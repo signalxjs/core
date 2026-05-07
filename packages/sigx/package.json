@@ -1,0 +1,69 @@
+{
+    "name": "sigx",
+    "version": "0.4.0",
+    "description": "SignalX - Lightweight reactive component framework with signals and TSX support",
+    "type": "module",
+    "main": "./dist/sigx.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+        ".": {
+            "import": "./dist/sigx.js",
+            "types": "./dist/index.d.ts"
+        },
+        "./hydration": {
+            "import": "./dist/hydration.js",
+            "types": "./dist/hydration.d.ts"
+        },
+        "./jsx-runtime": {
+            "import": "./dist/sigx.js",
+            "types": "./dist/index.d.ts"
+        },
+        "./jsx-dev-runtime": {
+            "import": "./dist/sigx.js",
+            "types": "./dist/index.d.ts"
+        },
+        "./internals": {
+            "import": "./dist/internals.js",
+            "types": "./dist/internals.d.ts"
+        }
+    },
+    "files": [
+        "dist"
+    ],
+    "scripts": {
+        "build": "vite build && tsgo --emitDeclarationOnly",
+        "dev": "vite build --watch",
+        "prepublishOnly": "pnpm run build"
+    },
+    "keywords": [
+        "SignalX"
+    ],
+    "author": "Andreas Ekdahl",
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/signalxjs/core.git",
+        "directory": "packages/sigx"
+    },
+    "homepage": "https://github.com/signalxjs/core/tree/main/packages/sigx",
+    "bugs": {
+        "url": "https://github.com/signalxjs/core/issues"
+    },
+    "sideEffects": [
+        "./dist/sigx.js",
+        "./dist/jsx-runtime.js"
+    ],
+    "engines": {
+        "node": "^20.19.0 || >=22.12.0"
+    },
+    "dependencies": {
+        "@sigx/reactivity": "workspace:^",
+        "@sigx/runtime-core": "workspace:^",
+        "@sigx/runtime-dom": "workspace:^"
+    },
+    "devDependencies": {
+        "@sigx/vite": "workspace:^",
+        "typescript": "^5.9.3",
+        "vite": "^8.0.3"
+    }
+}

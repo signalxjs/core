@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question or discussion
+    url: https://github.com/signalxjs/core/discussions
+    about: For open-ended questions, design discussions, or showcasing what you built. (Bugs and feature requests should use the templates above.)

@@ -1,0 +1,22 @@
+{
+    "name": "@sigx/examples",
+    "version": "0.2.0",
+    "private": true,
+    "description": "Example applications using SignalX",
+    "type": "module",
+    "workspaces": [
+        "hello",
+        "spa",
+        "spa-ssr"
+    ],
+    "scripts": {
+        "dev:hello": "npm run dev -w hello",
+        "build:hello": "npm run build -w hello",
+        "dev:spa": "npm run dev -w spa",
+        "build:spa": "npm run build -w spa",
+        "dev:spa-ssr": "npm run dev -w spa-ssr",
+        "build:spa-ssr": "npm run build -w spa-ssr",
+        "start:spa-ssr": "npm run start -w spa-ssr"
+    },
+    "devDependencies": {}
+}

@@ -1,0 +1,20 @@
+{
+    "name": "@sigx/spa-example",
+    "version": "0.2.0",
+    "private": true,
+    "description": "Hash-routed single-page app built with SignalX",
+    "type": "module",
+    "scripts": {
+        "dev": "vite",
+        "build": "vite build",
+        "preview": "vite preview"
+    },
+    "dependencies": {
+        "sigx": "workspace:^"
+    },
+    "devDependencies": {
+        "@sigx/vite": "workspace:^",
+        "vite": "^8.0.3",
+        "typescript": "^5.9.3"
+    }
+}

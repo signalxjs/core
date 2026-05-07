@@ -1,0 +1,8 @@
+packages:
+  - packages/*
+  - examples
+  - examples/*
+
+onlyBuiltDependencies:
+  - esbuild
+  - puppeteer

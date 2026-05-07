@@ -1,0 +1,30 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ES2020",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "jsx": "react-jsx",
+    "jsxImportSource": "sigx",
+    "paths": {
+      "@sigx/reactivity": ["../reactivity/dist"],
+      "@sigx/reactivity/internals": ["../reactivity/dist/internals"],
+      "@sigx/runtime-core": ["../runtime-core/dist"],
+      "@sigx/runtime-core/internals": ["../runtime-core/dist/internals"],
+      "@sigx/runtime-dom": ["../runtime-dom/dist"],
+      "@sigx/runtime-dom/internals": ["../runtime-dom/dist/internals"],
+      "sigx": ["./src"]
+    },
+    "types": []
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.d.ts"],
+  "exclude": ["node_modules", "dist"]
+}

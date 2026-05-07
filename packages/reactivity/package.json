@@ -1,0 +1,53 @@
+{
+    "name": "@sigx/reactivity",
+    "version": "0.4.0",
+    "description": "Reactivity system for SignalX",
+    "type": "module",
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+        ".": {
+            "import": "./dist/index.js",
+            "types": "./dist/index.d.ts"
+        },
+        "./internals": {
+            "import": "./dist/internals.js",
+            "types": "./dist/internals.d.ts"
+        }
+    },
+    "files": [
+        "dist"
+    ],
+    "scripts": {
+        "build": "vite build && tsgo --emitDeclarationOnly",
+        "dev": "vite build --watch",
+        "prepublishOnly": "pnpm run build"
+    },
+    "keywords": [
+        "sigx",
+        "reactivity",
+        "signals",
+        "reactive",
+        "state-management"
+    ],
+    "author": "Andreas Ekdahl",
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/signalxjs/core.git",
+        "directory": "packages/reactivity"
+    },
+    "homepage": "https://github.com/signalxjs/core/tree/main/packages/reactivity",
+    "bugs": {
+        "url": "https://github.com/signalxjs/core/issues"
+    },
+    "sideEffects": false,
+    "engines": {
+        "node": "^20.19.0 || >=22.12.0"
+    },
+    "devDependencies": {
+        "@sigx/vite": "workspace:^",
+        "typescript": "^5.9.3",
+        "vite": "^8.0.3"
+    }
+}

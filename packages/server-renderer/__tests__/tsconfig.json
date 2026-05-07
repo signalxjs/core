@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "jsx": "react-jsx",
+    "jsxImportSource": "sigx",
+    "paths": {
+      "@sigx/reactivity": ["../../../packages/reactivity/src/index.ts"],
+      "@sigx/runtime-core": ["../../../packages/runtime-core/src/index.ts"],
+      "@sigx/runtime-dom": ["../../../packages/runtime-dom/src/index.ts"],
+      "@sigx/server-renderer": ["../../../packages/server-renderer/src/index.ts"],
+      "@sigx/server-renderer/server": ["../../../packages/server-renderer/src/server/index.ts"],
+      "@sigx/server-renderer/client": ["../../../packages/server-renderer/src/client/index.ts"],
+      "sigx": ["../../../packages/sigx/src/index.ts"]
+    }
+  },
+  "include": ["./**/*.ts", "./**/*.tsx"]
+}

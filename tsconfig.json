@@ -1,0 +1,38 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "jsx": "react-jsx",
+    "jsxImportSource": "@sigx/runtime-core",
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "paths": {
+      "@sigx/reactivity": ["./packages/reactivity/src/index.ts"],
+      "@sigx/reactivity/internals": ["./packages/reactivity/src/internals.ts"],
+      "@sigx/runtime-core": ["./packages/runtime-core/src/index.ts"],
+      "@sigx/runtime-core/internals": ["./packages/runtime-core/src/internals.ts"],
+      "@sigx/runtime-core/jsx-runtime": ["./packages/runtime-core/src/index.ts"],
+      "@sigx/runtime-core/jsx-dev-runtime": ["./packages/runtime-core/src/index.ts"],
+      "@sigx/runtime-dom": ["./packages/runtime-dom/src/index.ts"],
+      "@sigx/runtime-dom/internals": ["./packages/runtime-dom/src/internals.ts"],
+      "@sigx/server-renderer": ["./packages/server-renderer/src/index.ts"],
+      "@sigx/server-renderer/server": ["./packages/server-renderer/src/server/index.ts"],
+      "@sigx/server-renderer/client": ["./packages/server-renderer/src/client/index.ts"],
+      "sigx": ["./packages/sigx/src/index.ts"],
+      "sigx/internals": ["./packages/sigx/src/internals.ts"],
+      "sigx/jsx-runtime": ["./packages/sigx/src/index.ts"],
+      "sigx/jsx-dev-runtime": ["./packages/sigx/src/index.ts"],
+      "sigx/hydration": ["./packages/sigx/src/hydration.ts"]
+    }
+  },
+  "include": [
+    "packages/*/src/**/*.ts",
+    "packages/*/src/**/*.tsx",
+    "packages/*/__tests__/**/*.ts",
+    "packages/*/__tests__/**/*.tsx"
+  ],
+  "exclude": ["node_modules", "**/dist", "examples"]
+}

@@ -1,0 +1,69 @@
+{
+    "name": "@sigx/runtime-core",
+    "version": "0.4.0",
+    "description": "Runtime core for SignalX",
+    "type": "module",
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+        ".": {
+            "import": "./dist/index.js",
+            "types": "./dist/index.d.ts"
+        },
+        "./internals": {
+            "import": "./dist/internals.js",
+            "types": "./dist/internals.d.ts"
+        },
+        "./jsx-runtime": {
+            "import": "./dist/index.js",
+            "types": "./dist/index.d.ts"
+        },
+        "./jsx-dev-runtime": {
+            "import": "./dist/index.js",
+            "types": "./dist/index.d.ts"
+        }
+    },
+    "files": [
+        "dist"
+    ],
+    "scripts": {
+        "build": "vite build && tsgo --emitDeclarationOnly",
+        "dev": "vite build --watch",
+        "test": "tsgo --noEmit -p tsconfig.test.json && vitest run",
+        "test:watch": "vitest",
+        "test:types": "tsgo --noEmit -p tsconfig.test.json",
+        "prepublishOnly": "pnpm run build"
+    },
+    "keywords": [
+        "sigx",
+        "runtime",
+        "core",
+        "components",
+        "framework"
+    ],
+    "author": "Andreas Ekdahl",
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/signalxjs/core.git",
+        "directory": "packages/runtime-core"
+    },
+    "homepage": "https://github.com/signalxjs/core/tree/main/packages/runtime-core",
+    "bugs": {
+        "url": "https://github.com/signalxjs/core/issues"
+    },
+    "sideEffects": false,
+    "engines": {
+        "node": "^20.19.0 || >=22.12.0"
+    },
+    "dependencies": {
+        "@sigx/reactivity": "workspace:^"
+    },
+    "devDependencies": {
+        "@sigx/vite": "workspace:^",
+        "@types/node": "^20.0.0",
+        "typescript": "^5.9.3",
+        "vite": "^8.0.3",
+        "vitest": "^4.1.1"
+    }
+}

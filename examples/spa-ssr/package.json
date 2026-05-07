@@ -1,0 +1,31 @@
+{
+    "name": "@sigx/spa-ssr-example",
+    "version": "0.1.0",
+    "private": true,
+    "description": "Server-rendered SignalX SPA with Express and client hydration",
+    "type": "module",
+    "scripts": {
+        "dev": "tsx server.ts",
+        "build": "npm run build:client && npm run build:server",
+        "build:client": "vite build --outDir dist/client",
+        "build:server": "vite build --ssr src/entry-server.tsx --outDir dist/server",
+        "start": "cross-env NODE_ENV=production tsx server.ts"
+    },
+    "dependencies": {
+        "sigx": "workspace:^",
+        "@sigx/server-renderer": "workspace:^",
+        "@sigx/reactivity": "workspace:^",
+        "@sigx/runtime-core": "workspace:^",
+        "@sigx/runtime-dom": "workspace:^",
+        "express": "^4.21.2"
+    },
+    "devDependencies": {
+        "@sigx/vite": "workspace:^",
+        "@types/express": "^4.17.21",
+        "@types/node": "^22.0.0",
+        "cross-env": "^7.0.3",
+        "tsx": "^4.19.2",
+        "vite": "^8.0.3",
+        "typescript": "^5.9.3"
+    }
+}

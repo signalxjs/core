@@ -1,0 +1,59 @@
+name: Feature request
+description: Propose a new feature, API, or improvement
+title: "[feat] "
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for sharing an idea! The best feature requests start from a clear problem rather than a prescribed solution.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do? What's making it hard or awkward today?
+      placeholder: I want to ... but currently I have to ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed API or behavior
+      description: A rough sketch of what the feature could look like — code samples are great. Don't worry about polish; we can iterate.
+      render: tsx
+    validations:
+      required: false
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Any workarounds you've tried, or other ways the problem could be solved.
+    validations:
+      required: false
+
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Which package(s) would this affect?
+      multiple: true
+      options:
+        - sigx
+        - "@sigx/reactivity"
+        - "@sigx/runtime-core"
+        - "@sigx/runtime-dom"
+        - "@sigx/server-renderer"
+        - "@sigx/vite"
+        - Not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: Prior art from other frameworks, links to related discussions, etc.
+    validations:
+      required: false

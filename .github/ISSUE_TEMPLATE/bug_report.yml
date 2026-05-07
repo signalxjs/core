@@ -1,0 +1,84 @@
+name: Bug report
+description: Report a problem with SignalX
+title: "[bug] "
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug! A small, self-contained reproduction makes a huge difference — please include one if you can.
+
+  - type: input
+    id: version
+    attributes:
+      label: SignalX version
+      description: The version of `sigx` (or the affected `@sigx/*` package) you're using. Run `npm ls sigx` to find it.
+      placeholder: "0.4.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: packages
+    attributes:
+      label: Affected package(s)
+      multiple: true
+      options:
+        - sigx
+        - "@sigx/reactivity"
+        - "@sigx/runtime-core"
+        - "@sigx/runtime-dom"
+        - "@sigx/server-renderer"
+        - "@sigx/vite"
+        - Not sure / multiple
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: A link to a minimal reproduction (StackBlitz, CodeSandbox, or a small GitHub repo) is best. Inline code is fine for very small cases.
+      placeholder: |
+        StackBlitz link, or a minimal code snippet that reproduces the issue.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What did you expect to happen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What actually happened? Include error messages and stack traces if any.
+    validations:
+      required: true
+
+  - type: input
+    id: node
+    attributes:
+      label: Node.js version
+      placeholder: "22.11.0"
+    validations:
+      required: false
+
+  - type: input
+    id: browser
+    attributes:
+      label: Browser (if relevant)
+      placeholder: "Chrome 131 / Firefox 134 / ..."
+    validations:
+      required: false
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: Additional context, related issues, screenshots, etc.
+    validations:
+      required: false

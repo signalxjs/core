@@ -1,0 +1,59 @@
+{
+    "name": "@sigx/server-renderer",
+    "version": "0.4.0",
+    "description": "Server-side rendering and client hydration for SigX",
+    "type": "module",
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+        ".": {
+            "import": "./dist/index.js",
+            "types": "./dist/index.d.ts"
+        },
+        "./server": {
+            "import": "./dist/server/index.js",
+            "types": "./dist/server/index.d.ts"
+        },
+        "./client": {
+            "import": "./dist/client/index.js",
+            "types": "./dist/client/index.d.ts"
+        }
+    },
+    "files": [
+        "dist"
+    ],
+    "sideEffects": false,
+    "scripts": {
+        "build": "vite build && tsgo --emitDeclarationOnly",
+        "dev": "vite build --watch",
+        "prepublishOnly": "pnpm run build"
+    },
+    "keywords": [
+        "sigx",
+        "ssr",
+        "server-side-rendering",
+        "server",
+        "renderer",
+        "hydration"
+    ],
+    "author": "Andreas Ekdahl",
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/signalxjs/core.git",
+        "directory": "packages/server-renderer"
+    },
+    "homepage": "https://github.com/signalxjs/core/tree/main/packages/server-renderer",
+    "bugs": {
+        "url": "https://github.com/signalxjs/core/issues"
+    },
+    "dependencies": {
+        "sigx": "workspace:^"
+    },
+    "devDependencies": {
+        "@sigx/vite": "workspace:^",
+        "@types/node": "^20.0.0",
+        "typescript": "^5.9.3",
+        "vite": "^8.0.3"
+    }
+}

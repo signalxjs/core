@@ -1,0 +1,57 @@
+{
+    "name": "@sigx/vite",
+    "version": "0.4.0",
+    "description": "Vite plugin for SignalX Framework with HMR, library builds, and automatic type generation",
+    "type": "module",
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+        ".": {
+            "import": "./dist/index.js",
+            "types": "./dist/index.d.ts"
+        },
+        "./hmr": {
+            "import": "./dist/hmr.js",
+            "types": "./dist/hmr.d.ts"
+        },
+        "./lib": {
+            "import": "./dist/lib.js",
+            "types": "./dist/lib.d.ts"
+        }
+    },
+    "files": [
+        "dist"
+    ],
+    "sideEffects": false,
+    "scripts": {
+        "build": "tsgo",
+        "dev": "tsc --watch",
+        "prepublishOnly": "pnpm run build"
+    },
+    "peerDependencies": {
+        "sigx": "*",
+        "vite": ">=8.0.0"
+    },
+    "devDependencies": {
+        "@types/node": "^22.19.1",
+        "sigx": "workspace:^",
+        "vite": "^8.0.3"
+    },
+    "keywords": [
+        "SignalX"
+    ],
+    "author": "Andreas Ekdahl",
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/signalxjs/core.git",
+        "directory": "packages/vite"
+    },
+    "homepage": "https://github.com/signalxjs/core/tree/main/packages/vite",
+    "bugs": {
+        "url": "https://github.com/signalxjs/core/issues"
+    },
+    "engines": {
+        "node": "^20.19.0 || >=22.12.0"
+    }
+}

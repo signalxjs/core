@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ES2020",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "paths": {
+      "sigx": ["../sigx/dist"],
+      "@sigx/reactivity": ["../reactivity/dist"],
+      "@sigx/runtime-core": ["../runtime-core/dist"],
+      "@sigx/runtime-dom": ["../runtime-dom/dist"]
+    },
+    "types": ["vite/client", "node"]
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
+}
