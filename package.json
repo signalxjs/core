@@ -34,7 +34,7 @@
     "clean": "node -e \"const fs=require('fs'),p=require('path');const rm=x=>fs.rmSync(x,{recursive:true,force:true});for(const d of fs.readdirSync('packages')){rm(p.join('packages',d,'dist'));rm(p.join('packages',d,'node_modules'));}rm('node_modules');rm('pnpm-lock.yaml');\""
   },
   "devDependencies": {
-    "@typescript/native-preview": "7.0.0-dev.20260215.1",
+    "@typescript/native-preview": "7.0.0-dev.20260507.1",
     "happy-dom": "^20.9.0",
     "oxlint": "^1.63.0",
     "playwright": "^1.59.1",
