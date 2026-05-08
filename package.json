@@ -2,6 +2,7 @@
   "name": "sigx-core",
   "version": "0.4.0",
   "private": true,
+  "packageManager": "pnpm@10.33.4",
   "description": "SignalX core - reactivity, runtime-core, runtime-dom, sigx, server-renderer and Vite plugin",
   "type": "module",
   "workspaces": [
