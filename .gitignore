@@ -16,7 +16,8 @@ docs/dist/
 # Keep specific JS files
 !vite.config.js
 !*.config.js
-!Examples/*.js
+!examples/*.js
+!scripts/*.js
 
 # TypeScript cache
 *.tsbuildinfo
