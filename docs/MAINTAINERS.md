@@ -9,10 +9,27 @@ Settings → Secrets and variables → Actions → New repository secret:
 
 | Secret           | Used by                  | How to obtain                                                                  |
 | ---------------- | ------------------------ | ------------------------------------------------------------------------------ |
-| `NPM_TOKEN`      | `release.yml`            | npmjs.com → Access Tokens → Generate New Token → "Automation". Must have publish scope on all six `sigx` / `@sigx/*` packages. |
-| `CODECOV_TOKEN`  | `ci.yml` (coverage job)  | codecov.io → link the repo → copy the upload token from the repo settings page. |
+| `CODECOV_TOKEN`  | `ci.yml` (coverage job)  | codecov.io → link the repo → copy the upload token from the repo settings page. Required because `main` is a protected branch — Codecov rejects tokenless uploads on protected branches even when the org auth setting is "Not required". |
 
-`GITHUB_TOKEN` is provided automatically by Actions — no setup needed.
+`GITHUB_TOKEN` is provided automatically by Actions — no setup needed. `release.yml`
+publishes via npm trusted publishing (OIDC), so no `NPM_TOKEN` is required.
+
+## npm trusted publishing
+
+Each of the six packages on npmjs.com is configured to trust this repo's
+`release.yml` workflow. Configuration: package page → Settings → Trusted
+Publishers → GitHub Actions, with:
+
+- Owner: `signalxjs`
+- Repository: `core`
+- Workflow filename: `release.yml`
+- Environment: blank
+
+If you ever rename the workflow file or add an environment gate, the
+trusted-publisher entries on npmjs.com must be updated to match — otherwise
+publishing will fail with `EAUTHIP`. `scripts/publish.js` still accepts an
+`NPM_TOKEN` env var as a fallback for local publishes (e.g. emergency manual
+release from a laptop).
 
 ## Branch protection (`main`)
 
@@ -49,26 +66,6 @@ To publish a prerelease, use a prerelease version (e.g. `0.4.1-rc.0`) and
 push the matching tag. The publish script does not pass `--tag` automatically;
 add `--tag beta` (or similar) to `release.yml` if a non-`latest` dist-tag is
 needed.
-
-## npm trusted publishing (follow-up — drop `NPM_TOKEN`)
-
-Once the first tag-push release works end-to-end, switch each package to
-trusted publishing so `NPM_TOKEN` is no longer required:
-
-For each of the six packages on npmjs.com → package page → Settings →
-Trusted Publishers → Add:
-
-- Owner: `signalxjs`
-- Repository: `core`
-- Workflow filename: `release.yml`
-- Environment: leave blank (or set if you want a manual approval gate)
-
-Repeat for: `sigx`, `@sigx/reactivity`, `@sigx/runtime-core`,
-`@sigx/runtime-dom`, `@sigx/server-renderer`, `@sigx/vite`.
-
-After all six are configured, delete the `NPM_TOKEN` secret and remove the
-`NPM_TOKEN` env var from the "Publish to npm" step in `release.yml`. pnpm
-will pick up the OIDC token automatically.
 
 ## What runs when
 

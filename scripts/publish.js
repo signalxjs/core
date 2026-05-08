@@ -15,9 +15,11 @@
  *                 GitHub Actions workflow with `permissions: id-token: write`.
  *
  * Environment Variables:
- *   NPM_TOKEN    npm automation token for CI/CD publishing (avoids 2FA prompts)
- *                Create one at: https://www.npmjs.com/settings/<username>/tokens
- *                Select "Automation" type for CI/CD use
+ *   NPM_TOKEN    npm automation token. Optional — only needed for local
+ *                publishing or as a fallback. CI uses npm trusted publishing
+ *                (OIDC) instead, configured per-package on npmjs.com.
+ *                Create at: https://www.npmjs.com/settings/<username>/tokens
+ *                ("Automation" type for CI use).
  */
 
 import { execSync } from 'child_process';
@@ -197,14 +199,23 @@ async function main() {
     // Setup npm token if provided
     setupNpmToken();
 
-    // Check npm login
-    try {
-        const whoami = execSync('npm whoami', { encoding: 'utf-8' }).trim();
-        console.log(`👤 Logged in as: ${whoami}\n`);
-    } catch {
-        console.error('❌ Not logged in to npm. Run: npm login');
-        console.error('   Or set NPM_TOKEN environment variable');
-        throw new Error('npm login required');
+    // Trusted publishing (npm OIDC) acquires a token at publish time, not before.
+    // Skip the whoami precheck in that mode — it would fail because no token is
+    // present yet. ACTIONS_ID_TOKEN_REQUEST_TOKEN is set by GitHub Actions when
+    // a job has `permissions: id-token: write`.
+    const isTrustedPublishing = !NPM_TOKEN && !!process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
+
+    if (isTrustedPublishing) {
+        console.log('🔐 Trusted publishing (OIDC) — skipping npm whoami precheck\n');
+    } else {
+        try {
+            const whoami = execSync('npm whoami', { encoding: 'utf-8' }).trim();
+            console.log(`👤 Logged in as: ${whoami}\n`);
+        } catch {
+            console.error('❌ Not logged in to npm. Run: npm login');
+            console.error('   Or set NPM_TOKEN environment variable');
+            throw new Error('npm login required');
+        }
     }
 
     // Build all packages first
