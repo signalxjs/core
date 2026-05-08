@@ -31,13 +31,16 @@
     "version:patch": "node scripts/bump-version.js patch",
     "version:minor": "node scripts/bump-version.js minor",
     "version:major": "node scripts/bump-version.js major",
+    "size": "size-limit",
     "clean": "node -e \"const fs=require('fs'),p=require('path');const rm=x=>fs.rmSync(x,{recursive:true,force:true});for(const d of fs.readdirSync('packages')){rm(p.join('packages',d,'dist'));rm(p.join('packages',d,'node_modules'));}rm('node_modules');rm('pnpm-lock.yaml');\""
   },
   "devDependencies": {
+    "@size-limit/preset-small-lib": "^11",
     "@typescript/native-preview": "7.0.0-dev.20260507.1",
     "happy-dom": "^20.9.0",
     "oxlint": "^1.63.0",
     "playwright": "^1.59.1",
+    "size-limit": "^11",
     "typescript": "^6.0.3",
     "vite": "^8.0.11",
     "vitest": "^4.1.5"

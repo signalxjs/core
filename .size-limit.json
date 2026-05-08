@@ -1,0 +1,27 @@
+[
+  {
+    "name": "sigx",
+    "path": "packages/sigx/dist/sigx.js",
+    "limit": "20 KB"
+  },
+  {
+    "name": "@sigx/reactivity",
+    "path": "packages/reactivity/dist/index.js",
+    "limit": "5 KB"
+  },
+  {
+    "name": "@sigx/runtime-core",
+    "path": "packages/runtime-core/dist/index.js",
+    "limit": "12 KB"
+  },
+  {
+    "name": "@sigx/runtime-dom",
+    "path": "packages/runtime-dom/dist/index.js",
+    "limit": "8 KB"
+  },
+  {
+    "name": "@sigx/server-renderer",
+    "path": "packages/server-renderer/dist/index.js",
+    "limit": "6 KB"
+  }
+]
