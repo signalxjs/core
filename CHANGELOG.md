@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.4.1] — 2026-05-08
+
+Maintenance release. No API changes.
+
+### Internal
+
+- `@sigx/runtime-core`, `@sigx/server-renderer`: declare `types: ["node"]` in
+  tsconfig so declaration files emit cleanly under newer
+  `@typescript/native-preview` releases.
+
 ## [0.4.0] — 2026-05-07
 
 Initial public release of the SignalX (`sigx`) ecosystem on npm. Six packages published together at the same version.
@@ -32,6 +42,7 @@ Initial public release of the SignalX (`sigx`) ecosystem on npm. Six packages pu
 - Node `^20.19.0 || >=22.12.0`
 - `@sigx/vite` peer-depends on `vite >=8.0.0`
 
-[Unreleased]: https://github.com/signalxjs/core/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/signalxjs/core/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/signalxjs/core/releases/tag/v0.4.1
 [0.4.0]: https://github.com/signalxjs/core/releases/tag/v0.4.0
 

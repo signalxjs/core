@@ -1,6 +1,6 @@
 {
     "name": "@sigx/runtime-core",
-    "version": "0.4.0",
+    "version": "0.4.1",
     "description": "Runtime core for SignalX",
     "type": "module",
     "main": "./dist/index.js",
