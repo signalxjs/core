@@ -270,6 +270,13 @@ async function main() {
     if (!dryRun && results.failed.length === 0) {
         console.log('\n🎉 All packages up to date!');
     }
+
+    // Surface partial-publish failures as a non-zero exit so CI doesn't
+    // mark a broken release as success — npm rejects, GH release publishes
+    // anyway, npm-vs-tag drift, etc.
+    if (results.failed.length > 0) {
+        process.exitCode = 1;
+    }
 }
 
 main()
