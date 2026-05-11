@@ -157,6 +157,29 @@ function resolveAliases(
  * });
  * ```
  */
+/**
+ * Externals that every @sigx library build must keep out of its bundle to
+ * preserve singleton reactivity. If any of these end up inlined, consumers
+ * get two physical copies of `@sigx/reactivity` (one inlined here, one
+ * resolved through the consumer's own dependency graph) and signal effects
+ * created via one copy will never fire effects tracked by the other.
+ *
+ * Always pre-pended to the caller's `external` list — callers don't need to
+ * remember and can't accidentally drop them by passing their own `external`.
+ */
+const SIGX_RUNTIME_EXTERNALS: (string | RegExp)[] = [
+    'sigx',
+    /^sigx\//,
+    '@sigx/reactivity',
+    /^@sigx\/reactivity\//,
+    '@sigx/runtime-core',
+    /^@sigx\/runtime-core\//,
+    '@sigx/runtime-dom',
+    /^@sigx\/runtime-dom\//,
+    '@sigx/server-renderer',
+    /^@sigx\/server-renderer\//,
+];
+
 export function defineLibConfig(options: LibBuildOptions): UserConfig {
     const {
         entry,
@@ -172,15 +195,26 @@ export function defineLibConfig(options: LibBuildOptions): UserConfig {
     } = options;
 
     // Resolve root directory from import.meta.url if provided
-    const rootDir = root.startsWith('file://') 
+    const rootDir = root.startsWith('file://')
         ? path.dirname(fileURLToPath(root))
         : root;
 
     const entries = normalizeEntries(entry);
     const resolvedAliases = resolveAliases(alias, rootDir);
 
+    // Always treat the sigx runtime tier as external, regardless of what the
+    // caller passed. De-dupe in case it's already in their list.
+    const seen = new Set<string>();
+    const mergedExternal: (string | RegExp)[] = [];
+    for (const ext of [...SIGX_RUNTIME_EXTERNALS, ...external]) {
+        const key = ext instanceof RegExp ? `re:${ext.source}` : `str:${ext}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        mergedExternal.push(ext);
+    }
+
     // Convert external patterns for Vite 8's rolldownOptions
-    const externalPatterns = external.map(ext => {
+    const externalPatterns = mergedExternal.map(ext => {
         if (ext instanceof RegExp) {
             return ext;
         }
