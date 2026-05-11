@@ -86,6 +86,41 @@ export function sigxPlugin(options: SigxPluginOptions = {}): Plugin {
                     }
                 };
             }
+
+            // In build mode, force the entire sigx runtime into a single shared
+            // chunk and dedupe across the dep graph. Without this, Vite/Rolldown
+            // happily inlines `@sigx/reactivity` into multiple chunks (e.g. once
+            // alongside `sigx` and once alongside `@sigx/runtime-core`). Each
+            // copy ships its own module-scoped `activeEffect`/dep WeakMap, so a
+            // signal created via one copy never triggers effects tracked by the
+            // other — observably, signal mutations from `onMounted`, observers,
+            // `setTimeout`, and event handlers silently fail to re-render after
+            // hydration. Pinning everything to a single `sigx` chunk plus
+            // `resolve.dedupe` keeps reactivity a single module instance.
+            if (command === 'build') {
+                return {
+                    resolve: {
+                        dedupe: [
+                            'sigx',
+                            '@sigx/reactivity',
+                            '@sigx/runtime-core',
+                            '@sigx/runtime-dom',
+                            '@sigx/server-renderer',
+                        ],
+                    },
+                    build: {
+                        rollupOptions: {
+                            output: {
+                                manualChunks(id: string) {
+                                    if (/[\\/]node_modules[\\/](sigx|@sigx[\\/](?:reactivity|runtime-core|runtime-dom|server-renderer))[\\/]/.test(id)) {
+                                        return 'sigx';
+                                    }
+                                },
+                            },
+                        },
+                    },
+                };
+            }
         },
 
         configResolved(resolvedConfig) {
