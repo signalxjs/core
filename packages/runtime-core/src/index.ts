@@ -8,6 +8,9 @@ export type { ModelProcessor } from './platform.js';
 // Plugin types (public type only)
 export type { ComponentPlugin } from './plugins.js';
 
+// Internal — exposed for HMR runtime. Not part of the public API.
+export { registerComponentPlugin as __registerComponentPlugin } from './plugins.js';
+
 // App system
 export { defineApp } from './app.js';
 export type {
