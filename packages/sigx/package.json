@@ -1,6 +1,6 @@
 {
     "name": "sigx",
-    "version": "0.4.1",
+    "version": "0.4.2",
     "description": "SignalX - Lightweight reactive component framework with signals and TSX support",
     "type": "module",
     "main": "./dist/sigx.js",
