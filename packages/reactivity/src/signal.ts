@@ -4,10 +4,11 @@
 
 import type { Subscriber, Signal, PrimitiveSignal, Primitive } from './types';
 import { currentSubscriber, batch, track, trigger } from './effect';
-import { 
-    isReactive, 
-    isCollection, 
-    isIterableCollection, 
+import { getDevtoolsHook, registerReactiveProxy } from './devtools-hook';
+import {
+    isReactive,
+    isCollection,
+    isIterableCollection,
     shouldNotProxy,
     reactiveToRaw,
     rawToReactive,
@@ -15,6 +16,14 @@ import {
     ITERATION_KEY,
     toRaw
 } from './collections';
+
+/**
+ * WeakMap from a reactive proxy to its devtools id. Lets the `set`
+ * trap emit `signal:updated` without each proxy carrying an extra
+ * property. Only populated when a hook is installed at signal-create
+ * time — production-without-devtools never grows this map.
+ */
+const signalIds = new WeakMap<object, number>();
 
 /** Check if a value is a primitive type */
 function isPrimitive(value: unknown): value is Primitive {
@@ -149,6 +158,22 @@ export function signal<T>(target: T): PrimitiveSignal<T> | Signal<T & object> {
     let depsMap: Map<string | symbol, Set<Subscriber>> | null = isCollectionTarget ? new Map() : null;
     const reactiveCache = new WeakMap<object, any>();
 
+    // DevTools id — only minted when a hook is currently installed.
+    // The id stays on the proxy for the rest of its life via
+    // `signalIds` so the `set` trap can include it in updates without
+    // a per-write hook lookup.
+    const hookAtCreate = getDevtoolsHook();
+    let signalId: number | null = null;
+    if (hookAtCreate) {
+        signalId = hookAtCreate.nextId();
+        hookAtCreate.emit({
+            type: 'signal:created',
+            id: signalId,
+            kind: isCollectionTarget ? 'collection' : 'object',
+            ownerComponentId: hookAtCreate.currentOwner,
+        });
+    }
+
     // Helper to get or create a dependency set for a key
     const getOrCreateDep = (key: string | symbol): Set<Subscriber> => {
         if (!depsMap) depsMap = new Map();
@@ -245,28 +270,48 @@ export function signal<T>(target: T): PrimitiveSignal<T> | Signal<T & object> {
             const oldValue = Reflect.get(obj, prop);
             const result = Reflect.set(obj, prop, newValue);
 
-            // Only trigger if value actually changed and deps exist
-            if (!Object.is(oldValue, newValue) && depsMap) {
-                const dep = depsMap.get(prop);
-                if (dep) {
-                    trigger(dep);
-                }
+            // Only trigger if value actually changed
+            if (!Object.is(oldValue, newValue)) {
+                if (depsMap) {
+                    const dep = depsMap.get(prop);
+                    if (dep) {
+                        trigger(dep);
+                    }
 
-                // Special handling for Arrays
-                if (Array.isArray(obj)) {
-                    // If we set an index and length changed, trigger length dependency
-                    if (prop !== 'length' && obj.length !== oldLength) {
-                        const lengthDep = depsMap.get('length');
-                        if (lengthDep) {
-                            trigger(lengthDep);
+                    // Special handling for Arrays
+                    if (Array.isArray(obj)) {
+                        // If we set an index and length changed, trigger length dependency
+                        if (prop !== 'length' && obj.length !== oldLength) {
+                            const lengthDep = depsMap.get('length');
+                            if (lengthDep) {
+                                trigger(lengthDep);
+                            }
+                        }
+                        // If we set length, trigger indices that are now out of bounds
+                        if (prop === 'length' && typeof newValue === 'number' && newValue < oldLength) {
+                            for (let i = newValue; i < oldLength; i++) {
+                                const idxDep = depsMap.get(String(i));
+                                if (idxDep) trigger(idxDep);
+                            }
                         }
                     }
-                    // If we set length, trigger indices that are now out of bounds
-                    if (prop === 'length' && typeof newValue === 'number' && newValue < oldLength) {
-                        for (let i = newValue; i < oldLength; i++) {
-                            const idxDep = depsMap.get(String(i));
-                            if (idxDep) trigger(idxDep);
-                        }
+                }
+
+                // Devtools: emit on any actual state change, even if
+                // nothing is currently subscribed (depsMap may be null
+                // when nothing has read the signal yet). `signalId !==
+                // null` doubles as the "hook was installed at create
+                // time" gate — signals created before any devtools
+                // hook attached stay invisible, matching what users
+                // expect (devtools only sees what it was around for).
+                if (signalId !== null) {
+                    const hook = getDevtoolsHook();
+                    if (hook) {
+                        hook.emit({
+                            type: 'signal:updated',
+                            id: signalId,
+                            key: typeof prop === 'symbol' ? prop.toString() : String(prop),
+                        });
                     }
                 }
             }
@@ -291,5 +336,22 @@ export function signal<T>(target: T): PrimitiveSignal<T> | Signal<T & object> {
     reactiveToRaw.set(proxy, objectTarget);
     rawToReactive.set(objectTarget, proxy);
 
+    // Associate the proxy with its devtools id so consumers can look
+    // it up later (e.g. when the panel asks for a signal's current
+    // value). Only populated when a hook was installed at create time.
+    if (signalId !== null) {
+        signalIds.set(proxy, signalId);
+        registerReactiveProxy(signalId, proxy);
+    }
+
     return proxy;
+}
+
+/**
+ * Get the devtools id of a reactive proxy, or `null` if it wasn't
+ * created while a hook was installed. Used by `@sigx/devtools` to
+ * map proxy values to their event ids.
+ */
+export function getSignalId(proxy: object): number | null {
+    return signalIds.get(proxy) ?? null;
 }

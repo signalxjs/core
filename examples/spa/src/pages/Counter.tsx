@@ -31,4 +31,4 @@ export const Counter = component(({ signal }) => {
             </div>
         </>
     );
-});
+}, { name: 'Counter' });

@@ -3,6 +3,7 @@
 // ============================================================================
 
 import type { EffectFn, EffectRunner, Subscriber } from './types';
+import { getDevtoolsHook } from './devtools-hook';
 
 export let currentSubscriber: Subscriber | null = null;
 let batchDepth = 0;
@@ -72,15 +73,49 @@ export function trigger(depSet: Set<Subscriber>): void {
 function runEffect(fn: EffectFn): EffectRunner {
     let stopped = false;
 
+    // Devtools id minted at create time when a hook is installed.
+    // `null` means "untracked by devtools" — the hot path in the
+    // effect's body skips emission entirely.
+    const hookAtCreate = getDevtoolsHook();
+    const effectId: number | null = hookAtCreate ? hookAtCreate.nextId() : null;
+    if (hookAtCreate && effectId !== null) {
+        hookAtCreate.emit({
+            type: 'effect:created',
+            id: effectId,
+            ownerComponentId: hookAtCreate.currentOwner,
+        });
+    }
+
     const effectFn: Subscriber = function () {
         if (stopped) return;
         cleanup(effectFn);
         const prev = currentSubscriber;
         currentSubscriber = effectFn;
+        if (effectId === null) {
+            try {
+                fn();
+            } finally {
+                currentSubscriber = prev;
+            }
+            return;
+        }
+        // Devtools path: measure duration and emit. We don't catch
+        // errors from `fn()` here — letting them propagate keeps
+        // user error-handling behavior identical to the non-devtools
+        // path. The `finally` still emits with whatever elapsed time.
+        const start = performance.now();
         try {
             fn();
         } finally {
             currentSubscriber = prev;
+            const hook = getDevtoolsHook();
+            if (hook) {
+                hook.emit({
+                    type: 'effect:run',
+                    id: effectId,
+                    durationMs: performance.now() - start,
+                });
+            }
         }
     } as Subscriber;
 
@@ -92,6 +127,12 @@ function runEffect(fn: EffectFn): EffectRunner {
     runner.stop = () => {
         stopped = true;
         cleanup(effectFn);
+        if (effectId !== null) {
+            const hook = getDevtoolsHook();
+            if (hook) {
+                hook.emit({ type: 'effect:stopped', id: effectId });
+            }
+        }
     };
     return runner;
 }

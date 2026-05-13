@@ -16,4 +16,4 @@ export const Home = component(() => {
             </div>
         </>
     );
-});
+}, { name: 'Home' });

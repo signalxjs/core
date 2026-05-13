@@ -32,4 +32,4 @@ export const App = component(() => {
             </main>
         </>
     );
-});
+}, { name: 'App' });

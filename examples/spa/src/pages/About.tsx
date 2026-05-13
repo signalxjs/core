@@ -16,4 +16,4 @@ export const About = component(() => {
             </div>
         </>
     );
-});
+}, { name: 'About' });

@@ -69,3 +69,15 @@ export {
 
 // Async context (for SSR isolation)
 export { runInRequestScope, hasRequestIsolation } from './async-context.js';
+
+// DevTools hook (for @sigx/devtools and other inspectors)
+export {
+    DEVTOOLS_HOOK_KEY,
+    getDevtoolsHook,
+    ensureDevtoolsHook
+} from './devtools-hook.js';
+export type {
+    DevtoolsHook,
+    DevtoolsEvent,
+    DevtoolsListener
+} from './devtools-hook.js';

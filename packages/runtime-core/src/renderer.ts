@@ -1,5 +1,6 @@
 import { VNode, Fragment, JSXElement, Text, Comment } from './jsx-runtime.js';
 import { effect, signal, untrack, EffectRunner } from '@sigx/reactivity';
+import { withoutOwnerTracking } from '@sigx/reactivity/internals';
 import { ComponentSetupContext, setCurrentInstance, getCurrentInstance, MountContext, ViewFn, SetupFn } from './component.js';
 import { createPropsAccessor } from './utils/props-accessor.js';
 import { createSlots } from './utils/slots.js';
@@ -423,10 +424,17 @@ export function createRenderer<HostNode = any, HostElement = any>(
             if (props) {
                 const newProps = newVNode.props || {};
                 const newModels = newVNode.props?.$models || {};
-                
-                // Update props (excluding children, key, ref, $models)
-                // Also update Model objects from $models into props
-                untrack(() => {
+
+                // Update props (excluding children, key, ref, $models).
+                // Reads through `props[key]` trigger the proxy GET trap,
+                // which lazily wraps object values in nested reactive
+                // signals. Wrapping this in `withoutOwnerTracking`
+                // prevents those framework-internal sub-signals from
+                // being attributed to whichever component's render
+                // effect is currently running (the parent's). Every
+                // re-render that passes a fresh Model object would
+                // otherwise leak a phantom signal into the parent.
+                untrack(() => withoutOwnerTracking(() => {
                     for (const key in newProps) {
                         if (key !== "children" && key !== "key" && key !== "ref" && key !== "$models") {
                             if (props[key] !== newProps[key]) {
@@ -434,7 +442,7 @@ export function createRenderer<HostNode = any, HostElement = any>(
                             }
                         }
                     }
-                    
+
                     // Merge updated Model objects into props
                     // Only update if the binding changed (different obj or key)
                     for (const modelKey in newModels) {
@@ -452,14 +460,14 @@ export function createRenderer<HostNode = any, HostElement = any>(
                             props[modelKey] = newModel;
                         }
                     }
-                    
+
                     // Handle removed props (optional but good)
                     for (const key in props) {
                         if (!(key in newProps) && !(key in newModels) && key !== "children" && key !== "key" && key !== "ref" && key !== "$models") {
                             delete props[key];
                         }
                     }
-                });
+                }));
             }
 
             // Update slots with new children and slot functions
@@ -715,12 +723,16 @@ export function createRenderer<HostNode = any, HostElement = any>(
             }
         }
         
-        const reactiveProps = signal(propsWithModels);
+        // Wrap renderer-internal reactives so the devtools owner
+        // attribution isn't polluted by the parent's render effect.
+        // Without this, every re-mount of a child leaks fresh signals
+        // into whichever component is currently rendering.
+        const reactiveProps = withoutOwnerTracking(() => signal(propsWithModels));
         const internalVNode = vnode as InternalVNode;
         internalVNode._componentProps = reactiveProps;
 
         // Create slots object from children and the slots prop
-        const slots = createSlots(children, slotsFromProps);
+        const slots = withoutOwnerTracking(() => createSlots(children, slotsFromProps));
         internalVNode._slots = slots;
 
         const createdHooks: (() => void)[] = [];
