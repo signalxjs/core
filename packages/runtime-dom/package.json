@@ -1,6 +1,6 @@
 {
     "name": "@sigx/runtime-dom",
-    "version": "0.4.6",
+    "version": "0.4.7",
     "description": "DOM runtime for SignalX",
     "type": "module",
     "main": "./dist/index.js",
