@@ -326,9 +326,10 @@ describe('effect', () => {
             //   2. state.step = 'b' triggers the effect
             //   3. inner.activeId = null re-triggers the same effect
             //      synchronously, mid-run (the bug).
-            // With the guard, the inner write may add the effect to the
-            // pending set but it is not re-invoked while it's still on
-            // the stack.
+            // With the guard, the inner write's trigger() finds the effect
+            // already on the stack and the nested invocation is dropped.
+            // (Outside of batch() there is no pending set — re-entrant
+            // triggers are simply ignored.)
             expect(runs).toBe(2);
         });
 
