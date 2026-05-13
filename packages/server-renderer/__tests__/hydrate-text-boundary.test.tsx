@@ -30,6 +30,10 @@ describe('hydration text-boundary handling (#15)', () => {
             cleanupContainer(container);
         }
         cleanupScripts();
+        // Tests below install a setter under this key so they can drive a
+        // signal from outside the component scope. Always clean up — even on
+        // failure — so leakage can't bleed across tests.
+        delete (globalThis as any).__issue15_setText;
     });
 
     it('does not duplicate a signal-driven component nested between two text siblings', async () => {
@@ -82,8 +86,6 @@ describe('hydration text-boundary handling (#15)', () => {
         expect(originalSpan.textContent).toBe('HYDRATED');
         // Surrounding text must remain in order.
         expect(p.textContent?.replace(/\s+/g, ' ').trim()).toBe('before HYDRATED after');
-
-        delete (globalThis as any).__issue15_setText;
     });
 
     it('handles a non-empty initial signal value without duplicating the span', async () => {
@@ -123,8 +125,6 @@ describe('hydration text-boundary handling (#15)', () => {
         expect(spansAfter[0]).toBe(originalSpan);
         expect(originalSpan.textContent).toBe('X');
         expect(p.textContent?.replace(/\s+/g, ' ').trim()).toBe('before X after');
-
-        delete (globalThis as any).__issue15_setText;
     });
 
     it('handles two components between three text siblings', async () => {
@@ -284,7 +284,5 @@ describe('hydration text-boundary handling (#15)', () => {
 
         expect(section.querySelectorAll('strong.recovered').length).toBe(1);
         expect(section.querySelector('strong.recovered')!.textContent).toBe('updated');
-
-        delete (globalThis as any).__issue15_setText;
     });
 });

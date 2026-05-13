@@ -188,6 +188,13 @@ export function hydrateNode(vnode: VNode, dom: Node | null, parent: Node): Node 
                 scan = scan.nextSibling;
             }
             if (scan) {
+                if (process.env.NODE_ENV !== 'production' && scan !== dom) {
+                    // Skipped over orphan siblings on the way to a matching
+                    // element. Surface SSR drift instead of silently papering
+                    // over it — the skipped nodes stay in the DOM as visible
+                    // content no VNode owns.
+                    console.warn('[Hydrate] Skipped non-matching sibling(s) to reach <' + vnode.type + '>; SSR output may not match the client VNode tree.', '| parent:', parent?.nodeName);
+                }
                 dom = scan;
             } else {
                 // Last-resort mismatch recovery: SSR didn't emit the expected
@@ -207,15 +214,20 @@ export function hydrateNode(vnode: VNode, dom: Node | null, parent: Node): Node 
                     parent.appendChild(fresh);
                 }
                 vnode.dom = fresh;
+                let hasDirectives = false;
                 if (vnode.props) {
                     for (const key in vnode.props) {
                         if (key === 'children' || key === 'key') continue;
                         if (key.startsWith('client:')) continue;
                         if (key.charCodeAt(0) === 117 /* 'u' */ && key.startsWith('use:')) {
                             patchDirective(fresh, key.slice(4), null, vnode.props[key], getCurrentAppContext());
+                            hasDirectives = true;
                         } else if (key !== 'ref') {
                             patchProp(fresh, key, null, vnode.props[key]);
                         }
+                    }
+                    if (hasDirectives) {
+                        onElementMounted(fresh);
                     }
                     if (vnode.props.ref) {
                         if (typeof vnode.props.ref === 'function') {
@@ -230,7 +242,14 @@ export function hydrateNode(vnode: VNode, dom: Node | null, parent: Node): Node 
                 for (const child of vnode.children) {
                     childDom = hydrateNode(child, childDom, fresh);
                 }
-                return dom;
+                if (vnode.type === 'select' && vnode.props) {
+                    fixSelectValue(fresh as HTMLElement, vnode.props);
+                }
+                // Advance past both the inserted `fresh` and the original
+                // mismatched `dom` (now orphaned). Returning `dom` would let
+                // the next sibling VNode bind to the orphan, cascading the
+                // mismatch.
+                return dom ? dom.nextSibling : null;
             }
         }
 
