@@ -126,6 +126,64 @@ describe('reactivity devtools events', () => {
         expect((globalThis as any)[DEVTOOLS_HOOK_KEY]).toBeUndefined();
     });
 
+    it('emits signal:updated on property delete', () => {
+        const { events } = withHook();
+        const state = signal({ a: 1, b: 2 }) as any;
+        delete state.a;
+        // Deleting a non-existent key shouldn't emit.
+        delete state.a;
+
+        const updated = events.filter(e => e.type === 'signal:updated');
+        expect(updated).toHaveLength(1);
+        expect(updated[0].key).toBe('a');
+    });
+
+    it('emits signal:updated when $set() drops keys via deleteProperty', () => {
+        const { events } = withHook();
+        const state = signal({ a: 1, b: 2 }) as any;
+        events.length = 0; // ignore create events
+        state.$set({ a: 1 }); // b should be deleted
+        const updated = events.filter(e => e.type === 'signal:updated');
+        // We expect at least one update for the dropped key.
+        expect(updated.some(e => e.key === 'b')).toBe(true);
+    });
+
+    it('emits signal:updated on Map mutations (set, delete, clear)', () => {
+        const { events } = withHook();
+        const m = signal(new Map<string, number>());
+        events.length = 0;
+
+        m.set('x', 1);
+        m.set('x', 1);  // no change, no emit
+        m.set('x', 2);  // value changed
+        m.delete('x');
+        m.delete('x');  // already gone, no emit
+        m.set('y', 1);
+        m.clear();
+
+        const keys = events
+            .filter(e => e.type === 'signal:updated')
+            .map(e => e.key);
+        expect(keys).toEqual(['x', 'x', 'x', 'y', 'clear']);
+    });
+
+    it('emits signal:updated on Set mutations (add, delete, clear)', () => {
+        const { events } = withHook();
+        const s = signal(new Set<string>());
+        events.length = 0;
+
+        s.add('a');
+        s.add('a');     // duplicate, no emit
+        s.add('b');
+        s.delete('a');
+        s.clear();
+
+        const keys = events
+            .filter(e => e.type === 'signal:updated')
+            .map(e => e.key);
+        expect(keys).toEqual(['a', 'b', 'a', 'clear']);
+    });
+
     it('signals created before the hook installs are invisible to it', () => {
         // Pre-hook signal — no `signalId` minted, so set traps stay silent.
         const earlier = signal(0);

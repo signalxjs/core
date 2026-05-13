@@ -17,6 +17,7 @@ export {
     ensureDevtoolsHook,
     withoutOwnerTracking,
     getReactiveById,
+    notifySignalUpdated,
 } from './devtools-hook';
 export type {
     DevtoolsHook,

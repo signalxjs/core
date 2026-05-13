@@ -11,6 +11,7 @@ import {
     DEVTOOLS_HOOK_KEY,
     getDevtoolsHook,
     ensureDevtoolsHook,
+    type DevtoolsEvent,
 } from '../src/devtools-hook';
 import {
     notifyComponentMounted,
@@ -18,7 +19,13 @@ import {
     notifyComponentUnmounted,
     handleComponentError,
 } from '../src/app';
+import {
+    setCurrentInstance,
+    getInstanceId,
+    getParentInstanceId,
+} from '../src/component-lifecycle';
 import type { AppContext, ComponentInstance } from '../src/app-types';
+import type { ComponentSetupContext } from '../src/component-types';
 
 function makeContext(): AppContext {
     return {
@@ -62,7 +69,8 @@ describe('devtools hook', () => {
         notifyComponentMounted(ctx, makeInstance('Bar'));
 
         const seen: string[] = [];
-        hook.on(event => {
+        hook.on(raw => {
+            const event = raw as DevtoolsEvent;
             if (event.type === 'component:mounted') seen.push(event.instance.name!);
         });
 
@@ -112,7 +120,7 @@ describe('devtools hook', () => {
         }
         expect(hook.buffer.length).toBe(1000);
         // Latest events win, oldest are dropped.
-        const last = hook.buffer[hook.buffer.length - 1];
+        const last = hook.buffer[hook.buffer.length - 1] as DevtoolsEvent;
         expect(last.type).toBe('component:mounted');
         if (last.type === 'component:mounted') {
             expect(last.instance.name).toBe('C1499');
@@ -125,5 +133,59 @@ describe('devtools hook', () => {
         const ctx = makeContext();
         // Should swallow the listener error rather than propagate.
         expect(() => notifyComponentMounted(ctx, makeInstance())).not.toThrow();
+    });
+
+    it('a listener throwing during buffer replay does not break attach', () => {
+        const hook = ensureDevtoolsHook();
+        // Buffer an event before any subscriber attaches.
+        notifyComponentMounted(makeContext(), makeInstance());
+        // Now subscribe a buggy listener — replay should swallow the
+        // throw and let the listener continue receiving live events.
+        let liveSeen = 0;
+        hook.on(() => { throw new Error('replay bug'); });
+        // Subsequent live emits still flow.
+        const goodListener = () => { liveSeen += 1; };
+        hook.on(goodListener);
+        notifyComponentMounted(makeContext(), makeInstance());
+        expect(liveSeen).toBe(1);
+    });
+
+    it('setCurrentInstance mints an id per ctx and updates currentOwner', () => {
+        const hook = ensureDevtoolsHook();
+        const parent = { __ctx: 'parent' } as unknown as ComponentSetupContext<any, any, any>;
+        const child = { __ctx: 'child', parent } as unknown as ComponentSetupContext<any, any, any>;
+
+        expect(getInstanceId(parent)).toBeNull();
+        expect(hook.currentOwner).toBeNull();
+
+        const prevOuter = setCurrentInstance(parent);
+        const parentId = getInstanceId(parent);
+        expect(typeof parentId).toBe('number');
+        expect(hook.currentOwner).toBe(parentId);
+
+        const prevInner = setCurrentInstance(child);
+        const childId = getInstanceId(child);
+        expect(typeof childId).toBe('number');
+        expect(childId).not.toBe(parentId);
+        expect(hook.currentOwner).toBe(childId);
+        // Child's parent id resolves via ctx.parent (the same field DI uses).
+        expect(getParentInstanceId(child)).toBe(parentId);
+
+        // Restore in reverse.
+        setCurrentInstance(prevInner);
+        expect(hook.currentOwner).toBe(parentId);
+        setCurrentInstance(prevOuter);
+        expect(hook.currentOwner).toBeNull();
+    });
+
+    it('setCurrentInstance returns null helpers when no hook is installed', () => {
+        // Hook NOT installed in this test (beforeEach already deleted it).
+        const ctx = { __ctx: 'lonely' } as unknown as ComponentSetupContext<any, any, any>;
+        setCurrentInstance(ctx);
+        // No hook → no id minted.
+        expect(getInstanceId(ctx)).toBeNull();
+        expect(getParentInstanceId(ctx)).toBeNull();
+        expect(getParentInstanceId(null)).toBeNull();
+        setCurrentInstance(null);
     });
 });

@@ -24,7 +24,7 @@ export type ReactivityDevtoolsEvent =
     | { type: 'effect:stopped';     id: number };
 
 // Compile-time check that our events extend the base shape — keeps
-// reactivity honest if someone adds an event without a `type`.
-type _check = ReactivityDevtoolsEvent extends DevtoolsEventBase ? true : never;
-const _check: _check = true;
-void _check;
+// reactivity honest if someone adds an event without a `type`. The
+// assertion is purely type-level; no runtime code emits.
+type _AssertExtendsBase = ReactivityDevtoolsEvent extends DevtoolsEventBase ? true : never;
+export type _DevtoolsEventsCheck = _AssertExtendsBase;

@@ -4,7 +4,7 @@
 
 import type { Subscriber, Signal, PrimitiveSignal, Primitive } from './types';
 import { currentSubscriber, batch, track, trigger } from './effect';
-import { getDevtoolsHook, registerReactiveProxy } from './devtools-hook';
+import { getDevtoolsHook, registerReactiveProxy, notifySignalUpdated } from './devtools-hook';
 import {
     isReactive,
     isCollection,
@@ -185,9 +185,13 @@ export function signal<T>(target: T): PrimitiveSignal<T> | Signal<T & object> {
         return dep;
     };
 
-    // Create collection instrumentations if this is a collection
-    const collectionInstrumentations = isCollectionTarget 
-        ? createCollectionInstrumentations(depsMap!, getOrCreateDep)
+    // Create collection instrumentations if this is a collection.
+    // The notify closure routes Map/Set mutations through the same
+    // devtools emit path as plain object property writes.
+    const collectionInstrumentations = isCollectionTarget
+        ? createCollectionInstrumentations(depsMap!, getOrCreateDep, (key) => {
+            notifySignalUpdated(signalId, key);
+        })
         : null;
 
     const proxy = new Proxy(objectTarget, {
@@ -299,21 +303,10 @@ export function signal<T>(target: T): PrimitiveSignal<T> | Signal<T & object> {
 
                 // Devtools: emit on any actual state change, even if
                 // nothing is currently subscribed (depsMap may be null
-                // when nothing has read the signal yet). `signalId !==
-                // null` doubles as the "hook was installed at create
-                // time" gate — signals created before any devtools
-                // hook attached stay invisible, matching what users
-                // expect (devtools only sees what it was around for).
-                if (signalId !== null) {
-                    const hook = getDevtoolsHook();
-                    if (hook) {
-                        hook.emit({
-                            type: 'signal:updated',
-                            id: signalId,
-                            key: typeof prop === 'symbol' ? prop.toString() : String(prop),
-                        });
-                    }
-                }
+                // when nothing has read the signal yet). Centralized
+                // via notifySignalUpdated so deleteProperty and the
+                // collection instrumentations use the same path.
+                notifySignalUpdated(signalId, prop);
             }
 
             return result;
@@ -322,11 +315,17 @@ export function signal<T>(target: T): PrimitiveSignal<T> | Signal<T & object> {
             const hasKey = Object.prototype.hasOwnProperty.call(obj, prop);
             const result = Reflect.deleteProperty(obj, prop);
 
-            if (result && hasKey && depsMap) {
-                const dep = depsMap.get(prop);
-                if (dep) {
-                    trigger(dep);
+            if (result && hasKey) {
+                if (depsMap) {
+                    const dep = depsMap.get(prop);
+                    if (dep) {
+                        trigger(dep);
+                    }
                 }
+                // Devtools: a delete is also a state change — `$set()`
+                // removals route through here too, so the panel needs
+                // to see them.
+                notifySignalUpdated(signalId, prop);
             }
             return result;
         }

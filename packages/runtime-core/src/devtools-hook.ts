@@ -54,7 +54,7 @@ export type DevtoolsEvent =
 export type DevtoolsListener = (event: DevtoolsEvent) => void;
 
 // Compile-time check that DevtoolsEvent extends DevtoolsEventBase.
-// If someone removes a `type` field by mistake, this fails.
-type _check = DevtoolsEvent extends DevtoolsEventBase ? true : never;
-const _check: _check = true;
-void _check;
+// If someone removes a `type` field by mistake, this fails. Pure
+// type-level — no runtime emit.
+type _AssertExtendsBase = DevtoolsEvent extends DevtoolsEventBase ? true : never;
+export type _RuntimeCoreEventsCheck = _AssertExtendsBase;

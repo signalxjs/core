@@ -93,6 +93,30 @@ export function withoutOwnerTracking<T>(fn: () => T): T {
     }
 }
 
+/**
+ * Centralized devtools "signal updated" emit.
+ *
+ * Called from every mutation path on a reactive signal — the proxy
+ * `set` and `deleteProperty` traps in signal.ts, plus the Map/Set
+ * instrumentations in collections.ts (`add`, `set`, `delete`,
+ * `clear`). Routing every mutation through one function means the
+ * panel sees every state change, not just object-property writes.
+ *
+ * `signalId === null` short-circuits — that's the "signal was created
+ * before any devtools hook attached" case, which we deliberately
+ * leave invisible (matching the rest of the surface).
+ */
+export function notifySignalUpdated(signalId: number | null, key: string | symbol): void {
+    if (signalId === null) return;
+    const hook = getDevtoolsHook();
+    if (!hook) return;
+    hook.emit({
+        type: 'signal:updated',
+        id: signalId,
+        key: typeof key === 'symbol' ? key.toString() : String(key),
+    });
+}
+
 // ----------------------------------------------------------------------------
 // id → reactive proxy lookup
 // ----------------------------------------------------------------------------
