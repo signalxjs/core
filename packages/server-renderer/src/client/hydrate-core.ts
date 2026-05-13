@@ -91,11 +91,22 @@ export function hydrateNode(vnode: VNode, dom: Node | null, parent: Node): Node 
                 break;
             }
         }
-        // When a text VNode hits a <!--t--> separator, the SSR may have omitted the
-        // preceding empty text (e.g. "" + " · Logout" → <!--t--> · Logout).
-        // Replace the comment with an empty text node so this VNode can attach to it,
-        // preserving the boundary for the next text VNode.
+        // <!--t--> is a boundary between adjacent text children. SSR emits it
+        // so the browser parser doesn't merge two text VNodes into one DOM
+        // text node.
+        //  - If the VNode's text is non-empty and a real text node follows the
+        //    marker, that real text node is this VNode's target — advance past
+        //    the marker.
+        //  - Otherwise the marker stands in for an omitted empty text node
+        //    (e.g. "" + " · Logout" → <!--t--> · Logout). Replace it with an
+        //    empty text node and bind this VNode to it.
         if (isTextVNode && (dom as globalThis.Comment).data === 't') {
+            const next = dom.nextSibling;
+            const vnodeIsEmpty = vnode.text == null || vnode.text === '';
+            if (!vnodeIsEmpty && next && next.nodeType === Node.TEXT_NODE) {
+                dom = next;
+                break;
+            }
             const emptyText = document.createTextNode('');
             parent.replaceChild(emptyText, dom);
             dom = emptyText;
@@ -162,12 +173,84 @@ export function hydrateNode(vnode: VNode, dom: Node | null, parent: Node): Node 
     }
 
     if (typeof vnode.type === 'string') {
-        if (!dom || dom.nodeType !== Node.ELEMENT_NODE) {
-            if (process.env.NODE_ENV !== 'production') {
-                const cls = vnode.props?.class || '';
-                console.warn('[Hydrate] Expected element but got:', dom, '| tag:', vnode.type, '| class:', cls, '| parent:', parent?.nodeName);
+        const wantTag = vnode.type.toLowerCase();
+        const matchesTag = (node: Node | null): node is Element =>
+            node != null
+            && node.nodeType === Node.ELEMENT_NODE
+            && (node as Element).tagName.toLowerCase() === wantTag;
+
+        if (!matchesTag(dom)) {
+            // Scan forward through remaining siblings for a matching element.
+            // This recovers from minor cursor drift without falling back to
+            // mount-fresh, which would otherwise duplicate content.
+            let scan: Node | null = dom;
+            while (scan && !matchesTag(scan)) {
+                scan = scan.nextSibling;
             }
-            return dom;
+            if (scan) {
+                if (process.env.NODE_ENV !== 'production' && scan !== dom) {
+                    // Skipped over orphan siblings on the way to a matching
+                    // element. Surface SSR drift instead of silently papering
+                    // over it — the skipped nodes stay in the DOM as visible
+                    // content no VNode owns.
+                    console.warn('[Hydrate] Skipped non-matching sibling(s) to reach <' + vnode.type + '>; SSR output may not match the client VNode tree.', '| parent:', parent?.nodeName);
+                }
+                dom = scan;
+            } else {
+                // Last-resort mismatch recovery: SSR didn't emit the expected
+                // element. Create a fresh one so vnode.dom is always bound,
+                // matching the recovery pattern used in the Text/Comment
+                // branches above. Without this, a later reactive patch with
+                // an undefined vnode.dom would mount fresh at the end of the
+                // parent and produce a duplicate.
+                if (process.env.NODE_ENV !== 'production') {
+                    const cls = vnode.props?.class || '';
+                    console.warn('[Hydrate] Expected element but got:', dom, '| tag:', vnode.type, '| class:', cls, '| parent:', parent?.nodeName);
+                }
+                const fresh = document.createElement(vnode.type);
+                if (dom) {
+                    parent.insertBefore(fresh, dom);
+                } else {
+                    parent.appendChild(fresh);
+                }
+                vnode.dom = fresh;
+                let hasDirectives = false;
+                if (vnode.props) {
+                    for (const key in vnode.props) {
+                        if (key === 'children' || key === 'key') continue;
+                        if (key.startsWith('client:')) continue;
+                        if (key.charCodeAt(0) === 117 /* 'u' */ && key.startsWith('use:')) {
+                            patchDirective(fresh, key.slice(4), null, vnode.props[key], getCurrentAppContext());
+                            hasDirectives = true;
+                        } else if (key !== 'ref') {
+                            patchProp(fresh, key, null, vnode.props[key]);
+                        }
+                    }
+                    if (hasDirectives) {
+                        onElementMounted(fresh);
+                    }
+                    if (vnode.props.ref) {
+                        if (typeof vnode.props.ref === 'function') {
+                            vnode.props.ref(fresh);
+                        } else if (typeof vnode.props.ref === 'object') {
+                            vnode.props.ref.current = fresh;
+                        }
+                    }
+                }
+                // Mount children fresh into the empty element.
+                let childDom: Node | null = null;
+                for (const child of vnode.children) {
+                    childDom = hydrateNode(child, childDom, fresh);
+                }
+                if (vnode.type === 'select' && vnode.props) {
+                    fixSelectValue(fresh as HTMLElement, vnode.props);
+                }
+                // Advance past both the inserted `fresh` and the original
+                // mismatched `dom` (now orphaned). Returning `dom` would let
+                // the next sibling VNode bind to the orphan, cascading the
+                // mismatch.
+                return dom ? dom.nextSibling : null;
+            }
         }
 
         const el = dom as Element;

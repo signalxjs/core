@@ -1,6 +1,6 @@
 {
     "name": "@sigx/vite",
-    "version": "0.4.4",
+    "version": "0.4.5",
     "description": "Vite plugin for SignalX Framework with HMR, library builds, and automatic type generation",
     "type": "module",
     "main": "./dist/index.js",
