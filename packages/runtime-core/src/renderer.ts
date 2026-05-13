@@ -417,6 +417,11 @@ export function createRenderer<HostNode = any, HostElement = any>(
             newInternal._subTree = oldInternal._subTree;
             newInternal._subTreeRef = oldInternal._subTreeRef;
             newInternal._slots = oldInternal._slots;
+            // Preserve the cleanup closure created during mountComponent.
+            // It notifies plugins of unmount and runs the component's
+            // unmountHooks; if we drop it here, the eventual unmount() finds
+            // vnode.cleanup === undefined and onUnmounted hooks never fire.
+            newVNode.cleanup = oldVNode.cleanup;
 
             const props = oldInternal._componentProps;
             newInternal._componentProps = props;
