@@ -119,6 +119,18 @@ async function* streamAllAsyncChunks(
     // Active pump promises, keyed by their slot index (totalCore + i)
     const activePumps = new Map<number, Promise<TaggedResult>>();
 
+    // pumpNext pulls ONE value from a generator. It does NOT pre-queue the
+    // next pull — the consumer is responsible for calling pumpNext again
+    // after it has yielded the current value (see the race loop below).
+    //
+    // The eager-re-queue variant deadlocked plugin streams: a generator
+    // that yields multiple already-resolved chunks would drain end-to-end
+    // through the microtask queue (each .then() schedules the next pull,
+    // which resolves immediately, scheduling the next .then(), ...) before
+    // the consumer's first `await Promise.race(...)` got a turn. When the
+    // generator hit `done: true`, the slot was deleted from `activePumps`
+    // and the consumer woke up to an empty map after a single yield. See
+    // signalxjs/core#17.
     function pumpNext(pumpIdx: number): Promise<TaggedResult> {
         const slotIndex = totalCore + pumpIdx;
         return pumps[pumpIdx].generator.next().then(({ value, done }) => {
@@ -127,9 +139,6 @@ async function* streamAllAsyncChunks(
                 activePumps.delete(slotIndex);
                 return { index: slotIndex, script: '' };
             }
-            // Re-queue: set new promise for this slot
-            const nextP = pumpNext(pumpIdx);
-            activePumps.set(slotIndex, nextP);
             return { index: slotIndex, script: value || '' };
         });
     }
@@ -137,8 +146,7 @@ async function* streamAllAsyncChunks(
     // Start initial pumps
     for (let i = 0; i < pumps.length; i++) {
         const slotIndex = totalCore + i;
-        const p = pumpNext(i);
-        activePumps.set(slotIndex, p);
+        activePumps.set(slotIndex, pumpNext(i));
     }
 
     // Race loop: core promises + pump promises
@@ -167,8 +175,16 @@ async function* streamAllAsyncChunks(
 
         if (winner.index < totalCore) {
             resolvedCore.add(winner.index);
+        } else {
+            // Pump slot — re-queue the next pull now that the consumer has
+            // yielded the current value. If the generator hit `done: true`
+            // (in which case `pumps[pumpIdx].done` was set inside pumpNext
+            // and the slot was removed from `activePumps`), skip re-queue.
+            const pumpIdx = winner.index - totalCore;
+            if (!pumps[pumpIdx].done) {
+                activePumps.set(winner.index, pumpNext(pumpIdx));
+            }
         }
-        // Pump promises auto-re-queue in pumpNext(), so no action needed here
     }
 }
 

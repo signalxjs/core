@@ -249,15 +249,16 @@ describe('streamAllAsyncChunks — plugin-only streaming (no core async)', () =>
         expect(html).toContain('<plugin-chunk-only/>');
     });
 
-    // Tracked as signalxjs/core#17 — the pump pattern in `streamAllAsyncChunks`
-    // eagerly re-queues `pumpNext` inside the resolved-value .then(). When a
-    // generator yields multiple chunks, the microtask chain pre-fetches them
-    // all and clears the active-pumps slot before the consumer awaits the
-    // second race iteration, silently dropping chunks 2..N. Un-skip once #17 lands.
-    it.skip('drains multiple plugin getStreamingChunks chunks (signalxjs/core#17)', async () => {
+    // Regression for signalxjs/core#17 — previously, a generator that yielded
+    // multiple chunks would have all but the first dropped because pumpNext
+    // recursively re-queued itself from inside the resolved-value .then(),
+    // draining the generator before the consumer awoke. The fix moves
+    // re-queue into the consumer's race loop.
+    it('drains all chunks from a single plugin getStreamingChunks generator', async () => {
         async function* gen() {
             yield '<plugin-chunk-1/>';
             yield '<plugin-chunk-2/>';
+            yield '<plugin-chunk-3/>';
         }
 
         const ssr = createSSR().use({
@@ -269,5 +270,35 @@ describe('streamAllAsyncChunks — plugin-only streaming (no core async)', () =>
         const html = await collectReadable(stream);
         expect(html).toContain('<plugin-chunk-1/>');
         expect(html).toContain('<plugin-chunk-2/>');
+        expect(html).toContain('<plugin-chunk-3/>');
+        // Order should be preserved within a single generator
+        expect(html.indexOf('<plugin-chunk-1/>')).toBeLessThan(html.indexOf('<plugin-chunk-2/>'));
+        expect(html.indexOf('<plugin-chunk-2/>')).toBeLessThan(html.indexOf('<plugin-chunk-3/>'));
+    });
+
+    it('interleaves chunks from multiple plugin generators', async () => {
+        async function* genA() {
+            yield '<a-1/>';
+            yield '<a-2/>';
+        }
+        async function* genB() {
+            yield '<b-1/>';
+            yield '<b-2/>';
+        }
+
+        const ssr = createSSR()
+            .use({ name: 'a', server: { getStreamingChunks: () => genA() } })
+            .use({ name: 'b', server: { getStreamingChunks: () => genB() } });
+
+        const stream = ssr.renderNodeStream((TestText as any)({ text: 'shell' }));
+        const html = await collectReadable(stream);
+        // All four chunks make it through
+        expect(html).toContain('<a-1/>');
+        expect(html).toContain('<a-2/>');
+        expect(html).toContain('<b-1/>');
+        expect(html).toContain('<b-2/>');
+        // Within each generator, order is preserved
+        expect(html.indexOf('<a-1/>')).toBeLessThan(html.indexOf('<a-2/>'));
+        expect(html.indexOf('<b-1/>')).toBeLessThan(html.indexOf('<b-2/>'));
     });
 });
