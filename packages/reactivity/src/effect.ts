@@ -72,6 +72,14 @@ export function trigger(depSet: Set<Subscriber>): void {
 
 function runEffect(fn: EffectFn): EffectRunner {
     let stopped = false;
+    // Re-entrancy guard. If a running effect synchronously triggers a
+    // signal that lists itself as a subscriber (e.g. an unmount hook
+    // does `if (state.x === id) state.x = null` while the parent's
+    // render effect is on the stack), we must not invoke the effect
+    // again while the previous invocation has not unwound — that would
+    // overwrite freshly-rebuilt deps and corrupt any state the outer
+    // run is mid-mutating (in practice, the renderer's subtree ref).
+    let running = false;
 
     // Devtools id minted at create time when a hook is installed.
     // `null` means "untracked by devtools" — the hot path in the
@@ -88,6 +96,8 @@ function runEffect(fn: EffectFn): EffectRunner {
 
     const effectFn: Subscriber = function () {
         if (stopped) return;
+        if (running) return;
+        running = true;
         cleanup(effectFn);
         const prev = currentSubscriber;
         currentSubscriber = effectFn;
@@ -96,6 +106,7 @@ function runEffect(fn: EffectFn): EffectRunner {
                 fn();
             } finally {
                 currentSubscriber = prev;
+                running = false;
             }
             return;
         }
@@ -108,6 +119,7 @@ function runEffect(fn: EffectFn): EffectRunner {
             fn();
         } finally {
             currentSubscriber = prev;
+            running = false;
             const hook = getDevtoolsHook();
             if (hook) {
                 hook.emit({
