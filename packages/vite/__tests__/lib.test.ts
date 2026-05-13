@@ -3,6 +3,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import path from 'path';
+import { fileURLToPath, pathToFileURL } from 'url';
 import { defineLibConfig } from '../src/lib';
 
 describe('defineLibConfig — defaults', () => {
@@ -112,14 +113,19 @@ describe('defineLibConfig — alias resolution', () => {
     });
 
     it('accepts a file:// URL as the root (import.meta.url style)', () => {
-        const root = 'file:///tmp/lib-test-root/vite.config.ts';
+        // Build the root URL from a real absolute path so this test runs on
+        // both POSIX and Windows (where file URLs need drive-letter prefixes).
+        const absFile = path.resolve(process.cwd(), 'vite.config.ts');
+        const root = pathToFileURL(absFile).href;
+        const expectedRootDir = path.dirname(fileURLToPath(root));
+
         const config: any = defineLibConfig({
             entry: 'src/index.ts',
             root,
             alias: { foo: 'bar.ts' }
         });
-        expect(config.root).toBe('/tmp/lib-test-root');
-        expect(config.resolve.alias.foo).toBe('/tmp/lib-test-root/bar.ts');
+        expect(config.root).toBe(expectedRootDir);
+        expect(config.resolve.alias.foo).toBe(path.resolve(expectedRootDir, 'bar.ts'));
     });
 
     it('returns an empty alias map when no alias option provided', () => {

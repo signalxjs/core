@@ -15,11 +15,11 @@ describe('escapeJsonForScript', () => {
     });
 
     it('escapes U+2028 line separator', () => {
-        expect(escapeJsonForScript('a b')).toBe('a\\u2028b');
+        expect(escapeJsonForScript('a\u2028b')).toBe('a\\u2028b');
     });
 
     it('escapes U+2029 paragraph separator', () => {
-        expect(escapeJsonForScript('a b')).toBe('a\\u2029b');
+        expect(escapeJsonForScript('a\u2029b')).toBe('a\\u2029b');
     });
 
     it('leaves plain text unchanged', () => {
@@ -63,7 +63,7 @@ describe('generateReplacementScript', () => {
         const out = generateReplacementScript(42, '<div>ok</div>');
         expect(out.startsWith('<script>$SIGX_REPLACE(42, ')).toBe(true);
         expect(out.endsWith('</script>')).toBe(true);
-        // JSON-encoded then script-escaped (so '<' becomes '<')
+        // JSON.stringify + escapeJsonForScript: '<' → '\\u003c', '>' → '\\u003e'
         expect(out).toContain('\\u003cdiv\\u003eok\\u003c/div\\u003e');
     });
 

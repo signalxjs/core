@@ -187,15 +187,17 @@ describe('hmr — HMR update path', () => {
         factory.__setup(ctx);
         expect(ctx.unmountCbs.length).toBe(1);
 
-        // Simulate unmount — cleanup callback runs
+        // Simulate unmount — cleanup callback runs and should remove the
+        // instance from the HMR registry.
         ctx.unmountCbs[0]();
 
-        // Re-define: there should be no surviving instance to update
+        // Re-define the same component. Because the original ctx was unmounted,
+        // its update() must NOT be called by the HMR update loop.
         registerHMRModule('moduleX');
-        const newCtx = makeCtx();
         const newRender = () => null;
         plugin.onDefine!('X', {} as any, () => newRender);
 
-        expect(newCtx.update).not.toHaveBeenCalled();
+        expect(ctx.update).not.toHaveBeenCalled();
+        expect(ctx.renderFn).toBeUndefined();
     });
 });
