@@ -13,6 +13,7 @@ import type {
 import { ComputedSymbol } from './types';
 import { cleanup, track, trigger, setCurrentSubscriber, getCurrentSubscriber } from './effect';
 import { getAccessObserver, setAccessObserver } from './signal';
+import { getDevtoolsHook, registerReactiveProxy } from './devtools-hook';
 
 /**
  * Creates a computed signal that lazily derives a value from other reactive sources.
@@ -51,6 +52,18 @@ export function computed<T>(
     let cachedValue: T;
     let dirty = true;
 
+    // Devtools id minted at create time. `null` skips emissions
+    // entirely on every recompute.
+    const hookAtCreate = getDevtoolsHook();
+    const computedId: number | null = hookAtCreate ? hookAtCreate.nextId() : null;
+    if (hookAtCreate && computedId !== null) {
+        hookAtCreate.emit({
+            type: 'computed:created',
+            id: computedId,
+            ownerComponentId: hookAtCreate.currentOwner,
+        });
+    }
+
     // Internal effect for dependency tracking
     const computedEffect: Subscriber = function () {
         if (!dirty) {
@@ -67,6 +80,10 @@ export function computed<T>(
         try {
             cachedValue = getter();
             dirty = false;
+            if (computedId !== null) {
+                const hook = getDevtoolsHook();
+                if (hook) hook.emit({ type: 'computed:recomputed', id: computedId });
+            }
             return cachedValue;
         } finally {
             setCurrentSubscriber(prevEffect);
@@ -115,9 +132,11 @@ export function computed<T>(
             enumerable: true,
             configurable: false,
         });
+        if (computedId !== null) registerReactiveProxy(computedId, computedObj);
         return computedObj as WritableComputed<T>;
     }
 
+    if (computedId !== null) registerReactiveProxy(computedId, computedObj);
     return computedObj as Computed<T>;
 }
 

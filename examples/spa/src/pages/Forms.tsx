@@ -97,4 +97,4 @@ export const Forms = component(({ signal }) => {
             </div>
         </>
     );
-});
+}, { name: 'Forms' });

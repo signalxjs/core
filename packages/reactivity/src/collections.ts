@@ -87,10 +87,17 @@ export function shouldNotProxy(value: unknown): boolean {
  * Creates instrumented collection methods that properly handle reactivity.
  * These methods call the real collection methods on the raw object while
  * tracking dependencies and triggering updates.
+ *
+ * `notify` is the devtools update hook — called from every write method
+ * so Map/Set mutations are visible to the panel. Pass a no-op when
+ * devtools isn't relevant. The `key` argument it receives is a
+ * stringifiable identifier for the affected slot (the mutated key for
+ * `add`/`set`/`delete`, or a synthetic `'clear'` marker for `clear`).
  */
 export function createCollectionInstrumentations(
     depsMap: Map<string | symbol, Set<Subscriber>>,
-    getOrCreateDep: (key: string | symbol) => Set<Subscriber>
+    getOrCreateDep: (key: string | symbol) => Set<Subscriber>,
+    notify: (key: string | symbol) => void = () => {}
 ) {
     const instrumentations: Record<string | symbol, any> = {};
 
@@ -192,6 +199,7 @@ export function createCollectionInstrumentations(
             if (dep) trigger(dep);
             const iterDep = depsMap.get(ITERATION_KEY);
             if (iterDep) trigger(iterDep);
+            notify(rawValue as string | symbol);
         }
         return this; // Return the proxy, not raw
     };
@@ -213,6 +221,7 @@ export function createCollectionInstrumentations(
             // Value changed - trigger key dependency
             const dep = depsMap.get(rawKey as string | symbol);
             if (dep) trigger(dep);
+            notify(rawKey as string | symbol);
         }
         return this; // Return the proxy, not raw
     };
@@ -229,6 +238,7 @@ export function createCollectionInstrumentations(
             if (dep) trigger(dep);
             const iterDep = depsMap.get(ITERATION_KEY);
             if (iterDep) trigger(iterDep);
+            notify(rawKey as string | symbol);
         }
         return result;
     };
@@ -243,6 +253,7 @@ export function createCollectionInstrumentations(
             for (const dep of depsMap.values()) {
                 trigger(dep);
             }
+            notify('clear');
         }
     };
 

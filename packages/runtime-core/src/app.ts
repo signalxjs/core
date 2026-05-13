@@ -33,6 +33,8 @@ import { getAppContextToken, type InjectableFunction } from './di/injectable.js'
 import { isDirective } from './directives.js';
 import type { JSXElement } from './jsx-runtime.js';
 import { noMountFunctionError, provideInvalidInjectableError } from './errors.js';
+import { getDevtoolsHook } from './devtools-hook.js';
+import { getInstanceId, getParentInstanceId } from './component-lifecycle.js';
 
 // ============================================================================
 // Dev mode flag - must be at top before any usage
@@ -192,6 +194,12 @@ export function defineApp<TContainer = any>(rootComponent: JSXElement): App<TCon
             container = target;
             isMounted = true;
 
+            const devtools = getDevtoolsHook();
+            if (devtools) {
+                devtools.apps.add(context);
+                devtools.emit({ type: 'app:init', app: context });
+            }
+
             // Call the platform-specific render function with our app context
             // The render function may return an unmount callback
             const result = mountFn(rootComponent, target, context);
@@ -212,6 +220,12 @@ export function defineApp<TContainer = any>(rootComponent: JSXElement): App<TCon
 
             if (unmountFn) {
                 unmountFn();
+            }
+
+            const devtools = getDevtoolsHook();
+            if (devtools) {
+                devtools.emit({ type: 'app:unmount', app: context });
+                devtools.apps.delete(context);
             }
 
             // Clear provides to help GC
@@ -265,6 +279,14 @@ export function notifyComponentCreated(context: AppContext | null, instance: Com
             handleHookError(context, err as Error, instance, 'onComponentCreated');
         }
     }
+    const devtools = getDevtoolsHook();
+    if (devtools) devtools.emit({
+        type: 'component:created',
+        app: context,
+        instance,
+        instanceId: getInstanceId(instance.ctx),
+        parentInstanceId: getParentInstanceId(instance.ctx),
+    });
 }
 
 /**
@@ -280,6 +302,8 @@ export function notifyComponentMounted(context: AppContext | null, instance: Com
             handleHookError(context, err as Error, instance, 'onComponentMounted');
         }
     }
+    const devtools = getDevtoolsHook();
+    if (devtools) devtools.emit({ type: 'component:mounted', app: context, instance, instanceId: getInstanceId(instance.ctx) });
 }
 
 /**
@@ -295,6 +319,8 @@ export function notifyComponentUnmounted(context: AppContext | null, instance: C
             handleHookError(context, err as Error, instance, 'onComponentUnmounted');
         }
     }
+    const devtools = getDevtoolsHook();
+    if (devtools) devtools.emit({ type: 'component:unmounted', app: context, instance, instanceId: getInstanceId(instance.ctx) });
 }
 
 /**
@@ -310,6 +336,8 @@ export function notifyComponentUpdated(context: AppContext | null, instance: Com
             handleHookError(context, err as Error, instance, 'onComponentUpdated');
         }
     }
+    const devtools = getDevtoolsHook();
+    if (devtools) devtools.emit({ type: 'component:updated', app: context, instance, instanceId: getInstanceId(instance.ctx) });
 }
 
 /**
@@ -323,6 +351,9 @@ export function handleComponentError(
     info: string
 ): boolean {
     if (!context) return false;
+
+    const devtools = getDevtoolsHook();
+    if (devtools) devtools.emit({ type: 'component:error', app: context, instance, instanceId: getInstanceId(instance?.ctx ?? null), error: err, info });
 
     // First, try plugin hooks
     for (const hooks of context.hooks) {
