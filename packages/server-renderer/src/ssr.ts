@@ -123,13 +123,15 @@ async function* streamAllAsyncChunks(
     // next pull — the consumer is responsible for calling pumpNext again
     // after it has yielded the current value (see the race loop below).
     //
-    // The eager-re-queue variant deadlocked plugin streams: a generator
-    // that yields multiple already-resolved chunks would drain end-to-end
-    // through the microtask queue (each .then() schedules the next pull,
-    // which resolves immediately, scheduling the next .then(), ...) before
-    // the consumer's first `await Promise.race(...)` got a turn. When the
-    // generator hit `done: true`, the slot was deleted from `activePumps`
-    // and the consumer woke up to an empty map after a single yield. See
+    // The eager-re-queue variant silently dropped chunks 2..N from plugin
+    // streams: a generator that yields multiple already-resolved chunks
+    // would drain end-to-end through the microtask queue (each .then()
+    // scheduled the next pull, which resolved immediately, scheduling the
+    // next .then(), ...) before the consumer's first `await
+    // Promise.race(...)` got a turn. When the generator hit `done: true`,
+    // the slot was deleted from `activePumps` and the consumer woke up to
+    // an empty map after a single yield — ending the stream prematurely
+    // even though most of the chunks were never observed. See
     // signalxjs/core#17.
     function pumpNext(pumpIdx: number): Promise<TaggedResult> {
         const slotIndex = totalCore + pumpIdx;

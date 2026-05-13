@@ -276,7 +276,7 @@ describe('streamAllAsyncChunks — plugin-only streaming (no core async)', () =>
         expect(html.indexOf('<plugin-chunk-2/>')).toBeLessThan(html.indexOf('<plugin-chunk-3/>'));
     });
 
-    it('interleaves chunks from multiple plugin generators', async () => {
+    it('surfaces all chunks from multiple plugin generators with per-generator order preserved', async () => {
         async function* genA() {
             yield '<a-1/>';
             yield '<a-2/>';
