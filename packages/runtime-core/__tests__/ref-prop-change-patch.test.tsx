@@ -91,7 +91,7 @@ describe('ref prop change during patch', () => {
         const which = signal<1 | 2>(1);
 
         const Child = component((ctx) => {
-            ctx.expose({ kind: 'child-api' });
+            (ctx.expose as any)({ kind: 'child-api' });
             return () => jsx('span', {});
         });
         const App = component(() => () => jsx(Child, { ref: which.value === 1 ? r1 : r2 }));
