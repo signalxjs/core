@@ -220,6 +220,35 @@ export function createRenderer<HostNode = any, HostElement = any>(
     function isSvgTag(tag: string): boolean {
         return svgTags.has(tag);
     }
+
+    /**
+     * Apply a ref value to a ref prop (function or object).
+     * Wrapped in untrack() to prevent reactive loops when a ref handler
+     * happens to write to a signal.
+     */
+    function applyRef(ref: any, value: any): void {
+        if (!ref) return;
+        untrack(() => {
+            if (typeof ref === 'function') {
+                ref(value);
+            } else if (typeof ref === 'object') {
+                ref.current = value;
+            }
+        });
+    }
+
+    /**
+     * Reconcile a `ref` prop across a same-type patch. If the ref identity
+     * changed, null the old ref and call the new ref with the current value.
+     * Without this, ref swaps (e.g. `ref={cond() ? a : b}`) silently leave
+     * the old ref holding a stale reference and never invoke the new one.
+     */
+    function updateRef(oldRef: any, newRef: any, value: any): void {
+        if (oldRef === newRef) return;
+        if (oldRef) applyRef(oldRef, null);
+        if (newRef) applyRef(newRef, value);
+    }
+
     function mount(vnode: VNode, container: HostElement, before: HostNode | null = null, parentIsSVG: boolean = false): void {
         // Guard against null, undefined, boolean values (from conditional rendering)
         if (vnode == null || vnode === (false as unknown as VNode) || vnode === (true as unknown as VNode)) {
@@ -288,15 +317,7 @@ export function createRenderer<HostNode = any, HostElement = any>(
             }
 
             // Handle ref - wrap in untrack to prevent reactive loops
-            if (vnode.props.ref) {
-                untrack(() => {
-                    if (typeof vnode.props.ref === 'function') {
-                        vnode.props.ref(element);
-                    } else if (typeof vnode.props.ref === 'object') {
-                        vnode.props.ref.current = element;
-                    }
-                });
-            }
+            applyRef(vnode.props.ref, element);
         }
 
         // Children - pass SVG context (reset for foreignObject)
@@ -338,15 +359,7 @@ export function createRenderer<HostNode = any, HostElement = any>(
                 hostRemove(vnode.dom);
             }
             // Handle ref cleanup - wrap in untrack to prevent reactive loops
-            if (vnode.props?.ref) {
-                untrack(() => {
-                    if (typeof vnode.props.ref === 'function') {
-                        vnode.props.ref(null);
-                    } else if (typeof vnode.props.ref === 'object') {
-                        vnode.props.ref.current = null;
-                    }
-                });
-            }
+            applyRef(vnode.props?.ref, null);
             return;
         }
 
@@ -369,15 +382,7 @@ export function createRenderer<HostNode = any, HostElement = any>(
         }
 
         // Handle ref cleanup - wrap in untrack to prevent reactive loops
-        if (vnode.props?.ref) {
-            untrack(() => {
-                if (typeof vnode.props.ref === 'function') {
-                    vnode.props.ref(null);
-                } else if (vnode.props.ref && typeof vnode.props.ref === 'object') {
-                    vnode.props.ref.current = null;
-                }
-            });
-        }
+        applyRef(vnode.props?.ref, null);
 
         // Invoke platform element lifecycle (e.g., directive unmounted hooks in runtime-dom)
         if (hostOnElementUnmounted && vnode.dom) {
@@ -422,6 +427,9 @@ export function createRenderer<HostNode = any, HostElement = any>(
             // unmountHooks; if we drop it here, the eventual unmount() finds
             // vnode.cleanup === undefined and onUnmounted hooks never fire.
             newVNode.cleanup = oldVNode.cleanup;
+            // Preserve the exposed-value snapshot so a later ref change can
+            // hand the new ref the same value the original mount captured.
+            newInternal._exposed = oldInternal._exposed;
 
             const props = oldInternal._componentProps;
             newInternal._componentProps = props;
@@ -505,6 +513,11 @@ export function createRenderer<HostNode = any, HostElement = any>(
                     }
                 }
             }
+
+            // Reconcile ref changes AFTER props/slots are updated so the new ref
+            // callback observes a component whose props reflect the latest patch.
+            // The prop-diff loop above excludes 'ref', so we handle it here.
+            updateRef(oldVNode.props?.ref, newVNode.props?.ref, oldInternal._exposed);
 
             return;
         }
@@ -592,6 +605,11 @@ export function createRenderer<HostNode = any, HostElement = any>(
                 }
             }
         }
+
+        // Reconcile ref changes (function or object swap, add, or removal) AFTER
+        // props are applied so the new ref callback observes the updated element.
+        // The prop loops above exclude 'ref', so we handle it here.
+        updateRef(oldProps.ref, newProps.ref, element);
 
         // Update children - pass SVG context for child elements (reset for foreignObject)
         const childIsSVG = isSVG && tag !== 'foreignObject';
@@ -818,16 +836,9 @@ export function createRenderer<HostNode = any, HostElement = any>(
         }
 
         // Handle ref - wrap in untrack to prevent reactive loops
-        if (vnode.props?.ref) {
-            const refValue = exposeCalled ? exposed : null;
-            untrack(() => {
-                if (typeof vnode.props.ref === 'function') {
-                    vnode.props.ref(refValue);
-                } else if (vnode.props.ref && typeof vnode.props.ref === 'object') {
-                    vnode.props.ref.current = refValue;
-                }
-            });
-        }
+        const refValue = exposeCalled ? exposed : null;
+        internalVNode._exposed = refValue;
+        applyRef(vnode.props?.ref, refValue);
 
         if (renderFn) {
             ctx.renderFn = renderFn;
