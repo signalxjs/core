@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.4.8] — 2026-05-14
+
+Follow-up to the wizard reconciler fix: a sibling bug in the same code path. Same-type patch branches were silently dropping `ref` prop changes, leaving old refs holding stale references and new refs never invoked. Also fixes an element-ref leak on unmount.
+
+### Fixed
+
+- **`@sigx/runtime-core`**: `patch()` now reconciles `ref` prop changes during same-type patches (both component and element branches). Previously the prop-diff loops excluded `ref`, so `<div ref={cond() ? a : b} />` or `<Child ref={whichRef()} />` would silently keep the old ref and never call the new one. The new ref now runs *after* props/slots are applied so it observes the fully-patched node. (#29)
+- **`@sigx/runtime-core`**: element `unmount()` now nulls `ref.current` / calls `ref(null)`, matching the existing component-unmount behavior. Previously element refs leaked, holding stale references to removed DOM nodes. (#29)
+
 ## [0.4.7] — 2026-05-13
 
 Fixes a renderer regression where a component's `onUnmounted` hooks silently stopped firing after any parent re-render — the second half of the sigx CLI `create` wizard bug. The previous `0.4.6` re-entrancy guard fixed one cause of the symptom; this releases the actual root cause.

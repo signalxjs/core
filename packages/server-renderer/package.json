@@ -1,6 +1,6 @@
 {
     "name": "@sigx/server-renderer",
-    "version": "0.4.7",
+    "version": "0.4.8",
     "description": "Server-side rendering and client hydration for SigX",
     "type": "module",
     "main": "./dist/index.js",
