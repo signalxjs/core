@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.4.9] — 2026-05-29
+
+Restores the DOM model processor that two-way `model={…}` binding on native form elements depends on. A packaging regression had dropped it from the build, so inputs bound with `model` never received their initial `value`/`checked` — fields rendered blank even when state was populated (write-back still worked, only the initial read was lost).
+
+### Fixed
+
+- **`@sigx/runtime-dom`**: the platform model processor is registered in the built output again. It is installed via a side-effect-only `import './model-processor.js'` in `index.ts`, but the package's `sideEffects` field listed only `./dist/*.js` paths. The lib bundler matches `sideEffects` against *source* module ids, so without `./src/model-processor.ts` listed it tree-shook the registration away — the built `index.js` contained no `setPlatformModelProcessor` call and no `model-processor.js` chunk was emitted. As a result, native `model`-bound form elements (and every `@sigx/daisyui` component that forwards `model`) never had their initial value applied. Restored the `./src/*.ts` entries to `sideEffects` so the side-effect import survives bundling.
+- **`sigx`**: restored the analogous `./src/index.ts` / `./src/jsx-runtime.ts` `sideEffects` entries on the meta-package to guard against the same class of regression.
+
 ## [0.4.8] — 2026-05-14
 
 Follow-up to the wizard reconciler fix: a sibling bug in the same code path. Same-type patch branches were silently dropping `ref` prop changes, leaving old refs holding stale references and new refs never invoked. Also fixes an element-ref leak on unmount.
@@ -93,7 +102,8 @@ Initial public release of the SignalX (`sigx`) ecosystem on npm. Six packages pu
 - Node `^20.19.0 || >=22.12.0`
 - `@sigx/vite` peer-depends on `vite >=8.0.0`
 
-[Unreleased]: https://github.com/signalxjs/core/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/signalxjs/core/compare/v0.4.9...HEAD
+[0.4.9]: https://github.com/signalxjs/core/compare/v0.4.8...v0.4.9
 [0.4.1]: https://github.com/signalxjs/core/releases/tag/v0.4.1
 [0.4.0]: https://github.com/signalxjs/core/releases/tag/v0.4.0
 

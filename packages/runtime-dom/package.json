@@ -1,6 +1,6 @@
 {
     "name": "@sigx/runtime-dom",
-    "version": "0.4.8",
+    "version": "0.4.9",
     "description": "DOM runtime for SignalX",
     "type": "module",
     "main": "./dist/index.js",
@@ -38,6 +38,9 @@
         "url": "https://github.com/signalxjs/core/issues"
     },
     "sideEffects": [
+        "./src/index.ts",
+        "./src/model-processor.ts",
+        "./src/render.ts",
         "./dist/index.js",
         "./dist/model-processor.js",
         "./dist/render.js"
