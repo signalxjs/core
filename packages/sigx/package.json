@@ -1,6 +1,6 @@
 {
     "name": "sigx",
-    "version": "0.4.8",
+    "version": "0.4.9",
     "description": "SignalX - Lightweight reactive component framework with signals and TSX support",
     "type": "module",
     "main": "./dist/sigx.js",
@@ -50,6 +50,8 @@
         "url": "https://github.com/signalxjs/core/issues"
     },
     "sideEffects": [
+        "./src/index.ts",
+        "./src/jsx-runtime.ts",
         "./dist/sigx.js",
         "./dist/jsx-runtime.js"
     ],
