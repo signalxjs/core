@@ -64,6 +64,17 @@ function mainCheckout() {
     return path.resolve(worktreePaths()[0]);
 }
 
+/** Platform-correct path equality (case-insensitive on Windows). */
+function samePath(a, b) {
+    return path.relative(path.resolve(a), path.resolve(b)) === '';
+}
+
+/** Is `child` equal to or inside `parent`? (platform-correct) */
+function isInside(child, parent) {
+    const rel = path.relative(path.resolve(parent), path.resolve(child));
+    return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+}
+
 /** Reject names that could escape ../<name> as a path or be invalid as a git branch. */
 function assertSafeName(name) {
     if (!/^[A-Za-z0-9._-]+$/.test(name) || name.includes('..')) {
@@ -121,7 +132,7 @@ function cmdNew(positional, flags) {
 function cmdList() {
     const main = mainCheckout();
     for (const wt of worktreePaths()) {
-        console.log(`${wt}${path.resolve(wt) === main ? '  (main)' : ''}`);
+        console.log(`${wt}${samePath(wt, main) ? '  (main)' : ''}`);
     }
 }
 
@@ -130,14 +141,14 @@ function cmdRm(positional, flags) {
     if (!name) die('Usage: pnpm wt rm <name> [--force]');
     assertSafeName(name);
     const worktree = path.join(PARENT_DIR, name);
-    if (path.resolve(worktree) === mainCheckout()) die('Refusing to remove the main checkout.');
+    if (samePath(worktree, mainCheckout())) die('Refusing to remove the main checkout.');
     // Only operate on registered worktrees — never delete an arbitrary sibling directory.
-    if (!worktreePaths().some((wt) => path.resolve(wt) === path.resolve(worktree))) {
+    if (!worktreePaths().some((wt) => samePath(wt, worktree))) {
         die(`'${name}' is not a registered worktree (see 'pnpm wt list').`);
     }
     // Don't saw off the branch we're sitting on — deleting the checkout we run from
     // would leave the process (and any shell/agent session) in a half-deleted directory.
-    if ((path.resolve(process.cwd()) + path.sep).startsWith(path.resolve(worktree) + path.sep)) {
+    if (isInside(process.cwd(), worktree)) {
         die(`Refusing to remove the worktree you are currently in — run this from another checkout.`);
     }
 
