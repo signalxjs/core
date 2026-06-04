@@ -35,7 +35,7 @@
     "devDependencies": {
         "@types/node": "^25.9.1",
         "sigx": "workspace:^",
-        "vite": "^8.0.14"
+        "vite": "^8.0.16"
     },
     "keywords": [
         "SignalX"
