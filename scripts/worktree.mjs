@@ -69,6 +69,12 @@ function assertSafeName(name) {
     if (!/^[A-Za-z0-9._-]+$/.test(name) || name.includes('..')) {
         die(`Invalid name '${name}' — use letters, digits, '.', '_', '-' only (no slashes or '..').`);
     }
+    // Path-safe but still possibly invalid as a ref (e.g. 'x.lock', trailing '.') — let git decide.
+    try {
+        git(['check-ref-format', '--branch', name], { stdio: 'ignore' });
+    } catch {
+        die(`Invalid name '${name}' — not a valid git branch name.`);
+    }
 }
 
 function die(msg) {
@@ -93,7 +99,11 @@ function cmdNew(positional, flags) {
     console.log(`Creating worktree at ${worktree}…`);
     const addArgs = ['worktree', 'add', '-b', name, worktree];
     if (flags.from) addArgs.push(String(flags.from));
-    git(addArgs, { stdio: 'inherit' });
+    try {
+        git(addArgs, { stdio: 'inherit' });
+    } catch {
+        die(`'git worktree add' failed (branch '${name}' may already exist) — see git's output above.`);
+    }
 
     // 2. Install deps (pnpm hardlinks from the global store — fast).
     console.log('Installing dependencies (pnpm install)…');
@@ -124,6 +134,11 @@ function cmdRm(positional, flags) {
     // Only operate on registered worktrees — never delete an arbitrary sibling directory.
     if (!worktreePaths().some((wt) => path.resolve(wt) === path.resolve(worktree))) {
         die(`'${name}' is not a registered worktree (see 'pnpm wt list').`);
+    }
+    // Don't saw off the branch we're sitting on — deleting the checkout we run from
+    // would leave the process (and any shell/agent session) in a half-deleted directory.
+    if ((path.resolve(process.cwd()) + path.sep).startsWith(path.resolve(worktree) + path.sep)) {
+        die(`Refusing to remove the worktree you are currently in — run this from another checkout.`);
     }
 
     const args = ['worktree', 'remove', worktree];
