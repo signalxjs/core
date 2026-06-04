@@ -49,6 +49,8 @@ straight to `main`.** Repo: `signalxjs/core`, base branch `main`.
    gh api --method POST repos/signalxjs/core/pulls/<pr>/requested_reviewers \
      -f 'reviewers[]=copilot-pull-request-reviewer[bot]'
    ```
+   (The reviewer-request API takes the `[bot]`-suffixed slug; the review author
+   login in `.reviews[].author.login` appears *without* the suffix.)
 
 5. **Wait for Copilot's review, then fix.** Do not merge before it has reviewed. Poll
    until a review by the bot appears, then read it:
