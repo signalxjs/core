@@ -9,5 +9,5 @@ Below are only the Claude-Code-specific bits.
 ## Claude Code specifics
 
 - **Worktrees**: Claude Code sessions are per-directory, so `pnpm wt new <name>`
-  plus launching Claude Code from `..\<name>` gives a fully independent parallel
-  session — no extra wiring needed.
+  plus launching Claude Code from `<repo>/branches/<name>` gives a fully
+  independent parallel session — no extra wiring needed.
