@@ -2,9 +2,10 @@
 /**
  * Git worktree helper for parallel work — the sigx standard.
  *
- * Each worktree is a sibling checkout of the main one (../<name>) on its own
- * branch `<name>`, with dependencies installed, so multiple changes (and agent
- * sessions) can run side by side without switching branches in place.
+ * Layout convention: the primary checkout lives at <repo>/main and every
+ * worktree at <repo>/branches/<name>, on its own branch `<name>`, with
+ * dependencies installed — so multiple changes (and agent sessions) can run
+ * side by side without switching branches in place.
  *
  * Usage:
  *   pnpm wt new <name> [--from <branch>]
@@ -12,12 +13,11 @@
  *   pnpm wt rm <name> [--force]
  */
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const PARENT_DIR = path.dirname(REPO_ROOT); // worktrees live as siblings of the main checkout
 
 // ── small utils ────────────────────────────────────────────────────────────
 
@@ -64,6 +64,11 @@ function mainCheckout() {
     return path.resolve(worktreePaths()[0]);
 }
 
+/** Worktrees live in <repo>/branches/, next to the primary checkout at <repo>/main. */
+function branchesDir() {
+    return path.join(path.dirname(mainCheckout()), 'branches');
+}
+
 /** Platform-correct path equality (case-insensitive on Windows). */
 function samePath(a, b) {
     return path.relative(path.resolve(a), path.resolve(b)) === '';
@@ -100,14 +105,17 @@ function cmdNew(positional, flags) {
     if (!name) die('Usage: pnpm wt new <name> [--from <branch>]');
     assertSafeName(name);
 
-    const worktree = path.join(PARENT_DIR, name);
+    const worktree = path.join(branchesDir(), name);
     if (existsSync(worktree)) die(`Path already exists: ${worktree}`);
 
     // 1. Create the worktree. Always create a NEW branch `name` (a branch can't be
     //    checked out in two worktrees), optionally based on `--from` (else HEAD).
     if (flags.from === true) die('--from requires a branch name: pnpm wt new <name> --from <branch>');
+    // Never let a --from value be parsed as a git option.
+    if (flags.from && String(flags.from).startsWith('-')) die(`Invalid --from value '${flags.from}' — must be a branch/ref, not an option.`);
 
     console.log(`Creating worktree at ${worktree}…`);
+    mkdirSync(branchesDir(), { recursive: true });
     const addArgs = ['worktree', 'add', '-b', name, worktree];
     if (flags.from) addArgs.push(String(flags.from));
     try {
@@ -140,7 +148,7 @@ function cmdRm(positional, flags) {
     const name = positional[0];
     if (!name) die('Usage: pnpm wt rm <name> [--force]');
     assertSafeName(name);
-    const worktree = path.join(PARENT_DIR, name);
+    const worktree = path.join(branchesDir(), name);
     if (samePath(worktree, mainCheckout())) die('Refusing to remove the main checkout.');
     // Only operate on registered worktrees — never delete an arbitrary sibling directory.
     if (!worktreePaths().some((wt) => samePath(wt, worktree))) {

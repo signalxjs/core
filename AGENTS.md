@@ -16,8 +16,10 @@ the `@sigx` scope (umbrella package: `sigx`).
 
 ## Development workflow (issue → PR → Copilot review → merge)
 
-**This is mandatory for EVERY change — including one-line fixes. Never commit
-straight to `main`.** Repo: `signalxjs/core`, base branch `main`.
+**This is mandatory for EVERY agent-driven change — including one-line fixes.
+Never commit straight to `main`.** Repo: `signalxjs/core`, base branch `main`.
+(Human contributors follow `CONTRIBUTING.md`, where an issue is optional; for
+agents the issue-first flow below is required.)
 
 1. **Issue first.** If no GitHub issue already tracks the work, create one *before*
    writing code and put the plan in it:
@@ -112,15 +114,17 @@ To work two things at once — each with its own checkout and its own agent
 session — use a worktree instead of switching branches in place:
 
 ```sh
-pnpm wt new <name> [--from <branch>]   # worktree at ../<name>: own branch + deps installed
+pnpm wt new <name> [--from <branch>]   # worktree at <repo>/branches/<name>: own branch + deps installed
 pnpm wt list                           # show all worktrees
 pnpm wt rm <name> [--force]            # remove a worktree
 ```
 
-`pnpm wt new` creates a sibling checkout of the main one on a new branch `<name>`
-and runs `pnpm install` (pnpm hardlinks from the global store — fast). Launch a
-**separate agent session from the worktree directory**; sessions stay independent
-per directory. Names: letters, digits, `.`, `_`, `-` only.
+Layout convention (all sigx repos): the primary checkout lives at `<repo>/main`
+and every worktree at `<repo>/branches/<name>`. `pnpm wt new` creates the
+checkout there on a new branch `<name>` and runs `pnpm install` (pnpm hardlinks
+from the global store — fast). Launch a **separate agent session from the
+worktree directory**; sessions stay independent per directory. Names: letters,
+digits, `.`, `_`, `-` only.
 
 ## Conventions & working principles
 
@@ -135,10 +139,12 @@ per directory. Names: letters, digits, `.`, `_`, `-` only.
 This file, `scripts/worktree.mjs`, and `CLAUDE.md` are the portable sigx
 standard. To adopt it in another repo:
 
-1. Copy `scripts/worktree.mjs` and `CLAUDE.md` verbatim; copy this `AGENTS.md` as a template.
-2. Add `"wt": "node scripts/worktree.mjs"` to the repo's `package.json` scripts.
-3. Adapt the repo-specific sections of `AGENTS.md`: the intro (what the repo is),
+1. Check the repo out using the standard layout: primary checkout at
+   `<repo>/main`, worktrees under `<repo>/branches/`.
+2. Copy `scripts/worktree.mjs` and `CLAUDE.md` verbatim; copy this `AGENTS.md` as a template.
+3. Add `"wt": "node scripts/worktree.mjs"` to the repo's `package.json` scripts.
+4. Adapt the repo-specific sections of `AGENTS.md`: the intro (what the repo is),
    "Build, Test, Lint", and "Packages". In the workflow section, swap the repo
    slug (`signalxjs/core`) in the `gh api` fallback.
-4. Keep the workflow, worktree, and conventions sections as-is — they are the
+5. Keep the workflow, worktree, and conventions sections as-is — they are the
    shared standard.
