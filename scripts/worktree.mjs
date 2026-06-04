@@ -88,15 +88,19 @@ function cmdNew(positional, flags) {
 
     // 1. Create the worktree. Always create a NEW branch `name` (a branch can't be
     //    checked out in two worktrees), optionally based on `--from` (else HEAD).
+    if (flags.from === true) die('--from requires a branch name: pnpm wt new <name> --from <branch>');
+
     console.log(`Creating worktree at ${worktree}…`);
     const addArgs = ['worktree', 'add', '-b', name, worktree];
-    if (flags.from && flags.from !== true) addArgs.push(String(flags.from));
+    if (flags.from) addArgs.push(String(flags.from));
     git(addArgs, { stdio: 'inherit' });
 
     // 2. Install deps (pnpm hardlinks from the global store — fast).
     console.log('Installing dependencies (pnpm install)…');
     const install = sh('pnpm install', { cwd: worktree, stdio: 'inherit' });
-    if (install.status !== 0) console.warn('  ⚠ pnpm install exited non-zero — check output above.');
+    if (install.status !== 0) {
+        die(`Worktree created at ${worktree}, but 'pnpm install' failed — fix and re-run it there.`);
+    }
 
     console.log(`\n✓ Worktree '${name}' ready.\nNext:`);
     console.log(`  cd "${worktree}"`);
@@ -117,6 +121,10 @@ function cmdRm(positional, flags) {
     assertSafeName(name);
     const worktree = path.join(PARENT_DIR, name);
     if (path.resolve(worktree) === mainCheckout()) die('Refusing to remove the main checkout.');
+    // Only operate on registered worktrees — never delete an arbitrary sibling directory.
+    if (!worktreePaths().some((wt) => path.resolve(wt) === path.resolve(worktree))) {
+        die(`'${name}' is not a registered worktree (see 'pnpm wt list').`);
+    }
 
     const args = ['worktree', 'remove', worktree];
     if (flags.force) args.push('--force');
