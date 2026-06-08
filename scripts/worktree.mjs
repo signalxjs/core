@@ -30,6 +30,10 @@ function sh(command, opts = {}) {
     return spawnSync(command, { shell: true, encoding: 'utf8', ...opts });
 }
 
+// Flags that are always boolean — never consume the following token as a value
+// (so `wt rm x --force` and `wt rm x --force anything` both mean force=true).
+const BOOLEAN_FLAGS = new Set(['force']);
+
 function parseArgs(argv) {
     const positional = [];
     const flags = {};
@@ -38,7 +42,7 @@ function parseArgs(argv) {
         if (a.startsWith('--')) {
             const key = a.slice(2);
             const next = argv[i + 1];
-            if (next === undefined || next.startsWith('--')) {
+            if (BOOLEAN_FLAGS.has(key) || next === undefined || next.startsWith('--')) {
                 flags[key] = true;
             } else {
                 flags[key] = next;
@@ -98,8 +102,10 @@ function isInside(child, parent) {
 
 /** Reject names that could escape ../<name> as a path or be invalid as a git branch. */
 function assertSafeName(name) {
-    if (!/^[A-Za-z0-9._-]+$/.test(name) || name.includes('..')) {
-        die(`Invalid name '${name}' — use letters, digits, '.', '_', '-' only (no slashes or '..').`);
+    // Reject a leading '-' too: a name like '--force' would otherwise be parsed as
+    // an option by the git commands below (and elsewhere), not as a branch name.
+    if (!/^[A-Za-z0-9._-]+$/.test(name) || name.includes('..') || name.startsWith('-')) {
+        die(`Invalid name '${name}' — use letters, digits, '.', '_', '-' only (no leading '-', slashes, or '..').`);
     }
     // Path-safe but still possibly invalid as a ref (e.g. 'x.lock', trailing '.') — let git decide.
     try {
@@ -176,8 +182,10 @@ function cmdRm(positional, flags) {
         die(`Refusing to remove the worktree you are currently in — run this from another checkout.`);
     }
 
-    const args = ['worktree', 'remove', worktree];
+    // Options before the path: `git worktree remove [--force] <worktree>`.
+    const args = ['worktree', 'remove'];
     if (flags.force) args.push('--force');
+    args.push(worktree);
     try {
         git(args, { stdio: 'inherit' });
     } catch {
