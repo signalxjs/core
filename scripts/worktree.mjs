@@ -76,14 +76,23 @@ function branchesDir() {
     return path.join(path.dirname(main), 'branches');
 }
 
+/** Resolve a path, lowercasing on Windows so comparisons match the OS's
+ *  case-insensitive filesystem. `path.relative` is case-SENSITIVE even on win32,
+ *  so two paths differing only in case (e.g. drive letter) would otherwise be
+ *  treated as different — breaking `wt list` labels and `wt rm` safety checks. */
+function normPath(p) {
+    const resolved = path.resolve(p);
+    return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+}
+
 /** Platform-correct path equality (case-insensitive on Windows). */
 function samePath(a, b) {
-    return path.relative(path.resolve(a), path.resolve(b)) === '';
+    return normPath(a) === normPath(b);
 }
 
 /** Is `child` equal to or inside `parent`? (platform-correct) */
 function isInside(child, parent) {
-    const rel = path.relative(path.resolve(parent), path.resolve(child));
+    const rel = path.relative(normPath(parent), normPath(child));
     return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
 }
 
@@ -140,7 +149,7 @@ function cmdNew(positional, flags) {
 
     console.log(`\n✓ Worktree '${name}' ready.\nNext:`);
     console.log(`  cd "${worktree}"`);
-    console.log('  pnpm typecheck && pnpm test   # verify the checkout works');
+    console.log('  pnpm typecheck   # plus the repo\'s test/build scripts, to verify the checkout works');
     console.log('  # …or launch an agent session from that directory for isolated parallel work.');
 }
 
