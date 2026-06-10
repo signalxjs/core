@@ -233,9 +233,9 @@ export interface App<TContainer = any> {
     /**
      * Provide a new instance of an injectable at app level.
      * All components will receive this instance when calling the injectable function.
-     * 
-     * @param useFn - An injectable function created by defineInjectable
-     * @param factory - Optional custom factory. If not provided, uses the injectable's default factory.
+     *
+     * @param useFn - A use-function created by defineInjectable or defineFactory
+     * @param factory - Optional custom factory. If not provided, uses the use-function's default factory.
      * @returns The created instance
      * 
      * @example

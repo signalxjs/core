@@ -157,12 +157,18 @@ export function defineApp<TContainer = any>(rootComponent: JSXElement): App<TCon
             context.provides.set(token, instance);
             // App-provided instances are app-owned: dispose them on unmount —
             // unless the factory setup took over disposal via overrideDispose.
-            // The RAW dispose reference is stored (not a wrapper) so the
-            // factory's dispose/recreate logic can delete the stale entry.
+            // Factory-generated disposes are stored RAW so the factory's
+            // dispose/recreate logic can delete the stale entry; user-supplied
+            // method-style disposes get a bound wrapper so `this` survives.
             const dispose = (instance as { dispose?: unknown } | null)?.dispose;
             if (typeof dispose === 'function'
                 && (dispose as { __sigxCustomManaged?: boolean }).__sigxCustomManaged !== true) {
-                context.disposables.add(dispose as () => void);
+                const isFactoryDispose = '__sigxDisposed' in (dispose as object);
+                context.disposables.add(
+                    isFactoryDispose
+                        ? dispose as () => void
+                        : () => (dispose as () => void).call(instance)
+                );
             }
             return instance;
         },
