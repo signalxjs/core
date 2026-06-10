@@ -18,6 +18,8 @@ export const DIRTY = 1 << 0;
 export const MAYBE_DIRTY = 1 << 1;
 /** Cycle guard: this computed's getter is currently executing. */
 export const COMPUTING = 1 << 2;
+/** Already sitting in the pending-effects queue (dedup without a Set). */
+const QUEUED = 1 << 3;
 
 /**
  * Pull-validate a subscriber whose sources are all "maybe dirty":
@@ -39,7 +41,9 @@ export function sourcesChanged(sub: Subscriber): boolean {
 
 export let currentSubscriber: Subscriber | null = null;
 let batchDepth = 0;
-const pendingEffects = new Set<Subscriber>();
+// Deduplicated via the QUEUED subscriber flag — cheaper than a Set on
+// the per-write hot path.
+const pendingEffects: Subscriber[] = [];
 
 export function setCurrentSubscriber(effect: Subscriber | null): void {
     currentSubscriber = effect;
@@ -74,10 +78,12 @@ export function batch(fn: () => void) {
 }
 
 function flushPendingEffects(): void {
-    while (pendingEffects.size > 0) {
-        const effects = Array.from(pendingEffects);
-        pendingEffects.clear();
+    while (pendingEffects.length > 0) {
+        // Snapshot-and-clear: a nested trigger during a run flushes its
+        // own wave immediately (depth-first), exactly as before.
+        const effects = pendingEffects.splice(0, pendingEffects.length);
         for (const effect of effects) {
+            effect.flags &= ~QUEUED;
             effect();
         }
     }
@@ -145,8 +151,8 @@ function mark(dep: Dep, bit: number): void {
     // mid-iteration — no snapshot needed.
     for (const sub of dep.subs) {
         const prev = sub.flags;
-        sub.flags = prev | bit;
         if (sub.ownDep) {
+            sub.flags = prev | bit;
             // Computed node: propagate downstream once per wave. An
             // already-flagged computed has already propagated (this also
             // terminates cycles).
@@ -154,7 +160,10 @@ function mark(dep: Dep, bit: number): void {
                 mark(sub.ownDep, MAYBE_DIRTY);
             }
         } else {
-            pendingEffects.add(sub);
+            sub.flags = prev | bit | QUEUED;
+            if ((prev & QUEUED) === 0) {
+                pendingEffects.push(sub);
+            }
         }
     }
 }
@@ -193,9 +202,10 @@ function runEffect(fn: EffectFn, scheduler?: EffectScheduler): EffectRunner {
         if (running) {
             // Re-entrant notification (the effect triggered itself while
             // executing): dropped, never scheduled — matching the long-
-            // standing guard that prevents render loops. Clear flags so a
-            // stale dirt bit can't skew the next real validation.
-            effectFn.flags = CLEAN;
+            // standing guard that prevents render loops. Clear the dirt
+            // bits (but keep QUEUED bookkeeping) so a stale bit can't
+            // skew the next real validation.
+            effectFn.flags &= QUEUED;
             return;
         }
         if (scheduler) {
@@ -209,11 +219,11 @@ function runEffect(fn: EffectFn, scheduler?: EffectScheduler): EffectRunner {
         if (stopped) return;
         if (running) {
             // Late-invoked scheduled job overlapping a manual run: drop.
-            effectFn.flags = CLEAN;
+            effectFn.flags &= QUEUED;
             return;
         }
         const flags = effectFn.flags;
-        effectFn.flags = CLEAN;
+        effectFn.flags &= QUEUED;
         if ((flags & MAYBE_DIRTY) !== 0 && (flags & DIRTY) === 0) {
             // Only computed sources were invalidated: pull-validate them
             // and skip the run entirely if no value actually changed.
