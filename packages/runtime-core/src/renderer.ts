@@ -11,6 +11,7 @@ import { createEmit } from './hydration/index.js';
 import { provideAppContext } from './di/injectable.js';
 import { isModel } from './model.js';
 import { asyncSetupClientError } from './errors.js';
+import { queueJob, nextJobId, type SchedulerJob } from './scheduler.js';
 import {
     AppContext,
     ComponentInstance,
@@ -849,6 +850,15 @@ export function createRenderer<HostNode = any, HostElement = any>(
             const subTreeRef: { current: VNode | null } = { current: null };
             internalVNode._subTreeRef = subTreeRef;
 
+            // Route re-renders through the render queue: one job per
+            // component, deduped per notification wave, parents before
+            // children (mount-order id). The first render stays inline.
+            let scheduledRun: (() => void) | undefined;
+            const renderJob: SchedulerJob = Object.assign(
+                () => { if (scheduledRun) scheduledRun(); },
+                { id: nextJobId() }
+            );
+
             const componentEffect = effect(() => {
                 // Set current instance during render so child components can find their parent
                 const prevInstance = setCurrentInstance(ctx);
@@ -894,6 +904,11 @@ export function createRenderer<HostNode = any, HostElement = any>(
                 } finally {
                     setCurrentInstance(prevInstance);
                 }
+            }, {
+                scheduler: (run) => {
+                    scheduledRun = run;
+                    queueJob(renderJob);
+                },
             });
             internalVNode._effect = componentEffect;
 

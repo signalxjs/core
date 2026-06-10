@@ -7,6 +7,20 @@ export const ComputedSymbol: unique symbol = Symbol('computed');
 
 export type EffectFn = () => void;
 
+/**
+ * Custom scheduling hook for effects. When provided, notifications hand
+ * the effect's `run` job to the scheduler instead of executing it; the
+ * scheduler decides when (and whether once-deduplicated) to invoke it.
+ * The job validates its sources when invoked, so a queued job whose
+ * sources turn out unchanged is a no-op, as is a job whose effect was
+ * stopped in the meantime.
+ */
+export type EffectScheduler = (run: () => void) => void;
+
+export interface EffectOptions {
+    scheduler?: EffectScheduler;
+}
+
 export interface EffectRunner<T = void> {
     (): T;
     stop: () => void;

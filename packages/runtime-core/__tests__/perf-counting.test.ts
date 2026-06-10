@@ -181,10 +181,9 @@ describe('component render counts (DOM)', () => {
 
         shared.v = 1;
         expect(parentRenders).toHaveBeenCalledTimes(2);
-        // STAGE 5 tightens this to 2 (render queue dedups: own subscription
-        // + parent prop write collapse into one job). Today the child runs
-        // once per trigger source.
-        expect(childRenders).toHaveBeenCalledTimes(3);
+        // Render queue dedup: own subscription + the parent's prop write
+        // collapse into ONE child render per wave.
+        expect(childRenders).toHaveBeenCalledTimes(2);
         expect(container.textContent).toBe('1:1');
     });
 

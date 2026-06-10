@@ -25,7 +25,10 @@ import {
     filterClientDirectives,
     createEmit,
     provideAppContext,
+    queueJob,
+    nextJobId,
 } from 'sigx/internals';
+import type { SchedulerJob } from 'sigx/internals';
 import {
     InternalVNode,
     createRestoringSignal,
@@ -202,6 +205,15 @@ export function hydrateComponent(vnode: VNode, dom: Node | null, parent: Node, s
         const subTreeRef: { current: VNode | null } = { current: null };
         internalVNode._subTreeRef = subTreeRef;
 
+        // Route re-renders through the shared render queue (same policy
+        // as runtime-core's mountComponent): deduped per component,
+        // parents flush before children. First render stays inline.
+        let scheduledRun: (() => void) | undefined;
+        const renderJob: SchedulerJob = Object.assign(
+            () => { if (scheduledRun) scheduledRun(); },
+            { id: nextJobId() }
+        );
+
         // Create reactive effect - on first run, hydrate; on subsequent, use render()
         const componentEffect = effect(() => {
             const prevInstance = setCurrentInstance(componentCtx);
@@ -271,6 +283,11 @@ export function hydrateComponent(vnode: VNode, dom: Node | null, parent: Node, s
             } finally {
                 setCurrentInstance(prevInstance);
             }
+        }, {
+            scheduler: (run) => {
+                scheduledRun = run;
+                queueJob(renderJob);
+            },
         });
 
         internalVNode._effect = componentEffect;

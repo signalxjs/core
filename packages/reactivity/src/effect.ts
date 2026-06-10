@@ -2,7 +2,7 @@
 // Effect System - Core reactivity primitives
 // ============================================================================
 
-import type { Dep, EffectFn, EffectRunner, Subscriber } from './types';
+import type { Dep, EffectFn, EffectOptions, EffectRunner, EffectScheduler, Subscriber } from './types';
 import { getDevtoolsHook } from './devtools-hook';
 
 /** Create a dependency slot (see {@link Dep}). */
@@ -81,6 +81,23 @@ function flushPendingEffects(): void {
             effect();
         }
     }
+    // Every notification wave ends by draining scheduled work (e.g. the
+    // renderer's render queue), so scheduler users never need their own
+    // "am I mid-batch?" probe.
+    if (flushHandler) flushHandler();
+}
+
+let flushHandler: (() => void) | null = null;
+
+/**
+ * Register a callback invoked at the end of every notification wave
+ * (after all pending effects have run). Used by renderers to drain a
+ * deduplicated job queue filled via the effect `scheduler` option.
+ *
+ * @internal exported via `@sigx/reactivity/internals`
+ */
+export function setFlushHandler(fn: (() => void) | null): void {
+    flushHandler = fn;
 }
 
 export function cleanup(effect: Subscriber): void {
@@ -142,7 +159,7 @@ function mark(dep: Dep, bit: number): void {
     }
 }
 
-function runEffect(fn: EffectFn): EffectRunner {
+function runEffect(fn: EffectFn, scheduler?: EffectScheduler): EffectRunner {
     let stopped = false;
     // Re-entrancy guard. If a running effect synchronously triggers a
     // signal that lists itself as a subscriber (e.g. an unmount hook
@@ -166,11 +183,32 @@ function runEffect(fn: EffectFn): EffectRunner {
         });
     }
 
+    // The tracked subscriber: invoked on notification. With a scheduler,
+    // notifications hand the validating `runJob` to the caller's queue
+    // instead of executing it — dedup and ordering become the caller's
+    // policy, while validation (and thus the value-equality cutoff) stays
+    // inside the job itself.
     const effectFn: Subscriber = function () {
         if (stopped) return;
         if (running) {
-            // Dropped re-entrant invocation: clear flags so a stale dirt
-            // bit can't skew the next real validation.
+            // Re-entrant notification (the effect triggered itself while
+            // executing): dropped, never scheduled — matching the long-
+            // standing guard that prevents render loops. Clear flags so a
+            // stale dirt bit can't skew the next real validation.
+            effectFn.flags = CLEAN;
+            return;
+        }
+        if (scheduler) {
+            scheduler(runJob);
+            return;
+        }
+        runJob();
+    } as Subscriber;
+
+    const runJob = (): void => {
+        if (stopped) return;
+        if (running) {
+            // Late-invoked scheduled job overlapping a manual run: drop.
             effectFn.flags = CLEAN;
             return;
         }
@@ -215,17 +253,19 @@ function runEffect(fn: EffectFn): EffectRunner {
                 });
             }
         }
-    } as Subscriber;
+    };
 
     effectFn.deps = [];
     effectFn.flags = DIRTY;
-    effectFn();
+    // The first run is always immediate and inline, even with a scheduler.
+    runJob();
 
     // Return the effect as a runner with a stop method. Manual runs are
-    // forced: they bypass validation by marking the effect dirty first.
+    // forced: they bypass both the scheduler and validation by marking
+    // the effect dirty and running the job directly.
     const runner = (() => {
         effectFn.flags |= DIRTY;
-        return effectFn();
+        return runJob();
     }) as EffectRunner;
     runner.stop = () => {
         stopped = true;
@@ -255,8 +295,8 @@ function runEffect(fn: EffectFn): EffectRunner {
  * runner.stop();
  * ```
  */
-export function effect(fn: EffectFn): EffectRunner {
-    return runEffect(fn);
+export function effect(fn: EffectFn, options?: EffectOptions): EffectRunner {
+    return runEffect(fn, options?.scheduler);
 }
 
 /**
