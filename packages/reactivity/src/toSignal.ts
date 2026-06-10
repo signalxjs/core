@@ -9,9 +9,10 @@
 export type PropertySignal<T> = { value: T };
 
 /**
- * Property keys eligible for toSignal/toSignals: own enumerable string keys.
- * `$set` is excluded — it is the object-signal's replace method injected by
- * the proxy, not data, and Object.keys never enumerates it.
+ * Property keys eligible for toSignal/toSignals: string keys excluding
+ * `$set` (the object-signal's replace method injected by the proxy — not
+ * data). Note that `toSignals()` additionally only creates views for keys
+ * `Object.keys` yields at runtime (own enumerable keys).
  */
 type SignalKey<T> = Exclude<Extract<keyof T, string>, '$set'>;
 
@@ -39,6 +40,15 @@ export function toSignal<T extends object, K extends SignalKey<T>>(source: T, ke
 }
 
 /**
+ * Per-key views of a reactive object. Homomorphic key-remapped map:
+ * optionality is preserved, since views only exist for keys Object.keys
+ * actually yields at runtime.
+ */
+export type ToSignals<T extends object> = {
+    [K in keyof T as K extends SignalKey<T> ? K : never]: PropertySignal<T[K]>;
+};
+
+/**
  * Create signal-shaped views for every own enumerable property of a reactive
  * object, so it can be destructured without losing reactivity.
  *
@@ -49,15 +59,6 @@ export function toSignal<T extends object, K extends SignalKey<T>>(source: T, ke
  * count.value++;        // still reactive
  * ```
  */
-/**
- * Per-key views of a reactive object. Homomorphic key-remapped map:
- * optionality is preserved, since views only exist for keys Object.keys
- * actually yields at runtime.
- */
-export type ToSignals<T extends object> = {
-    [K in keyof T as K extends SignalKey<T> ? K : never]: PropertySignal<T[K]>;
-};
-
 export function toSignals<T extends object>(source: T): ToSignals<T> {
     const result = {} as ToSignals<T>;
     for (const key of Object.keys(source) as SignalKey<T>[]) {
