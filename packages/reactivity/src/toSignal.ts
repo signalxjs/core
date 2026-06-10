@@ -34,7 +34,11 @@ export function toSignal<T extends object, K extends SignalKey<T>>(source: T, ke
             return source[key];
         },
         set value(newValue: T[K]) {
-            source[key] = newValue;
+            // Reflect.set reports rejected writes (read-only descriptors,
+            // proxies that refuse the set) instead of a generic TypeError.
+            if (!Reflect.set(source, key, newValue)) {
+                throw new Error(`[sigx] toSignal: cannot write to read-only property "${String(key)}".`);
+            }
         }
     };
 }

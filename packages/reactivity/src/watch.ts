@@ -122,6 +122,11 @@ export function watch<T>(source: WatchSource<T>, cb: WatchCallback<T>, options?:
         if (disposed) return;
         disposed = true;
         stopped = true;
+        // Clear pause/pending state so a resume() after stop() can never
+        // run the callback with a stale pending value.
+        paused = false;
+        hasPending = false;
+        pendingValue = undefined;
         runner.stop();
         if (cleanupFn) {
             cleanupFn();
