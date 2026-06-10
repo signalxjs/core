@@ -7,7 +7,7 @@
 
 import type { VNode, JSXElement } from './jsx-runtime.js';
 import type { ComponentSetupContext } from './component.js';
-import type { InjectableFunction } from './di/injectable.js';
+import type { Providable } from './di/injectable.js';
 import type { DirectiveDefinition } from './directives.js';
 
 // ============================================================================
@@ -100,6 +100,8 @@ export interface AppContext {
     app: App;
     /** App-level provides (available via inject in all components) */
     provides: Map<symbol, unknown>;
+    /** Dispose callbacks for app-owned instances, run on app.unmount() */
+    disposables: Set<() => void>;
     /** App configuration */
     config: AppConfig;
     /** Lifecycle hooks from all plugins */
@@ -231,9 +233,9 @@ export interface App<TContainer = any> {
     /**
      * Provide a new instance of an injectable at app level.
      * All components will receive this instance when calling the injectable function.
-     * 
-     * @param useFn - An injectable function created by defineInjectable
-     * @param factory - Optional custom factory. If not provided, uses the injectable's default factory.
+     *
+     * @param useFn - A use-function created by defineInjectable or defineFactory
+     * @param factory - Optional custom factory. If not provided, uses the use-function's default factory.
      * @returns The created instance
      * 
      * @example
@@ -250,7 +252,7 @@ export interface App<TContainer = any> {
      * app.defineProvide(useApiConfig, () => ({ baseUrl: 'https://other.api.com' }));
      * ```
      */
-    defineProvide<T>(useFn: InjectableFunction<T>, factory?: () => T): T;
+    defineProvide<T>(useFn: Providable<T>, factory?: () => T): T;
 
     /**
      * Register lifecycle hooks to observe all components
