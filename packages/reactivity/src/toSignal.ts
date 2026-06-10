@@ -9,6 +9,13 @@
 export type PropertySignal<T> = { value: T };
 
 /**
+ * Property keys eligible for toSignal/toSignals: own enumerable string keys.
+ * `$set` is excluded — it is the object-signal's replace method injected by
+ * the proxy, not data, and Object.keys never enumerates it.
+ */
+type SignalKey<T> = Exclude<Extract<keyof T, string>, '$set'>;
+
+/**
  * Create a signal-shaped view over one property of a reactive object.
  * Unlike destructuring (which snapshots the value), the returned object
  * reads and writes through to the source, so tracking and triggering work.
@@ -20,7 +27,7 @@ export type PropertySignal<T> = { value: T };
  * count.value++;        // triggers effects watching state.count
  * ```
  */
-export function toSignal<T extends object, K extends keyof T>(source: T, key: K): PropertySignal<T[K]> {
+export function toSignal<T extends object, K extends SignalKey<T>>(source: T, key: K): PropertySignal<T[K]> {
     return {
         get value() {
             return source[key];
@@ -42,9 +49,9 @@ export function toSignal<T extends object, K extends keyof T>(source: T, key: K)
  * count.value++;        // still reactive
  * ```
  */
-export function toSignals<T extends object>(source: T): { [K in Extract<keyof T, string>]-?: PropertySignal<T[K]> } {
-    const result = {} as { [K in Extract<keyof T, string>]-?: PropertySignal<T[K]> };
-    for (const key of Object.keys(source) as Extract<keyof T, string>[]) {
+export function toSignals<T extends object>(source: T): { [K in SignalKey<T>]-?: PropertySignal<T[K]> } {
+    const result = {} as { [K in SignalKey<T>]-?: PropertySignal<T[K]> };
+    for (const key of Object.keys(source) as SignalKey<T>[]) {
         result[key] = toSignal(source, key);
     }
     return result;

@@ -272,6 +272,31 @@ describe('effectScope', () => {
             expect(fn).toHaveBeenCalledTimes(1);
         });
 
+        it('stop() during run() also disposes effects created by disposers', () => {
+            const state = signal({ count: 0 });
+            const lateEffect = vi.fn();
+
+            const scope = effectScope();
+            scope.run(() => {
+                watch(() => state.count, (_v, _p, onCleanup) => {
+                    onCleanup(() => {
+                        // a disposer that synchronously creates a new effect
+                        effect(() => {
+                            lateEffect(state.count);
+                        });
+                    });
+                });
+
+                state.count = 1; // arm the watcher's cleanup
+                scope.stop();    // stop while this scope is the active run() scope
+            });
+
+            const callsAtStop = lateEffect.mock.calls.length;
+            state.count = 2;
+            // the late-created effect must have been disposed by the drain loop
+            expect(lateEffect.mock.calls.length).toBe(callsAtStop);
+        });
+
         it('effects created outside any scope are unaffected by stop()', () => {
             const state = signal({ count: 0 });
             const outside = vi.fn();

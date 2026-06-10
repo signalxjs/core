@@ -116,4 +116,15 @@ describe('types', () => {
         expectTypeOf(signals.count.value).toEqualTypeOf<number>();
         expectTypeOf(signals.status.value).toEqualTypeOf<'idle' | 'busy'>();
     });
+
+    it("excludes the object-signal's $set from eligible keys", () => {
+        const state = signal({ count: 0 });
+
+        // @ts-expect-error — $set is the proxy's replace method, not data
+        toSignal(state, '$set');
+
+        const signals = toSignals(state);
+        expectTypeOf(signals).not.toHaveProperty('$set');
+        expect(Object.keys(signals)).toEqual(['count']);
+    });
 });

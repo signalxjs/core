@@ -248,9 +248,14 @@ export function effectScope(detached?: boolean): {
         stop() {
             if (!active) return;
             active = false;
-            const toDispose = cleanups.slice();
-            cleanups.length = 0;
-            toDispose.forEach(dispose => dispose());
+            // Drain until empty: a disposer may synchronously create new
+            // effects/watchers that register into this scope (when stop() is
+            // called while this scope's run() is active) — they must be
+            // disposed too, not leaked into a cleared list.
+            while (cleanups.length > 0) {
+                const toDispose = cleanups.splice(0, cleanups.length);
+                toDispose.forEach(dispose => dispose());
+            }
         }
     };
 
