@@ -61,8 +61,13 @@ export type ToSignals<T extends object> = {
  */
 export function toSignals<T extends object>(source: T): ToSignals<T> {
     const result = {} as ToSignals<T>;
-    for (const key of Object.keys(source) as SignalKey<T>[]) {
-        (result as Record<string, PropertySignal<unknown>>)[key] = toSignal(source, key) as PropertySignal<unknown>;
+    for (const key of Object.keys(source)) {
+        // Match the type-level contract at runtime: user data may contain an
+        // own enumerable "$set" key, which must not get a view (the proxy get
+        // trap would serve the injected replacer instead of the data).
+        if (key === '$set') continue;
+        (result as Record<string, PropertySignal<unknown>>)[key] =
+            toSignal(source, key as SignalKey<T>) as PropertySignal<unknown>;
     }
     return result;
 }
