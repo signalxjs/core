@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-06-10
+
+Foundations release for the @sigx/store redesign: real factory lifetimes in the DI layer, Topic v2 with refCount hooks and an inspection registry, working effectScope disposal, and destructuring-safe signal views. Breaking changes are called out below (0.x line).
+
 ### Added
 
 - **`@sigx/runtime-core`**: Topic v2. `Topic<T>` now exposes `namespace`/`name` (tooling metadata), `subscriberCount`, `hasSubscribers`, and `disposed`; `createTopic` accepts `onActivate`/`onDeactivate` refCount hooks (fired on subscriberCount 0→1 and →0) so producers can pay for work only while observed. New `createTopicGroup<EventMap>({ namespace })` — a typed, lazily-created group of topics keyed by an event map. (#56)
