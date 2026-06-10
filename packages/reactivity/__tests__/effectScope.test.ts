@@ -232,6 +232,28 @@ describe('effectScope', () => {
             expect(fn).not.toHaveBeenCalledWith(2, 1);
         });
 
+        it("stop() runs a scoped watcher's onCleanup teardown", () => {
+            const state = signal({ count: 0 });
+            const cleanup = vi.fn();
+
+            const scope = effectScope();
+            scope.run(() => {
+                watch(() => state.count, (_value, _prev, onCleanup) => {
+                    onCleanup(cleanup);
+                });
+            });
+
+            state.count = 1;
+            expect(cleanup).not.toHaveBeenCalled();
+
+            scope.stop();
+            expect(cleanup).toHaveBeenCalledTimes(1);
+
+            // and never again after disposal
+            state.count = 2;
+            expect(cleanup).toHaveBeenCalledTimes(1);
+        });
+
         it('stop() is idempotent and effects are disposed once', () => {
             const state = signal({ count: 0 });
             const fn = vi.fn();

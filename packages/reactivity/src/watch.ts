@@ -3,7 +3,7 @@
 // ============================================================================
 
 import type { WatchSource, WatchCallback, WatchOptions, WatchHandle } from './types';
-import { effect } from './effect';
+import { rawEffect, registerWithActiveScope } from './effect';
 
 /**
  * Deeply traverses an object to trigger reactive tracking on all nested properties.
@@ -72,7 +72,10 @@ export function watch<T>(source: WatchSource<T>, cb: WatchCallback<T>, options?:
     const deep = options?.deep;
     const traverseDepth = deep === true ? Infinity : (typeof deep === 'number' ? deep : 0);
 
-    const runner = effect(() => {
+    // rawEffect: the scope must dispose the WHOLE watcher (including the
+    // user's onCleanup teardown), so the full handle is registered below
+    // instead of the bare effect runner.
+    const runner = rawEffect(() => {
         if (stopped) return;
         
         let newValue = typeof source === 'function' ? (source as () => T)() : source;
@@ -117,8 +120,13 @@ export function watch<T>(source: WatchSource<T>, cb: WatchCallback<T>, options?:
     const stop = () => {
         stopped = true;
         runner.stop();
-        if (cleanupFn) cleanupFn();
+        if (cleanupFn) {
+            cleanupFn();
+            cleanupFn = null;
+        }
     };
+
+    registerWithActiveScope(stop);
 
     const pause = () => {
         paused = true;

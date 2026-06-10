@@ -115,7 +115,5 @@ describe('types', () => {
         const signals = toSignals(state);
         expectTypeOf(signals.count.value).toEqualTypeOf<number>();
         expectTypeOf(signals.status.value).toEqualTypeOf<'idle' | 'busy'>();
-
-        expect(true).toBe(true);
     });
 });

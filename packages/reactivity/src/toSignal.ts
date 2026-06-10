@@ -42,9 +42,9 @@ export function toSignal<T extends object, K extends keyof T>(source: T, key: K)
  * count.value++;        // still reactive
  * ```
  */
-export function toSignals<T extends object>(source: T): { [K in keyof T]-?: PropertySignal<T[K]> } {
-    const result = {} as { [K in keyof T]-?: PropertySignal<T[K]> };
-    for (const key of Object.keys(source) as (keyof T & string)[]) {
+export function toSignals<T extends object>(source: T): { [K in Extract<keyof T, string>]-?: PropertySignal<T[K]> } {
+    const result = {} as { [K in Extract<keyof T, string>]-?: PropertySignal<T[K]> };
+    for (const key of Object.keys(source) as Extract<keyof T, string>[]) {
         result[key] = toSignal(source, key);
     }
     return result;

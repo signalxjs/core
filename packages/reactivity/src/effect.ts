@@ -163,8 +163,26 @@ function runEffect(fn: EffectFn): EffectRunner {
  */
 export function effect(fn: EffectFn): EffectRunner {
     const runner = runEffect(fn);
-    activeScopeCleanups?.push(runner.stop);
+    registerWithActiveScope(runner.stop);
     return runner;
+}
+
+/**
+ * Create an effect WITHOUT registering it with the active effect scope.
+ * For composite primitives (e.g. `watch`) that register their own, more
+ * complete disposer with the scope instead.
+ * @internal
+ */
+export function rawEffect(fn: EffectFn): EffectRunner {
+    return runEffect(fn);
+}
+
+/**
+ * Register a disposer with the currently-active effect scope, if any.
+ * @internal
+ */
+export function registerWithActiveScope(dispose: () => void): void {
+    activeScopeCleanups?.push(dispose);
 }
 
 /**
