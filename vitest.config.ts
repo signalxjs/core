@@ -13,6 +13,9 @@ export default defineConfig({
         environment: 'happy-dom',
         include: ['packages/**/__tests__/**/*.test.{ts,tsx}'],
         globals: true,
+        benchmark: {
+            include: ['packages/**/__tests__/**/*.bench.{ts,tsx}']
+        },
         coverage: {
             provider: 'v8',
             reporter: ['text', 'json', 'html'],
