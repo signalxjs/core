@@ -2,6 +2,8 @@
 
 Runtime core for SignalX. Provides the platform-agnostic component system, JSX runtime, reconciler, lifecycle hooks, dependency injection, and control flow primitives.
 
+📚 **Full guides, API reference and live examples → <https://sigx.dev/core/packages/runtime-core/overview/>**
+
 ## Install
 
 ```bash
@@ -29,26 +31,11 @@ const Timer = component(() => {
 });
 ```
 
-## Key Exports
-
-- **Component** — `component`, `getCurrentInstance`, `getComponentMeta`
-- **Lifecycle** — `onMounted`, `onUnmounted`, `onCreated`, `onUpdated`
-- **JSX Runtime** — `jsx`, `jsxs`, `jsxDEV`, `Fragment`, `Text`, `Comment`
-- **Lazy Loading** — `lazy`, `Suspense`, `isLazyComponent`
-- **Async** — `useAsync`
-- **Control Flow** — `Show`, `Switch`, `Match`
-- **App** — `defineApp`
-- **DI** — `defineInjectable`, `defineProvide`, `useAppContext`
-- **Model** — `createModel`, `createModelFromBinding`, `isModel`
-- **Directives** — `defineDirective`, `isDirective`
-- **Error Handling** — `ErrorBoundary`
-- **Messaging** — Domain models and pub/sub messaging
-
 > **Note:** Most users should install [`sigx`](https://www.npmjs.com/package/sigx) instead, which bundles this package with a DOM renderer and the reactivity system.
 
-## Documentation
+## 📚 Documentation
 
-Full documentation and guides are available at the [SignalX repository](https://github.com/signalxjs/core).
+The complete export list (component model, JSX runtime, lifecycle, lazy/Suspense, DI, control flow, directives, error handling), guides and live examples → **<https://sigx.dev/core/packages/runtime-core/overview/>**
 
 ## License
 

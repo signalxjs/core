@@ -61,7 +61,7 @@
     "type": "git",
     "url": "git+https://github.com/signalxjs/core.git"
   },
-  "homepage": "https://github.com/signalxjs/core",
+  "homepage": "https://sigx.dev/core/",
   "bugs": {
     "url": "https://github.com/signalxjs/core/issues"
   }

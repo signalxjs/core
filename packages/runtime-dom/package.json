@@ -33,7 +33,7 @@
         "url": "git+https://github.com/signalxjs/core.git",
         "directory": "packages/runtime-dom"
     },
-    "homepage": "https://github.com/signalxjs/core/tree/main/packages/runtime-dom",
+    "homepage": "https://sigx.dev/core/packages/runtime-dom/overview/",
     "bugs": {
         "url": "https://github.com/signalxjs/core/issues"
     },

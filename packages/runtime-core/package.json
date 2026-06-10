@@ -48,7 +48,7 @@
         "url": "git+https://github.com/signalxjs/core.git",
         "directory": "packages/runtime-core"
     },
-    "homepage": "https://github.com/signalxjs/core/tree/main/packages/runtime-core",
+    "homepage": "https://sigx.dev/core/packages/runtime-core/overview/",
     "bugs": {
         "url": "https://github.com/signalxjs/core/issues"
     },
