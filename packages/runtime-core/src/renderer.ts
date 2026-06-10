@@ -80,6 +80,47 @@ function isSameVNode(n1: VNode, n2: VNode): boolean {
     return String(k1) === String(k2);
 }
 
+/**
+ * Conservative structural equality for slot content (raw `props.children`
+ * values: vnodes, arrays, primitives). Used to elide the slot version
+ * bump when a parent re-render passes identical slot content. MUST err
+ * on the side of "different": any uncertainty returns false and the
+ * child re-renders exactly as it always did. Fresh inline closures in
+ * props make this return false naturally (`!==`), which is correct —
+ * the new handler must reach the DOM.
+ */
+function sameSlotChildren(a: any, b: any): boolean {
+    if (a === b) return true;
+    const aIsArray = Array.isArray(a);
+    const bIsArray = Array.isArray(b);
+    if (aIsArray || bIsArray) {
+        if (!aIsArray || !bIsArray || a.length !== b.length) return false;
+        for (let i = 0; i < a.length; i++) {
+            if (!sameSlotChildren(a[i], b[i])) return false;
+        }
+        return true;
+    }
+    if (a == null || b == null || typeof a !== 'object' || typeof b !== 'object') {
+        // primitives (and mismatched null/undefined): identity above was
+        // the only acceptable equality
+        return false;
+    }
+    // vnode-shaped objects
+    if (a.type !== b.type || a.key !== b.key || a.text !== b.text) return false;
+    const aProps = a.props || {};
+    const bProps = b.props || {};
+    for (const k in aProps) {
+        if (k === 'children') continue;
+        if (aProps[k] !== bProps[k]) return false;
+    }
+    for (const k in bProps) {
+        if (k === 'children') continue;
+        if (!(k in aProps)) return false;
+    }
+    return sameSlotChildren(aProps.children, bProps.children)
+        && sameSlotChildren(a.children, b.children);
+}
+
 function createKeyToKeyIndexMap(children: VNode[], beginIdx: number, endIdx: number) {
     const map = new Map<string | number, number>();
     for (let i = beginIdx; i <= endIdx; i++) {
@@ -490,20 +531,37 @@ export function createRenderer<HostNode = any, HostElement = any>(
             const newSlotsFromProps = newVNode.props?.slots;
 
             if (slotsRef) {
-                // Update children for default slot
+                let slotContentChanged = false;
+
+                // Update children for default slot — only when the new
+                // content structurally differs. On equality we keep the
+                // OLD vnodes (the ones the child's mounted subtree
+                // references) and skip the version bump entirely, so a
+                // parent-only re-render no longer forces every child
+                // with static slot content to re-render.
                 if (newChildren !== undefined) {
-                    slotsRef._children = newChildren;
+                    if (sameSlotChildren(slotsRef._children, newChildren)) {
+                        // keep mounted originals
+                    } else {
+                        slotsRef._children = newChildren;
+                        slotContentChanged = true;
+                    }
                 }
 
-                // Update slot functions from the slots prop
+                // Update slot functions from the slots prop. Function
+                // identity is the only cheap safe signal here: inline
+                // slot objects/closures always differ and always bump.
                 if (newSlotsFromProps !== undefined) {
-                    slotsRef._slotsFromProps = newSlotsFromProps;
+                    if (slotsRef._slotsFromProps !== newSlotsFromProps) {
+                        slotsRef._slotsFromProps = newSlotsFromProps;
+                        slotContentChanged = true;
+                    }
                 }
 
                 // Trigger component re-render by bumping version
                 // Use per-component flag to prevent infinite loops on the SAME component
                 // but allow nested components to update
-                if (!slotsRef._isPatching) {
+                if (slotContentChanged && !slotsRef._isPatching) {
                     slotsRef._isPatching = true;
                     try {
                         untrack(() => {

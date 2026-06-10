@@ -209,10 +209,69 @@ describe('component render counts (DOM)', () => {
         expect(childRenders).toHaveBeenCalledTimes(1);
 
         parentOnly.v = 1;
-        // STAGE 6 tightens this to 1 (identical slot content elides the
-        // version bump). Today every parent patch bumps the slot version.
-        expect(childRenders).toHaveBeenCalledTimes(2);
+        // Identical slot content elides the version bump entirely.
+        expect(childRenders).toHaveBeenCalledTimes(1);
         expect(container.textContent).toBe('1static');
+    });
+
+    it('slot content with a fresh inline handler still re-renders the child', () => {
+        const parentOnly = signal({ v: 0 });
+        const childRenders = vi.fn();
+
+        const Child = component((ctx) => () => {
+            childRenders();
+            return jsx('div', { children: ctx.slots.default() });
+        });
+
+        const Parent = component(() => () =>
+            jsx('div', {
+                children: [
+                    jsx('p', { children: String(parentOnly.v) }),
+                    // fresh closure every parent render -> must NOT be elided
+                    jsx(Child, { children: jsx('button', { onClick: () => parentOnly.v, children: 'go' }) }),
+                ],
+            })
+        );
+
+        render(jsx(Parent, {}), container);
+        expect(childRenders).toHaveBeenCalledTimes(1);
+
+        parentOnly.v = 1;
+        expect(childRenders).toHaveBeenCalledTimes(2);
+    });
+
+    it('nested static slot trees are elided too', () => {
+        const parentOnly = signal({ v: 0 });
+        const childRenders = vi.fn();
+
+        const Child = component((ctx) => () => {
+            childRenders();
+            return jsx('div', { children: ctx.slots.default() });
+        });
+
+        const Parent = component(() => () =>
+            jsx('div', {
+                children: [
+                    jsx('p', { children: String(parentOnly.v) }),
+                    jsx(Child, {
+                        children: jsx('ul', {
+                            children: [
+                                jsx('li', { key: 1, class: 'a', children: 'one' }),
+                                jsx('li', { key: 2, class: 'b', children: ['two', jsx('em', { children: '!' })] }),
+                            ],
+                        }),
+                    }),
+                ],
+            })
+        );
+
+        render(jsx(Parent, {}), container);
+        expect(childRenders).toHaveBeenCalledTimes(1);
+
+        parentOnly.v = 1;
+        parentOnly.v = 2;
+        expect(childRenders).toHaveBeenCalledTimes(1);
+        expect(container.textContent).toBe('2onetwo!');
     });
 
     it('changed slot content re-renders the child exactly once', () => {
