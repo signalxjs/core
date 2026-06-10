@@ -5,7 +5,8 @@ import { signal } from '@sigx/reactivity';
 import { makeRows, type Row } from '../../runtime-core/__tests__/helpers/perf-harness';
 
 /**
- * js-framework-benchmark-style scenarios on happy-dom (`pnpm bench`).
+ * Standard row-list update scenarios on happy-dom (`pnpm bench`):
+ * create/replace/partial-update/select/swap/clear/prepend.
  *
  * happy-dom has no layout/paint, so absolute numbers say nothing about
  * browser performance — these measure framework overhead only (vnode

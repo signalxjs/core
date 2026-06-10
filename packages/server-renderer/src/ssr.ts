@@ -300,8 +300,8 @@ export function createSSR(): SSRInstance {
             const { element, appContext } = extractInput(input);
 
             // Use pull-based ReadableStream backed by an async generator.
-            // This avoids the push-based "React Flight pattern" (worst-case for
-            // WebStreams — see Vercel fast-webstreams research) and provides
+            // Push-based enqueueing is the worst case for WebStreams
+            // throughput; pulling from a generator avoids it and provides
             // natural backpressure.
             async function* generateAll() {
                 enableSSRHead();
