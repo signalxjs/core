@@ -7,7 +7,7 @@
 
 import type { VNode, JSXElement } from './jsx-runtime.js';
 import type { ComponentSetupContext } from './component.js';
-import type { InjectableFunction } from './di/injectable.js';
+import type { Providable } from './di/injectable.js';
 import type { DirectiveDefinition } from './directives.js';
 
 // ============================================================================
@@ -252,7 +252,7 @@ export interface App<TContainer = any> {
      * app.defineProvide(useApiConfig, () => ({ baseUrl: 'https://other.api.com' }));
      * ```
      */
-    defineProvide<T>(useFn: InjectableFunction<T>, factory?: () => T): T;
+    defineProvide<T>(useFn: Providable<T>, factory?: () => T): T;
 
     /**
      * Register lifecycle hooks to observe all components

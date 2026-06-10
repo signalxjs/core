@@ -79,6 +79,15 @@ export interface InjectableFunction<T> {
 }
 
 /**
+ * The metadata defineProvide actually needs — satisfied by both
+ * InjectableFunction and parameterized FactoryFunction use-functions.
+ */
+export interface Providable<T> {
+    _factory: () => T;
+    _token: symbol;
+}
+
+/**
  * Define an injectable service/value that can be provided at app or component level.
  * 
  * The returned function can be called to get the current instance:
@@ -151,7 +160,7 @@ export function defineInjectable<T>(factory: () => T): InjectableFunction<T> {
  * });
  * ```
  */
-export function defineProvide<T>(useFn: InjectableFunction<T>, factory?: () => T): T {
+export function defineProvide<T>(useFn: Providable<T>, factory?: () => T): T {
     const actualFactory = factory ?? useFn._factory;
     const token = useFn._token;
 
@@ -161,9 +170,11 @@ export function defineProvide<T>(useFn: InjectableFunction<T>, factory?: () => T
 
     const instance = actualFactory();
     provideAtComponent(token, instance);
-    // The provider component owns the instance: dispose it on unmount.
+    // The provider component owns the instance: dispose it on unmount —
+    // unless the factory setup took over disposal via overrideDispose.
     const dispose = (instance as { dispose?: unknown } | null)?.dispose;
-    if (typeof dispose === 'function') {
+    if (typeof dispose === 'function'
+        && (dispose as { __sigxCustomManaged?: boolean }).__sigxCustomManaged !== true) {
         try {
             onUnmounted(() => (dispose as () => void).call(instance));
         } catch {

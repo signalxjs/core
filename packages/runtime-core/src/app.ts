@@ -29,7 +29,7 @@ import type {
     App
 } from './app-types.js';
 
-import { getAppContextToken, type InjectableFunction } from './di/injectable.js';
+import { getAppContextToken, type Providable } from './di/injectable.js';
 import { isDirective } from './directives.js';
 import type { JSXElement } from './jsx-runtime.js';
 import { noMountFunctionError, provideInvalidInjectableError } from './errors.js';
@@ -145,7 +145,7 @@ export function defineApp<TContainer = any>(rootComponent: JSXElement): App<TCon
             return app;
         },
 
-        defineProvide<T>(useFn: InjectableFunction<T>, factory?: () => T): T {
+        defineProvide<T>(useFn: Providable<T>, factory?: () => T): T {
             const actualFactory = factory ?? useFn._factory;
             const token = useFn._token;
 
@@ -155,9 +155,11 @@ export function defineApp<TContainer = any>(rootComponent: JSXElement): App<TCon
 
             const instance = actualFactory();
             context.provides.set(token, instance);
-            // App-provided instances are app-owned: dispose them on unmount.
+            // App-provided instances are app-owned: dispose them on unmount —
+            // unless the factory setup took over disposal via overrideDispose.
             const dispose = (instance as { dispose?: unknown } | null)?.dispose;
-            if (typeof dispose === 'function') {
+            if (typeof dispose === 'function'
+                && (dispose as { __sigxCustomManaged?: boolean }).__sigxCustomManaged !== true) {
                 context.disposables.add(() => (dispose as () => void).call(instance));
             }
             return instance;

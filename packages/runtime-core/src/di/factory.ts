@@ -26,6 +26,22 @@ type CreatedInstance<T> = {
     customDispose: ((fn: () => void) => void) | null;
 };
 
+/**
+ * A parameterized factory use-function: callable with the setup's params and
+ * carrying the provide metadata so it works with defineProvide/app.defineProvide.
+ */
+export type FactoryFunction<TArgs extends unknown[], TInstance> = ((...args: TArgs) => TInstance) & {
+    _factory: () => TInstance;
+    _token: symbol;
+};
+
+/** True when the value is a factory instance whose generated dispose has run. */
+function isDisposedInstance(value: unknown): boolean {
+    const dispose = (value as { dispose?: unknown } | null)?.dispose;
+    return typeof dispose === 'function'
+        && (dispose as { __sigxDisposed?: boolean }).__sigxDisposed === true;
+}
+
 export function defineFactory<InferReturnSetup>(
     setup: (ctx: SetupFactoryContext, ...args: unknown[]) => InferReturnSetup,
     lifetime: Lifetime,
@@ -35,27 +51,27 @@ export function defineFactory<InferReturnSetup, T1>(
     setup: (ctx: SetupFactoryContext, param1: T1) => InferReturnSetup,
     lifetime: Lifetime,
     typeIdentifier?: guid
-): (param1: T1) => InferReturnSetup & { dispose: () => void }
+): FactoryFunction<[T1], InferReturnSetup & { dispose: () => void }>
 export function defineFactory<InferReturnSetup, T1, T2>(
     setup: (ctx: SetupFactoryContext, param1: T1, param2: T2) => InferReturnSetup,
     lifetime: Lifetime,
-    typeIdentifier?: string
-): (param1: T1, param2: T2) => InferReturnSetup & { dispose: () => void }
+    typeIdentifier?: guid
+): FactoryFunction<[T1, T2], InferReturnSetup & { dispose: () => void }>
 export function defineFactory<InferReturnSetup, T1, T2, T3>(
     setup: (ctx: SetupFactoryContext, param1: T1, param2: T2, param3: T3) => InferReturnSetup,
     lifetime: Lifetime,
     typeIdentifier?: guid
-): (param1: T1, param2: T2, param3: T3) => InferReturnSetup & { dispose: () => void }
+): FactoryFunction<[T1, T2, T3], InferReturnSetup & { dispose: () => void }>
 export function defineFactory<InferReturnSetup, T1, T2, T3, T4>(
     setup: (ctx: SetupFactoryContext, param1: T1, param2: T2, param3: T3, param4: T4) => InferReturnSetup,
     lifetime: Lifetime,
     typeIdentifier?: guid
-): (param1: T1, param2: T2, param3: T3, param4: T4) => InferReturnSetup & { dispose: () => void }
+): FactoryFunction<[T1, T2, T3, T4], InferReturnSetup & { dispose: () => void }>
 export function defineFactory<InferReturnSetup, T1, T2, T3, T4, T5>(
     setup: (ctx: SetupFactoryContext, param1: T1, param2: T2, param3: T3, param4: T4, param5: T5) => InferReturnSetup,
     lifetime: Lifetime,
     typeIdentifier?: guid
-): (param1: T1, param2: T2, param3: T3, param4: T4, param5: T5) => InferReturnSetup & { dispose: () => void }
+): FactoryFunction<[T1, T2, T3, T4, T5], InferReturnSetup & { dispose: () => void }>
 export function defineFactory<InferReturnSetup>(
     setup: (ctx: SetupFactoryContext, ...args: unknown[]) => InferReturnSetup,
     lifetime: Lifetime,
@@ -92,6 +108,14 @@ export function defineFactory<InferReturnSetup>(
             subscriptions.unsubscribe();
             userDispose?.();
         };
+
+        // Tag the generated dispose so caches can detect disposal (and
+        // recreate instead of serving a corpse) and so provide paths can
+        // tell factory-managed disposal from overrideDispose-managed.
+        Object.defineProperties(dispose, {
+            __sigxDisposed: { get: () => disposed },
+            __sigxCustomManaged: { get: () => customDispose !== null }
+        });
 
         // Attach (not spread): spreading would snapshot accessor getters and
         // drop prototypes, silently breaking reactive `get foo()` returns.
@@ -138,9 +162,11 @@ export function defineFactory<InferReturnSetup>(
 
         const appContext = useAppContext();
         if (appContext) {
-            if (!appContext.provides.has(token)) {
+            const existing = appContext.provides.get(token);
+            if (existing === undefined || isDisposedInstance(existing)) {
                 // Args are honored at first creation only ("first creation
-                // wins") — later calls return the shared instance.
+                // wins") — later calls return the shared instance. A manually
+                // disposed instance is replaced, never served as a corpse.
                 const { instance, dispose, customDispose } = createInstance(...args);
                 if (customDispose) {
                     customDispose(dispose);
@@ -154,7 +180,7 @@ export function defineFactory<InferReturnSetup>(
             return appContext.provides.get(token) as Instance;
         }
 
-        if (!realmInstance) {
+        if (!realmInstance || isDisposedInstance(realmInstance.instance)) {
             const { instance, dispose, customDispose } = createInstance(...args);
             if (customDispose) {
                 customDispose(dispose);
@@ -169,8 +195,16 @@ export function defineFactory<InferReturnSetup>(
     ) as InjectableFunction<Instance>;
 
     // Metadata so defineProvide / app.defineProvide can create and provide
-    // scoped instances from this factory (args-less creation).
-    useFn._factory = () => createInstance().instance;
+    // scoped instances from this factory (args-less creation). overrideDispose
+    // is honored here too — the custom registration receives the dispose fn,
+    // and the __sigxCustomManaged tag tells provide paths to skip their own.
+    useFn._factory = () => {
+        const { instance, dispose, customDispose } = createInstance();
+        if (customDispose) {
+            customDispose(dispose);
+        }
+        return instance;
+    };
     useFn._token = token;
 
     return useFn;

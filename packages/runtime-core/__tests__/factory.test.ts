@@ -340,6 +340,34 @@ describe("lifetime: 'scoped'", () => {
     });
 });
 
+// ─── disposed-instance recovery ─────────────────────────────────────────────
+
+describe('disposed singleton recovery', () => {
+    it('realm fallback recreates the instance after manual dispose()', () => {
+        const useThing = defineFactory(() => ({ id: {} }), 'singleton');
+
+        const a = useThing();
+        a.dispose();
+
+        const b = useThing();
+        expect(b).not.toBe(a);
+        expect(useThing()).toBe(b);
+    });
+
+    it('app-context singleton recreates after manual dispose()', () => {
+        const useThing = defineFactory(() => ({ id: {} }), 'singleton');
+        const app = defineApp({} as any);
+
+        setCurrentInstance(nodeInApp(app) as ComponentSetupContext);
+        const a = useThing();
+        a.dispose();
+
+        const b = useThing();
+        expect(b).not.toBe(a);
+        expect(useThing()).toBe(b);
+    });
+});
+
 // ─── defineProvide integration ──────────────────────────────────────────────
 
 describe('defineProvide with factory-made functions', () => {
@@ -359,11 +387,54 @@ describe('defineProvide with factory-made functions', () => {
 
         const app = defineApp({} as any);
         app.mount({} as any, () => () => { /* platform unmount */ });
-        const instance = app.defineProvide(useThing as any);
+        const instance = app.defineProvide(useThing);
 
-        expect(app._context.provides.get((useThing as any)._token)).toBe(instance);
+        expect(app._context.provides.get(useThing._token)).toBe(instance);
 
         app.unmount();
         expect(deactivated).toHaveBeenCalledOnce();
+    });
+
+    it('parameterized factories carry provide metadata in their types', () => {
+        const useThing = defineFactory((_ctx, label: string) => ({ label }), 'scoped');
+
+        // compiles without casts: FactoryFunction includes _factory/_token
+        const provider: MockComponentContext = { provides: new Map(), parent: null };
+        setCurrentInstance(provider as ComponentSetupContext);
+        const instance = defineProvide(useThing);
+
+        expect(instance.label).toBeUndefined(); // args-less creation via _factory
+        expect(provider.provides!.has(useThing._token)).toBe(true);
+    });
+
+    it('overrideDispose is honored through defineProvide (custom registration, no auto-register)', () => {
+        const customRegistration = vi.fn();
+        const useThing = defineFactory((ctx) => {
+            ctx.overrideDispose(customRegistration);
+            return {};
+        }, 'scoped');
+
+        const provider: MockComponentContext = { provides: new Map(), parent: null };
+        setCurrentInstance(provider as ComponentSetupContext);
+        defineProvide(useThing);
+
+        expect(customRegistration).toHaveBeenCalledOnce();
+        expect(typeof customRegistration.mock.calls[0][0]).toBe('function');
+        // defineProvide must NOT also register provider-owned disposal
+        expect(onUnmounted).not.toHaveBeenCalled();
+    });
+
+    it('overrideDispose is honored through app.defineProvide (no app disposable)', () => {
+        const customRegistration = vi.fn();
+        const useThing = defineFactory((ctx) => {
+            ctx.overrideDispose(customRegistration);
+            return {};
+        }, 'scoped');
+
+        const app = defineApp({} as any);
+        app.defineProvide(useThing);
+
+        expect(customRegistration).toHaveBeenCalledOnce();
+        expect(app._context.disposables.size).toBe(0);
     });
 });
