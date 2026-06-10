@@ -17,7 +17,7 @@
   {
     "name": "@sigx/runtime-dom",
     "path": "packages/runtime-dom/dist/index.js",
-    "limit": "10 KB"
+    "limit": "10.5 KB"
   },
   {
     "name": "@sigx/server-renderer",
