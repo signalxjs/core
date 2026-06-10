@@ -93,13 +93,19 @@ export function defineFactory<InferReturnSetup>(
 
         const result = setup(ctx, ...args);
         // Functions are valid factory products too (e.g. callable stores) —
-        // anything non-primitive can carry the dispose property.
+        // anything non-primitive can carry the dispose property. Primitives
+        // cannot, which would silently break the dispose contract and the
+        // disposed-instance detection the caches rely on — reject them loudly.
         const attachable = result !== null && (typeof result === 'object' || typeof result === 'function');
+        if (!attachable) {
+            throw new Error('[sigx] defineFactory setup must return an object or function, got ' +
+                (result === null ? 'null' : typeof result) + '.');
+        }
 
         // Capture a user-supplied dispose BEFORE attaching our own, so the
         // wrapper can delegate to it without recursing into itself.
         const userDispose =
-            attachable && typeof (result as { dispose?: unknown }).dispose === 'function'
+            typeof (result as { dispose?: unknown }).dispose === 'function'
                 ? ((result as unknown as { dispose: () => void }).dispose).bind(result)
                 : null;
 
@@ -122,16 +128,12 @@ export function defineFactory<InferReturnSetup>(
 
         // Attach (not spread): spreading would snapshot accessor getters and
         // drop prototypes, silently breaking reactive `get foo()` returns.
-        // Primitives can't carry dispose — disposal tracking requires an
-        // object/function result.
-        if (attachable) {
-            Object.defineProperty(result as object, 'dispose', {
-                value: dispose,
-                enumerable: false,
-                configurable: true,
-                writable: true
-            });
-        }
+        Object.defineProperty(result as object, 'dispose', {
+            value: dispose,
+            enumerable: false,
+            configurable: true,
+            writable: true
+        });
 
         return { instance: result as Instance, dispose, customDispose };
     };

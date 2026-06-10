@@ -150,6 +150,14 @@ describe('defineFactory setup context', () => {
         expect(result.total).toBe(2);
     });
 
+    it('throws when setup returns a primitive', () => {
+        const usePrimitive = defineFactory((() => 42) as any, 'transient');
+        expect(() => usePrimitive()).toThrow(/must return an object or function/);
+
+        const useNull = defineFactory((() => null) as any, 'transient');
+        expect(() => useNull()).toThrow(/must return an object or function/);
+    });
+
     it('attaches dispose to function-valued setup results', () => {
         const deactivated = vi.fn();
         const useThing = defineFactory((ctx) => {
