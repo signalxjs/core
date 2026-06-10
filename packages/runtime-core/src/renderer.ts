@@ -1,4 +1,4 @@
-import { VNode, Fragment, JSXElement, Text, Comment } from './jsx-runtime.js';
+import { VNode, Fragment, JSXElement, Text, Comment, EMPTY_PROPS } from './jsx-runtime.js';
 import { effect, signal, untrack, EffectRunner } from '@sigx/reactivity';
 import { withoutOwnerTracking } from '@sigx/reactivity/internals';
 import { ComponentSetupContext, setCurrentInstance, getCurrentInstance, MountContext, ViewFn, SetupFn } from './component.js';
@@ -648,9 +648,11 @@ export function createRenderer<HostNode = any, HostElement = any>(
         const isSVG = tag === 'svg' || isSvgTag(tag);
 
         // Update props — skipped entirely when both sides share the same
-        // props object (prop-less elements share EMPTY_PROPS).
-        const oldProps = oldVNode.props || {};
-        const newProps = newVNode.props || {};
+        // props object (prop-less elements share EMPTY_PROPS). Compare the
+        // RAW references first: substituting fresh `{}` for a missing props
+        // object would make the identity guard never fire.
+        const oldProps = oldVNode.props || EMPTY_PROPS;
+        const newProps = newVNode.props || EMPTY_PROPS;
 
         if (oldProps !== newProps) {
             // Remove old props
