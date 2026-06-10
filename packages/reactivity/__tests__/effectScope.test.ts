@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { effectScope, effect, signal } from '../src/index';
+import { effectScope, effect, signal, watch } from '../src/index';
 
 describe('effectScope', () => {
     describe('basic behavior', () => {
@@ -133,13 +133,165 @@ describe('effectScope', () => {
             state.count = 1;
             expect(outerFn).toHaveBeenCalledWith(1);
             expect(innerFn).toHaveBeenCalledWith(1);
-            
+
             // Stop inner scope - inner effect should no longer run
             innerScope!.stop();
-            
+
             state.count = 2;
             expect(outerFn).toHaveBeenCalledWith(2);
-            // Inner effect no longer tracks
+            expect(innerFn).not.toHaveBeenCalledWith(2);
+        });
+
+        it('stopping a parent scope stops nested scopes', () => {
+            const state = signal({ count: 0 });
+            const innerFn = vi.fn();
+
+            const outerScope = effectScope();
+            outerScope.run(() => {
+                const innerScope = effectScope();
+                innerScope.run(() => {
+                    effect(() => {
+                        innerFn(state.count);
+                    });
+                });
+            });
+
+            outerScope.stop();
+
+            state.count = 1;
+            expect(innerFn).toHaveBeenCalledTimes(1);
+            expect(innerFn).not.toHaveBeenCalledWith(1);
+        });
+
+        it('a detached nested scope survives the parent stopping', () => {
+            const state = signal({ count: 0 });
+            const innerFn = vi.fn();
+
+            const outerScope = effectScope();
+            let innerScope: ReturnType<typeof effectScope> | undefined;
+            outerScope.run(() => {
+                innerScope = effectScope(true);
+                innerScope.run(() => {
+                    effect(() => {
+                        innerFn(state.count);
+                    });
+                });
+            });
+
+            outerScope.stop();
+
+            state.count = 1;
+            expect(innerFn).toHaveBeenCalledWith(1);
+
+            innerScope!.stop();
+            state.count = 2;
+            expect(innerFn).not.toHaveBeenCalledWith(2);
+        });
+    });
+
+    describe('disposal', () => {
+        it('stop() disposes effects created within run()', () => {
+            const state = signal({ count: 0 });
+            const fn = vi.fn();
+
+            const scope = effectScope();
+            scope.run(() => {
+                effect(() => {
+                    fn(state.count);
+                });
+            });
+
+            expect(fn).toHaveBeenCalledTimes(1);
+
+            scope.stop();
+
+            state.count = 1;
+            state.count = 2;
+            expect(fn).toHaveBeenCalledTimes(1);
+            expect(fn).not.toHaveBeenCalledWith(1);
+        });
+
+        it('stop() disposes watchers created within run()', () => {
+            const state = signal({ count: 0 });
+            const fn = vi.fn();
+
+            const scope = effectScope();
+            scope.run(() => {
+                watch(() => state.count, (value, prev) => {
+                    fn(value, prev);
+                });
+            });
+
+            state.count = 1;
+            expect(fn).toHaveBeenCalledWith(1, 0);
+
+            scope.stop();
+
+            state.count = 2;
+            expect(fn).toHaveBeenCalledTimes(1);
+            expect(fn).not.toHaveBeenCalledWith(2, 1);
+        });
+
+        it('stop() is idempotent and effects are disposed once', () => {
+            const state = signal({ count: 0 });
+            const fn = vi.fn();
+
+            const scope = effectScope();
+            scope.run(() => {
+                effect(() => {
+                    fn(state.count);
+                });
+            });
+
+            scope.stop();
+            expect(() => scope.stop()).not.toThrow();
+
+            state.count = 1;
+            expect(fn).toHaveBeenCalledTimes(1);
+        });
+
+        it('effects created outside any scope are unaffected by stop()', () => {
+            const state = signal({ count: 0 });
+            const outside = vi.fn();
+            const inside = vi.fn();
+
+            const outsideRunner = effect(() => {
+                outside(state.count);
+            });
+
+            const scope = effectScope();
+            scope.run(() => {
+                effect(() => {
+                    inside(state.count);
+                });
+            });
+
+            scope.stop();
+
+            state.count = 1;
+            expect(outside).toHaveBeenCalledWith(1);
+            expect(inside).not.toHaveBeenCalledWith(1);
+
+            outsideRunner.stop();
+        });
+
+        it('effects created after run() returns are not captured by the scope', () => {
+            const state = signal({ count: 0 });
+            const fn = vi.fn();
+
+            const scope = effectScope();
+            scope.run(() => { /* nothing */ });
+
+            const runner = effect(() => {
+                fn(state.count);
+            });
+
+            scope.stop();
+
+            state.count = 1;
+            expect(fn).toHaveBeenCalledWith(1);
+
+            runner.stop();
         });
     });
 });
