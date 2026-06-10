@@ -229,7 +229,7 @@ let activeScopeCleanups: (() => void)[] | null = null;
  */
 export function effectScope(detached?: boolean): {
     run<T>(fn: () => T): T | undefined;
-    stop(fromParent?: boolean): void;
+    stop(): void;
 } {
     const cleanups: (() => void)[] = [];
     let active = true;

@@ -44,9 +44,9 @@ export function toSignal<T extends object, K extends SignalKey<T>>(source: T, ke
 }
 
 /**
- * Per-key views of a reactive object. Homomorphic key-remapped map:
- * optionality is preserved, since views only exist for keys Object.keys
- * actually yields at runtime.
+ * Per-key views of a reactive object. The homomorphic key-remapped map
+ * preserves optional property markers from T; at runtime, views exist only
+ * for keys Object.keys yields (own enumerable string keys).
  */
 export type ToSignals<T extends object> = {
     [K in keyof T as K extends SignalKey<T> ? K : never]: PropertySignal<T[K]>;
