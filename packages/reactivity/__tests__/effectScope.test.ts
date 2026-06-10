@@ -133,13 +133,103 @@ describe('effectScope', () => {
             state.count = 1;
             expect(outerFn).toHaveBeenCalledWith(1);
             expect(innerFn).toHaveBeenCalledWith(1);
-            
+
             // Stop inner scope - inner effect should no longer run
             innerScope!.stop();
-            
+
             state.count = 2;
             expect(outerFn).toHaveBeenCalledWith(2);
-            // Inner effect no longer tracks
+            expect(innerFn).toHaveBeenCalledTimes(2); // initial + count=1, not count=2
+        });
+
+        it('should stop nested scopes when the parent scope stops', () => {
+            const state = signal({ count: 0 });
+            const outerFn = vi.fn();
+            const innerFn = vi.fn();
+
+            const outerScope = effectScope();
+            outerScope.run(() => {
+                effect(() => { outerFn(state.count); });
+                const innerScope = effectScope();
+                innerScope.run(() => {
+                    effect(() => { innerFn(state.count); });
+                });
+            });
+
+            outerScope.stop();
+
+            state.count = 1;
+            expect(outerFn).toHaveBeenCalledTimes(1);
+            expect(innerFn).toHaveBeenCalledTimes(1);
+        });
+
+        it('should not stop detached scopes when the parent scope stops', () => {
+            const state = signal({ count: 0 });
+            const detachedFn = vi.fn();
+
+            const outerScope = effectScope();
+            let detachedScope: ReturnType<typeof effectScope> | undefined;
+            outerScope.run(() => {
+                detachedScope = effectScope(true);
+                detachedScope.run(() => {
+                    effect(() => { detachedFn(state.count); });
+                });
+            });
+
+            outerScope.stop();
+
+            state.count = 1;
+            expect(detachedFn).toHaveBeenCalledTimes(2);
+
+            detachedScope!.stop();
+            state.count = 2;
+            expect(detachedFn).toHaveBeenCalledTimes(2);
+        });
+    });
+
+    describe('effect disposal', () => {
+        it('should stop collected effects on scope.stop()', () => {
+            const state = signal({ count: 0 });
+            const fn1 = vi.fn();
+            const fn2 = vi.fn();
+
+            const scope = effectScope();
+            scope.run(() => {
+                effect(() => { fn1(state.count); });
+                effect(() => { fn2(state.count); });
+            });
+
+            expect(fn1).toHaveBeenCalledTimes(1);
+            expect(fn2).toHaveBeenCalledTimes(1);
+
+            scope.stop();
+
+            state.count = 5;
+            expect(fn1).toHaveBeenCalledTimes(1);
+            expect(fn2).toHaveBeenCalledTimes(1);
+        });
+
+        it('should not collect effects created outside scope.run()', () => {
+            const state = signal({ count: 0 });
+            const outside = vi.fn();
+
+            const scope = effectScope();
+            scope.run(() => { /* nothing */ });
+            effect(() => { outside(state.count); });
+
+            scope.stop();
+
+            state.count = 1;
+            expect(outside).toHaveBeenCalledTimes(2);
+        });
+
+        it('should be safe to call stop() twice', () => {
+            const scope = effectScope();
+            scope.run(() => {
+                effect(() => { /* noop */ });
+            });
+            scope.stop();
+            expect(() => scope.stop()).not.toThrow();
         });
     });
 });

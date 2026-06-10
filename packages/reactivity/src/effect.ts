@@ -146,6 +146,9 @@ function runEffect(fn: EffectFn): EffectRunner {
             }
         }
     };
+    if (activeScope) {
+        activeScope._effects.push(runner);
+    }
     return runner;
 }
 
@@ -199,21 +202,61 @@ export function untrack<T>(fn: () => T): T {
  * scope.stop(); // disposes both effects
  * ```
  */
-export function effectScope(_detached?: boolean): {
+export function effectScope(detached?: boolean): {
     run<T>(fn: () => T): T | undefined;
     stop(fromParent?: boolean): void;
 } {
-    const effects: (() => void)[] = [];
+    const effects: EffectRunner[] = [];
+    const childScopes: InternalScope[] = [];
     let active = true;
 
-    return {
+    const scope: InternalScope = {
+        _effects: effects,
+        _childScopes: childScopes,
         run<T>(fn: () => T): T | undefined {
             if (!active) return undefined;
-            return fn();
+            const prevScope = activeScope;
+            activeScope = scope;
+            try {
+                return fn();
+            } finally {
+                activeScope = prevScope;
+            }
         },
-        stop() {
+        stop(fromParent?: boolean) {
+            if (!active) return;
             active = false;
-            effects.forEach(e => e());
-        }
+            for (const runner of effects) {
+                runner.stop();
+            }
+            effects.length = 0;
+            for (const child of childScopes) {
+                child.stop(true);
+            }
+            childScopes.length = 0;
+            // Detach from the parent so a long-lived parent scope doesn't
+            // retain stopped children.
+            if (!fromParent && parentScope) {
+                const siblings = parentScope._childScopes;
+                const i = siblings.indexOf(scope);
+                if (i !== -1) siblings.splice(i, 1);
+            }
+        },
     };
+
+    const parentScope = detached ? null : activeScope;
+    if (parentScope) {
+        parentScope._childScopes.push(scope);
+    }
+
+    return scope;
 }
+
+interface InternalScope {
+    _effects: EffectRunner[];
+    _childScopes: InternalScope[];
+    run<T>(fn: () => T): T | undefined;
+    stop(fromParent?: boolean): void;
+}
+
+let activeScope: InternalScope | null = null;
