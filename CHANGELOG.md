@@ -10,10 +10,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - **`@sigx/runtime-core`**: Topic v2. `Topic<T>` now exposes `namespace`/`name` (tooling metadata), `subscriberCount`, `hasSubscribers`, and `disposed`; `createTopic` accepts `onActivate`/`onDeactivate` refCount hooks (fired on subscriberCount 0→1 and →0) so producers can pay for work only while observed. New `createTopicGroup<EventMap>({ namespace })` — a typed, lazily-created group of topics keyed by an event map. (#56)
 - **`@sigx/runtime-core/inspect`** (new package entry): inspection-only topic registry for tooling — `getTopic(namespace, name)`, `listTopics(pattern?)`, `subscribeTopics(pattern, handler)` (observes existing and future matches), `onTopicCreated(handler)`. Patterns use `*` wildcards over `namespace.name`. Only topics created with a `namespace` register; `destroy()` unregisters; the registry is realm-global and deliberately `Topic<unknown>`-typed — typed app code holds `Topic<T>` references, strings are tooling metadata. (#56)
+- **`@sigx/reactivity`**: `toSignal(source, key)` and `toSignals(source)` — signal-shaped live views (`{ value }`) over properties of a reactive object, so state can be destructured without losing reactivity. Reads are tracked and writes trigger through to the source. (#52)
 
 ### Changed (breaking)
 
 - **`@sigx/runtime-core`**: `Topic.subscribe()` now throws on a destroyed topic (previously it silently re-attached a handler that could never be cleaned up), and `publish` isolates subscriber errors (a throwing handler is logged via `console.error` and no longer skips later subscribers or propagates into the publisher). `createTopic`'s `namespace`/`name` options are no longer inert. (#56)
+
+### Fixed
+
+- **`@sigx/reactivity`**: `effectScope().stop()` now actually disposes the effects and watchers created inside `run()`. Previously the scope's cleanup list was never populated, so `stop()` silently did nothing and scoped effects kept running forever (e.g. `@sigx/store` state watchers leaked after store disposal). Nested scopes are stopped with their parent unless created detached (`effectScope(true)`). (#52)
 
 ## [0.4.9] — 2026-05-29
 
