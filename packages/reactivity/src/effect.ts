@@ -162,7 +162,27 @@ function runEffect(fn: EffectFn): EffectRunner {
  * ```
  */
 export function effect(fn: EffectFn): EffectRunner {
+    const runner = runEffect(fn);
+    registerWithActiveScope(runner.stop);
+    return runner;
+}
+
+/**
+ * Create an effect WITHOUT registering it with the active effect scope.
+ * For composite primitives (e.g. `watch`) that register their own, more
+ * complete disposer with the scope instead.
+ * @internal
+ */
+export function rawEffect(fn: EffectFn): EffectRunner {
     return runEffect(fn);
+}
+
+/**
+ * Register a disposer with the currently-active effect scope, if any.
+ * @internal
+ */
+export function registerWithActiveScope(dispose: () => void): void {
+    activeScopeCleanups?.push(dispose);
 }
 
 /**
@@ -186,8 +206,16 @@ export function untrack<T>(fn: () => T): T {
     }
 }
 
+// Cleanup list of the scope whose run() is currently on the stack.
+// effect() pushes its runner's stop here; nested scopes push their own stop
+// so they are disposed with their parent (unless created detached).
+let activeScopeCleanups: (() => void)[] | null = null;
+
 /**
  * Create an effect scope that collects reactive effects for bulk disposal.
+ * Effects and watchers created synchronously inside `run()` are disposed by
+ * `stop()`. Scopes created inside another scope's `run()` are stopped with
+ * their parent unless created with `effectScope(true)` (detached).
  *
  * @example
  * ```ts
@@ -199,21 +227,47 @@ export function untrack<T>(fn: () => T): T {
  * scope.stop(); // disposes both effects
  * ```
  */
-export function effectScope(_detached?: boolean): {
+export function effectScope(detached?: boolean): {
     run<T>(fn: () => T): T | undefined;
-    stop(fromParent?: boolean): void;
+    stop(): void;
 } {
-    const effects: (() => void)[] = [];
+    const cleanups: (() => void)[] = [];
     let active = true;
 
-    return {
+    const scope = {
         run<T>(fn: () => T): T | undefined {
             if (!active) return undefined;
-            return fn();
+            const prev = activeScopeCleanups;
+            activeScopeCleanups = cleanups;
+            try {
+                return fn();
+            } finally {
+                activeScopeCleanups = prev;
+            }
         },
         stop() {
+            if (!active) return;
             active = false;
-            effects.forEach(e => e());
+            // Drain until empty: a disposer may synchronously create new
+            // effects/watchers that register into this scope (when stop() is
+            // called while this scope's run() is active) — they must be
+            // disposed too, not leaked into a cleared list.
+            while (cleanups.length > 0) {
+                const toDispose = cleanups.splice(0, cleanups.length);
+                toDispose.forEach(dispose => dispose());
+            }
+            // If stop() was called inside this scope's own run(), detach the
+            // registration target so effects created after stop() don't pile
+            // into a dead scope's list (they become unscoped instead).
+            if (activeScopeCleanups === cleanups) {
+                activeScopeCleanups = null;
+            }
         }
     };
+
+    if (!detached && activeScopeCleanups) {
+        activeScopeCleanups.push(() => scope.stop());
+    }
+
+    return scope;
 }
