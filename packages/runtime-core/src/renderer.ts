@@ -108,10 +108,14 @@ function sameSlotChildren(a: any, b: any): boolean {
         // the only acceptable equality
         return false;
     }
-    // vnode-shaped objects
+    // Only vnode-shaped objects can be compared structurally. Anything
+    // else (state proxies, arbitrary user objects) is only equal by the
+    // identity check above — comparing absent vnode fields would make
+    // two DIFFERENT opaque objects look identical.
+    if (a.type === undefined || b.type === undefined) return false;
     if (a.type !== b.type || a.key !== b.key || a.text !== b.text) return false;
-    const aProps = a.props || {};
-    const bProps = b.props || {};
+    const aProps = a.props || EMPTY_PROPS;
+    const bProps = b.props || EMPTY_PROPS;
     for (const k in aProps) {
         if (k === 'children') continue;
         if (aProps[k] !== bProps[k]) return false;

@@ -12,7 +12,8 @@
  * inline handler closure.
  */
 interface EventInvoker extends EventListener {
-    value: Function;
+    /** Current user handler; receives the Event, or `detail` for CustomEvents. */
+    value: (eventOrDetail: unknown) => void;
 }
 
 export function patchProp(dom: Element, key: string, prevValue: any, nextValue: any, isSVG?: boolean) {
