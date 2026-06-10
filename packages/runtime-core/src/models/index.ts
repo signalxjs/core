@@ -14,7 +14,17 @@ export interface Subscription {
 }
 
 export interface Topic<T> {
+    /** Deliver to all subscribers. Handler errors are isolated. No-op when disposed. */
     publish(data: T): void;
+    /** Subscribe to messages. Throws if the topic is destroyed. */
     subscribe(handler: (data: T) => void): Subscription;
+    /** Remove all subscribers and unregister; idempotent. */
     destroy(): void;
+    /** Tooling metadata — never an app-level lookup path. */
+    readonly namespace?: string;
+    /** Tooling metadata — never an app-level lookup path. */
+    readonly name?: string;
+    readonly subscriberCount: number;
+    readonly hasSubscribers: boolean;
+    readonly disposed: boolean;
 }
