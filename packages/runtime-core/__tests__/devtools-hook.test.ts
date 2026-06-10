@@ -31,6 +31,7 @@ function makeContext(): AppContext {
     return {
         app: null!,
         provides: new Map(),
+        disposables: new Set(),
         config: {},
         hooks: [],
         directives: new Map(),

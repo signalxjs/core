@@ -478,6 +478,7 @@ describe('Notification hooks', () => {
         return {
             app: {} as any,
             provides: new Map(),
+            disposables: new Set(),
             config: {},
             hooks,
             directives: new Map(),

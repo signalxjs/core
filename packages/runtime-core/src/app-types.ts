@@ -100,6 +100,8 @@ export interface AppContext {
     app: App;
     /** App-level provides (available via inject in all components) */
     provides: Map<symbol, unknown>;
+    /** Dispose callbacks for app-owned instances, run on app.unmount() */
+    disposables: Set<() => void>;
     /** App configuration */
     config: AppConfig;
     /** Lifecycle hooks from all plugins */

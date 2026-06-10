@@ -1,4 +1,4 @@
-import { getCurrentInstance } from "../component.js";
+import { getCurrentInstance, onUnmounted } from "../component.js";
 import type { AppContext } from "../app-types.js";
 import { provideOutsideSetupError, provideInvalidInjectableError } from "../errors.js";
 
@@ -27,9 +27,10 @@ const appContextToken = Symbol('sigx:appContext');
  * Lookup a provided value by token, traversing component tree.
  * The AppContext is provided at the root component level, so it's found
  * just like any other provided value.
+ * Exported for the factory system's scoped-lifetime resolution.
  * @internal
  */
-function lookupProvided<T>(token: symbol): T | undefined {
+export function lookupProvided<T>(token: symbol): T | undefined {
     const ctx = getCurrentInstance();
     if (!ctx) {
         return undefined;
@@ -160,6 +161,15 @@ export function defineProvide<T>(useFn: InjectableFunction<T>, factory?: () => T
 
     const instance = actualFactory();
     provideAtComponent(token, instance);
+    // The provider component owns the instance: dispose it on unmount.
+    const dispose = (instance as { dispose?: unknown } | null)?.dispose;
+    if (typeof dispose === 'function') {
+        try {
+            onUnmounted(() => (dispose as () => void).call(instance));
+        } catch {
+            // Context without unmount support — owner disposes manually.
+        }
+    }
     return instance;
 }
 

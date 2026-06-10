@@ -15,6 +15,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Changed (breaking)
 
 - **`@sigx/runtime-core`**: `Topic.subscribe()` now throws on a destroyed topic (previously it silently re-attached a handler that could never be cleaned up), and `publish` isolates subscriber errors (a throwing handler is logged via `console.error` and no longer skips later subscribers or propagates into the publisher). `createTopic`'s `namespace`/`name` options are no longer inert. (#56)
+- **`@sigx/runtime-core`**: factory lifetimes are now real. `defineFactory(setup, lifetime)` honors its lifetime argument — previously it was accepted and silently ignored, and actual behavior depended on whether `setup` declared parameters (parameterless → global singleton, with params → new instance per call). The `InstanceLifetimes` enum is replaced by the string-literal `Lifetime` type (`'singleton' | 'scoped' | 'transient'`):
+  - `'singleton'` — one instance per `AppContext`, created on first resolution and disposed on `app.unmount()`. Outside any app context, falls back to one instance per JS realm.
+  - `'scoped'` — the nearest instance provided via `defineProvide` in the component tree; falls back to the app-context instance when no provider exists.
+  - `'transient'` — a new instance per call, auto-disposed with the calling component (or manually via `dispose()`).
+  Parameterized non-transient factories honor args at first creation only ("first creation wins"). (#54)
+
+### Fixed
+
+- **`@sigx/runtime-core`**: singleton disposal is no longer owned by whichever component happened to resolve the instance first — previously that component's unmount disposed the shared instance while the global map kept serving the disposed corpse to later callers. App-owned instances are disposed by `app.unmount()` (via the new `AppContext.disposables`); `defineProvide`-created instances by their provider component's unmount; `app.defineProvide` instances on app unmount. (#54)
+- **`@sigx/runtime-core`**: factory instances are no longer built with `{ ...result, dispose }` — the spread snapshotted accessor getters (silently breaking reactive `get foo()` returns) and dropped prototypes. `dispose` is now attached as a non-enumerable property; a setup-returned `dispose` is still delegated to, and `dispose()` is idempotent. (#54)
 
 ### Fixed
 

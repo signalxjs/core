@@ -108,6 +108,7 @@ export function defineApp<TContainer = any>(rootComponent: JSXElement): App<TCon
     const context: AppContext = {
         app: null!, // Will be set below
         provides: new Map(),
+        disposables: new Set(),
         config: {},
         hooks: [],
         directives: new Map()
@@ -154,6 +155,11 @@ export function defineApp<TContainer = any>(rootComponent: JSXElement): App<TCon
 
             const instance = actualFactory();
             context.provides.set(token, instance);
+            // App-provided instances are app-owned: dispose them on unmount.
+            const dispose = (instance as { dispose?: unknown } | null)?.dispose;
+            if (typeof dispose === 'function') {
+                context.disposables.add(() => (dispose as () => void).call(instance));
+            }
             return instance;
         },
 
@@ -227,6 +233,18 @@ export function defineApp<TContainer = any>(rootComponent: JSXElement): App<TCon
                 devtools.emit({ type: 'app:unmount', app: context });
                 devtools.apps.delete(context);
             }
+
+            // Dispose app-owned instances (singletons, app-level provides).
+            // Each disposable is isolated so one failing dispose cannot
+            // prevent the rest of the teardown.
+            for (const dispose of context.disposables) {
+                try {
+                    dispose();
+                } catch (err) {
+                    console.error('Error disposing app-owned instance:', err);
+                }
+            }
+            context.disposables.clear();
 
             // Clear provides to help GC
             context.provides.clear();
