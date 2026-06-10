@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-06-10
+
+Foundations release for the @sigx/store redesign: real factory lifetimes in the DI layer, Topic v2 with refCount hooks and an inspection registry, working effectScope disposal, and destructuring-safe signal views. Breaking changes are called out below (0.x line).
+
 ### Added
 
 - **`@sigx/runtime-core`**: Topic v2. `Topic<T>` now exposes `namespace`/`name` (tooling metadata), `subscriberCount`, `hasSubscribers`, and `disposed`; `createTopic` accepts `onActivate`/`onDeactivate` refCount hooks (fired on subscriberCount 0→1 and →0) so producers can pay for work only while observed. New `createTopicGroup<EventMap>({ namespace })` — a typed, lazily-created group of topics keyed by an event map. (#56)
@@ -123,7 +127,8 @@ Initial public release of the SignalX (`sigx`) ecosystem on npm. Six packages pu
 - Node `^20.19.0 || >=22.12.0`
 - `@sigx/vite` peer-depends on `vite >=8.0.0`
 
-[Unreleased]: https://github.com/signalxjs/core/compare/v0.4.9...HEAD
+[Unreleased]: https://github.com/signalxjs/core/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/signalxjs/core/compare/v0.4.9...v0.5.0
 [0.4.9]: https://github.com/signalxjs/core/compare/v0.4.8...v0.4.9
 [0.4.1]: https://github.com/signalxjs/core/releases/tag/v0.4.1
 [0.4.0]: https://github.com/signalxjs/core/releases/tag/v0.4.0
