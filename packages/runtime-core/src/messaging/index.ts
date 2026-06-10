@@ -25,6 +25,25 @@ export function createTopic<T>(options?: CreateTopicOptions): Topic<T> {
 
     const label = name ? ` "${namespace ? `${namespace}.` : ''}${name}"` : '';
 
+    // User-supplied lifecycle hooks are isolated so a misbehaving hook can
+    // never corrupt subscription bookkeeping or block destroy/unregister.
+    const activate = () => {
+        active = true;
+        try {
+            onActivate?.();
+        } catch (err) {
+            console.error(`[sigx] Error in topic onActivate${label}:`, err);
+        }
+    };
+    const deactivate = () => {
+        active = false;
+        try {
+            onDeactivate?.();
+        } catch (err) {
+            console.error(`[sigx] Error in topic onDeactivate${label}:`, err);
+        }
+    };
+
     const topic: Topic<T> = {
         get namespace() {
             return namespace;
@@ -63,8 +82,7 @@ export function createTopic<T>(options?: CreateTopicOptions): Topic<T> {
             }
             subscribers.push(handler);
             if (subscribers.length === 1 && !active) {
-                active = true;
-                onActivate?.();
+                activate();
             }
 
             let removed = false;
@@ -74,8 +92,7 @@ export function createTopic<T>(options?: CreateTopicOptions): Topic<T> {
                 const idx = subscribers.indexOf(handler);
                 if (idx > -1) subscribers.splice(idx, 1);
                 if (subscribers.length === 0 && active) {
-                    active = false;
-                    onDeactivate?.();
+                    deactivate();
                 }
             };
 
@@ -94,8 +111,7 @@ export function createTopic<T>(options?: CreateTopicOptions): Topic<T> {
             disposed = true;
             subscribers = [];
             if (active) {
-                active = false;
-                onDeactivate?.();
+                deactivate();
             }
             unregisterTopic(topic as Topic<unknown>);
         }
@@ -136,8 +152,13 @@ export function createTopicGroup<EventMap extends Record<string, any>>(options?:
     let disposed = false;
 
     const topics = new Proxy({} as { [K in keyof EventMap]: Topic<EventMap[K]> }, {
-        get(_target, key) {
-            if (typeof key !== 'string') return undefined;
+        get(target, key) {
+            // Never treat prototype/protocol keys as event names — logging,
+            // stringification, JSON.stringify, or await would otherwise
+            // silently create and register topics named toString/toJSON/then.
+            if (typeof key !== 'string' || key in Object.prototype || key === 'toJSON' || key === 'then') {
+                return Reflect.get(target, key);
+            }
             let topic = created.get(key);
             if (!topic) {
                 if (disposed) {

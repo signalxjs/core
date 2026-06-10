@@ -105,20 +105,47 @@ describe('subscribeTopics', () => {
 
     it('ignores non-matching topics', () => {
         const handler = vi.fn();
-        subscribeTopics('todos#1.*', handler);
+        const sub = subscribeTopics('todos#1.*', handler);
 
         const other = createTopic<number>({ namespace: 'auth#1.state', name: 'user' });
         other.publish(1);
 
         expect(handler).not.toHaveBeenCalled();
+        sub.unsubscribe();
     });
 
     it('wildcard subscription activates refCount producers', () => {
         const onActivate = vi.fn();
         createTopic({ namespace: 'todos#1.state', name: 'count', onActivate });
 
-        subscribeTopics('todos#1.state.*', () => {});
+        const sub = subscribeTopics('todos#1.state.*', () => {});
 
         expect(onActivate).toHaveBeenCalledTimes(1);
+        sub.unsubscribe();
+    });
+
+    it('drops its attachment when an observed topic is destroyed', () => {
+        const topic = createTopic<number>({ namespace: 'todos#1.state', name: 'count' });
+        const handler = vi.fn();
+        const sub = subscribeTopics('todos#1.*', handler);
+
+        topic.publish(1);
+        expect(handler).toHaveBeenCalledTimes(1);
+
+        topic.destroy();
+
+        // a NEW topic with the same path is observed again — proving the
+        // dead entry was dropped rather than blocking re-attachment
+        const reborn = createTopic<number>({ namespace: 'todos#1.state', name: 'count' });
+        reborn.publish(2);
+        expect(handler).toHaveBeenCalledTimes(2);
+
+        sub.unsubscribe();
+    });
+
+    it('unsubscribe is idempotent', () => {
+        const sub = subscribeTopics('todos#1.*', () => {});
+        sub.unsubscribe();
+        expect(() => sub.unsubscribe()).not.toThrow();
     });
 });

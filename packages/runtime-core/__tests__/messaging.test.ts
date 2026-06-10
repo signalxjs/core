@@ -293,6 +293,44 @@ describe('onActivate / onDeactivate (refCount hooks)', () => {
         expect(onDeactivate).toHaveBeenCalledTimes(1);
     });
 
+    it('a throwing onActivate is isolated and the subscription still works', () => {
+        const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+        const topic = createTopic<number>({
+            onActivate: () => {
+                throw new Error('bad hook');
+            }
+        });
+
+        const received = vi.fn();
+        const sub = topic.subscribe(received);
+
+        expect(errorSpy).toHaveBeenCalled();
+        topic.publish(1);
+        expect(received).toHaveBeenCalledWith(1);
+        expect(topic.subscriberCount).toBe(1);
+
+        sub.unsubscribe();
+        errorSpy.mockRestore();
+    });
+
+    it('a throwing onDeactivate does not block destroy/unregister', () => {
+        const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+        const topic = createTopic<number>({
+            namespace: 'ns.hooks',
+            name: 'x',
+            onDeactivate: () => {
+                throw new Error('bad hook');
+            }
+        });
+
+        topic.subscribe(() => {});
+        expect(() => topic.destroy()).not.toThrow();
+        expect(topic.disposed).toBe(true);
+        expect(listTopics('ns.hooks.*')).toHaveLength(0);
+
+        errorSpy.mockRestore();
+    });
+
     it('unsubscribe is idempotent with respect to refCount', () => {
         const onDeactivate = vi.fn();
         const topic = createTopic<number>({ onDeactivate });
@@ -340,5 +378,17 @@ describe('createTopicGroup', () => {
         expect(a.disposed).toBe(true);
         expect(b.disposed).toBe(true);
         expect(() => group.topics.a).toThrow(/destroyed topic group/);
+    });
+
+    it('does not create topics for prototype/protocol keys', () => {
+        const group = createTopicGroup<{ a: number }>({ namespace: 'grp.proto' });
+
+        // stringification, JSON serialization, and thenable checks must not
+        // silently create/register topics
+        void `${group.topics}`;
+        void JSON.stringify(group.topics);
+        void (group.topics as { then?: unknown }).then;
+
+        expect(listTopics('grp.proto.*')).toHaveLength(0);
     });
 });

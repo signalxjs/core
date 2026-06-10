@@ -13,6 +13,7 @@ import { onUnmounted } from "../component.js";
 
 const topics = new Set<Topic<unknown>>();
 const creationHandlers = new Set<(topic: Topic<unknown>) => void>();
+const removalHandlers = new Set<(topic: Topic<unknown>) => void>();
 
 /** Called by createTopic for namespaced topics. @internal */
 export function registerTopic(topic: Topic<unknown>): void {
@@ -28,7 +29,14 @@ export function registerTopic(topic: Topic<unknown>): void {
 
 /** Called by Topic.destroy(). @internal */
 export function unregisterTopic(topic: Topic<unknown>): void {
-    topics.delete(topic);
+    if (!topics.delete(topic)) return;
+    for (const handler of removalHandlers) {
+        try {
+            handler(topic);
+        } catch (err) {
+            console.error('[sigx] Error in topic removal handler:', err);
+        }
+    }
 }
 
 function topicPath(topic: Topic<unknown>): string {
@@ -102,13 +110,38 @@ export function subscribeTopics(
         ));
     };
 
+    // Drop the map entry when a topic is destroyed/unregistered — without
+    // this, a session-long tooling subscription would retain every destroyed
+    // topic forever.
+    const detach = (topic: Topic<unknown>) => {
+        const sub = attached.get(topic);
+        if (sub) {
+            sub.unsubscribe();
+            attached.delete(topic);
+        }
+    };
+
     topics.forEach(attach);
     const creationSub = onTopicCreated(attach);
+    removalHandlers.add(detach);
 
+    let done = false;
     const unsubscribe = () => {
+        if (done) return;
+        done = true;
         creationSub.unsubscribe();
+        removalHandlers.delete(detach);
         attached.forEach(sub => sub.unsubscribe());
         attached.clear();
     };
+
+    // Auto-unsubscribe with the component when used inside a setup, matching
+    // Topic.subscribe / onTopicCreated.
+    try {
+        onUnmounted(unsubscribe);
+    } catch {
+        // Not in a context that supports auto-cleanup
+    }
+
     return { unsubscribe };
 }
