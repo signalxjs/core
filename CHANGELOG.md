@@ -25,9 +25,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - **`@sigx/runtime-core`**: singleton disposal is no longer owned by whichever component happened to resolve the instance first — previously that component's unmount disposed the shared instance while the global map kept serving the disposed corpse to later callers. App-owned instances are disposed by `app.unmount()` (via the new `AppContext.disposables`); `defineProvide`-created instances by their provider component's unmount; `app.defineProvide` instances on app unmount. (#54)
 - **`@sigx/runtime-core`**: factory instances are no longer built with `{ ...result, dispose }` — the spread snapshotted accessor getters (silently breaking reactive `get foo()` returns) and dropped prototypes. `dispose` is now attached as a non-enumerable property; a setup-returned `dispose` is still delegated to, and `dispose()` is idempotent. (#54)
-
-### Fixed
-
 - **`@sigx/reactivity`**: `effectScope().stop()` now actually disposes the effects and watchers created inside `run()`. Previously the scope's cleanup list was never populated, so `stop()` silently did nothing and scoped effects kept running forever (e.g. `@sigx/store` state watchers leaked after store disposal). Nested scopes are stopped with their parent unless created detached (`effectScope(true)`). (#52)
 
 ## [0.4.9] — 2026-05-29
