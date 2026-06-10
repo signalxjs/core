@@ -47,7 +47,7 @@ export {
 
 // Per-property signal views
 export { toSignal, toSignals } from './toSignal';
-export type { PropertySignal } from './toSignal';
+export type { PropertySignal, ToSignals } from './toSignal';
 
 // Watch
 export { watch } from './watch';

@@ -49,10 +49,19 @@ export function toSignal<T extends object, K extends SignalKey<T>>(source: T, ke
  * count.value++;        // still reactive
  * ```
  */
-export function toSignals<T extends object>(source: T): { [K in SignalKey<T>]-?: PropertySignal<T[K]> } {
-    const result = {} as { [K in SignalKey<T>]-?: PropertySignal<T[K]> };
+/**
+ * Per-key views of a reactive object. Homomorphic key-remapped map:
+ * optionality is preserved, since views only exist for keys Object.keys
+ * actually yields at runtime.
+ */
+export type ToSignals<T extends object> = {
+    [K in keyof T as K extends SignalKey<T> ? K : never]: PropertySignal<T[K]>;
+};
+
+export function toSignals<T extends object>(source: T): ToSignals<T> {
+    const result = {} as ToSignals<T>;
     for (const key of Object.keys(source) as SignalKey<T>[]) {
-        result[key] = toSignal(source, key);
+        (result as Record<string, PropertySignal<unknown>>)[key] = toSignal(source, key) as PropertySignal<unknown>;
     }
     return result;
 }

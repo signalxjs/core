@@ -256,6 +256,12 @@ export function effectScope(detached?: boolean): {
                 const toDispose = cleanups.splice(0, cleanups.length);
                 toDispose.forEach(dispose => dispose());
             }
+            // If stop() was called inside this scope's own run(), detach the
+            // registration target so effects created after stop() don't pile
+            // into a dead scope's list (they become unscoped instead).
+            if (activeScopeCleanups === cleanups) {
+                activeScopeCleanups = null;
+            }
         }
     };
 

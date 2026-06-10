@@ -117,7 +117,10 @@ export function watch<T>(source: WatchSource<T>, cb: WatchCallback<T>, options?:
         oldValue = newValue;
     });
 
+    let disposed = false;
     const stop = () => {
+        if (disposed) return;
+        disposed = true;
         stopped = true;
         runner.stop();
         if (cleanupFn) {
