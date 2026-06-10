@@ -11,7 +11,7 @@ import type {
     WritableComputedOptions 
 } from './types';
 import { ComputedSymbol } from './types';
-import { cleanup, track, trigger, setCurrentSubscriber, getCurrentSubscriber } from './effect';
+import { cleanup, createDep, track, trigger, setCurrentSubscriber, getCurrentSubscriber } from './effect';
 import { getAccessObserver, setAccessObserver } from './signal';
 import { getDevtoolsHook, registerReactiveProxy } from './devtools-hook';
 
@@ -48,7 +48,7 @@ export function computed<T>(
         setter = getterOrOptions.set;
     }
 
-    const subscribers = new Set<Subscriber>();
+    const ownDep = createDep();
     let cachedValue: T;
     let dirty = true;
 
@@ -68,10 +68,13 @@ export function computed<T>(
     const computedEffect: Subscriber = function () {
         if (!dirty) {
             dirty = true;
-            trigger(subscribers);
+            trigger(ownDep);
         }
     } as Subscriber;
     computedEffect.deps = [];
+    computedEffect.flags = 0;
+    computedEffect.ownDep = ownDep;
+    ownDep.computed = computedEffect;
 
     const computeValue = (): T => {
         cleanup(computedEffect);
@@ -101,7 +104,7 @@ export function computed<T>(
                 // Suspend observer so computeValue's internal signal reads don't leak
                 setAccessObserver(null);
             }
-            track(subscribers);
+            track(ownDep);
             const result = dirty ? computeValue() : cachedValue;
             // Restore observer after compute
             if (observer) setAccessObserver(observer);
@@ -120,7 +123,7 @@ export function computed<T>(
                     // Suspend observer so computeValue's internal signal reads don't leak
                     setAccessObserver(null);
                 }
-                track(subscribers);
+                track(ownDep);
                 const result = dirty ? computeValue() : cachedValue;
                 // Restore observer after compute
                 if (observer) setAccessObserver(observer);

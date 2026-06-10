@@ -2,7 +2,7 @@
 // Collection Reactivity Support (Set, Map, WeakSet, WeakMap)
 // ============================================================================
 
-import type { Subscriber } from './types';
+import type { Dep } from './types';
 import { batch, track, trigger } from './effect';
 
 /** Symbol for tracking iteration dependencies (forEach, keys, values, entries, size) */
@@ -95,8 +95,8 @@ export function shouldNotProxy(value: unknown): boolean {
  * `add`/`set`/`delete`, or a synthetic `'clear'` marker for `clear`).
  */
 export function createCollectionInstrumentations(
-    depsMap: Map<string | symbol, Set<Subscriber>>,
-    getOrCreateDep: (key: string | symbol) => Set<Subscriber>,
+    depsMap: Map<string | symbol, Dep>,
+    getOrCreateDep: (key: string | symbol) => Dep,
     notify: (key: string | symbol) => void = () => {}
 ) {
     const instrumentations: Record<string | symbol, any> = {};

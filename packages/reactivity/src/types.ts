@@ -12,8 +12,33 @@ export interface EffectRunner<T = void> {
     stop: () => void;
 }
 
+/**
+ * A dependency slot: one tracked property/key of one signal, or a
+ * computed's output. `version` increments on every definite value change,
+ * letting subscribers validate "did this source really change?" without
+ * recomputing.
+ */
+export interface Dep {
+    subs: Set<Subscriber>;
+    version: number;
+    /** Present iff this dep is a computed's output dep. */
+    computed?: Subscriber;
+}
+
+/** A subscriber's edge to one Dep, with the version seen at track time. */
+export interface Link {
+    dep: Dep;
+    version: number;
+}
+
 export interface Subscriber extends EffectFn {
-    deps: Set<Subscriber>[];
+    deps: Link[];
+    /** Dirtiness state (CLEAN / DIRTY / MAYBE_DIRTY / COMPUTING). */
+    flags: number;
+    /** Present iff this subscriber is a computed node: its output dep. */
+    ownDep?: Dep;
+    /** Present iff this subscriber is a computed node: pull/validate. */
+    refresh?: () => void;
 }
 
 /** 

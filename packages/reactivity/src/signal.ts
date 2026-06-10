@@ -2,8 +2,8 @@
 // Signal - Reactive state primitives
 // ============================================================================
 
-import type { Subscriber, Signal, PrimitiveSignal, Primitive } from './types';
-import { currentSubscriber, batch, track, trigger } from './effect';
+import type { Dep, Signal, PrimitiveSignal, Primitive } from './types';
+import { currentSubscriber, batch, createDep, track, trigger } from './effect';
 import { getDevtoolsHook, registerReactiveProxy, notifySignalUpdated } from './devtools-hook';
 import {
     isReactive,
@@ -155,7 +155,7 @@ export function signal<T>(target: T): PrimitiveSignal<T> | Signal<T & object> {
     // Defer depsMap allocation for non-collections (most signals).
     // Collections need the Map upfront for their write method instrumentations.
     const isCollectionTarget = isCollection(objectTarget);
-    let depsMap: Map<string | symbol, Set<Subscriber>> | null = isCollectionTarget ? new Map() : null;
+    let depsMap: Map<string | symbol, Dep> | null = isCollectionTarget ? new Map() : null;
     const reactiveCache = new WeakMap<object, any>();
 
     // DevTools id — only minted when a hook is currently installed.
@@ -174,12 +174,12 @@ export function signal<T>(target: T): PrimitiveSignal<T> | Signal<T & object> {
         });
     }
 
-    // Helper to get or create a dependency set for a key
-    const getOrCreateDep = (key: string | symbol): Set<Subscriber> => {
+    // Helper to get or create the dependency slot for a key
+    const getOrCreateDep = (key: string | symbol): Dep => {
         if (!depsMap) depsMap = new Map();
         let dep = depsMap.get(key);
         if (!dep) {
-            dep = new Set<Subscriber>();
+            dep = createDep();
             depsMap.set(key, dep);
         }
         return dep;

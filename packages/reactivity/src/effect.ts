@@ -2,8 +2,13 @@
 // Effect System - Core reactivity primitives
 // ============================================================================
 
-import type { EffectFn, EffectRunner, Subscriber } from './types';
+import type { Dep, EffectFn, EffectRunner, Subscriber } from './types';
 import { getDevtoolsHook } from './devtools-hook';
+
+/** Create a dependency slot (see {@link Dep}). */
+export function createDep(): Dep {
+    return { subs: new Set<Subscriber>(), version: 0 };
+}
 
 export let currentSubscriber: Subscriber | null = null;
 let batchDepth = 0;
@@ -47,29 +52,32 @@ export function batch(fn: () => void) {
 
 export function cleanup(effect: Subscriber): void {
     if (!effect.deps) return;
-    for (const dep of effect.deps) {
-        dep.delete(effect);
+    for (const link of effect.deps) {
+        link.dep.subs.delete(effect);
     }
     effect.deps.length = 0;
 }
 
-export function track(depSet: Set<Subscriber>): void {
+export function track(dep: Dep): void {
     if (!currentSubscriber) return;
-    depSet.add(currentSubscriber);
-    currentSubscriber.deps.push(depSet);
+    dep.subs.add(currentSubscriber);
+    currentSubscriber.deps.push({ dep, version: dep.version });
 }
 
-export function trigger(depSet: Set<Subscriber>): void {
+export function trigger(dep: Dep): void {
+    // Every trigger is a definite value change (callers already gate on
+    // Object.is), so the version always advances.
+    dep.version++;
     if (batchDepth > 0) {
         // Collecting into pendingEffects never mutates the dep set, so no
         // snapshot is needed on this path.
-        for (const effect of depSet) {
+        for (const effect of dep.subs) {
             pendingEffects.add(effect);
         }
         return;
     }
     // Snapshot: running an effect re-tracks its deps, mutating the set.
-    const effects = Array.from(depSet);
+    const effects = Array.from(dep.subs);
     for (const effect of effects) {
         effect();
     }
@@ -137,6 +145,7 @@ function runEffect(fn: EffectFn): EffectRunner {
     } as Subscriber;
 
     effectFn.deps = [];
+    effectFn.flags = 0;
     effectFn();
 
     // Return the effect as a runner with a stop method
