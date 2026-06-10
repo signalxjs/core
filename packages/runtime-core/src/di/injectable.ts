@@ -136,7 +136,7 @@ export function defineInjectable<T>(factory: () => T): InjectableFunction<T> {
  * Provide a new instance of an injectable at the current component level.
  * Child components will receive this instance when calling the injectable function.
  * 
- * @param useFn - The injectable function created by defineInjectable
+ * @param useFn - A use-function created by defineInjectable or defineFactory
  * @param factory - Optional custom factory to create the instance (overrides default)
  * 
  * @example

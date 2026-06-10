@@ -9,7 +9,9 @@ export const guid = guidFn;
  * - `'singleton'` — one instance per `AppContext`, disposed on `app.unmount()`.
  *   Outside any app context, falls back to one instance per JS realm.
  * - `'scoped'` — the nearest instance provided via `defineProvide` in the
- *   component tree; falls back to the app-context (singleton) instance.
+ *   component tree; falls back to the app-context (singleton) instance, and
+ *   outside any app/component context to the per-realm instance (same
+ *   fallback as `'singleton'`).
  * - `'transient'` — a new instance per call, disposed with the calling
  *   component (or manually via `dispose()`).
  */
