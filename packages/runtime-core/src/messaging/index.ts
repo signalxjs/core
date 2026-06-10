@@ -1,43 +1,162 @@
-import { Subscription, Topic } from "../models/index.js";
+import type { Subscription, Topic } from "../models/index.js";
 import { onUnmounted } from "../component.js";
+import { registerTopic, unregisterTopic } from "./registry.js";
 
-export function createTopic<T>(_options?: { namespace?: string; name?: string }): Topic<T> {
+export interface CreateTopicOptions {
+    /** Tooling metadata; topics WITH a namespace register in the inspection registry. */
+    namespace?: string;
+    /** Tooling metadata. */
+    name?: string;
+    /** Called when subscriberCount transitions 0 → 1 (refCount pattern). */
+    onActivate?(): void;
+    /** Called when subscriberCount transitions back to 0 (last unsubscribe or destroy). */
+    onDeactivate?(): void;
+}
+
+export function createTopic<T>(options?: CreateTopicOptions): Topic<T> {
+    const namespace = options?.namespace;
+    const name = options?.name;
+    const onActivate = options?.onActivate;
+    const onDeactivate = options?.onDeactivate;
+
     let subscribers: ((data: T) => void)[] = [];
+    let disposed = false;
+    let active = false;
 
-    const publish = (data: T) => {
-        subscribers.forEach(s => s(data));
-    };
+    const label = name ? ` "${namespace ? `${namespace}.` : ''}${name}"` : '';
 
-    const subscribe = (handler: (data: T) => void): Subscription => {
-        subscribers.push(handler);
-        const unsubscribe = () => {
-            const idx = subscribers.indexOf(handler);
-            if (idx > -1) subscribers.splice(idx, 1);
-        };
+    const topic: Topic<T> = {
+        get namespace() {
+            return namespace;
+        },
+        get name() {
+            return name;
+        },
+        get subscriberCount() {
+            return subscribers.length;
+        },
+        get hasSubscribers() {
+            return subscribers.length > 0;
+        },
+        get disposed() {
+            return disposed;
+        },
 
-        // Auto-unsubscribe if inside a component or effect scope that supports cleanup
-        try {
-            onUnmounted(unsubscribe);
-        } catch {
-            // Not in a context that supports auto-cleanup, ignore
+        publish(data: T) {
+            if (disposed) return;
+            // Snapshot so a handler unsubscribing mid-publish cannot skip siblings.
+            const handlers = subscribers.slice();
+            for (const handler of handlers) {
+                try {
+                    handler(data);
+                } catch (err) {
+                    // Isolate subscriber errors: a bad observer must not break
+                    // the publisher or the remaining subscribers.
+                    console.error(`[sigx] Error in topic subscriber${label}:`, err);
+                }
+            }
+        },
+
+        subscribe(handler: (data: T) => void): Subscription {
+            if (disposed) {
+                throw new Error(`[sigx] Cannot subscribe to destroyed topic${label}.`);
+            }
+            subscribers.push(handler);
+            if (subscribers.length === 1 && !active) {
+                active = true;
+                onActivate?.();
+            }
+
+            let removed = false;
+            const unsubscribe = () => {
+                if (removed) return;
+                removed = true;
+                const idx = subscribers.indexOf(handler);
+                if (idx > -1) subscribers.splice(idx, 1);
+                if (subscribers.length === 0 && active) {
+                    active = false;
+                    onDeactivate?.();
+                }
+            };
+
+            // Auto-unsubscribe if inside a component or effect scope that supports cleanup
+            try {
+                onUnmounted(unsubscribe);
+            } catch {
+                // Not in a context that supports auto-cleanup, ignore
+            }
+
+            return { unsubscribe };
+        },
+
+        destroy() {
+            if (disposed) return;
+            disposed = true;
+            subscribers = [];
+            if (active) {
+                active = false;
+                onDeactivate?.();
+            }
+            unregisterTopic(topic as Topic<unknown>);
         }
-
-        return { unsubscribe };
     };
 
-    const destroy = () => {
-        subscribers = [];
-    };
+    if (namespace) {
+        registerTopic(topic as Topic<unknown>);
+    }
 
-    return {
-        publish,
-        subscribe,
-        destroy
-    };
+    return topic;
 }
 
 export function toSubscriber<T>(topic: Topic<T>) {
     return {
         subscribe: (handler: (data: T) => void) => topic.subscribe(handler)
+    };
+}
+
+/**
+ * A typed group of topics keyed by an event map — mitt-level DX on the Topic
+ * primitive. Topics are created lazily per key on first access (the event-map
+ * generic is erased at runtime, so keys are only known when touched) and are
+ * namespaced/registered like any other topic.
+ *
+ * @example
+ * ```ts
+ * const group = createTopicGroup<{ loggedIn: User; loggedOut: void }>({ namespace: 'auth#1.events' });
+ * group.topics.loggedIn.publish(user);          // payload type-checked
+ * group.topics.loggedIn.subscribe(u => ...);    // u: User
+ * group.destroy();                              // destroys all created topics
+ * ```
+ */
+export function createTopicGroup<EventMap extends Record<string, any>>(options?: { namespace?: string }): {
+    topics: { [K in keyof EventMap]: Topic<EventMap[K]> };
+    destroy(): void;
+} {
+    const created = new Map<string, Topic<any>>();
+    let disposed = false;
+
+    const topics = new Proxy({} as { [K in keyof EventMap]: Topic<EventMap[K]> }, {
+        get(_target, key) {
+            if (typeof key !== 'string') return undefined;
+            let topic = created.get(key);
+            if (!topic) {
+                if (disposed) {
+                    throw new Error(`[sigx] Cannot create topic "${key}" on a destroyed topic group.`);
+                }
+                topic = createTopic({ namespace: options?.namespace, name: key });
+                created.set(key, topic);
+            }
+            return topic;
+        }
+    });
+
+    return {
+        topics,
+        destroy() {
+            if (disposed) return;
+            disposed = true;
+            created.forEach(topic => topic.destroy());
+            created.clear();
+        }
     };
 }
