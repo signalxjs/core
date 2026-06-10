@@ -124,5 +124,5 @@ export interface WritableComputedOptions<T> {
 // Effect scope types
 export type EffectScope = {
     run<T>(fn: () => T): T | undefined;
-    stop(fromParent?: boolean): void;
+    stop(): void;
 }

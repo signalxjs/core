@@ -42,10 +42,14 @@ export {
 } from './collections';
 
 // Signal
-export { 
-    signal, 
-    detectAccess 
+export {
+    signal,
+    detectAccess
 } from './signal';
+
+// Per-property signal views
+export { toSignal, toSignals } from './toSignal';
+export type { PropertySignal, ToSignals } from './toSignal';
 
 // Watch
 export { watch } from './watch';

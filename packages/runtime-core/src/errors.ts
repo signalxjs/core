@@ -130,12 +130,13 @@ export function provideOutsideSetupError(): SigxError {
 
 export function provideInvalidInjectableError(): SigxError {
     return new SigxError(
-        'defineProvide must be called with a function created by defineInjectable.',
+        'defineProvide must be called with a function created by defineInjectable or defineFactory.',
         {
             code: SigxErrorCode.PROVIDE_INVALID_INJECTABLE,
             suggestion:
-                'Create an injectable first:\n' +
+                'Create an injectable or factory first:\n' +
                 '  const useMyService = defineInjectable(() => new MyService());\n' +
+                "  // or: const useMyService = defineFactory(setup, 'scoped');\n" +
                 '  defineProvide(useMyService);',
         }
     );

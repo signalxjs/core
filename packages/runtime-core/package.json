@@ -1,6 +1,6 @@
 {
     "name": "@sigx/runtime-core",
-    "version": "0.4.9",
+    "version": "0.5.0",
     "description": "Runtime core for SignalX",
     "type": "module",
     "main": "./dist/index.js",
@@ -13,6 +13,10 @@
         "./internals": {
             "import": "./dist/internals.js",
             "types": "./dist/internals.d.ts"
+        },
+        "./inspect": {
+            "import": "./dist/inspect.js",
+            "types": "./dist/inspect.d.ts"
         },
         "./jsx-runtime": {
             "import": "./dist/index.js",

@@ -29,7 +29,7 @@ import type {
     App
 } from './app-types.js';
 
-import { getAppContextToken, type InjectableFunction } from './di/injectable.js';
+import { getAppContextToken, type Providable } from './di/injectable.js';
 import { isDirective } from './directives.js';
 import type { JSXElement } from './jsx-runtime.js';
 import { noMountFunctionError, provideInvalidInjectableError } from './errors.js';
@@ -108,6 +108,7 @@ export function defineApp<TContainer = any>(rootComponent: JSXElement): App<TCon
     const context: AppContext = {
         app: null!, // Will be set below
         provides: new Map(),
+        disposables: new Set(),
         config: {},
         hooks: [],
         directives: new Map()
@@ -144,7 +145,7 @@ export function defineApp<TContainer = any>(rootComponent: JSXElement): App<TCon
             return app;
         },
 
-        defineProvide<T>(useFn: InjectableFunction<T>, factory?: () => T): T {
+        defineProvide<T>(useFn: Providable<T>, factory?: () => T): T {
             const actualFactory = factory ?? useFn._factory;
             const token = useFn._token;
 
@@ -154,6 +155,21 @@ export function defineApp<TContainer = any>(rootComponent: JSXElement): App<TCon
 
             const instance = actualFactory();
             context.provides.set(token, instance);
+            // App-provided instances are app-owned: dispose them on unmount —
+            // unless the factory setup took over disposal via overrideDispose.
+            // Factory-generated disposes are stored RAW so the factory's
+            // dispose/recreate logic can delete the stale entry; user-supplied
+            // method-style disposes get a bound wrapper so `this` survives.
+            const dispose = (instance as { dispose?: unknown } | null)?.dispose;
+            if (typeof dispose === 'function'
+                && (dispose as { __sigxCustomManaged?: boolean }).__sigxCustomManaged !== true) {
+                const isFactoryDispose = '__sigxDisposed' in (dispose as object);
+                context.disposables.add(
+                    isFactoryDispose
+                        ? dispose as () => void
+                        : () => (dispose as () => void).call(instance)
+                );
+            }
             return instance;
         },
 
@@ -227,6 +243,18 @@ export function defineApp<TContainer = any>(rootComponent: JSXElement): App<TCon
                 devtools.emit({ type: 'app:unmount', app: context });
                 devtools.apps.delete(context);
             }
+
+            // Dispose app-owned instances (singletons, app-level provides).
+            // Each disposable is isolated so one failing dispose cannot
+            // prevent the rest of the teardown.
+            for (const dispose of context.disposables) {
+                try {
+                    dispose();
+                } catch (err) {
+                    console.error('Error disposing app-owned instance:', err);
+                }
+            }
+            context.disposables.clear();
 
             // Clear provides to help GC
             context.provides.clear();

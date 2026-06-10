@@ -287,9 +287,6 @@ function runEffect(fn: EffectFn, scheduler?: EffectScheduler): EffectRunner {
             }
         }
     };
-    if (activeScope) {
-        activeScope._effects.push(runner);
-    }
     return runner;
 }
 
@@ -306,7 +303,27 @@ function runEffect(fn: EffectFn, scheduler?: EffectScheduler): EffectRunner {
  * ```
  */
 export function effect(fn: EffectFn, options?: EffectOptions): EffectRunner {
-    return runEffect(fn, options?.scheduler);
+    const runner = runEffect(fn, options?.scheduler);
+    registerWithActiveScope(runner.stop);
+    return runner;
+}
+
+/**
+ * Create an effect WITHOUT registering it with the active effect scope.
+ * For composite primitives (e.g. `watch`) that register their own, more
+ * complete disposer with the scope instead.
+ * @internal
+ */
+export function rawEffect(fn: EffectFn): EffectRunner {
+    return runEffect(fn);
+}
+
+/**
+ * Register a disposer with the currently-active effect scope, if any.
+ * @internal
+ */
+export function registerWithActiveScope(dispose: () => void): void {
+    activeScopeCleanups?.push(dispose);
 }
 
 /**
@@ -330,8 +347,16 @@ export function untrack<T>(fn: () => T): T {
     }
 }
 
+// Cleanup list of the scope whose run() is currently on the stack.
+// effect() pushes its runner's stop here; nested scopes push their own stop
+// so they are disposed with their parent (unless created detached).
+let activeScopeCleanups: (() => void)[] | null = null;
+
 /**
  * Create an effect scope that collects reactive effects for bulk disposal.
+ * Effects and watchers created synchronously inside `run()` are disposed by
+ * `stop()`. Scopes created inside another scope's `run()` are stopped with
+ * their parent unless created with `effectScope(true)` (detached).
  *
  * @example
  * ```ts
@@ -345,59 +370,45 @@ export function untrack<T>(fn: () => T): T {
  */
 export function effectScope(detached?: boolean): {
     run<T>(fn: () => T): T | undefined;
-    stop(fromParent?: boolean): void;
+    stop(): void;
 } {
-    const effects: EffectRunner[] = [];
-    const childScopes: InternalScope[] = [];
+    const cleanups: (() => void)[] = [];
     let active = true;
 
-    const scope: InternalScope = {
-        _effects: effects,
-        _childScopes: childScopes,
+    const scope = {
         run<T>(fn: () => T): T | undefined {
             if (!active) return undefined;
-            const prevScope = activeScope;
-            activeScope = scope;
+            const prev = activeScopeCleanups;
+            activeScopeCleanups = cleanups;
             try {
                 return fn();
             } finally {
-                activeScope = prevScope;
+                activeScopeCleanups = prev;
             }
         },
-        stop(fromParent?: boolean) {
+        stop() {
             if (!active) return;
             active = false;
-            for (const runner of effects) {
-                runner.stop();
+            // Drain until empty: a disposer may synchronously create new
+            // effects/watchers that register into this scope (when stop() is
+            // called while this scope's run() is active) — they must be
+            // disposed too, not leaked into a cleared list.
+            while (cleanups.length > 0) {
+                const toDispose = cleanups.splice(0, cleanups.length);
+                toDispose.forEach(dispose => dispose());
             }
-            effects.length = 0;
-            for (const child of childScopes) {
-                child.stop(true);
+            // If stop() was called inside this scope's own run(), detach the
+            // registration target so effects created after stop() don't pile
+            // into a dead scope's list (they become unscoped instead).
+            if (activeScopeCleanups === cleanups) {
+                activeScopeCleanups = null;
             }
-            childScopes.length = 0;
-            // Detach from the parent so a long-lived parent scope doesn't
-            // retain stopped children.
-            if (!fromParent && parentScope) {
-                const siblings = parentScope._childScopes;
-                const i = siblings.indexOf(scope);
-                if (i !== -1) siblings.splice(i, 1);
-            }
-        },
+        }
     };
 
-    const parentScope = detached ? null : activeScope;
-    if (parentScope) {
-        parentScope._childScopes.push(scope);
+    if (!detached && activeScopeCleanups) {
+        activeScopeCleanups.push(() => scope.stop());
     }
 
     return scope;
 }
-
-interface InternalScope {
-    _effects: EffectRunner[];
-    _childScopes: InternalScope[];
-    run<T>(fn: () => T): T | undefined;
-    stop(fromParent?: boolean): void;
-}
-
-let activeScope: InternalScope | null = null;
