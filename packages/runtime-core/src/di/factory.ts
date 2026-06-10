@@ -92,11 +92,14 @@ export function defineFactory<InferReturnSetup>(
         };
 
         const result = setup(ctx, ...args);
+        // Functions are valid factory products too (e.g. callable stores) —
+        // anything non-primitive can carry the dispose property.
+        const attachable = result !== null && (typeof result === 'object' || typeof result === 'function');
 
         // Capture a user-supplied dispose BEFORE attaching our own, so the
         // wrapper can delegate to it without recursing into itself.
         const userDispose =
-            result && typeof result === 'object' && typeof (result as { dispose?: unknown }).dispose === 'function'
+            attachable && typeof (result as { dispose?: unknown }).dispose === 'function'
                 ? ((result as unknown as { dispose: () => void }).dispose).bind(result)
                 : null;
 
@@ -119,8 +122,10 @@ export function defineFactory<InferReturnSetup>(
 
         // Attach (not spread): spreading would snapshot accessor getters and
         // drop prototypes, silently breaking reactive `get foo()` returns.
-        if (result && typeof result === 'object') {
-            Object.defineProperty(result, 'dispose', {
+        // Primitives can't carry dispose — disposal tracking requires an
+        // object/function result.
+        if (attachable) {
+            Object.defineProperty(result as object, 'dispose', {
                 value: dispose,
                 enumerable: false,
                 configurable: true,
@@ -164,6 +169,14 @@ export function defineFactory<InferReturnSetup>(
         if (appContext) {
             const existing = appContext.provides.get(token);
             if (existing === undefined || isDisposedInstance(existing)) {
+                // Drop the stale disposable so dispose/recreate cycles can't
+                // grow the set unboundedly until app.unmount().
+                if (existing !== undefined) {
+                    const oldDispose = (existing as { dispose?: () => void }).dispose;
+                    if (oldDispose) {
+                        appContext.disposables.delete(oldDispose);
+                    }
+                }
                 // Args are honored at first creation only ("first creation
                 // wins") — later calls return the shared instance. A manually
                 // disposed instance is replaced, never served as a corpse.

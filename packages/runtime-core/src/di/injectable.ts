@@ -172,14 +172,11 @@ export function defineProvide<T>(useFn: Providable<T>, factory?: () => T): T {
     provideAtComponent(token, instance);
     // The provider component owns the instance: dispose it on unmount —
     // unless the factory setup took over disposal via overrideDispose.
+    // provideAtComponent above guarantees we are inside a component setup.
     const dispose = (instance as { dispose?: unknown } | null)?.dispose;
     if (typeof dispose === 'function'
         && (dispose as { __sigxCustomManaged?: boolean }).__sigxCustomManaged !== true) {
-        try {
-            onUnmounted(() => (dispose as () => void).call(instance));
-        } catch {
-            // Context without unmount support — owner disposes manually.
-        }
+        onUnmounted(() => (dispose as () => void).call(instance));
     }
     return instance;
 }

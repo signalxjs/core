@@ -150,6 +150,22 @@ describe('defineFactory setup context', () => {
         expect(result.total).toBe(2);
     });
 
+    it('attaches dispose to function-valued setup results', () => {
+        const deactivated = vi.fn();
+        const useThing = defineFactory((ctx) => {
+            ctx.onDeactivated(deactivated);
+            const callable = () => 42;
+            return callable;
+        }, 'transient');
+
+        const result = useThing();
+
+        expect(result()).toBe(42);
+        expect(typeof result.dispose).toBe('function');
+        result.dispose();
+        expect(deactivated).toHaveBeenCalledOnce();
+    });
+
     it('dispose is non-enumerable on the instance', () => {
         const useThing = defineFactory(() => ({ value: 1 }), 'transient');
         const result = useThing();
@@ -365,6 +381,19 @@ describe('disposed singleton recovery', () => {
         const b = useThing();
         expect(b).not.toBe(a);
         expect(useThing()).toBe(b);
+    });
+
+    it('dispose/recreate cycles do not grow the app disposables set', () => {
+        const useThing = defineFactory(() => ({ id: {} }), 'singleton');
+        const app = defineApp({} as any);
+
+        setCurrentInstance(nodeInApp(app) as ComponentSetupContext);
+        for (let i = 0; i < 5; i++) {
+            useThing().dispose();
+        }
+        useThing();
+
+        expect(app._context.disposables.size).toBe(1);
     });
 });
 
