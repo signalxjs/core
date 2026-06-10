@@ -40,7 +40,10 @@ export function unregisterTopic(topic: Topic<unknown>): void {
 }
 
 function topicPath(topic: Topic<unknown>): string {
-    return topic.name ? `${topic.namespace}.${topic.name}` : `${topic.namespace}`;
+    // Always `namespace.name` (empty name when absent) so wildcard patterns
+    // like `ns.*` match nameless topics consistently with the documented
+    // `${namespace}.${name}` semantics.
+    return `${topic.namespace}.${topic.name ?? ''}`;
 }
 
 /** Compile a `*`-wildcard pattern (matched against `namespace.name`) to a RegExp. */

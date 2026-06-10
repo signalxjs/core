@@ -53,6 +53,11 @@ describe('listTopics patterns', () => {
         expect(listTopics('a+b.x')).toHaveLength(1);
         expect(listTopics('aab.x')).toHaveLength(0);
     });
+
+    it('nameless namespaced topics match namespace wildcards', () => {
+        createTopic({ namespace: 'bare' });
+        expect(listTopics('bare.*')).toHaveLength(1);
+    });
 });
 
 describe('onTopicCreated', () => {

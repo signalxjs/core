@@ -23,7 +23,9 @@ export function createTopic<T>(options?: CreateTopicOptions): Topic<T> {
     let disposed = false;
     let active = false;
 
-    const label = name ? ` "${namespace ? `${namespace}.` : ''}${name}"` : '';
+    // Identify the topic in errors/logs by whatever metadata it has.
+    const path = namespace && name ? `${namespace}.${name}` : (namespace ?? name);
+    const label = path ? ` "${path}"` : '';
 
     // User-supplied lifecycle hooks are isolated so a misbehaving hook can
     // never corrupt subscription bookkeeping or block destroy/unregister.
