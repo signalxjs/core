@@ -60,13 +60,18 @@ export function track(depSet: Set<Subscriber>): void {
 }
 
 export function trigger(depSet: Set<Subscriber>): void {
+    if (batchDepth > 0) {
+        // Collecting into pendingEffects never mutates the dep set, so no
+        // snapshot is needed on this path.
+        for (const effect of depSet) {
+            pendingEffects.add(effect);
+        }
+        return;
+    }
+    // Snapshot: running an effect re-tracks its deps, mutating the set.
     const effects = Array.from(depSet);
     for (const effect of effects) {
-        if (batchDepth > 0) {
-            pendingEffects.add(effect);
-        } else {
-            effect();
-        }
+        effect();
     }
 }
 

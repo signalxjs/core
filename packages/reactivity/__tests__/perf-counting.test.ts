@@ -161,8 +161,7 @@ describe('propagation counts', () => {
             expect(runs).toHaveBeenCalledTimes(1);
 
             m.set('k', 1);
-            // STAGE 3 tightens this to 2 (key + iteration triggers batched).
-            expect(runs).toHaveBeenCalledTimes(3);
+            expect(runs).toHaveBeenCalledTimes(2);
         });
 
         it('Map.delete runs an effect reading size + has() exactly once', () => {
@@ -172,8 +171,7 @@ describe('propagation counts', () => {
             expect(runs).toHaveBeenCalledTimes(1);
 
             m.delete('k');
-            // STAGE 3 tightens this to 2.
-            expect(runs).toHaveBeenCalledTimes(3);
+            expect(runs).toHaveBeenCalledTimes(2);
         });
 
         it('Set.clear runs an effect reading size + has() exactly once', () => {
@@ -183,8 +181,7 @@ describe('propagation counts', () => {
             expect(runs).toHaveBeenCalledTimes(1);
 
             s.clear();
-            // STAGE 3 tightens this to 2 (all clear() triggers batched).
-            expect(runs).toHaveBeenCalledTimes(3);
+            expect(runs).toHaveBeenCalledTimes(2);
         });
 
         it('growing array index write runs an effect reading that index + length exactly once', () => {
@@ -194,8 +191,7 @@ describe('propagation counts', () => {
             expect(runs).toHaveBeenCalledTimes(1);
 
             arr[5] = 'x'; // grows length 3 -> 6: index dep + length dep
-            // STAGE 3 tightens this to 2 (index + length triggers batched).
-            expect(runs).toHaveBeenCalledTimes(3);
+            expect(runs).toHaveBeenCalledTimes(2);
         });
 
         it('array push runs an effect reading the array exactly once (already batched)', () => {

@@ -277,26 +277,39 @@ export function signal<T>(target: T): PrimitiveSignal<T> | Signal<T & object> {
             // Only trigger if value actually changed
             if (!Object.is(oldValue, newValue)) {
                 if (depsMap) {
-                    const dep = depsMap.get(prop);
-                    if (dep) {
-                        trigger(dep);
-                    }
+                    // Array writes can hit several deps at once (an index
+                    // plus `length`, or `length` plus truncated indices).
+                    // Batch those so a subscriber of more than one runs
+                    // once; the common single-dep write stays un-batched.
+                    const isArray = Array.isArray(obj);
+                    const lengthChanged = isArray && prop !== 'length' && obj.length !== oldLength;
+                    const lengthShrunk = isArray && prop === 'length' &&
+                        typeof newValue === 'number' && newValue < oldLength;
 
-                    // Special handling for Arrays
-                    if (Array.isArray(obj)) {
-                        // If we set an index and length changed, trigger length dependency
-                        if (prop !== 'length' && obj.length !== oldLength) {
-                            const lengthDep = depsMap.get('length');
-                            if (lengthDep) {
-                                trigger(lengthDep);
+                    if (lengthChanged || lengthShrunk) {
+                        batch(() => {
+                            const dep = depsMap!.get(prop);
+                            if (dep) {
+                                trigger(dep);
                             }
-                        }
-                        // If we set length, trigger indices that are now out of bounds
-                        if (prop === 'length' && typeof newValue === 'number' && newValue < oldLength) {
-                            for (let i = newValue; i < oldLength; i++) {
-                                const idxDep = depsMap.get(String(i));
-                                if (idxDep) trigger(idxDep);
+                            if (lengthChanged) {
+                                const lengthDep = depsMap!.get('length');
+                                if (lengthDep) {
+                                    trigger(lengthDep);
+                                }
                             }
+                            if (lengthShrunk) {
+                                // Trigger indices that are now out of bounds
+                                for (let i = newValue as number; i < oldLength; i++) {
+                                    const idxDep = depsMap!.get(String(i));
+                                    if (idxDep) trigger(idxDep);
+                                }
+                            }
+                        });
+                    } else {
+                        const dep = depsMap.get(prop);
+                        if (dep) {
+                            trigger(dep);
                         }
                     }
                 }
