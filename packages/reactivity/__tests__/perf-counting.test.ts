@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { signal, computed, effect, batch } from '../src/index';
+import { signal, computed, effect, batch, watch } from '../src/index';
 
 /**
  * Deterministic propagation-count proofs.
@@ -97,12 +97,10 @@ describe('propagation counts', () => {
             expect(getter).toHaveBeenCalledTimes(1);
 
             // 2 -> 5: still positive. The getter must re-validate, but the
-            // effect must not observe a change.
+            // effect must not observe a change (value-equality cutoff).
             s.count = 5;
             expect(getter).toHaveBeenCalledTimes(2);
-            // STAGE 4 tightens this to 1 (value-equality cutoff). Today the
-            // computed eagerly re-notifies subscribers regardless of value.
-            expect(runs).toHaveBeenCalledTimes(2);
+            expect(runs).toHaveBeenCalledTimes(1);
         });
 
         it('diamond: one write runs the joint effect a bounded number of times', () => {
@@ -122,12 +120,11 @@ describe('propagation counts', () => {
 
             s.n = 10;
 
-            // STAGE 4 tightens this to 2 (single, glitch-free run per write).
-            // Today the effect runs once per computed invalidation: the first
-            // run observes a fresh c1 with a STALE c2 (the diamond glitch).
-            expect(runs).toHaveBeenCalledTimes(3);
-            expect(observedPairs[1]).toEqual([11, 2]); // glitch: stale c2 — STAGE 4 removes this run
-            expect(observedPairs[observedPairs.length - 1]).toEqual([11, 12]);
+            // Single, glitch-free run per write: the mark phase flags both
+            // branches before the effect executes, so no stale pair is ever
+            // observable.
+            expect(runs).toHaveBeenCalledTimes(2);
+            expect(observedPairs).toEqual([[1, 2], [11, 12]]);
 
             // Each getter recomputes exactly once per write regardless.
             expect(c1Getter).toHaveBeenCalledTimes(2);
@@ -144,11 +141,78 @@ describe('propagation counts', () => {
             effect(() => { runs(label.value); });
             expect(runs).toHaveBeenCalledTimes(1);
 
-            // 1 -> 3: parity unchanged (1).
+            // 1 -> 3: parity unchanged (1) — the cutoff stops at parity:
+            // neither the downstream getter nor the effect runs again.
             s.n = 3;
             expect(parityGetter).toHaveBeenCalledTimes(2);
-            // STAGE 4 tightens both to 1 (cutoff stops at parity).
-            expect(labelGetter).toHaveBeenCalledTimes(2);
+            expect(labelGetter).toHaveBeenCalledTimes(1);
+            expect(runs).toHaveBeenCalledTimes(1);
+        });
+    });
+
+    describe('push-pull edge cases', () => {
+        it('effect on a signal AND a value-stable computed still runs for the signal change', () => {
+            const s = signal({ count: 2, other: 0 });
+            const isPositive = computed(() => s.count > 0);
+            const runs = vi.fn();
+            effect(() => { runs(s.other, isPositive.value); });
+            expect(runs).toHaveBeenCalledTimes(1);
+
+            s.other = 1; // direct signal dep: DIRTY, no validation needed
+            expect(runs).toHaveBeenCalledTimes(2);
+
+            s.count = 5; // only the computed dep, and its value is stable
+            expect(runs).toHaveBeenCalledTimes(2);
+        });
+
+        it('throwing getter surfaces at read time and retries on next read', () => {
+            const s = signal({ fail: true, v: 1 });
+            const c = computed(() => {
+                if (s.fail) throw new Error('boom');
+                return s.v;
+            });
+
+            expect(() => c.value).toThrow('boom');
+            // still subscribed: fixing the source makes the next read work
+            s.fail = false;
+            expect(c.value).toBe(1);
+        });
+
+        it('self-reading computed yields its cached value instead of overflowing the stack', () => {
+            const s = signal({ v: 1 });
+            const c: { value: number } = computed((): number => s.v + (c ? (c.value ?? 0) : 0));
+            expect(() => c.value).not.toThrow();
+        });
+
+        it('watch on a value-stable computed source does not fire the callback', () => {
+            const s = signal({ count: 2 });
+            const isPositive = computed(() => s.count > 0);
+            const cb = vi.fn();
+            watch(() => isPositive.value, cb);
+
+            s.count = 5;
+            expect(cb).not.toHaveBeenCalled();
+
+            s.count = -1;
+            expect(cb).toHaveBeenCalledTimes(1);
+            expect(cb).toHaveBeenCalledWith(false, true, expect.anything());
+        });
+
+        it('cutoff works inside batch()', () => {
+            const s = signal({ count: 2 });
+            const isPositive = computed(() => s.count > 0);
+            const runs = vi.fn();
+            effect(() => { runs(isPositive.value); });
+
+            batch(() => {
+                s.count = 5;
+                s.count = 9;
+            });
+            expect(runs).toHaveBeenCalledTimes(1);
+
+            batch(() => {
+                s.count = -1;
+            });
             expect(runs).toHaveBeenCalledTimes(2);
         });
     });

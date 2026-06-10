@@ -10,6 +10,33 @@ export function createDep(): Dep {
     return { subs: new Set<Subscriber>(), version: 0 };
 }
 
+// Subscriber dirtiness flags (Subscriber.flags).
+export const CLEAN = 0;
+/** A direct source definitely changed: must re-run / recompute. */
+export const DIRTY = 1 << 0;
+/** A computed source was invalidated: validate before running. */
+export const MAYBE_DIRTY = 1 << 1;
+/** Cycle guard: this computed's getter is currently executing. */
+export const COMPUTING = 1 << 2;
+
+/**
+ * Pull-validate a subscriber whose sources are all "maybe dirty":
+ * refresh computed sources and report whether any source's version
+ * actually advanced past the version recorded at track time.
+ */
+export function sourcesChanged(sub: Subscriber): boolean {
+    for (const link of sub.deps) {
+        const computedSub = link.dep.computed;
+        if (computedSub) {
+            computedSub.refresh!();
+        }
+        if (link.dep.version !== link.version) {
+            return true;
+        }
+    }
+    return false;
+}
+
 export let currentSubscriber: Subscriber | null = null;
 let batchDepth = 0;
 const pendingEffects = new Set<Subscriber>();
@@ -41,11 +68,17 @@ export function batch(fn: () => void) {
     } finally {
         batchDepth--;
         if (batchDepth === 0) {
-            const effects = Array.from(pendingEffects);
-            pendingEffects.clear();
-            for (const effect of effects) {
-                effect();
-            }
+            flushPendingEffects();
+        }
+    }
+}
+
+function flushPendingEffects(): void {
+    while (pendingEffects.size > 0) {
+        const effects = Array.from(pendingEffects);
+        pendingEffects.clear();
+        for (const effect of effects) {
+            effect();
         }
     }
 }
@@ -64,22 +97,48 @@ export function track(dep: Dep): void {
     currentSubscriber.deps.push({ dep, version: dep.version });
 }
 
+/**
+ * Two-pass push: first MARK the whole downstream graph (computeds become
+ * maybe-dirty, effects are queued and deduped), then FLUSH the queued
+ * effects. Marking everything before running anything is what makes a
+ * diamond (s → c1,c2 → e) glitch-free and single-run: when `e` executes,
+ * both branches already know they must (re)validate.
+ *
+ * Effects still flush synchronously before the signal write returns
+ * (unless an outer batch() is open), so write-then-assert code keeps
+ * working unchanged.
+ */
 export function trigger(dep: Dep): void {
     // Every trigger is a definite value change (callers already gate on
     // Object.is), so the version always advances.
     dep.version++;
-    if (batchDepth > 0) {
-        // Collecting into pendingEffects never mutates the dep set, so no
-        // snapshot is needed on this path.
-        for (const effect of dep.subs) {
-            pendingEffects.add(effect);
+    batchDepth++;
+    try {
+        mark(dep, DIRTY);
+    } finally {
+        batchDepth--;
+        if (batchDepth === 0) {
+            flushPendingEffects();
         }
-        return;
     }
-    // Snapshot: running an effect re-tracks its deps, mutating the set.
-    const effects = Array.from(dep.subs);
-    for (const effect of effects) {
-        effect();
+}
+
+function mark(dep: Dep, bit: number): void {
+    // The mark phase runs no user code, so dep.subs cannot mutate
+    // mid-iteration — no snapshot needed.
+    for (const sub of dep.subs) {
+        const prev = sub.flags;
+        sub.flags = prev | bit;
+        if (sub.ownDep) {
+            // Computed node: propagate downstream once per wave. An
+            // already-flagged computed has already propagated (this also
+            // terminates cycles).
+            if ((prev & (DIRTY | MAYBE_DIRTY)) === 0) {
+                mark(sub.ownDep, MAYBE_DIRTY);
+            }
+        } else {
+            pendingEffects.add(sub);
+        }
     }
 }
 
@@ -109,7 +168,21 @@ function runEffect(fn: EffectFn): EffectRunner {
 
     const effectFn: Subscriber = function () {
         if (stopped) return;
-        if (running) return;
+        if (running) {
+            // Dropped re-entrant invocation: clear flags so a stale dirt
+            // bit can't skew the next real validation.
+            effectFn.flags = CLEAN;
+            return;
+        }
+        const flags = effectFn.flags;
+        effectFn.flags = CLEAN;
+        if ((flags & MAYBE_DIRTY) !== 0 && (flags & DIRTY) === 0) {
+            // Only computed sources were invalidated: pull-validate them
+            // and skip the run entirely if no value actually changed.
+            if (!sourcesChanged(effectFn)) {
+                return;
+            }
+        }
         running = true;
         cleanup(effectFn);
         const prev = currentSubscriber;
@@ -145,11 +218,15 @@ function runEffect(fn: EffectFn): EffectRunner {
     } as Subscriber;
 
     effectFn.deps = [];
-    effectFn.flags = 0;
+    effectFn.flags = DIRTY;
     effectFn();
 
-    // Return the effect as a runner with a stop method
-    const runner = (() => effectFn()) as EffectRunner;
+    // Return the effect as a runner with a stop method. Manual runs are
+    // forced: they bypass validation by marking the effect dirty first.
+    const runner = (() => {
+        effectFn.flags |= DIRTY;
+        return effectFn();
+    }) as EffectRunner;
     runner.stop = () => {
         stopped = true;
         cleanup(effectFn);
