@@ -2,6 +2,8 @@
 
 DOM runtime for SignalX. Provides the DOM-specific renderer, event handling, attribute patching, directive system, and SVG support.
 
+📚 **Full guides, API reference and live examples → <https://sigx.dev/core/packages/runtime-dom/overview/>**
+
 ## Install
 
 ```bash
@@ -31,21 +33,11 @@ const App = component(() => {
 render(<App />, document.getElementById('app')!);
 ```
 
-## Key Exports
-
-| Export | Description |
-|---|---|
-| `render(vnode, container)` | Mount a component tree to a DOM element |
-| `Portal` | Render children into a different DOM container |
-| `show` | Built-in directive for conditional display |
-
-The module also handles DOM property/attribute patching, event delegation, form control bindings, SVG namespace handling, and directive lifecycle management.
-
 > **Note:** Most users should install [`sigx`](https://www.npmjs.com/package/sigx) instead, which bundles this package with the core runtime and reactivity system.
 
-## Documentation
+## 📚 Documentation
 
-Full documentation and guides are available at the [SignalX repository](https://github.com/signalxjs/core).
+The full export list (`render`, `Portal`, the `show` directive) plus DOM patching, event delegation, form bindings and SVG handling — guides and live examples → **<https://sigx.dev/core/packages/runtime-dom/overview/>**
 
 ## License
 

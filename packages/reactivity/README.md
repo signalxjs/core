@@ -2,6 +2,8 @@
 
 Reactivity system for SignalX. Provides fine-grained reactive primitives including signals, computed values, effects, and watchers.
 
+📚 **Full guides, API reference and live examples → <https://sigx.dev/core/packages/reactivity/overview/>**
+
 ## Install
 
 ```bash
@@ -27,25 +29,9 @@ batch(() => {
 // Logs once: "count: 2, doubled: 4"
 ```
 
-## API
+## 📚 Documentation
 
-| Export | Description |
-|---|---|
-| `signal(value)` | Create a reactive signal |
-| `computed(fn)` | Derived reactive value |
-| `effect(fn)` | Run a side effect when dependencies change |
-| `batch(fn)` | Batch multiple updates into a single notification |
-| `watch(source, callback)` | Watch a reactive source with old/new value tracking |
-| `untrack(fn)` | Read reactive values without tracking dependencies |
-| `effectScope()` | Create a scope to collect and dispose effects |
-| `toRaw(value)` | Get the raw underlying value of a reactive object |
-| `isReactive(value)` | Check if a value is reactive |
-| `isComputed(value)` | Check if a value is a computed signal |
-| `detectAccess(fn)` | Detect which signals are accessed in a function |
-
-## Documentation
-
-Full documentation and guides are available at the [SignalX repository](https://github.com/signalxjs/core).
+The complete API reference (`signal`, `computed`, `effect`, `batch`, `watch`, `untrack`, `effectScope`, and more), guides and live examples → **<https://sigx.dev/core/packages/reactivity/overview/>**
 
 ## License
 

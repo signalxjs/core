@@ -37,7 +37,7 @@
         "url": "git+https://github.com/signalxjs/core.git",
         "directory": "packages/reactivity"
     },
-    "homepage": "https://github.com/signalxjs/core/tree/main/packages/reactivity",
+    "homepage": "https://sigx.dev/core/packages/reactivity/overview/",
     "bugs": {
         "url": "https://github.com/signalxjs/core/issues"
     },

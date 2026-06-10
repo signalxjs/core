@@ -2,6 +2,8 @@
 
 Lightweight reactive component framework with signals and TSX support. This is the main entry point that re-exports the public API from `@sigx/reactivity`, `@sigx/runtime-core`, and `@sigx/runtime-dom`.
 
+📚 **Full guides, API reference and live examples → <https://sigx.dev/core/>**
+
 ## Install
 
 ```bash
@@ -27,18 +29,9 @@ const Counter = component(() => {
 render(<Counter />, document.getElementById('app')!);
 ```
 
-## Key Exports
+## 📚 Documentation
 
-- **Reactivity** — `signal`, `computed`, `effect`, `batch`, `watch`, `untrack`
-- **Components** — `component`, `lazy`, `defineApp`
-- **Lifecycle** — `onMounted`, `onUnmounted`, `onCreated`, `onUpdated`
-- **Rendering** — `render`, `Portal`, `Suspense`, `Fragment`
-- **Control Flow** — `Show`, `Switch`, `Match`
-- **JSX** — `jsx`, `jsxs`, `jsxDEV`
-
-## Documentation
-
-Full documentation and guides are available at the [SignalX repository](https://github.com/signalxjs/core).
+Full guides, the complete API reference and live examples → **<https://sigx.dev/core/>**
 
 ## License
 
