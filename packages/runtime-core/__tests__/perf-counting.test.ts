@@ -274,6 +274,40 @@ describe('component render counts (DOM)', () => {
         expect(container.textContent).toBe('2onetwo!');
     });
 
+    it('inline event handlers re-bind without listener churn (stable invoker)', () => {
+        const count = signal({ v: 0 });
+        const clicks: number[] = [];
+
+        const Comp = component(() => () =>
+            jsx('button', {
+                // fresh closure every render
+                onClick: () => clicks.push(count.v),
+                children: String(count.v),
+            })
+        );
+
+        render(jsx(Comp, {}), container);
+        const button = container.querySelector('button')!;
+        const addSpy = vi.spyOn(button, 'addEventListener');
+        const removeSpy = vi.spyOn(button, 'removeEventListener');
+
+        count.v = 1;
+        count.v = 2;
+        count.v = 3;
+
+        // Re-renders swap the invoker's inner value; the DOM listener is
+        // attached exactly once (at mount, before the spy) and never removed.
+        expect(addSpy).not.toHaveBeenCalled();
+        expect(removeSpy).not.toHaveBeenCalled();
+
+        // The swapped handler is the LATEST closure.
+        button.dispatchEvent(new MouseEvent('click'));
+        expect(clicks).toEqual([3]);
+
+        addSpy.mockRestore();
+        removeSpy.mockRestore();
+    });
+
     it('changed slot content re-renders the child exactly once', () => {
         const label = signal({ v: 'a' });
         const childRenders = vi.fn();

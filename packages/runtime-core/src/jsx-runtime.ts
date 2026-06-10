@@ -138,9 +138,18 @@ export function jsx(
         }
 
         const { children, ...rest } = (props || {});
+        // Share EMPTY_PROPS for prop-less elements so the renderer's
+        // `oldProps !== newProps` patch guard can skip the prop diff for
+        // bare wrappers entirely. Nothing in the runtime mutates element
+        // vnode props.
+        let hasProps = false;
+        for (const _k in rest) {
+            hasProps = true;
+            break;
+        }
         return {
             type: type as string | typeof Fragment,
-            props: rest,
+            props: hasProps ? rest : EMPTY_PROPS,
             key: key || rest.key || null,
             children: normalizeChildren(children),
             dom: null

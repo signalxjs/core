@@ -72,11 +72,14 @@ interface InternalComponentContext extends ComponentSetupContext {
 // ============================================================================
 
 function isSameVNode(n1: VNode, n2: VNode): boolean {
+    if (n1.type !== n2.type) return false;
     const k1 = n1.key == null ? null : n1.key;
     const k2 = n2.key == null ? null : n2.key;
-    if (n1.type !== n2.type) return false;
     if (k1 === k2) return true;
-
+    // Identity failed: only a string/number cross-type pair can still
+    // match (key coercion). Avoid the String() allocations on the hot
+    // same-type and null cases — this runs O(n) per keyed diff pass.
+    if (k1 === null || k2 === null || typeof k1 === typeof k2) return false;
     return String(k1) === String(k2);
 }
 
@@ -324,7 +327,10 @@ export function createRenderer<HostNode = any, HostElement = any>(
             vnode.dom = anchor;
             hostInsert(anchor, container, before);
             if (vnode.children) {
-                vnode.children.forEach((child: VNode) => mount(child, container, anchor, parentIsSVG));
+                const children = vnode.children;
+                for (let i = 0; i < children.length; i++) {
+                    mount(children[i], container, anchor, parentIsSVG);
+                }
             }
             return;
         }
@@ -365,10 +371,12 @@ export function createRenderer<HostNode = any, HostElement = any>(
         // Children - pass SVG context (reset for foreignObject)
         const childIsSVG = isSVG && tag !== 'foreignObject';
         if (vnode.children) {
-            vnode.children.forEach((child: VNode) => {
+            const children = vnode.children;
+            for (let i = 0; i < children.length; i++) {
+                const child = children[i];
                 child.parent = vnode;
-                mount(child, element, null, childIsSVG)
-            });
+                mount(child, element, null, childIsSVG);
+            }
         }
 
         hostInsert(element as unknown as HostNode, container, before);
@@ -407,7 +415,10 @@ export function createRenderer<HostNode = any, HostElement = any>(
 
         if (vnode.type === Fragment) {
             if (vnode.children) {
-                vnode.children.forEach((child: VNode) => unmount(child, container));
+                const children = vnode.children;
+                for (let i = 0; i < children.length; i++) {
+                    unmount(children[i], container);
+                }
             }
             // Remove anchor comment if exists
             if (vnode.dom) {
@@ -433,7 +444,10 @@ export function createRenderer<HostNode = any, HostElement = any>(
 
         // Recursively unmount children for regular elements
         if (vnode.children && vnode.children.length > 0) {
-            vnode.children.forEach((child: VNode) => unmount(child, vnode.dom as HostElement));
+            const children = vnode.children;
+            for (let i = 0; i < children.length; i++) {
+                unmount(children[i], vnode.dom as HostElement);
+            }
         }
 
         if (vnode.dom) {
@@ -633,34 +647,37 @@ export function createRenderer<HostNode = any, HostElement = any>(
         const tag = newVNode.type as string;
         const isSVG = tag === 'svg' || isSvgTag(tag);
 
-        // Update props
+        // Update props — skipped entirely when both sides share the same
+        // props object (prop-less elements share EMPTY_PROPS).
         const oldProps = oldVNode.props || {};
         const newProps = newVNode.props || {};
 
-        // Remove old props
-        for (const key in oldProps) {
-            if (!(key in newProps) && key !== 'children' && key !== 'key' && key !== 'ref') {
-                if (key.charCodeAt(0) === 117 /* 'u' */ && key.startsWith('use:')) {
-                    if (hostPatchDirective) {
-                        hostPatchDirective(element, key.slice(4), oldProps[key], null, currentAppContext);
+        if (oldProps !== newProps) {
+            // Remove old props
+            for (const key in oldProps) {
+                if (!(key in newProps) && key !== 'children' && key !== 'key' && key !== 'ref') {
+                    if (key.charCodeAt(0) === 117 /* 'u' */ && key.startsWith('use:')) {
+                        if (hostPatchDirective) {
+                            hostPatchDirective(element, key.slice(4), oldProps[key], null, currentAppContext);
+                        }
+                    } else {
+                        hostPatchProp(element, key, oldProps[key], null, isSVG);
                     }
-                } else {
-                    hostPatchProp(element, key, oldProps[key], null, isSVG);
                 }
             }
-        }
 
-        // Set new props
-        for (const key in newProps) {
-            const oldValue = oldProps[key];
-            const newValue = newProps[key];
-            if (key !== 'children' && key !== 'key' && key !== 'ref' && oldValue !== newValue) {
-                if (key.charCodeAt(0) === 117 /* 'u' */ && key.startsWith('use:')) {
-                    if (hostPatchDirective) {
-                        hostPatchDirective(element, key.slice(4), oldValue, newValue, currentAppContext);
+            // Set new props
+            for (const key in newProps) {
+                const oldValue = oldProps[key];
+                const newValue = newProps[key];
+                if (key !== 'children' && key !== 'key' && key !== 'ref' && oldValue !== newValue) {
+                    if (key.charCodeAt(0) === 117 /* 'u' */ && key.startsWith('use:')) {
+                        if (hostPatchDirective) {
+                            hostPatchDirective(element, key.slice(4), oldValue, newValue, currentAppContext);
+                        }
+                    } else {
+                        hostPatchProp(element, key, oldValue, newValue, isSVG);
                     }
-                } else {
-                    hostPatchProp(element, key, oldValue, newValue, isSVG);
                 }
             }
         }
@@ -679,7 +696,9 @@ export function createRenderer<HostNode = any, HostElement = any>(
         const oldChildren = oldVNode.children;
         const newChildren = newVNode.children;
 
-        newChildren.forEach((c: VNode) => c.parent = newVNode);
+        for (let i = 0; i < newChildren.length; i++) {
+            newChildren[i].parent = newVNode;
+        }
 
         reconcileChildrenArray(container, oldChildren, newChildren, parentIsSVG, fallbackAnchor);
     }

@@ -6,17 +6,22 @@
  * and custom property bindings.
  */
 
+/**
+ * Stable per-event listener wrapper: re-renders swap `invoker.value`
+ * instead of removing and re-adding the DOM listener for every fresh
+ * inline handler closure.
+ */
+interface EventInvoker extends EventListener {
+    value: Function;
+}
+
 export function patchProp(dom: Element, key: string, prevValue: any, nextValue: any, isSVG?: boolean) {
     // Guard: skip if dom is null (shouldn't happen but protects against edge cases)
     if (!dom) return;
-    const tagName = dom.tagName.toLowerCase();
-    
+
     // Detect SVG context: either passed explicitly or detect from element type
     // This ensures SVG attributes are handled correctly even if renderer doesn't pass isSVG
     const isSvgElement = isSVG ?? (dom instanceof SVGElement);
-    
-    const _oldProps = prevValue ? { [key]: prevValue } : {};
-    const _newProps = nextValue ? { [key]: nextValue } : {};
 
     // This is a simplified version of updateProps that handles a single prop
     // But the original updateProps handled all props at once.
@@ -66,6 +71,7 @@ export function patchProp(dom: Element, key: string, prevValue: any, nextValue: 
             el.style.cssText = '';
         }
     } else if (key.startsWith('on')) {
+        const tagName = dom.tagName.toLowerCase();
         if (key === 'onUpdate:modelValue' && (tagName === 'input' || tagName === 'textarea' || tagName === 'select')) {
             const el = dom as HTMLElement;
             if (oldValue) {
@@ -106,33 +112,36 @@ export function patchProp(dom: Element, key: string, prevValue: any, nextValue: 
         }
 
         const eventName = key.slice(2).toLowerCase();
-        // Store handlers on the DOM element to properly track them across re-renders
-        // Using a Map keyed by event name to ensure we remove the correct wrapper
+        // Store invokers on the DOM element, keyed by event name. Re-renders
+        // hand fresh handler closures to patchProp constantly; swapping
+        // `invoker.value` keeps the DOM listener stable instead of paying a
+        // removeEventListener+addEventListener per prop per re-render.
         const handlersKey = '__sigx_event_handlers';
-        let handlers = (dom as any)[handlersKey] as Map<string, EventListener> | undefined;
+        let handlers = (dom as any)[handlersKey] as Map<string, EventInvoker> | undefined;
         if (!handlers) {
             handlers = new Map();
             (dom as any)[handlersKey] = handlers;
         }
 
-        // Remove old handler if exists
-        const oldHandler = handlers.get(eventName);
-        if (oldHandler) {
-            dom.removeEventListener(eventName, oldHandler);
-            handlers.delete(eventName);
-        }
-
-        // Add new handler
+        const existing = handlers.get(eventName);
         if (newValue) {
-            const handler = (e: Event) => {
-                if (e instanceof CustomEvent) {
-                    (newValue as Function)(e.detail);
-                } else {
-                    (newValue as Function)(e);
-                }
-            };
-            handlers.set(eventName, handler);
-            dom.addEventListener(eventName, handler as EventListener);
+            if (existing) {
+                existing.value = newValue;
+            } else {
+                const invoker = function (e: Event) {
+                    if (e instanceof CustomEvent) {
+                        invoker.value(e.detail);
+                    } else {
+                        invoker.value(e);
+                    }
+                } as EventInvoker;
+                invoker.value = newValue;
+                handlers.set(eventName, invoker);
+                dom.addEventListener(eventName, invoker);
+            }
+        } else if (existing) {
+            dom.removeEventListener(eventName, existing);
+            handlers.delete(eventName);
         }
     } else if (key === 'className') {
         // For SVG, use setAttribute to preserve case (class works on both)
@@ -164,6 +173,7 @@ export function patchProp(dom: Element, key: string, prevValue: any, nextValue: 
             else dom.setAttribute(key, String(newValue));
         }
     } else {
+        const tagName = dom.tagName.toLowerCase();
         if ((tagName === 'input' || tagName === 'textarea' || tagName === 'select') &&
             (key === 'value' || key === 'checked')) {
             if (tagName === 'select' && key === 'value') {
