@@ -67,9 +67,11 @@ export {
     filterClientDirectives,
     getHydrationDirective,
     hasClientDirective,
-    serializeProps,
-    createEmit
+    serializeProps
 } from './hydration/index.js';
+
+// Component-setup helpers shared with the client hydrator
+export { createEmit, splitComponentProps } from './utils/component-props.js';
 
 // Async context (for SSR isolation)
 export { runInRequestScope, hasRequestIsolation } from './async-context.js';

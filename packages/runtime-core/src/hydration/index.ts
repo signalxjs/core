@@ -146,25 +146,3 @@ export function serializeProps(props: Record<string, any>): Record<string, any> 
 
     return hasProps ? result : undefined;
 }
-
-/**
- * Create an emit function for component context.
- * This is a common pattern used in both mountComponent and hydrateComponent.
- * 
- * @example
- * ```ts
- * const emit = createEmit(reactiveProps);
- * emit('click', eventData); // Calls props.onClick(eventData)
- * ```
- */
-export function createEmit(reactiveProps: { value?: Record<string, any> } | Record<string, any>): (event: string, ...args: any[]) => void {
-    return (event: string, ...args: any[]) => {
-        const eventName = `on${event[0].toUpperCase() + event.slice(1)}`;
-        // Handle both signal-wrapped props and plain props
-        const props = 'value' in reactiveProps ? reactiveProps.value : reactiveProps;
-        const handler = props?.[eventName];
-        if (handler && typeof handler === 'function') {
-            handler(...args);
-        }
-    };
-}

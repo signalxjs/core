@@ -10,8 +10,7 @@ import {
     VNode,
     getCurrentInstance,
     signal,
-    effect,
-    isModel
+    effect
 } from 'sigx';
 import type { ComponentSetupContext, SlotsObject } from 'sigx';
 import {
@@ -24,6 +23,7 @@ import {
     patchProp,
     filterClientDirectives,
     createEmit,
+    splitComponentProps,
     provideAppContext,
     queueJob,
     nextJobId,
@@ -110,18 +110,7 @@ export function hydrateComponent(vnode: VNode, dom: Node | null, parent: Node, t
 
     const internalVNode = vnode as InternalVNode;
     const initialProps = vnode.props || {};
-    const { children, slots: slotsFromProps, $models: modelsData, ...propsData } = filterClientDirectives(initialProps);
-
-    // Merge Model<T> objects directly into props for unified access: props.model.value
-    const propsWithModels = { ...propsData };
-    if (modelsData) {
-        for (const modelKey in modelsData) {
-            const modelValue = modelsData[modelKey];
-            if (isModel(modelValue)) {
-                propsWithModels[modelKey] = modelValue;
-            }
-        }
-    }
+    const { children, slotsFromProps, propsWithModels } = splitComponentProps(filterClientDirectives(initialProps));
 
     // Create reactive props
     const reactiveProps = signal(propsWithModels);

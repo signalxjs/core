@@ -7,7 +7,7 @@ import { createSlots } from './utils/slots.js';
 import { normalizeSubTree } from './utils/normalize.js';
 import { applyContextExtensions } from './plugins.js';
 import { isComponent } from './utils/is-component.js';
-import { createEmit } from './hydration/index.js';
+import { createEmit, splitComponentProps } from './utils/component-props.js';
 import { provideAppContext } from './di/injectable.js';
 import { isModel } from './model.js';
 import { asyncSetupClientError } from './errors.js';
@@ -802,8 +802,6 @@ export function createRenderer<HostNode = any, HostElement = any>(
         }
     }
 
-    // createPropsAccessor is now imported from component-helpers.ts
-
     function mountComponent(vnode: VNode, container: HostElement, before: HostNode | null, setup: SetupFn<any, any, any, any>) {
         // No wrapper element - we render directly into the container
         // Use an anchor comment to track the component's position
@@ -816,19 +814,7 @@ export function createRenderer<HostNode = any, HostElement = any>(
         let exposeCalled = false;
 
         const initialProps = vnode.props || {};
-        // Create reactive props - exclude children, slots, and $models to avoid deep recursion on VNodes
-        const { children, slots: slotsFromProps, $models: modelsData, ...propsData } = initialProps;
-        
-        // Merge Model<T> objects directly into props for unified access: props.model.value
-        const propsWithModels = { ...propsData };
-        if (modelsData) {
-            for (const modelKey in modelsData) {
-                const modelValue = modelsData[modelKey];
-                if (isModel(modelValue)) {
-                    propsWithModels[modelKey] = modelValue;
-                }
-            }
-        }
+        const { children, slotsFromProps, propsWithModels } = splitComponentProps(initialProps);
         
         // Wrap renderer-internal reactives so the devtools owner
         // attribution isn't polluted by the parent's render effect.

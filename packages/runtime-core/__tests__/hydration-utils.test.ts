@@ -6,8 +6,9 @@ import {
     getHydrationDirective,
     hasClientDirective,
     serializeProps,
-    createEmit,
 } from '../src/hydration/index';
+import { createEmit, splitComponentProps } from '../src/utils/component-props';
+import { createModel } from '../src/model';
 
 describe('CLIENT_DIRECTIVE_PREFIX', () => {
     it("is 'client:'", () => {
@@ -203,5 +204,35 @@ describe('createEmit', () => {
     it('no-ops when handler is not a function', () => {
         const emit = createEmit({ onClick: 'not-a-function' });
         expect(() => emit('click')).not.toThrow();
+    });
+});
+
+describe('splitComponentProps', () => {
+    it('separates children and slots from data props', () => {
+        const slots = { header: () => [] };
+        const result = splitComponentProps({ children: 'hi', slots, name: 'x', count: 1 });
+
+        expect(result.children).toBe('hi');
+        expect(result.slotsFromProps).toBe(slots);
+        expect(result.propsWithModels).toEqual({ name: 'x', count: 1 });
+    });
+
+    it('merges only Model values from $models into props', () => {
+        const m = createModel([{ v: 1 }, 'v'], () => {});
+        const result = splitComponentProps({
+            name: 'x',
+            $models: { value: m, bogus: { value: 1 } }
+        });
+
+        expect(result.propsWithModels.value).toBe(m);
+        expect(result.propsWithModels.bogus).toBeUndefined();
+        expect(result.propsWithModels.name).toBe('x');
+    });
+
+    it('handles empty props', () => {
+        const result = splitComponentProps({});
+        expect(result.children).toBeUndefined();
+        expect(result.slotsFromProps).toBeUndefined();
+        expect(result.propsWithModels).toEqual({});
     });
 });
