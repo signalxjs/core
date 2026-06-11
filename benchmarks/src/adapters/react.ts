@@ -4,8 +4,13 @@
  * piped into a byte-counting Writable (TTFB at first write).
  */
 import { Writable } from 'node:stream';
-import { createElement as ce, type ReactNode } from 'react';
+// @ts-expect-error — react ships no bundled type declarations and @types/react
+// is intentionally not a dependency; the adapter is untyped at this boundary.
+import { createElement as ce } from 'react';
+// @ts-expect-error — same: react-dom ships no bundled type declarations.
 import { renderToString, renderToPipeableStream } from 'react-dom/server';
+
+type ReactNode = unknown;
 import type { FrameworkAdapter, ScenarioName } from './types.ts';
 import type { StreamSample } from './measure.ts';
 import {
@@ -107,8 +112,8 @@ function measurePipeable(element: ReactNode): Promise<StreamSample> {
             // Pipe as soon as the shell is ready so the first chunk timestamps
             // TTFB; remaining content streams until the sink finishes.
             onShellReady() { pipe(sink); },
-            onShellError(err) { reject(err); },
-            onError(err) { reject(err as Error); }
+            onShellError(err: unknown) { reject(err); },
+            onError(err: unknown) { reject(err as Error); }
         });
     });
 }

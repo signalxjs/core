@@ -35,7 +35,7 @@ function Table({ rows }: { rows: TableRow[] }) {
         h('tbody', null, rows.map((row) => h(Row, { row, key: row.id }))));
 }
 
-function Level({ depth, branching }: { depth: number; branching: number }): VNode {
+function Level({ depth, branching }: { depth: number; branching: number }): VNode<any> {
     return h('div', { class: `lvl lvl-${depth}` },
         depth <= 1
             ? 'leaf'
@@ -45,7 +45,7 @@ function Level({ depth, branching }: { depth: number; branching: number }): VNod
 
 // --- scenario trees ----------------------------------------------------------
 
-function smallPage(): VNode {
+function smallPage(): VNode<any> {
     return h('div', { id: 'app' },
         h('header', null,
             h('h1', null, SMALL_PAGE.title),
@@ -56,7 +56,7 @@ function smallPage(): VNode {
         h('footer', null, h('p', null, SMALL_PAGE.footer)));
 }
 
-function attrDiv(item: AttrItem): VNode {
+function attrDiv(item: AttrItem): VNode<any> {
     return h('div', {
         id: item.id,
         class: item.className,
@@ -70,11 +70,11 @@ function attrDiv(item: AttrItem): VNode {
     }, item.label);
 }
 
-function article(paragraphs: string[]): VNode {
+function article(paragraphs: string[]): VNode<any> {
     return h('article', { class: 'prose' }, paragraphs.map((p, i) => h('p', { key: i }, p)));
 }
 
-function build(scenario: ScenarioName): VNode {
+function build(scenario: ScenarioName): VNode<any> {
     switch (scenario) {
         case 'small-page': return smallPage();
         case 'large-table': return h(Table, { rows: ROWS_10K });

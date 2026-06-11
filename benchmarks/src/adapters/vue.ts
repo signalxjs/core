@@ -3,7 +3,7 @@
  * through @vue/server-renderer. Children of components are passed as function
  * slots (Vue's equivalent of sigx's slots.default()).
  */
-import { h, defineComponent, createSSRApp, type VNodeChild } from 'vue';
+import { h, defineComponent, createSSRApp, type VNode, type VNodeChild } from 'vue';
 import { renderToString, renderToNodeStream } from '@vue/server-renderer';
 import type { FrameworkAdapter, ScenarioName } from './types.ts';
 import { measureReadable } from './measure.ts';
@@ -49,15 +49,17 @@ const Table = defineComponent({
     }
 });
 
+// Explicit return annotations break the self-referential type inference cycle
+// (Level appears in its own initializer via the recursive h() call).
 const Level = defineComponent({
     name: 'Level',
     props: { depth: { type: Number, required: true }, branching: { type: Number, required: true } },
     setup(props) {
         const { depth, branching } = props;
-        return () => h('div', { class: `lvl lvl-${depth}` },
+        return (): VNode => h('div', { class: `lvl lvl-${depth}` },
             depth <= 1
                 ? 'leaf'
-                : Array.from({ length: branching }, (_, i) =>
+                : Array.from({ length: branching }, (_, i): VNode =>
                     h(Level, { depth: depth - 1, branching, key: i })));
     }
 });

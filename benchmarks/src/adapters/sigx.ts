@@ -53,13 +53,15 @@ const Table = component<{ rows: TableRow[] }>((ctx) => {
     });
 });
 
+// Explicit return annotations break the self-referential type inference cycle
+// (Level appears in its own initializer via the recursive jsx() call).
 const Level = component<{ depth: number; branching: number }>((ctx) => {
     const { depth, branching } = ctx.props;
-    return () => jsx('div', {
+    return (): JSXElement => jsx('div', {
         class: `lvl lvl-${depth}`,
         children: depth <= 1
             ? 'leaf'
-            : Array.from({ length: branching }, (_, i) =>
+            : Array.from({ length: branching }, (_, i): JSXElement =>
                 jsx(Level, { depth: depth - 1, branching }, String(i)))
     });
 });
