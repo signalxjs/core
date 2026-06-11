@@ -2,8 +2,8 @@
 // Collection Reactivity Support (Set, Map, WeakSet, WeakMap)
 // ============================================================================
 
-import type { Subscriber } from './types';
-import { track, trigger } from './effect';
+import type { Dep } from './types';
+import { batch, track, trigger } from './effect';
 
 /** Symbol for tracking iteration dependencies (forEach, keys, values, entries, size) */
 export const ITERATION_KEY = Symbol('sigx:iterate');
@@ -95,8 +95,8 @@ export function shouldNotProxy(value: unknown): boolean {
  * `add`/`set`/`delete`, or a synthetic `'clear'` marker for `clear`).
  */
 export function createCollectionInstrumentations(
-    depsMap: Map<string | symbol, Set<Subscriber>>,
-    getOrCreateDep: (key: string | symbol) => Set<Subscriber>,
+    depsMap: Map<string | symbol, Dep>,
+    getOrCreateDep: (key: string | symbol) => Dep,
     notify: (key: string | symbol) => void = () => {}
 ) {
     const instrumentations: Record<string | symbol, any> = {};
@@ -194,11 +194,14 @@ export function createCollectionInstrumentations(
         const hadKey = target.has(rawValue);
         target.add(rawValue);
         if (!hadKey) {
-            // Trigger both the specific key and iteration
-            const dep = depsMap.get(rawValue as string | symbol);
-            if (dep) trigger(dep);
-            const iterDep = depsMap.get(ITERATION_KEY);
-            if (iterDep) trigger(iterDep);
+            // Trigger both the specific key and iteration as one flush so
+            // an effect reading both runs once, not twice.
+            batch(() => {
+                const dep = depsMap.get(rawValue as string | symbol);
+                if (dep) trigger(dep);
+                const iterDep = depsMap.get(ITERATION_KEY);
+                if (iterDep) trigger(iterDep);
+            });
             notify(rawValue as string | symbol);
         }
         return this; // Return the proxy, not raw
@@ -212,15 +215,17 @@ export function createCollectionInstrumentations(
         const hadKey = target.has(rawKey);
         const oldValue = target.get(rawKey);
         target.set(rawKey, rawValue);
-        if (!hadKey) {
-            // New key - trigger iteration
-            const iterDep = depsMap.get(ITERATION_KEY);
-            if (iterDep) trigger(iterDep);
-        }
         if (!hadKey || !Object.is(oldValue, rawValue)) {
-            // Value changed - trigger key dependency
-            const dep = depsMap.get(rawKey as string | symbol);
-            if (dep) trigger(dep);
+            // New key or changed value: trigger iteration (size/forEach)
+            // and the key dependency as one flush.
+            batch(() => {
+                if (!hadKey) {
+                    const iterDep = depsMap.get(ITERATION_KEY);
+                    if (iterDep) trigger(iterDep);
+                }
+                const dep = depsMap.get(rawKey as string | symbol);
+                if (dep) trigger(dep);
+            });
             notify(rawKey as string | symbol);
         }
         return this; // Return the proxy, not raw
@@ -233,11 +238,13 @@ export function createCollectionInstrumentations(
         const hadKey = target.has(rawKey);
         const result = target.delete(rawKey);
         if (hadKey) {
-            // Trigger both the specific key and iteration
-            const dep = depsMap.get(rawKey as string | symbol);
-            if (dep) trigger(dep);
-            const iterDep = depsMap.get(ITERATION_KEY);
-            if (iterDep) trigger(iterDep);
+            // Trigger both the specific key and iteration as one flush
+            batch(() => {
+                const dep = depsMap.get(rawKey as string | symbol);
+                if (dep) trigger(dep);
+                const iterDep = depsMap.get(ITERATION_KEY);
+                if (iterDep) trigger(iterDep);
+            });
             notify(rawKey as string | symbol);
         }
         return result;
@@ -249,10 +256,12 @@ export function createCollectionInstrumentations(
         const hadItems = target.size > 0;
         target.clear();
         if (hadItems) {
-            // Trigger all dependencies
-            for (const dep of depsMap.values()) {
-                trigger(dep);
-            }
+            // Trigger all dependencies as one flush
+            batch(() => {
+                for (const dep of depsMap.values()) {
+                    trigger(dep);
+                }
+            });
             notify('clear');
         }
     };

@@ -56,3 +56,6 @@ coverage/
 .cache/
 .temp/
 .tmp/
+
+# benchmark output (pnpm bench:json)
+bench-results.json

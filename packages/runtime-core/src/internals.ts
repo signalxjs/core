@@ -25,6 +25,10 @@ export type {
 export { setCurrentInstance, getCurrentInstance } from './component.js';
 export type { SetupFn, ViewFn, ComponentSetupContext, SlotsObject } from './component.js';
 
+// Render scheduler (one job per component, parent-before-child flush)
+export { queueJob, flushJobs, nextJobId } from './scheduler.js';
+export type { SchedulerJob } from './scheduler.js';
+
 // Renderer utilities
 export { createPropsAccessor } from './utils/props-accessor.js';
 export { createSlots } from './utils/slots.js';

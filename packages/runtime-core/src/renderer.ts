@@ -1,4 +1,4 @@
-import { VNode, Fragment, JSXElement, Text, Comment } from './jsx-runtime.js';
+import { VNode, Fragment, JSXElement, Text, Comment, EMPTY_PROPS } from './jsx-runtime.js';
 import { effect, signal, untrack, EffectRunner } from '@sigx/reactivity';
 import { withoutOwnerTracking } from '@sigx/reactivity/internals';
 import { ComponentSetupContext, setCurrentInstance, getCurrentInstance, MountContext, ViewFn, SetupFn } from './component.js';
@@ -11,6 +11,7 @@ import { createEmit } from './hydration/index.js';
 import { provideAppContext } from './di/injectable.js';
 import { isModel } from './model.js';
 import { asyncSetupClientError } from './errors.js';
+import { queueJob, nextJobId, type SchedulerJob } from './scheduler.js';
 import {
     AppContext,
     ComponentInstance,
@@ -71,12 +72,60 @@ interface InternalComponentContext extends ComponentSetupContext {
 // ============================================================================
 
 function isSameVNode(n1: VNode, n2: VNode): boolean {
+    if (n1.type !== n2.type) return false;
     const k1 = n1.key == null ? null : n1.key;
     const k2 = n2.key == null ? null : n2.key;
-    if (n1.type !== n2.type) return false;
     if (k1 === k2) return true;
-
+    // Identity failed: only a string/number cross-type pair can still
+    // match (key coercion). Avoid the String() allocations on the hot
+    // same-type and null cases — this runs O(n) per keyed diff pass.
+    if (k1 === null || k2 === null || typeof k1 === typeof k2) return false;
     return String(k1) === String(k2);
+}
+
+/**
+ * Conservative structural equality for slot content (raw `props.children`
+ * values: vnodes, arrays, primitives). Used to elide the slot version
+ * bump when a parent re-render passes identical slot content. MUST err
+ * on the side of "different": any uncertainty returns false and the
+ * child re-renders exactly as it always did. Fresh inline closures in
+ * props make this return false naturally (`!==`), which is correct —
+ * the new handler must reach the DOM.
+ */
+function sameSlotChildren(a: any, b: any): boolean {
+    if (a === b) return true;
+    const aIsArray = Array.isArray(a);
+    const bIsArray = Array.isArray(b);
+    if (aIsArray || bIsArray) {
+        if (!aIsArray || !bIsArray || a.length !== b.length) return false;
+        for (let i = 0; i < a.length; i++) {
+            if (!sameSlotChildren(a[i], b[i])) return false;
+        }
+        return true;
+    }
+    if (a == null || b == null || typeof a !== 'object' || typeof b !== 'object') {
+        // primitives (and mismatched null/undefined): identity above was
+        // the only acceptable equality
+        return false;
+    }
+    // Only vnode-shaped objects can be compared structurally. Anything
+    // else (state proxies, arbitrary user objects) is only equal by the
+    // identity check above — comparing absent vnode fields would make
+    // two DIFFERENT opaque objects look identical.
+    if (a.type === undefined || b.type === undefined) return false;
+    if (a.type !== b.type || a.key !== b.key || a.text !== b.text) return false;
+    const aProps = a.props || EMPTY_PROPS;
+    const bProps = b.props || EMPTY_PROPS;
+    for (const k in aProps) {
+        if (k === 'children') continue;
+        if (aProps[k] !== bProps[k]) return false;
+    }
+    for (const k in bProps) {
+        if (k === 'children') continue;
+        if (!(k in aProps)) return false;
+    }
+    return sameSlotChildren(aProps.children, bProps.children)
+        && sameSlotChildren(a.children, b.children);
 }
 
 function createKeyToKeyIndexMap(children: VNode[], beginIdx: number, endIdx: number) {
@@ -282,7 +331,10 @@ export function createRenderer<HostNode = any, HostElement = any>(
             vnode.dom = anchor;
             hostInsert(anchor, container, before);
             if (vnode.children) {
-                vnode.children.forEach((child: VNode) => mount(child, container, anchor, parentIsSVG));
+                const children = vnode.children;
+                for (let i = 0; i < children.length; i++) {
+                    mount(children[i], container, anchor, parentIsSVG);
+                }
             }
             return;
         }
@@ -323,10 +375,12 @@ export function createRenderer<HostNode = any, HostElement = any>(
         // Children - pass SVG context (reset for foreignObject)
         const childIsSVG = isSVG && tag !== 'foreignObject';
         if (vnode.children) {
-            vnode.children.forEach((child: VNode) => {
+            const children = vnode.children;
+            for (let i = 0; i < children.length; i++) {
+                const child = children[i];
                 child.parent = vnode;
-                mount(child, element, null, childIsSVG)
-            });
+                mount(child, element, null, childIsSVG);
+            }
         }
 
         hostInsert(element as unknown as HostNode, container, before);
@@ -365,7 +419,10 @@ export function createRenderer<HostNode = any, HostElement = any>(
 
         if (vnode.type === Fragment) {
             if (vnode.children) {
-                vnode.children.forEach((child: VNode) => unmount(child, container));
+                const children = vnode.children;
+                for (let i = 0; i < children.length; i++) {
+                    unmount(children[i], container);
+                }
             }
             // Remove anchor comment if exists
             if (vnode.dom) {
@@ -391,7 +448,10 @@ export function createRenderer<HostNode = any, HostElement = any>(
 
         // Recursively unmount children for regular elements
         if (vnode.children && vnode.children.length > 0) {
-            vnode.children.forEach((child: VNode) => unmount(child, vnode.dom as HostElement));
+            const children = vnode.children;
+            for (let i = 0; i < children.length; i++) {
+                unmount(children[i], vnode.dom as HostElement);
+            }
         }
 
         if (vnode.dom) {
@@ -489,20 +549,37 @@ export function createRenderer<HostNode = any, HostElement = any>(
             const newSlotsFromProps = newVNode.props?.slots;
 
             if (slotsRef) {
-                // Update children for default slot
+                let slotContentChanged = false;
+
+                // Update children for default slot — only when the new
+                // content structurally differs. On equality we keep the
+                // OLD vnodes (the ones the child's mounted subtree
+                // references) and skip the version bump entirely, so a
+                // parent-only re-render no longer forces every child
+                // with static slot content to re-render.
                 if (newChildren !== undefined) {
-                    slotsRef._children = newChildren;
+                    if (sameSlotChildren(slotsRef._children, newChildren)) {
+                        // keep mounted originals
+                    } else {
+                        slotsRef._children = newChildren;
+                        slotContentChanged = true;
+                    }
                 }
 
-                // Update slot functions from the slots prop
+                // Update slot functions from the slots prop. Function
+                // identity is the only cheap safe signal here: inline
+                // slot objects/closures always differ and always bump.
                 if (newSlotsFromProps !== undefined) {
-                    slotsRef._slotsFromProps = newSlotsFromProps;
+                    if (slotsRef._slotsFromProps !== newSlotsFromProps) {
+                        slotsRef._slotsFromProps = newSlotsFromProps;
+                        slotContentChanged = true;
+                    }
                 }
 
                 // Trigger component re-render by bumping version
                 // Use per-component flag to prevent infinite loops on the SAME component
                 // but allow nested components to update
-                if (!slotsRef._isPatching) {
+                if (slotContentChanged && !slotsRef._isPatching) {
                     slotsRef._isPatching = true;
                     try {
                         untrack(() => {
@@ -574,34 +651,39 @@ export function createRenderer<HostNode = any, HostElement = any>(
         const tag = newVNode.type as string;
         const isSVG = tag === 'svg' || isSvgTag(tag);
 
-        // Update props
-        const oldProps = oldVNode.props || {};
-        const newProps = newVNode.props || {};
+        // Update props — skipped entirely when both sides share the same
+        // props object (prop-less elements share EMPTY_PROPS). Compare the
+        // RAW references first: substituting fresh `{}` for a missing props
+        // object would make the identity guard never fire.
+        const oldProps = oldVNode.props || EMPTY_PROPS;
+        const newProps = newVNode.props || EMPTY_PROPS;
 
-        // Remove old props
-        for (const key in oldProps) {
-            if (!(key in newProps) && key !== 'children' && key !== 'key' && key !== 'ref') {
-                if (key.charCodeAt(0) === 117 /* 'u' */ && key.startsWith('use:')) {
-                    if (hostPatchDirective) {
-                        hostPatchDirective(element, key.slice(4), oldProps[key], null, currentAppContext);
+        if (oldProps !== newProps) {
+            // Remove old props
+            for (const key in oldProps) {
+                if (!(key in newProps) && key !== 'children' && key !== 'key' && key !== 'ref') {
+                    if (key.charCodeAt(0) === 117 /* 'u' */ && key.startsWith('use:')) {
+                        if (hostPatchDirective) {
+                            hostPatchDirective(element, key.slice(4), oldProps[key], null, currentAppContext);
+                        }
+                    } else {
+                        hostPatchProp(element, key, oldProps[key], null, isSVG);
                     }
-                } else {
-                    hostPatchProp(element, key, oldProps[key], null, isSVG);
                 }
             }
-        }
 
-        // Set new props
-        for (const key in newProps) {
-            const oldValue = oldProps[key];
-            const newValue = newProps[key];
-            if (key !== 'children' && key !== 'key' && key !== 'ref' && oldValue !== newValue) {
-                if (key.charCodeAt(0) === 117 /* 'u' */ && key.startsWith('use:')) {
-                    if (hostPatchDirective) {
-                        hostPatchDirective(element, key.slice(4), oldValue, newValue, currentAppContext);
+            // Set new props
+            for (const key in newProps) {
+                const oldValue = oldProps[key];
+                const newValue = newProps[key];
+                if (key !== 'children' && key !== 'key' && key !== 'ref' && oldValue !== newValue) {
+                    if (key.charCodeAt(0) === 117 /* 'u' */ && key.startsWith('use:')) {
+                        if (hostPatchDirective) {
+                            hostPatchDirective(element, key.slice(4), oldValue, newValue, currentAppContext);
+                        }
+                    } else {
+                        hostPatchProp(element, key, oldValue, newValue, isSVG);
                     }
-                } else {
-                    hostPatchProp(element, key, oldValue, newValue, isSVG);
                 }
             }
         }
@@ -620,7 +702,9 @@ export function createRenderer<HostNode = any, HostElement = any>(
         const oldChildren = oldVNode.children;
         const newChildren = newVNode.children;
 
-        newChildren.forEach((c: VNode) => c.parent = newVNode);
+        for (let i = 0; i < newChildren.length; i++) {
+            newChildren[i].parent = newVNode;
+        }
 
         reconcileChildrenArray(container, oldChildren, newChildren, parentIsSVG, fallbackAnchor);
     }
@@ -849,6 +933,15 @@ export function createRenderer<HostNode = any, HostElement = any>(
             const subTreeRef: { current: VNode | null } = { current: null };
             internalVNode._subTreeRef = subTreeRef;
 
+            // Route re-renders through the render queue: one job per
+            // component, deduped per notification wave, parents before
+            // children (mount-order id). The first render stays inline.
+            let scheduledRun: (() => void) | undefined;
+            const renderJob: SchedulerJob = Object.assign(
+                () => { if (scheduledRun) scheduledRun(); },
+                { id: nextJobId() }
+            );
+
             const componentEffect = effect(() => {
                 // Set current instance during render so child components can find their parent
                 const prevInstance = setCurrentInstance(ctx);
@@ -894,6 +987,11 @@ export function createRenderer<HostNode = any, HostElement = any>(
                 } finally {
                     setCurrentInstance(prevInstance);
                 }
+            }, {
+                scheduler: (run) => {
+                    scheduledRun = run;
+                    queueJob(renderJob);
+                },
             });
             internalVNode._effect = componentEffect;
 

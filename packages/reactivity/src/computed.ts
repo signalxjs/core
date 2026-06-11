@@ -11,7 +11,19 @@ import type {
     WritableComputedOptions 
 } from './types';
 import { ComputedSymbol } from './types';
-import { cleanup, track, trigger, setCurrentSubscriber, getCurrentSubscriber } from './effect';
+import {
+    cleanup,
+    createDep,
+    track,
+    setCurrentSubscriber,
+    getCurrentSubscriber,
+    sourcesChanged,
+    CLEAN,
+    DIRTY,
+    MAYBE_DIRTY,
+    COMPUTING,
+    ERRORED,
+} from './effect';
 import { getAccessObserver, setAccessObserver } from './signal';
 import { getDevtoolsHook, registerReactiveProxy } from './devtools-hook';
 
@@ -48,9 +60,9 @@ export function computed<T>(
         setter = getterOrOptions.set;
     }
 
-    const subscribers = new Set<Subscriber>();
+    const ownDep = createDep();
     let cachedValue: T;
-    let dirty = true;
+    let firstRun = true;
 
     // Devtools id minted at create time. `null` skips emissions
     // entirely on every recompute.
@@ -64,48 +76,89 @@ export function computed<T>(
         });
     }
 
-    // Internal effect for dependency tracking
+    // Internal subscriber node. Its function body is never invoked: the
+    // mark phase flags computed nodes and recurses into their own dep
+    // instead of calling them; recomputation happens lazily in refresh().
     const computedEffect: Subscriber = function () {
-        if (!dirty) {
-            dirty = true;
-            trigger(subscribers);
-        }
     } as Subscriber;
     computedEffect.deps = [];
+    computedEffect.flags = DIRTY; // must compute on first read
+    computedEffect.ownDep = ownDep;
+    ownDep.computed = computedEffect;
 
-    const computeValue = (): T => {
+    /**
+     * Pull phase: bring the cached value up to date.
+     * - CLEAN: nothing to do.
+     * - MAYBE_DIRTY only: validate sources first; if none actually
+     *   changed value, become CLEAN without running the getter (cutoff).
+     * - DIRTY (or validation found a change): recompute, and advance
+     *   ownDep.version only if the result is not Object.is-equal — the
+     *   value-equality cutoff downstream subscribers validate against.
+     */
+    const refresh = (): void => {
+        const flags = computedEffect.flags;
+        if ((flags & COMPUTING) !== 0) return; // cycle: yield cached value
+        if ((flags & (DIRTY | MAYBE_DIRTY)) === 0) return;
+        if ((flags & DIRTY) === 0) {
+            if (!sourcesChanged(computedEffect)) {
+                computedEffect.flags = CLEAN;
+                return;
+            }
+        }
+        computedEffect.flags = COMPUTING;
         cleanup(computedEffect);
         const prevEffect = getCurrentSubscriber();
         setCurrentSubscriber(computedEffect);
         try {
-            cachedValue = getter();
-            dirty = false;
+            const newValue = getter();
+            const changed = firstRun || !Object.is(newValue, cachedValue);
+            cachedValue = newValue;
+            firstRun = false;
+            computedEffect.flags = CLEAN;
+            if (changed) ownDep.version++;
             if (computedId !== null) {
                 const hook = getDevtoolsHook();
                 if (hook) hook.emit({ type: 'computed:recomputed', id: computedId });
             }
-            return cachedValue;
+        } catch (err) {
+            // Surface getter errors at read time and retry on the next
+            // read. ERRORED forces downstream re-notification on the next
+            // source write, so subscribed effects aren't wedged by a
+            // transient failure.
+            computedEffect.flags = DIRTY | ERRORED;
+            throw err;
         } finally {
             setCurrentSubscriber(prevEffect);
         }
+    };
+    computedEffect.refresh = refresh;
+
+    const readValue = (): T => {
+        // Notify access observer for model binding integration (detectAccess)
+        const observer = getAccessObserver();
+        if (observer) {
+            observer(computedObj, 'value');
+            // Suspend observer so refresh's internal signal reads don't leak
+            setAccessObserver(null);
+        }
+        try {
+            refresh();
+        } finally {
+            // Track AFTER refresh so the link records the post-recompute
+            // version; in a finally so a throwing getter still subscribes
+            // the reader for the retry.
+            track(ownDep);
+            // Restore observer after compute
+            if (observer) setAccessObserver(observer);
+        }
+        return cachedValue;
     };
 
     // The computed object with .value accessor
     const computedObj = {
         [ComputedSymbol]: true as const,
         get value(): T {
-            // Notify access observer for model binding integration (detectAccess)
-            const observer = getAccessObserver();
-            if (observer) {
-                observer(computedObj, 'value');
-                // Suspend observer so computeValue's internal signal reads don't leak
-                setAccessObserver(null);
-            }
-            track(subscribers);
-            const result = dirty ? computeValue() : cachedValue;
-            // Restore observer after compute
-            if (observer) setAccessObserver(observer);
-            return result;
+            return readValue();
         },
     };
 
@@ -113,18 +166,7 @@ export function computed<T>(
     if (setter) {
         Object.defineProperty(computedObj, 'value', {
             get(): T {
-                // Notify access observer for model binding integration (detectAccess)
-                const observer = getAccessObserver();
-                if (observer) {
-                    observer(computedObj, 'value');
-                    // Suspend observer so computeValue's internal signal reads don't leak
-                    setAccessObserver(null);
-                }
-                track(subscribers);
-                const result = dirty ? computeValue() : cachedValue;
-                // Restore observer after compute
-                if (observer) setAccessObserver(observer);
-                return result;
+                return readValue();
             },
             set(newValue: T) {
                 setter!(newValue);

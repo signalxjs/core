@@ -523,7 +523,7 @@ declare global {
             blocking?: 'render' | '';
             elementTiming?: string;
 
-            // Event handlers (React-style camelCase)
+            // Event handlers (camelCase on* props)
             onAbort?: (event: Event) => void;
             onAnimationCancel?: (event: AnimationEvent) => void;
             onAnimationEnd?: (event: AnimationEvent) => void;

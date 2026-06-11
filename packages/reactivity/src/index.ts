@@ -5,6 +5,8 @@
 // Types
 export type {
     EffectFn,
+    EffectOptions,
+    EffectScheduler,
     EffectRunner,
     Subscriber,
     Widen,

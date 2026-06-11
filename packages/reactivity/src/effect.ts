@@ -2,12 +2,57 @@
 // Effect System - Core reactivity primitives
 // ============================================================================
 
-import type { EffectFn, EffectRunner, Subscriber } from './types';
+import type { Dep, EffectFn, EffectOptions, EffectRunner, EffectScheduler, Subscriber } from './types';
 import { getDevtoolsHook } from './devtools-hook';
+
+/** Create a dependency slot (see {@link Dep}). */
+export function createDep(): Dep {
+    return { subs: new Set<Subscriber>(), version: 0 };
+}
+
+// Subscriber dirtiness flags (Subscriber.flags).
+export const CLEAN = 0;
+/** A direct source definitely changed: must re-run / recompute. */
+export const DIRTY = 1 << 0;
+/** A computed source was invalidated: validate before running. */
+export const MAYBE_DIRTY = 1 << 1;
+/** Cycle guard: this computed's getter is currently executing. */
+export const COMPUTING = 1 << 2;
+/** Already sitting in the pending-effects queue (dedup without a Set). */
+const QUEUED = 1 << 3;
+/**
+ * The computed's last refresh threw. A computed normally propagates
+ * downstream only on its first dirtying per wave; an errored computed
+ * stays DIRTY across waves, which would suppress that propagation and
+ * wedge its subscribers after a transient getter error. This bit forces
+ * one extra downstream propagation per mark (cleared on propagation, so
+ * cycle termination is preserved) until a refresh succeeds.
+ */
+export const ERRORED = 1 << 4;
+
+/**
+ * Pull-validate a subscriber whose sources are all "maybe dirty":
+ * refresh computed sources and report whether any source's version
+ * actually advanced past the version recorded at track time.
+ */
+export function sourcesChanged(sub: Subscriber): boolean {
+    for (const link of sub.deps) {
+        const computedSub = link.dep.computed;
+        if (computedSub) {
+            computedSub.refresh!();
+        }
+        if (link.dep.version !== link.version) {
+            return true;
+        }
+    }
+    return false;
+}
 
 export let currentSubscriber: Subscriber | null = null;
 let batchDepth = 0;
-const pendingEffects = new Set<Subscriber>();
+// Deduplicated via the QUEUED subscriber flag — cheaper than a Set on
+// the per-write hot path.
+const pendingEffects: Subscriber[] = [];
 
 export function setCurrentSubscriber(effect: Subscriber | null): void {
     currentSubscriber = effect;
@@ -36,41 +81,104 @@ export function batch(fn: () => void) {
     } finally {
         batchDepth--;
         if (batchDepth === 0) {
-            const effects = Array.from(pendingEffects);
-            pendingEffects.clear();
-            for (const effect of effects) {
-                effect();
+            flushPendingEffects();
+        }
+    }
+}
+
+function flushPendingEffects(): void {
+    while (pendingEffects.length > 0) {
+        // Snapshot-and-clear: a nested trigger during a run flushes its
+        // own wave immediately (depth-first), exactly as before.
+        const effects = pendingEffects.splice(0, pendingEffects.length);
+        for (const effect of effects) {
+            effect.flags &= ~QUEUED;
+            effect();
+        }
+    }
+    // Every notification wave ends by draining scheduled work (e.g. the
+    // renderer's render queue), so scheduler users never need their own
+    // "am I mid-batch?" probe.
+    if (flushHandler) flushHandler();
+}
+
+let flushHandler: (() => void) | null = null;
+
+/**
+ * Register a callback invoked at the end of every notification wave
+ * (after all pending effects have run). Used by renderers to drain a
+ * deduplicated job queue filled via the effect `scheduler` option.
+ *
+ * @internal exported via `@sigx/reactivity/internals`
+ */
+export function setFlushHandler(fn: (() => void) | null): void {
+    flushHandler = fn;
+}
+
+export function cleanup(effect: Subscriber): void {
+    if (!effect.deps) return;
+    for (const link of effect.deps) {
+        link.dep.subs.delete(effect);
+    }
+    effect.deps.length = 0;
+}
+
+export function track(dep: Dep): void {
+    if (!currentSubscriber) return;
+    dep.subs.add(currentSubscriber);
+    currentSubscriber.deps.push({ dep, version: dep.version });
+}
+
+/**
+ * Two-pass push: first MARK the whole downstream graph (computeds become
+ * maybe-dirty, effects are queued and deduped), then FLUSH the queued
+ * effects. Marking everything before running anything is what makes a
+ * diamond (s → c1,c2 → e) glitch-free and single-run: when `e` executes,
+ * both branches already know they must (re)validate.
+ *
+ * Effects still flush synchronously before the signal write returns
+ * (unless an outer batch() is open), so write-then-assert code keeps
+ * working unchanged.
+ */
+export function trigger(dep: Dep): void {
+    // Every trigger is a definite value change (callers already gate on
+    // Object.is), so the version always advances.
+    dep.version++;
+    batchDepth++;
+    try {
+        mark(dep, DIRTY);
+    } finally {
+        batchDepth--;
+        if (batchDepth === 0) {
+            flushPendingEffects();
+        }
+    }
+}
+
+function mark(dep: Dep, bit: number): void {
+    // The mark phase runs no user code, so dep.subs cannot mutate
+    // mid-iteration — no snapshot needed.
+    for (const sub of dep.subs) {
+        const prev = sub.flags;
+        if (sub.ownDep) {
+            sub.flags = (prev | bit) & ~ERRORED;
+            // Computed node: propagate downstream once per wave. An
+            // already-flagged computed has already propagated (this also
+            // terminates cycles) — unless its last refresh errored, in
+            // which case it must re-notify so subscribers can retry.
+            if ((prev & (DIRTY | MAYBE_DIRTY)) === 0 || (prev & ERRORED) !== 0) {
+                mark(sub.ownDep, MAYBE_DIRTY);
+            }
+        } else {
+            sub.flags = prev | bit | QUEUED;
+            if ((prev & QUEUED) === 0) {
+                pendingEffects.push(sub);
             }
         }
     }
 }
 
-export function cleanup(effect: Subscriber): void {
-    if (!effect.deps) return;
-    for (const dep of effect.deps) {
-        dep.delete(effect);
-    }
-    effect.deps.length = 0;
-}
-
-export function track(depSet: Set<Subscriber>): void {
-    if (!currentSubscriber) return;
-    depSet.add(currentSubscriber);
-    currentSubscriber.deps.push(depSet);
-}
-
-export function trigger(depSet: Set<Subscriber>): void {
-    const effects = Array.from(depSet);
-    for (const effect of effects) {
-        if (batchDepth > 0) {
-            pendingEffects.add(effect);
-        } else {
-            effect();
-        }
-    }
-}
-
-function runEffect(fn: EffectFn): EffectRunner {
+function runEffect(fn: EffectFn, scheduler?: EffectScheduler): EffectRunner {
     let stopped = false;
     // Re-entrancy guard. If a running effect synchronously triggers a
     // signal that lists itself as a subscriber (e.g. an unmount hook
@@ -94,9 +202,45 @@ function runEffect(fn: EffectFn): EffectRunner {
         });
     }
 
+    // The tracked subscriber: invoked on notification. With a scheduler,
+    // notifications hand the validating `runJob` to the caller's queue
+    // instead of executing it — dedup and ordering become the caller's
+    // policy, while validation (and thus the value-equality cutoff) stays
+    // inside the job itself.
     const effectFn: Subscriber = function () {
         if (stopped) return;
-        if (running) return;
+        if (running) {
+            // Re-entrant notification (the effect triggered itself while
+            // executing): dropped, never scheduled — matching the long-
+            // standing guard that prevents render loops. Clear the dirt
+            // bits (but keep QUEUED bookkeeping) so a stale bit can't
+            // skew the next real validation.
+            effectFn.flags &= QUEUED;
+            return;
+        }
+        if (scheduler) {
+            scheduler(runJob);
+            return;
+        }
+        runJob();
+    } as Subscriber;
+
+    const runJob = (): void => {
+        if (stopped) return;
+        if (running) {
+            // Late-invoked scheduled job overlapping a manual run: drop.
+            effectFn.flags &= QUEUED;
+            return;
+        }
+        const flags = effectFn.flags;
+        effectFn.flags &= QUEUED;
+        if ((flags & MAYBE_DIRTY) !== 0 && (flags & DIRTY) === 0) {
+            // Only computed sources were invalidated: pull-validate them
+            // and skip the run entirely if no value actually changed.
+            if (!sourcesChanged(effectFn)) {
+                return;
+            }
+        }
         running = true;
         cleanup(effectFn);
         const prev = currentSubscriber;
@@ -129,13 +273,20 @@ function runEffect(fn: EffectFn): EffectRunner {
                 });
             }
         }
-    } as Subscriber;
+    };
 
     effectFn.deps = [];
-    effectFn();
+    effectFn.flags = DIRTY;
+    // The first run is always immediate and inline, even with a scheduler.
+    runJob();
 
-    // Return the effect as a runner with a stop method
-    const runner = (() => effectFn()) as EffectRunner;
+    // Return the effect as a runner with a stop method. Manual runs are
+    // forced: they bypass both the scheduler and validation by marking
+    // the effect dirty and running the job directly.
+    const runner = (() => {
+        effectFn.flags |= DIRTY;
+        return runJob();
+    }) as EffectRunner;
     runner.stop = () => {
         stopped = true;
         cleanup(effectFn);
@@ -161,8 +312,8 @@ function runEffect(fn: EffectFn): EffectRunner {
  * runner.stop();
  * ```
  */
-export function effect(fn: EffectFn): EffectRunner {
-    const runner = runEffect(fn);
+export function effect(fn: EffectFn, options?: EffectOptions): EffectRunner {
+    const runner = runEffect(fn, options?.scheduler);
     registerWithActiveScope(runner.stop);
     return runner;
 }
