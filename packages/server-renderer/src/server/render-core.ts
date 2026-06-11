@@ -562,6 +562,60 @@ function* renderNode(
 
     // Handle Components
     if (isComponent(vnode.type)) {
+        // Lazy components await their module inline. After the suspension the
+        // wrapper's setup sees state 'resolved' and renders the real component
+        // immediately — no empty output, no fallback-forever (F4).
+        const factory = vnode.type as any;
+        if (factory.__lazy && !factory.isLoaded()) {
+            // Swallow rejection here — setup() rethrows the stored error and
+            // routes it through the component error fallback below.
+            yield { p: factory.preload().catch(() => undefined) };
+        }
+
+        // Suspense boundaries in streaming mode: stream the fallback now,
+        // replace with the real children once their lazy deps resolve —
+        // reusing the standard placeholder/$SIGX_REPLACE machinery. In
+        // blocking/string mode Suspense needs no special handling: lazy
+        // children await inline (above), so the boundary never has pending
+        // promises and Suspense renders its children directly.
+        if (factory.__suspense && ctx._streaming) {
+            const id = ctx.nextId();
+            const props = vnode.props || {};
+
+            const placeholder = `<div data-async-placeholder="${id}" style="display:contents;">`;
+            buf.push(placeholder);
+            state.len += placeholder.length;
+
+            const fallback = typeof props.fallback === 'function' ? props.fallback() : props.fallback;
+            if (fallback != null) {
+                yield* renderNode(fallback, ctx, parentCtx, appContext, buf, state);
+            }
+
+            buf.push('</div>');
+            state.len += 6;
+
+            const children = props.children;
+            const items: JSXElement[] = Array.isArray(children)
+                ? children
+                : children != null ? [children] : [];
+            const capturedParentCtx = parentCtx;
+
+            const deferredRender = (async () => {
+                let html = '';
+                for (const item of items) {
+                    // The deferred driver awaits unresolved lazy() preloads
+                    // inline (rule above), so this resolves to real content.
+                    html += await renderVNodeToString(item, ctx, appContext, capturedParentCtx);
+                }
+                return html;
+            })();
+
+            ctx._pendingAsync.push({ id, promise: deferredRender });
+
+            if (state.len >= state.threshold) yield FLUSH;
+            return;
+        }
+
         const setup = vnode.type.__setup;
         const { componentName, id, ssrLoads, componentCtx } = createComponentState(vnode, ctx, parentCtx, appContext);
 
@@ -628,6 +682,7 @@ function* renderNode(
                         const capturedRenderFn = renderFn;
                         const capturedCtx = ctx;
                         const capturedAppContext = appContext;
+                        const capturedComponentCtx = componentCtx;
 
                         const deferredRender = (async () => {
                             await Promise.all(ssrLoads);
@@ -636,7 +691,7 @@ function* renderNode(
                             if (capturedRenderFn) {
                                 const result = (capturedRenderFn as () => any)();
                                 if (result) {
-                                    html = await renderVNodeToString(result, capturedCtx, capturedAppContext);
+                                    html = await renderVNodeToString(result, capturedCtx, capturedAppContext, capturedComponentCtx);
                                 }
                             }
 
@@ -850,11 +905,14 @@ export async function* renderToChunks(
  *
  * Fully synchronous trees complete in a single `gen.next()` call with no
  * promise allocations beyond the implicit async-function wrapper.
+ *
+ * @param parentCtx - optional parent component context so deferred renders
+ *   keep their provide/inject chain
  */
-export async function renderVNodeToString(element: JSXElement, ctx: SSRContext, appContext: AppContext | null = null): Promise<string> {
+export async function renderVNodeToString(element: JSXElement, ctx: SSRContext, appContext: AppContext | null = null, parentCtx: ComponentSetupContext | null = null): Promise<string> {
     const buf: string[] = [];
     const state: RenderBufState = { len: 0, threshold: Infinity };
-    const gen = renderNode(element, ctx, null, appContext, buf, state);
+    const gen = renderNode(element, ctx, parentCtx, appContext, buf, state);
 
     let result = gen.next();
     while (!result.done) {

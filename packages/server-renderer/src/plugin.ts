@@ -72,6 +72,11 @@ export interface SSRPlugin {
          * When core handles streaming, it manages the deferred render and race loop.
          * Plugins that need to augment the streamed result should use `onAsyncComponentResolved`.
          *
+         * Note: this hook keys off `ssr.load()` only. Suspense-boundary async
+         * (lazy() children) does not pass through here — Suspense boundaries
+         * stream via the same placeholder machinery and are observable on
+         * `ctx._pendingAsync` and in `onAsyncComponentResolved`.
+         *
          * @example Suspense plugin returns `{ mode: 'stream', placeholder: '<Spinner/>' }`
          * @example A plugin returns `{ mode: 'block' }` to force waiting
          */

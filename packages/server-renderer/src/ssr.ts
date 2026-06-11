@@ -64,7 +64,11 @@ async function* streamAllAsyncChunks(
 ): AsyncGenerator<string> {
     type TaggedResult = { index: number; script: string };
 
-    const hasCoreAsync = ctx._pendingAsync.length > 0;
+    // Pump slots live at PUMP_BASE and above. Core slots can GROW while
+    // streaming — deferred renders (Suspense children, nested ssr.load
+    // components) push new entries onto ctx._pendingAsync mid-stream — so
+    // they get the open-ended range below PUMP_BASE.
+    const PUMP_BASE = 1 << 30;
 
     // Collect plugin streaming generators
     const pluginGenerators: AsyncGenerator<string>[] = [];
@@ -73,51 +77,67 @@ async function* streamAllAsyncChunks(
         if (chunks) pluginGenerators.push(chunks);
     }
 
-    const hasPluginStreaming = pluginGenerators.length > 0;
-
     // Nothing to stream
-    if (!hasCoreAsync && !hasPluginStreaming) return;
+    if (ctx._pendingAsync.length === 0 && pluginGenerators.length === 0) return;
 
-    // Emit the $SIGX_REPLACE bootstrap script (needed by core replacements)
-    if (hasCoreAsync) {
+    // Emit the $SIGX_REPLACE bootstrap script (needed by core replacements).
+    // If core async only appears mid-stream (deferred renders), the loop
+    // below emits it just-in-time before the first core replacement.
+    let bootstrapEmitted = false;
+    if (ctx._pendingAsync.length > 0) {
         yield generateStreamingScript();
+        bootstrapEmitted = true;
     }
 
-    // Build tagged promises for core-managed async components
-    const corePromises: Promise<TaggedResult>[] = ctx._pendingAsync.map(
-        (pending, index) =>
-            pending.promise.then(html => {
-                // Let plugins augment the resolved HTML
-                let finalHtml = html;
-                let extraScript = '';
-                let preScript = '';
-                for (const plugin of plugins) {
-                    const result = plugin.server?.onAsyncComponentResolved?.(pending.id, finalHtml, ctx);
-                    if (result) {
-                        if (result.html !== undefined) finalHtml = result.html;
-                        if (result.script) extraScript += result.script;
-                        if (result.preScript) preScript += result.preScript;
-                    }
-                }
-                return {
-                    index,
-                    script: generateReplacementScript(pending.id, finalHtml, extraScript || undefined, preScript || undefined)
-                };
-            }).catch(error => {
-                if (process.env.NODE_ENV !== 'production') {
-                    console.error(`Error streaming async component ${pending.id}:`, error);
-                }
-                return {
-                    index,
-                    script: generateReplacementScript(
-                        pending.id,
-                        `<div style="color:red;">Error loading component</div>`
-                    )
-                };
-            })
-    );
+    // Tagged promises for core-managed async components, keyed by their
+    // ctx._pendingAsync index; entries are removed once yielded.
+    const corePromises = new Map<number, Promise<TaggedResult>>();
+    let coreCount = 0;
 
-    const totalCore = corePromises.length;
+    function makeCorePromise(index: number): Promise<TaggedResult> {
+        const pending = ctx._pendingAsync[index];
+        return pending.promise.then(html => {
+            // Let plugins augment the resolved HTML
+            let finalHtml = html;
+            let extraScript = '';
+            let preScript = '';
+            for (const plugin of plugins) {
+                const result = plugin.server?.onAsyncComponentResolved?.(pending.id, finalHtml, ctx);
+                if (result) {
+                    if (result.html !== undefined) finalHtml = result.html;
+                    if (result.script) extraScript += result.script;
+                    if (result.preScript) preScript += result.preScript;
+                }
+            }
+            return {
+                index,
+                script: generateReplacementScript(pending.id, finalHtml, extraScript || undefined, preScript || undefined)
+            };
+        }).catch(error => {
+            if (process.env.NODE_ENV !== 'production') {
+                console.error(`Error streaming async component ${pending.id}:`, error);
+            }
+            return {
+                index,
+                script: generateReplacementScript(
+                    pending.id,
+                    `<div style="color:red;">Error loading component</div>`
+                )
+            };
+        });
+    }
+
+    /**
+     * Pick up pending async components added since the last check — deferred
+     * renders that are themselves being awaited can push new entries onto
+     * ctx._pendingAsync while the race loop runs.
+     */
+    function syncCorePromises(): void {
+        while (coreCount < ctx._pendingAsync.length) {
+            const index = coreCount++;
+            corePromises.set(index, makeCorePromise(index));
+        }
+    }
 
     // Set up pump pattern for plugin generators so they can be raced alongside core
     interface PumpState {
@@ -126,7 +146,7 @@ async function* streamAllAsyncChunks(
     }
     const pumps: PumpState[] = pluginGenerators.map(g => ({ generator: g, done: false }));
 
-    // Active pump promises, keyed by their slot index (totalCore + i)
+    // Active pump promises, keyed by their slot index (PUMP_BASE + i)
     const activePumps = new Map<number, Promise<TaggedResult>>();
 
     // pumpNext pulls ONE value from a generator. It does NOT pre-queue the
@@ -144,7 +164,7 @@ async function* streamAllAsyncChunks(
     // even though most of the chunks were never observed. See
     // signalxjs/core#17.
     function pumpNext(pumpIdx: number): Promise<TaggedResult> {
-        const slotIndex = totalCore + pumpIdx;
+        const slotIndex = PUMP_BASE + pumpIdx;
         return pumps[pumpIdx].generator.next().then(({ value, done }) => {
             if (done) {
                 pumps[pumpIdx].done = true;
@@ -157,18 +177,12 @@ async function* streamAllAsyncChunks(
 
     // Start initial pumps
     for (let i = 0; i < pumps.length; i++) {
-        const slotIndex = totalCore + i;
-        activePumps.set(slotIndex, pumpNext(i));
+        activePumps.set(PUMP_BASE + i, pumpNext(i));
     }
 
-    // Race loop: core promises + pump promises
-    const resolvedCore = new Set<number>();
-
     function getRaceablePromises(): Promise<TaggedResult>[] {
-        const promises: Promise<TaggedResult>[] = [];
-        for (let i = 0; i < totalCore; i++) {
-            if (!resolvedCore.has(i)) promises.push(corePromises[i]);
-        }
+        syncCorePromises();
+        const promises: Promise<TaggedResult>[] = [...corePromises.values()];
         for (const [, p] of activePumps) {
             promises.push(p);
         }
@@ -182,17 +196,23 @@ async function* streamAllAsyncChunks(
         const winner = await Promise.race(raceable);
 
         if (winner.script) {
+            // Just-in-time bootstrap for core replacements that only appeared
+            // mid-stream (no upfront core async existed).
+            if (!bootstrapEmitted && winner.index < PUMP_BASE) {
+                yield generateStreamingScript();
+                bootstrapEmitted = true;
+            }
             yield winner.script;
         }
 
-        if (winner.index < totalCore) {
-            resolvedCore.add(winner.index);
+        if (winner.index < PUMP_BASE) {
+            corePromises.delete(winner.index);
         } else {
             // Pump slot — re-queue the next pull now that the consumer has
             // yielded the current value. If the generator hit `done: true`
             // (in which case `pumps[pumpIdx].done` was set inside pumpNext
             // and the slot was removed from `activePumps`), skip re-queue.
-            const pumpIdx = winner.index - totalCore;
+            const pumpIdx = winner.index - PUMP_BASE;
             if (!pumps[pumpIdx].done) {
                 activePumps.set(winner.index, pumpNext(pumpIdx));
             }

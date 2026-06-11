@@ -371,6 +371,10 @@ export const Suspense = component<SuspenseProps>(
     { name: 'Suspense' }
 );
 
+// Marker for renderers that special-case Suspense boundaries (e.g. the
+// server renderer streams the fallback and defers the children).
+(Suspense as any).__suspense = true;
+
 // ============================================================================
 // Utility: isLazyComponent
 // ============================================================================
