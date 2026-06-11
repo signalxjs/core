@@ -60,6 +60,7 @@ async function bundleClientApp(entrySource: string, options: { minifySyntax?: bo
 const DATA_LAYER_MARKER = '__SIGX_ASYNC__';            // use-async.ts
 const HEAD_MARKER = 'data-sigx-head';                  // use-head.ts
 const SSR_MARKER = 'data-async-placeholder';           // @sigx/server-renderer only
+const HYDRATION_MARKER = 'client:only';                // hydration/index.ts only
 
 describe('client-only bundle layering guarantees', () => {
     it('an app using only component/render/signal ships no data layer, head, or SSR bytes', async () => {
@@ -75,6 +76,9 @@ describe('client-only bundle layering guarantees', () => {
         expect(output).not.toContain(DATA_LAYER_MARKER);
         expect(output).not.toContain(HEAD_MARKER);
         expect(output).not.toContain(SSR_MARKER);
+        // Hydration utilities (client: directives) are SSR-only — a
+        // client-only app must not carry them (issue #75).
+        expect(output).not.toContain(HYDRATION_MARKER);
     });
 
     it('opting into useAsync pulls exactly the data layer (positive control)', async () => {
