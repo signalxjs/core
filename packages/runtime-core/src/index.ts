@@ -4,6 +4,7 @@
 
 // Platform types (public type only)
 export type { ModelProcessor } from './platform.js';
+export { registerModelProcessor } from './platform.js';
 
 // Plugin types (public type only)
 export type { ComponentPlugin } from './plugins.js';
