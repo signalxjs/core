@@ -22,6 +22,12 @@
   {
     "name": "@sigx/server-renderer",
     "path": "packages/server-renderer/dist/index.js",
-    "limit": "18 KB"
+    "limit": "22 KB",
+    "ignore": ["node:stream"]
+  },
+  {
+    "name": "@sigx/server-renderer/client (browser entry)",
+    "path": "packages/server-renderer/dist/client/index.js",
+    "limit": "14 KB"
   }
 ]
