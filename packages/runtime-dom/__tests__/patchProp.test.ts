@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render } from '../src/index';
+import { render, patchProp } from '../src/index';
 import { component, jsx, signal } from 'sigx';
 
 describe('patchProp', () => {
@@ -278,6 +278,41 @@ describe('patchProp', () => {
             const div = container.firstElementChild as HTMLDivElement;
             expect(div.style.color).toBe('red');
             expect(div.style.fontSize).toBe('14px');
+        });
+    });
+
+    describe('direct patchProp edge cases', () => {
+        it('ignores a null element', () => {
+            expect(() => patchProp(null as any, 'class', null, 'x')).not.toThrow();
+        });
+
+        it('unwraps CustomEvent detail for on* handlers', () => {
+            const el = document.createElement('div');
+            const handler = vi.fn();
+            patchProp(el, 'onThing', null, handler);
+
+            el.dispatchEvent(new CustomEvent('thing', { detail: { ok: 1 } }));
+            expect(handler).toHaveBeenCalledWith({ ok: 1 });
+
+            // swapped handler receives the detail through the same invoker
+            const next = vi.fn();
+            patchProp(el, 'onThing', handler, next);
+            el.dispatchEvent(new CustomEvent('thing', { detail: 2 }));
+            expect(next).toHaveBeenCalledWith(2);
+            expect(handler).toHaveBeenCalledTimes(1);
+        });
+
+        it('removes the listener when the handler becomes null', () => {
+            const el = document.createElement('button');
+            const handler = vi.fn();
+            patchProp(el, 'onClick', null, handler);
+
+            el.dispatchEvent(new MouseEvent('click'));
+            expect(handler).toHaveBeenCalledTimes(1);
+
+            patchProp(el, 'onClick', handler, null);
+            el.dispatchEvent(new MouseEvent('click'));
+            expect(handler).toHaveBeenCalledTimes(1);
         });
     });
 });
