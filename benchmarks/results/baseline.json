@@ -394,7 +394,7 @@
     }
   ],
   "meta": {
-    "date": "2026-06-11T07:13:38.813Z",
+    "date": "2026-06-11T08:04:53.557Z",
     "node": "v24.16.0",
     "cpu": "12th Gen Intel(R) Core(TM) i9-12900HK"
   },
@@ -446,5 +446,67 @@
         }
       }
     ]
+  },
+  "quick": {
+    "meta": {
+      "date": "2026-06-11T08:04:53.557Z",
+      "node": "v24.16.0",
+      "cpu": "12th Gen Intel(R) Core(TM) i9-12900HK"
+    },
+    "string": [
+      {
+        "scenario": "escape-heavy",
+        "framework": "sigx",
+        "stats": {
+          "avgNs": 853555.6642066409,
+          "p50Ns": 679454,
+          "samples": 271
+        }
+      },
+      {
+        "scenario": "escape-clean",
+        "framework": "sigx",
+        "stats": {
+          "avgNs": 26873.893981933583,
+          "p50Ns": 26933.115478515625,
+          "samples": 12
+        }
+      },
+      {
+        "scenario": "small-page",
+        "framework": "sigx",
+        "stats": {
+          "avgNs": 16948.095692090395,
+          "p50Ns": 13220,
+          "samples": 14160
+        }
+      },
+      {
+        "scenario": "large-table-1k",
+        "framework": "sigx",
+        "stats": {
+          "avgNs": 5474237.625,
+          "p50Ns": 4759332,
+          "samples": 40
+        }
+      }
+    ],
+    "stream": {
+      "scenario": "large-table-1k",
+      "warmup": 3,
+      "iterations": 10,
+      "results": [
+        {
+          "framework": "sigx",
+          "bytes": 191925,
+          "ttfbMs": {
+            "p50": 0.342
+          },
+          "totalMs": {
+            "p50": 4.688
+          }
+        }
+      ]
+    }
   }
 }

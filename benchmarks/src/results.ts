@@ -27,10 +27,10 @@ export function writeResults(fileName: string, payload: unknown): string {
 }
 
 /**
- * Merge one section ('string' or 'stream') into results/baseline.json so the
- * two --baseline runs build a single combined baseline file.
+ * Merge one section ('string', 'stream' or 'quick') into results/baseline.json
+ * so the individual --baseline runs build a single combined baseline file.
  */
-export function mergeBaseline(key: 'string' | 'stream', data: unknown, meta: ResultsMeta): string {
+export function mergeBaseline(key: 'string' | 'stream' | 'quick', data: unknown, meta: ResultsMeta): string {
     fs.mkdirSync(RESULTS_DIR, { recursive: true });
     const file = path.join(RESULTS_DIR, 'baseline.json');
     let baseline: Record<string, unknown> = {};

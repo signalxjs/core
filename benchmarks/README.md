@@ -19,7 +19,9 @@ pnpm build          # at the repo root
 ```sh
 pnpm bench:ssr            # verify equivalence, then run string-render benches (mitata)
 pnpm bench:ssr:stream     # streaming TTFB harness (large-table, p50/p75/p99)
+pnpm bench:ssr:quick      # sigx-only quick suite + regression check (informational)
 pnpm bench:ssr:baseline   # full run that writes/merges results/baseline.json
+pnpm --filter @sigx/benchmarks bench:quick:enforce   # quick suite, fails on >25% regression
 pnpm --filter @sigx/benchmarks verify   # equivalence check only
 ```
 
@@ -54,10 +56,39 @@ away).
 `NODE_ENV=production` is forced before adapters load so React and Vue use
 their production builds.
 
+## Quick regression suite (`bench:quick`)
+
+`pnpm bench:ssr:quick` runs `src/quick.ts` + `src/check-regression.ts`: a
+**sigx-only** suite (target well under 30s) covering `escape-heavy`,
+`escape-clean`, `small-page` and `large-table-1k` via `renderToString` with a
+reduced mitata sample budget, plus one streaming measurement (TTFB + total of
+`renderToNodeStream(large-table-1k)`, 10 iterations). It writes
+`results/quick-latest.json` and prints a delta table (baseline p50 vs current
+p50, delta %) against the `quick` section of `results/baseline.json`.
+
+- **Quick-vs-quick only**: the comparison uses the baseline's `quick` section
+  (written by `node src/quick.ts --baseline`, included in
+  `pnpm bench:ssr:baseline`) — never the full-suite numbers, which use a
+  different sample budget.
+- **Default is informational** (exit 0). `bench:quick:enforce` fails on any
+  median regression worse than **+25%** — but first re-runs the quick suite
+  once as a noise filter and only exits 1 if the regression persists.
+  (`--threshold=<pct>` overrides the 25% for experiments.)
+- **Fingerprint skip**: if the baseline's CPU model or Node *major* version
+  differs from the current machine, enforcement is skipped with a warning —
+  cross-machine deltas are meaningless.
+- **Re-baseline** after *intentional* perf changes (and on the same machine
+  the checks will run on): `node src/quick.ts --baseline`, or the full
+  `pnpm bench:ssr:baseline`.
+- **CI** (`.github/workflows/bench.yml`, manual trigger) runs the quick suite
+  *without* `--enforce` and uploads `quick-latest.json` as an artifact —
+  shared runners are far too noisy to gate on, so CI numbers are
+  informational only.
+
 ## Baseline & caveats
 
 `results/` is gitignored except `results/baseline.json`, which
-`pnpm bench:ssr:baseline` produces (string + stream sections + meta).
+`pnpm bench:ssr:baseline` produces (string + stream + quick sections + meta).
 
 Re-baseline when: sigx SSR internals change intentionally, a competitor
 dependency is bumped, or the benchmark scenarios themselves change.

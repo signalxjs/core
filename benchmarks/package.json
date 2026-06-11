@@ -7,7 +7,9 @@
     "scripts": {
         "bench": "node src/verify-equivalence.ts && node src/run-all.ts",
         "bench:stream": "node src/run-stream.ts",
-        "bench:baseline": "node src/run-all.ts --baseline && node src/run-stream.ts --baseline",
+        "bench:quick": "node src/quick.ts && node src/check-regression.ts",
+        "bench:quick:enforce": "node src/quick.ts && node src/check-regression.ts --enforce",
+        "bench:baseline": "node src/run-all.ts --baseline && node src/run-stream.ts --baseline && node src/quick.ts --baseline",
         "verify": "node src/verify-equivalence.ts"
     },
     "devDependencies": {
