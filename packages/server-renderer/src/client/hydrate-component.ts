@@ -31,7 +31,6 @@ import {
 import type { SchedulerJob } from 'sigx/internals';
 import {
     InternalVNode,
-    createRestoringSignal,
     getCurrentAppContext
 } from './hydrate-context';
 import { hydrateNode } from './hydrate-core';
@@ -56,10 +55,9 @@ export interface ComponentFactory {
  * @param vnode - The VNode to hydrate
  * @param dom - The DOM node to start from (content starts here)
  * @param parent - The parent node
- * @param serverState - Optional state captured from server for async components
  * @param trailingMarker - Optional trailing marker comment (the component anchor)
  */
-export function hydrateComponent(vnode: VNode, dom: Node | null, parent: Node, serverState?: Record<string, any>, trailingMarker?: Comment | null): Node | null {
+export function hydrateComponent(vnode: VNode, dom: Node | null, parent: Node, trailingMarker?: Comment | null): Node | null {
     const componentFactory = vnode.type as unknown as ComponentFactory;
     const setup = componentFactory.__setup;
     const componentName = componentFactory.__name || 'Anonymous';
@@ -140,25 +138,16 @@ export function hydrateComponent(vnode: VNode, dom: Node | null, parent: Node, s
 
     const parentInstance = getCurrentInstance();
 
-    // Use restoring signal when we have server state to restore
-    const signalFn = serverState
-        ? createRestoringSignal(serverState)
-        : signal;
-
-    // Create SSR helper for client-side
-    // When hydrating with server state, ssr.load() is a no-op (data already restored)
-    const hasServerState = !!serverState;
+    // Environment flags: hydrating server-rendered DOM. Data loading lives
+    // in useAsync/useStream — restored values come from window.__SIGX_ASYNC__.
     const ssrHelper = {
-        load(_fn: () => Promise<void>): void {
-            // No-op on client when hydrating - signal state was restored from server
-        },
         isServer: false,
-        isHydrating: hasServerState
+        isHydrating: true
     };
 
     const componentCtx: ComponentSetupContext = {
         el: parent as HTMLElement,
-        signal: signalFn as typeof signal,
+        signal: signal,
         props: createPropsAccessor(reactiveProps),
         slots: slots,
         emit: createEmit(reactiveProps),
@@ -170,8 +159,7 @@ export function hydrateComponent(vnode: VNode, dom: Node | null, parent: Node, s
         expose: () => { },
         renderFn: null,
         update: () => { },
-        ssr: ssrHelper,
-        _serverState: serverState
+        ssr: ssrHelper
     };
 
     // For ROOT component only (no parent), provide the AppContext
@@ -190,6 +178,22 @@ export function hydrateComponent(vnode: VNode, dom: Node | null, parent: Node, s
         }
     } finally {
         setCurrentInstance(prev);
+    }
+
+    // Streamed async components (and Suspense boundaries) render inside a
+    // <div data-async-placeholder> wrapper that is NOT part of the vnode
+    // tree. Hydrate against the wrapper's children — matching the wrapper
+    // itself against the component's first element would mismatch and mount
+    // a duplicate copy of the content.
+    let hydrateDom: Node | null = dom;
+    let hydrateParent: Node = parent;
+    if (
+        dom &&
+        dom.nodeType === Node.ELEMENT_NODE &&
+        (dom as Element).hasAttribute('data-async-placeholder')
+    ) {
+        hydrateParent = dom;
+        hydrateDom = dom.firstChild;
     }
 
     // Track where the component's DOM starts
@@ -230,7 +234,7 @@ export function hydrateComponent(vnode: VNode, dom: Node | null, parent: Node, s
                         // In that case, keep isFirstRender=true so the next render (after the
                         // lazy component resolves) will hydrate against the existing SSR DOM
                         // instead of mounting a duplicate.
-                        const hasSSRContent = dom != null && anchor != null && dom !== anchor;
+                        const hasSSRContent = hydrateDom != null && anchor != null && hydrateDom !== anchor;
                         if (!hasSSRContent) {
                             // Truly null first render — SSR also rendered nothing
                             isFirstRender = false;
@@ -258,10 +262,14 @@ export function hydrateComponent(vnode: VNode, dom: Node | null, parent: Node, s
                     // SSR rendered nothing (e.g., lazy() returned null on the server).
                     // In that case, mount fresh instead of trying to hydrate
                     // against non-existent DOM.
-                    const hasSSRContent = dom != null && dom !== anchor;
+                    const hasSSRContent = hydrateDom != null && hydrateDom !== anchor;
                     if (hasSSRContent) {
-                        // Hydrate against existing SSR DOM
-                        endDom = hydrateNode(subTree, dom, parent);
+                        // Hydrate against existing SSR DOM (inside the
+                        // placeholder wrapper when one exists)
+                        endDom = hydrateNode(subTree, hydrateDom, hydrateParent);
+                    } else if (hydrateParent !== parent) {
+                        // Empty placeholder wrapper — mount inside it
+                        mount(subTree, hydrateParent as Element, null);
                     } else {
                         // No SSR content — mount fresh before the anchor
                         mount(subTree, parent as Element, anchor || null);
@@ -273,6 +281,9 @@ export function hydrateComponent(vnode: VNode, dom: Node | null, parent: Node, s
                     if (prevSubTree) {
                         const patchContainer = prevSubTree.dom?.parentNode as Element || parent;
                         patch(prevSubTree, subTree, patchContainer);
+                    } else if (hydrateParent !== parent) {
+                        // No previous subtree — mount inside the placeholder wrapper
+                        mount(subTree, hydrateParent as Element, null);
                     } else {
                         // No previous subtree - mount fresh using the component's anchor
                         mount(subTree, parent as Element, anchor || null);

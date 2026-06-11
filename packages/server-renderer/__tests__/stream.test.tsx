@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { component, signal, Fragment, Text, defineApp } from 'sigx';
+import { component, useAsync, Fragment, Text, defineApp } from 'sigx';
 import { renderToString, renderToStream, renderToStreamWithCallbacks, type StreamCallbacks } from '../src/server/index';
 import { createSSRContext } from '../src/server/context';
 import { createSSR } from '../src/ssr';
@@ -112,12 +112,8 @@ const MultiTextChildren = component(() => {
     );
 }, { name: 'MultiTextChildren' });
 
-const AsyncComponent = component((ctx) => {
-    const data = ctx.signal('');
-
-    ctx.ssr.load(async () => {
-        data.value = 'loaded-data';
-    });
+const AsyncComponent = component(() => {
+    const data = useAsync('stream-async-component', async () => 'loaded-data');
 
     return () => (
         <div class="async">
@@ -126,10 +122,10 @@ const AsyncComponent = component((ctx) => {
     );
 }, { name: 'AsyncComponent' });
 
-const AsyncFailing = component((ctx) => {
-    ctx.ssr.load(async () => {
+const AsyncFailing = component(() => {
+    useAsync('stream-async-failing', async () => {
         throw new Error('Async load failed');
-    });
+    }, { throwOnError: true });
 
     return () => <div class="async-fail">Content</div>;
 }, { name: 'AsyncFailing' });
@@ -483,13 +479,10 @@ describe('renderToString', () => {
         });
     });
 
-    describe('async components with ssr.load', () => {
-        it('should await ssr.load for non-island async components', async () => {
-            const AsyncData = component((ctx) => {
-                const loaded = ctx.signal(false);
-                ctx.ssr.load(async () => {
-                    loaded.value = true;
-                });
+    describe('async components with useAsync', () => {
+        it('should await keyed useAsync fetchers for non-island async components', async () => {
+            const AsyncData = component(() => {
+                const loaded = useAsync('stream-await-inline', async () => true);
                 return () => <div>{loaded.value ? 'Loaded' : 'Not loaded'}</div>;
             }, { name: 'AsyncData' });
 
@@ -498,16 +491,10 @@ describe('renderToString', () => {
             expect(html).not.toContain('Not loaded');
         });
 
-        it('should handle multiple ssr.load calls', async () => {
-            const MultiLoad = component((ctx) => {
-                const usersCsv = ctx.signal('');
-                const theme = ctx.signal('');
-                ctx.ssr.load(async () => {
-                    usersCsv.value = 'Alice,Bob';
-                });
-                ctx.ssr.load(async () => {
-                    theme.value = 'dark';
-                });
+        it('should handle multiple useAsync calls', async () => {
+            const MultiLoad = component(() => {
+                const usersCsv = useAsync('stream-multi-users', async () => 'Alice,Bob');
+                const theme = useAsync('stream-multi-theme', async () => 'dark');
                 return () => (
                     <div>
                         <span>{usersCsv.value}</span>
@@ -521,7 +508,7 @@ describe('renderToString', () => {
             expect(html).toContain('dark');
         });
 
-        it('should handle ssr.load that throws (non-island)', async () => {
+        it('should handle a throwOnError fetcher that rejects (non-island)', async () => {
             // Suppress console.error for this test
             const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
@@ -831,23 +818,19 @@ describe('Error boundary (onComponentError)', () => {
 
 describe('concurrent SSR requests', () => {
     it('should not leak data between parallel renders with async components', async () => {
-        const SlowComponent = component((ctx) => {
-            const data = ctx.signal({ value: '' });
-
-            ctx.ssr.load(async () => {
+        const SlowComponent = component(() => {
+            const data = useAsync('concurrent-slow', async () => {
                 await new Promise(r => setTimeout(r, 50));
-                data.value = 'slow-data';
+                return 'slow-data';
             });
 
             return () => <div class="slow">{data.value}</div>;
         }, { name: 'SlowComponent' });
 
-        const FastComponent = component((ctx) => {
-            const data = ctx.signal({ value: '' });
-
-            ctx.ssr.load(async () => {
+        const FastComponent = component(() => {
+            const data = useAsync('concurrent-fast', async () => {
                 await new Promise(r => setTimeout(r, 10));
-                data.value = 'fast-data';
+                return 'fast-data';
             });
 
             return () => <div class="fast">{data.value}</div>;
@@ -871,34 +854,30 @@ describe('concurrent SSR requests', () => {
         const { getCurrentInstance } = await import('sigx');
         const instanceChecks: { component: string, isOwnContext: boolean }[] = [];
 
-        const SlowParent = component((ctx) => {
-            const data = ctx.signal({ child: '' });
-
-            ctx.ssr.load(async () => {
+        const SlowParent = component(() => {
+            const data = useAsync('isolate-slow-child', async () => {
                 await new Promise(r => setTimeout(r, 50));
-                data.child = 'slow-child';
+                return 'slow-child';
             });
 
             return () => (
                 <div class="slow-parent">
                     <SlowChild label="from-slow" />
-                    {data.child}
+                    {data.value}
                 </div>
             );
         }, { name: 'SlowParent' });
 
-        const FastParent = component((ctx) => {
-            const data = ctx.signal({ child: '' });
-
-            ctx.ssr.load(async () => {
+        const FastParent = component(() => {
+            const data = useAsync('isolate-fast-child', async () => {
                 await new Promise(r => setTimeout(r, 10));
-                data.child = 'fast-child';
+                return 'fast-child';
             });
 
             return () => (
                 <div class="fast-parent">
                     <FastChild label="from-fast" />
-                    {data.child}
+                    {data.value}
                 </div>
             );
         }, { name: 'FastParent' });
@@ -934,13 +913,12 @@ describe('concurrent SSR requests', () => {
 
     it('should handle many concurrent renders without errors', async () => {
         const renders = Array.from({ length: 10 }, (_, i) => {
-            const Comp = component((ctx) => {
-                const data = ctx.signal({ id: '' });
-                ctx.ssr.load(async () => {
+            const Comp = component(() => {
+                const data = useAsync(`many-concurrent-${i}`, async () => {
                     await new Promise(r => setTimeout(r, Math.random() * 20));
-                    data.id = `render-${i}`;
+                    return `render-${i}`;
                 });
-                return () => <span class="item">{data.id}</span>;
+                return () => <span class="item">{data.value}</span>;
             }, { name: `Concurrent${i}` });
 
             return renderToString(<Comp />);

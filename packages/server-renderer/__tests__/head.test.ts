@@ -1,22 +1,15 @@
 /**
  * SSR Head management tests
  *
- * Tests renderHeadToString, enableSSRHead, collectSSRHead, and useHead in SSR mode.
+ * Tests renderHeadToString and the per-request useHead collection (configs
+ * land on SSRContext._headConfigs via the component instance's ssr._ctx).
  */
 
-import { describe, it, expect, afterEach } from 'vitest';
-import {
-    enableSSRHead,
-    collectSSRHead,
-    renderHeadToString,
-    useHead,
-    type HeadConfig,
-} from '../src/head';
-
-// Reset module-level state after each test
-afterEach(() => {
-    collectSSRHead();
-});
+import { describe, it, expect } from 'vitest';
+import { component, useHead } from 'sigx';
+import { renderHeadToString } from '../src/head';
+import { createSSR } from '../src/index';
+import { createSSRContext } from '../src/server/context';
 
 // ============= renderHeadToString =============
 
@@ -119,66 +112,57 @@ describe('renderHeadToString', () => {
     });
 });
 
-// ============= enableSSRHead / collectSSRHead =============
+// ============= per-request useHead collection =============
 
-describe('enableSSRHead / collectSSRHead', () => {
-    it('enableSSRHead enables SSR mode so useHead collects configs', () => {
-        enableSSRHead();
-        useHead({ title: 'SSR Title' });
-        const configs = collectSSRHead();
-        expect(configs).toHaveLength(1);
-        expect(configs[0].title).toBe('SSR Title');
+describe('useHead during server rendering', () => {
+    function makePage(configs: Parameters<typeof useHead>[0][]) {
+        return component(() => {
+            for (const config of configs) useHead(config);
+            return () => ({ type: 'div', props: {}, key: null, children: ['x'], dom: null } as any);
+        }, { name: 'HeadPage' });
+    }
+
+    it('collects configs on the per-request SSRContext', async () => {
+        const Page = makePage([{ title: 'SSR Title', meta: [{ name: 'description', content: 'desc' }] }]);
+        const ssr = createSSR();
+        const ctx = createSSRContext();
+        await ssr.render((Page as any)({}), ctx);
+
+        expect(ctx._headConfigs).toHaveLength(1);
+        expect(ctx._headConfigs[0].title).toBe('SSR Title');
+        expect(ctx._headConfigs[0].meta![0].content).toBe('desc');
     });
 
-    it('collectSSRHead returns collected configs and clears them', () => {
-        enableSSRHead();
-        useHead({ title: 'First' });
-        useHead({ title: 'Second' });
-        const configs = collectSSRHead();
-        expect(configs).toHaveLength(2);
+    it('accumulates multiple useHead calls in render order', async () => {
+        const Page = makePage([
+            { title: 'Page' },
+            { meta: [{ name: 'author', content: 'Alice' }] },
+            { link: [{ rel: 'stylesheet', href: '/style.css' }] }
+        ]);
+        const ssr = createSSR();
+        const ctx = createSSRContext();
+        await ssr.render((Page as any)({}), ctx);
 
-        // Calling again should return empty
-        enableSSRHead();
-        const empty = collectSSRHead();
-        expect(empty).toHaveLength(0);
+        expect(ctx._headConfigs).toHaveLength(3);
+        expect(ctx._headConfigs[0].title).toBe('Page');
+        expect(ctx._headConfigs[1].meta![0].name).toBe('author');
+        expect(ctx._headConfigs[2].link![0].href).toBe('/style.css');
     });
 
-    it('after collectSSRHead, SSR mode is disabled', () => {
-        enableSSRHead();
-        collectSSRHead();
+    it('does not leak configs between two render contexts', async () => {
+        const A = makePage([{ title: 'A' }]);
+        const B = makePage([{ title: 'B' }]);
+        const ssr = createSSR();
+        const ctxA = createSSRContext();
+        const ctxB = createSSRContext();
+        await Promise.all([
+            ssr.render((A as any)({}), ctxA),
+            ssr.render((B as any)({}), ctxB)
+        ]);
 
-        // useHead should no longer collect — it will try client-side path.
-        // We verify by enabling SSR again and checking nothing was accumulated
-        // from any prior useHead call after collectSSRHead.
-        enableSSRHead();
-        const configs = collectSSRHead();
-        expect(configs).toHaveLength(0);
-    });
-});
-
-// ============= useHead in SSR mode =============
-
-describe('useHead in SSR mode', () => {
-    it('collects a single config in SSR mode', () => {
-        enableSSRHead();
-        useHead({ title: 'My Page', meta: [{ name: 'description', content: 'desc' }] });
-        const configs = collectSSRHead();
-        expect(configs).toHaveLength(1);
-        expect(configs[0]).toEqual({
-            title: 'My Page',
-            meta: [{ name: 'description', content: 'desc' }],
-        });
-    });
-
-    it('accumulates multiple useHead calls', () => {
-        enableSSRHead();
-        useHead({ title: 'Page' });
-        useHead({ meta: [{ name: 'author', content: 'Alice' }] });
-        useHead({ link: [{ rel: 'stylesheet', href: '/style.css' }] });
-        const configs = collectSSRHead();
-        expect(configs).toHaveLength(3);
-        expect(configs[0].title).toBe('Page');
-        expect(configs[1].meta![0].name).toBe('author');
-        expect(configs[2].link![0].href).toBe('/style.css');
+        expect(ctxA._headConfigs).toHaveLength(1);
+        expect(ctxA._headConfigs[0].title).toBe('A');
+        expect(ctxB._headConfigs).toHaveLength(1);
+        expect(ctxB._headConfigs[0].title).toBe('B');
     });
 });
