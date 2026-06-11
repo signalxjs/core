@@ -34,6 +34,7 @@ export function nextJobId(): number {
 const queue: SchedulerJob[] = [];
 let flushIndex = -1;
 let isFlushing = false;
+let registered = false;
 
 /**
  * Enqueue a render job, keeping the queue sorted by id. Duplicate
@@ -42,6 +43,16 @@ let isFlushing = false;
  * up in the same flush.
  */
 export function queueJob(job: SchedulerJob): void {
+    // Register the drain hook on first use rather than at module load: a
+    // module-level side effect is at odds with the package's
+    // `sideEffects: false` declaration and could be dropped by a
+    // tree-shaker. queueJob always runs during a notification wave,
+    // BEFORE flushPendingEffects consults the handler at the wave's end,
+    // so even the very first wave drains correctly.
+    if (!registered) {
+        registered = true;
+        setFlushHandler(flushJobs);
+    }
     if (job.queued) return;
     job.queued = true;
     let lo = isFlushing ? flushIndex + 1 : 0;
@@ -83,6 +94,3 @@ export function flushJobs(): void {
         isFlushing = false;
     }
 }
-
-// Drain render jobs at the end of every reactivity notification wave.
-setFlushHandler(flushJobs);

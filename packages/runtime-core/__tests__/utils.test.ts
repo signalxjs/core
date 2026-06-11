@@ -210,4 +210,55 @@ describe('createSlots', () => {
         const result = slots.default();
         expect(result).toEqual([]);
     });
+
+    it('returns a stable accessor function per named slot', () => {
+        const slots = createSlots([{ type: 'div', props: { slot: 'header' }, key: null, children: [], dom: null }]);
+        expect((slots as any).header).toBe((slots as any).header);
+        expect((slots as any).header()).toHaveLength(1);
+    });
+
+    it('repeated calls return defensive copies of the cached extraction', () => {
+        const child = { type: 'span', props: {}, key: null, children: [], dom: null };
+        const slots = createSlots([child]);
+
+        const first = slots.default();
+        first.push('corruption');
+        const second = slots.default();
+        expect(second).toEqual([child]);
+        expect(second).not.toBe(first);
+    });
+
+    it('a slot named __proto__ is stored as a plain key without prototype pollution', () => {
+        const child = { type: 'div', props: { slot: '__proto__' }, key: null, children: [], dom: null };
+        const slots = createSlots([child]);
+
+        // Force extraction.
+        expect(slots.default()).toEqual([]);
+
+        expect(({} as any).polluted).toBeUndefined();
+        expect(Object.prototype.hasOwnProperty.call(Object.prototype, '0')).toBe(false);
+        // The default slot stays clean and repeated extraction is stable.
+        expect(slots.default()).toEqual([]);
+
+        // The pathological name is still a WORKING named slot: the proxy
+        // must not let the inherited __proto__ accessor shadow it.
+        expect((slots as any)['__proto__']()).toEqual([child]);
+    });
+
+    it('re-extracts after a version bump swaps the children', () => {
+        const a = { type: 'span', props: {}, key: null, children: [], dom: null };
+        const b = { type: 'em', props: { slot: 'side' }, key: null, children: [], dom: null };
+        const slots = createSlots([a]);
+
+        expect(slots.default()).toEqual([a]);
+        expect((slots as any).side()).toEqual([]);
+
+        // The renderer's contract: _children is only reassigned together
+        // with a version bump.
+        slots._children = [b];
+        slots._version.v++;
+
+        expect(slots.default()).toEqual([]);
+        expect((slots as any).side()).toEqual([b]);
+    });
 });
