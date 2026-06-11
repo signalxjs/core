@@ -162,9 +162,12 @@ async function prepareDocument(
 
     // Split the tail at </body>: everything before it (entry scripts!)
     // flushes with the shell; only the closing tags wait for the stream.
+    // No </body> in the template → flush the WHOLE tail with the shell
+    // (streamed chunks append at document end, which browsers tolerate);
+    // delaying it would defeat the early-script-download behavior.
     const bodyClose = post.search(/<\/body\s*>/i);
-    const postBody = bodyClose >= 0 ? post.slice(0, bodyClose) : '';
-    const postTail = bodyClose >= 0 ? post.slice(bodyClose) : post;
+    const postBody = bodyClose >= 0 ? post.slice(0, bodyClose) : post;
+    const postTail = bodyClose >= 0 ? post.slice(bodyClose) : '';
 
     return { ctx, pre, shell: shellHtml + injected, postBody, postTail, streaming };
 }

@@ -77,11 +77,12 @@ export interface AsyncState<T> {
  * Read a server-serialized value for `key` from the page blob
  * (`window.__SIGX_ASYNC__`, emitted by the server renderer).
  *
- * The blob is the page's INITIAL-DATA CACHE for its lifetime: every mount
- * of the same key restores from it (two components sharing a key both
- * restore — neither refetches), including remounts after client-side
- * navigation. `refresh()` is the explicit invalidation: it deletes the
- * key's entry and fetches fresh data.
+ * The blob is the page's DATA CACHE for its lifetime: every mount of the
+ * same key restores from it (two components sharing a key both restore —
+ * neither refetches), including remounts after client-side navigation.
+ * Successful keyed fetches write back, so the cache always holds the
+ * latest value regardless of whether SSR seeded the key. `refresh()`
+ * invalidates the entry, fetches fresh, and repopulates on success.
  */
 function peekRestored(key: string): { hit: boolean; value: unknown } {
     const blob = (globalThis as any).__SIGX_ASYNC__;
@@ -185,6 +186,14 @@ export function useAsync<T>(
             }
             const result = await promise;
             if (abortSignal.aborted) return;
+            // Keep the page cache honest: successful keyed fetches write
+            // back, so refresh() repopulates and later mounts restore the
+            // LATEST value — identical behavior whether or not SSR seeded
+            // the key. (Null-prototype blob — see the server emitter.)
+            if (key !== null) {
+                const blob = ((globalThis as any).__SIGX_ASYNC__ ??= Object.create(null));
+                blob[key] = result;
+            }
             batch(() => {
                 state.data = result;
                 state.pending = false;

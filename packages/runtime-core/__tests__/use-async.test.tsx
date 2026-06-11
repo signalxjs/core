@@ -256,8 +256,9 @@ describe('useAsync', () => {
         await settle();
         expect(fetcher).toHaveBeenCalledTimes(1);
         expect(el.querySelector('.v')?.textContent).toBe('fresh');
-        // The invalidated entry must not resurrect stale data on remount
-        expect('refresh-key' in (globalThis as any).__SIGX_ASYNC__).toBe(false);
+        // refresh() repopulates the cache — a remount restores the LATEST
+        // value, never the stale pre-refresh one
+        expect((globalThis as any).__SIGX_ASYNC__['refresh-key']).toBe('fresh');
     });
 
     // ========================================================================
