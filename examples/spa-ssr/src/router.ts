@@ -1,8 +1,8 @@
 import { signal, defineInjectable, type Signal } from 'sigx';
 
-export type Route = '/' | '/counter' | '/forms' | '/about';
+export type Route = '/' | '/counter' | '/forms' | '/ai' | '/about';
 
-const ROUTES: ReadonlyArray<Route> = ['/', '/counter', '/forms', '/about'];
+const ROUTES: ReadonlyArray<Route> = ['/', '/counter', '/forms', '/ai', '/about'];
 
 export function parseUrl(url: string): Route {
     const path = url.split('?')[0].split('#')[0];

@@ -1,13 +1,33 @@
 import { defineApp } from 'sigx';
-import { renderToString } from '@sigx/server-renderer/server';
+import { renderDocument, renderDocumentToNodeStream } from '@sigx/server-renderer/server';
+import type { Readable } from 'node:stream';
 import { App } from './App';
 import { createRouter, parseUrl, useRouter } from './router';
 
-export async function render(url: string): Promise<{ html: string }> {
+export interface RenderOpts {
+    /** Complete HTML for crawlers/AI agents: no placeholders, no scripts to run. */
+    bot: boolean;
+}
+
+export type RenderResult =
+    | { kind: 'blocking'; html: Promise<string> }
+    | { kind: 'stream'; stream: Readable; shell: Promise<void> };
+
+export function render(url: string, template: string, opts: RenderOpts): RenderResult {
     // Per-request: fresh app + fresh router scoped to this URL. No module-level
     // state is shared between requests, so concurrent SSR can't interleave.
     const app = defineApp(<App />);
     app.defineProvide(useRouter, () => createRouter(parseUrl(url)));
-    const html = await renderToString(app);
-    return { html };
+
+    if (opts.bot) {
+        // Blocking document: every ssr.load()/ssr.stream() resolves inline —
+        // crawlers and AI agents get the full content with zero client JS work.
+        return { kind: 'blocking', html: renderDocument(app, { template, mode: 'blocking' }) };
+    }
+
+    // Streaming document: head + shell flush immediately (async content as
+    // placeholders), data and AI tokens stream in afterwards. `shell` settles
+    // before the first byte — the server uses it to pick the status code.
+    const { stream, shell } = renderDocumentToNodeStream(app, { template });
+    return { kind: 'stream', stream, shell };
 }

@@ -1,10 +1,16 @@
-import { component } from 'sigx';
+import { component, Suspense } from 'sigx';
+import { useHead } from '@sigx/server-renderer/client';
+import { TechDetails } from '../lazy-sections';
 
 export const About = component(() => {
+    useHead({ title: 'About' });
     return () => (
         <>
             <h1>About</h1>
-            <p>The smallest credible SSR shape for SignalX: an Express server, <code>renderToString</code> on the way out, <code>ssrClientPlugin</code> + <code>hydrate()</code> on the way in.</p>
+            <p>The reference SSR shape for SignalX: an Express server, <code>renderDocumentToNodeStream</code> on the way out, <code>ssrClientPlugin</code> + <code>hydrate()</code> on the way in.</p>
+            <Suspense fallback={<div class="card"><p>Loading section…</p></div>}>
+                <TechDetails />
+            </Suspense>
             <div class="card">
                 <h3 style="margin-top: 0;">How it works</h3>
                 <ul>
