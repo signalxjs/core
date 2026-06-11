@@ -93,6 +93,24 @@ describe('list scenarios (happy-dom)', () => {
     });
 });
 
+describe('component mount cost (happy-dom)', () => {
+    // Trivial components without hooks or slots: measures the fixed
+    // per-instance allocation cost of mountComponent.
+    const Item = component<{ n: number }>((ctx) => () =>
+        jsx('span', { children: String(ctx.props.n) })
+    );
+
+    bench('mount 2,000 trivial components', () => {
+        const container = document.createElement('div');
+        render(
+            jsx(Fragment, {
+                children: Array.from({ length: 2000 }, (_, i) => jsx(Item, { key: i, n: i })),
+            }),
+            container
+        );
+    });
+});
+
 describe('component tree scenarios (happy-dom)', () => {
     // 50 child components all reading one shared signal through props AND
     // directly — measures redundant child re-renders (stages 5/6 target).
