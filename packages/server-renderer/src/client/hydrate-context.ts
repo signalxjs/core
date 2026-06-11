@@ -79,6 +79,17 @@ export function setPendingServerState(state: Record<string, any> | null): void {
     _pendingServerState = state;
 }
 
+/**
+ * Look up serialized server state for a component by its SSR component ID.
+ * The state blob is emitted by the server's stateSerializationPlugin as
+ * `window.__SIGX_STATE__` (string mode: one blob after the shell; streaming:
+ * per-component preScripts before each $SIGX_REPLACE).
+ */
+export function lookupServerState(componentId: number): Record<string, any> | undefined {
+    const states = (globalThis as any).__SIGX_STATE__;
+    return states ? states[componentId] : undefined;
+}
+
 /** Get the current app context for deferred hydration */
 export function getCurrentAppContext(): AppContext | null {
     return _currentAppContext;
@@ -116,7 +127,18 @@ export function createRestoringSignal(serverState: Record<string, any>): SSRSign
 
         // Check if we have server state for this signal
         if (key in serverState) {
-            return signal(serverState[key]);
+            const restored = serverState[key];
+            // The signal KIND must follow the component's initial value — that
+            // is how the component code accesses it. A primitive-style signal
+            // (`signal(null)`, read via `.value`) whose restored value is an
+            // object must stay primitive-style: `signal(restoredObject)` would
+            // produce an object proxy and `.value` would read undefined.
+            if (typeof initial === 'object' && initial !== null) {
+                return signal(restored);
+            }
+            const s = signal(initial as any);
+            (s as any).value = restored;
+            return s;
         }
 
         // No server state, use initial value

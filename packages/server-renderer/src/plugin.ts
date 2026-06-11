@@ -88,7 +88,11 @@ export interface SSRPlugin {
          *
          * Return an object with:
          * - `html`: replacement HTML (modified or as-is)
-         * - `script`: extra script content to inject alongside the replacement
+         * - `script`: extra script content to run AFTER the `$SIGX_REPLACE`
+         *   call (i.e. after hydration listeners may have fired)
+         * - `preScript`: script content to run BEFORE the `$SIGX_REPLACE`
+         *   call — use this for state that must be installed before the
+         *   replace dispatches `sigx:async-ready`
          *
          * Return void to accept the default (plain HTML replacement).
          *
@@ -98,7 +102,7 @@ export interface SSRPlugin {
             id: number,
             html: string,
             ctx: SSRContext
-        ): { html?: string; script?: string } | void;
+        ): { html?: string; script?: string; preScript?: string } | void;
 
         /**
          * Called after rendering finishes. Return HTML to append after the rendered content.

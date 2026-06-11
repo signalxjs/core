@@ -62,6 +62,9 @@ export type { SSRHelper } from './client-directives.js';
 export type { SSRSignalFn } from './server/types.js';
 export { generateSignalKey } from './server/types.js';
 
+// State serialization (server capture → client restore; opt-in plugin)
+export { stateSerializationPlugin } from './server/state-plugin.js';
+
 // Head management
 export { useHead, renderHeadToString, enableSSRHead, collectSSRHead } from './head.js';
 export type { HeadConfig, HeadMeta, HeadLink, HeadScript } from './head.js';

@@ -22,3 +22,6 @@ export type { SSRContext, SSRContextOptions, RenderOptions, CorePendingAsync } f
 export { generateStreamingScript, generateReplacementScript, escapeJsonForScript } from './streaming';
 export type { SSRSignalFn, StreamCallbacks } from './types';
 export { generateSignalKey } from './types';
+export { stateSerializationPlugin } from './state-plugin';
+export { createTrackingSignal, captureSignalState, serializeStateScript, stateAssignmentJs } from './state';
+export type { TrackedSignalStore } from './state';

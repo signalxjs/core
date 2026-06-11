@@ -32,7 +32,8 @@ import type { SchedulerJob } from 'sigx/internals';
 import {
     InternalVNode,
     createRestoringSignal,
-    getCurrentAppContext
+    getCurrentAppContext,
+    lookupServerState
 } from './hydrate-context';
 import { hydrateNode } from './hydrate-core';
 
@@ -108,6 +109,13 @@ export function hydrateComponent(vnode: VNode, dom: Node | null, parent: Node, s
         if (text.startsWith('$c:')) {
             componentId = parseInt(text.slice(3), 10);
         }
+    }
+
+    // Automatic state pickup: when no explicit state was passed and the
+    // server serialized this component's signals (stateSerializationPlugin),
+    // restore from window.__SIGX_STATE__ — ssr.load() then no-ops below.
+    if (!serverState && componentId != null) {
+        serverState = lookupServerState(componentId);
     }
 
     const internalVNode = vnode as InternalVNode;

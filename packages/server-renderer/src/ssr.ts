@@ -82,16 +82,18 @@ async function* streamAllAsyncChunks(
                 // Let plugins augment the resolved HTML
                 let finalHtml = html;
                 let extraScript = '';
+                let preScript = '';
                 for (const plugin of plugins) {
                     const result = plugin.server?.onAsyncComponentResolved?.(pending.id, finalHtml, ctx);
                     if (result) {
                         if (result.html !== undefined) finalHtml = result.html;
                         if (result.script) extraScript += result.script;
+                        if (result.preScript) preScript += result.preScript;
                     }
                 }
                 return {
                     index,
-                    script: generateReplacementScript(pending.id, finalHtml, extraScript || undefined)
+                    script: generateReplacementScript(pending.id, finalHtml, extraScript || undefined, preScript || undefined)
                 };
             }).catch(error => {
                 if (process.env.NODE_ENV !== 'production') {

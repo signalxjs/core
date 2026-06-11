@@ -44,10 +44,18 @@ window.$SIGX_REPLACE = function(id, html) {
 
 /**
  * Generate a replacement script for a resolved async component.
+ *
+ * @param extraScript - raw JS appended AFTER the $SIGX_REPLACE call
+ * @param preScript - raw JS prepended BEFORE the $SIGX_REPLACE call; runs
+ *   before the replace dispatches `sigx:async-ready` (e.g. state install)
  */
-export function generateReplacementScript(id: number, html: string, extraScript?: string): string {
+export function generateReplacementScript(id: number, html: string, extraScript?: string, preScript?: string): string {
     const escapedHtml = escapeJsonForScript(JSON.stringify(html));
-    let script = `<script>$SIGX_REPLACE(${id}, ${escapedHtml});`;
+    let script = `<script>`;
+    if (preScript) {
+        script += preScript;
+    }
+    script += `$SIGX_REPLACE(${id}, ${escapedHtml});`;
     if (extraScript) {
         script += extraScript;
     }
