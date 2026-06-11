@@ -60,7 +60,18 @@ export function isSerializable(key: string, value: unknown): boolean {
         return false;
     }
     try {
-        JSON.stringify(value);
+        // stringify can also RETURN undefined (symbols, toJSON() returning
+        // undefined) — the key would silently vanish from the blob.
+        if (JSON.stringify(value) === undefined) {
+            if (process.env.NODE_ENV !== 'production') {
+                console.warn(
+                    `[SSR] useAsync("${key}") resolved to a value JSON cannot ` +
+                    `represent (symbol / toJSON returning undefined), skipped. ` +
+                    `The client will refetch.`
+                );
+            }
+            return false;
+        }
         return true;
     } catch {
         if (process.env.NODE_ENV !== 'production') {

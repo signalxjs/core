@@ -40,7 +40,9 @@ export interface DocumentOptions extends SSRContextOptions {
     /**
      * `'stream'`: shell + out-of-order async chunks (default for the stream
      * variants). `'blocking'`: all async data awaited inline — complete HTML,
-     * no placeholders, no replacement scripts (default for renderDocument).
+     * no placeholders, no streaming replacement/bootstrap scripts (default
+     * for renderDocument). The state blob is still emitted unless
+     * `serializeState: false`.
      */
     mode?: 'stream' | 'blocking';
 

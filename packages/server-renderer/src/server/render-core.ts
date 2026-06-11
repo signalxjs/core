@@ -213,7 +213,11 @@ function createComponentState(
     ctx.pushComponent(id);
 
     // Create slots from children
-    const defaultSlot = () => children ? (Array.isArray(children) ? children : [children]) : [];
+    // Only null/undefined/boolean mean "no children" — falsy render output
+    // like the number 0 or '' is valid slot content.
+    const defaultSlot = () => children == null || typeof children === 'boolean'
+        ? []
+        : (Array.isArray(children) ? children : [children]);
     const slots: SlotsObject<any> = slotsFromProps
         ? { default: defaultSlot, ...slotsFromProps }
         : { default: defaultSlot };

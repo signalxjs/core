@@ -185,6 +185,17 @@ describe('renderToString — Comment vnodes', () => {
     });
 });
 
+describe('renderToString — falsy slot children', () => {
+    it('renders numeric 0 and empty-adjacent children passed to a component slot', async () => {
+        const Wrap = component((ctx) => {
+            return () => <div class="wrap">{ctx.slots.default()}</div>;
+        }, { name: 'Wrap' });
+
+        const html = await renderToString(<Wrap>{0}</Wrap>);
+        expect(html).toContain('>0<');
+    });
+});
+
 describe('renderToString — component error handling', () => {
     const Boom = component(() => {
         throw new Error('boom');

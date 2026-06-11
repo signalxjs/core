@@ -100,6 +100,23 @@ describe('stateSerializationPlugin — server capture', () => {
     });
 });
 
+describe('non-representable values', () => {
+    it('skips values JSON.stringify cannot represent (symbol) with a warning', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const Sym = component(() => {
+            const data = useAsync('sym-key', async () => Symbol('nope') as any);
+            return () => <div>{data.loading ? 'loading' : 'done'}</div>;
+        }, { name: 'Sym' });
+
+        const ssr = createSSR().use(stateSerializationPlugin());
+        const html = await ssr.render((Sym as any)({}));
+
+        expect(html).not.toContain('sym-key');
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining('"sym-key"'));
+        warn.mockRestore();
+    });
+});
+
 describe('prototype-pollution guards', () => {
     it('rejects dangerous keys with a dev warning', async () => {
         const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
