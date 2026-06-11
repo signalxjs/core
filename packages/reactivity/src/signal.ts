@@ -162,16 +162,18 @@ export function signal<T>(target: T): PrimitiveSignal<T> | Signal<T & object> {
     // The id stays on the proxy for the rest of its life via
     // `signalIds` so the `set` trap can include it in updates without
     // a per-write hook lookup.
-    const hookAtCreate = getDevtoolsHook();
     let signalId: number | null = null;
-    if (hookAtCreate) {
-        signalId = hookAtCreate.nextId();
-        hookAtCreate.emit({
-            type: 'signal:created',
-            id: signalId,
-            kind: isCollectionTarget ? 'collection' : 'object',
-            ownerComponentId: hookAtCreate.currentOwner,
-        });
+    if (process.env.NODE_ENV !== 'production') {
+        const hookAtCreate = getDevtoolsHook();
+        if (hookAtCreate) {
+            signalId = hookAtCreate.nextId();
+            hookAtCreate.emit({
+                type: 'signal:created',
+                id: signalId,
+                kind: isCollectionTarget ? 'collection' : 'object',
+                ownerComponentId: hookAtCreate.currentOwner,
+            });
+        }
     }
 
     // Helper to get or create the dependency slot for a key

@@ -91,6 +91,8 @@ agents the issue-first flow below is required.)
 ```bash
 pnpm install
 pnpm build       # all packages: core + server-renderer + vite plugin
+                 # each package builds twice: dist/*.js (dev) + dist/*.prod.js
+                 # (NODE_ENV-stripped), selected via export conditions
 pnpm build:core  # reactivity + runtime-core + runtime-dom + sigx
 pnpm test        # vitest run (unit tests across packages)
 pnpm test -- packages/reactivity   # single test file/dir (substring match)

@@ -170,6 +170,26 @@ function main() {
     step('Build scratch app');
     run('npm run build', { cwd: appDir });
 
+    step('Assert production build resolved the production dist (devtools/dev-warnings stripped)');
+    const assetsDir = join(appDir, 'dist', 'assets');
+    const bundles = readdirSync(assetsDir).filter((f) => f.endsWith('.js'));
+    if (bundles.length === 0) {
+        throw new Error('Scratch app build produced no JS assets to inspect.');
+    }
+    const FORBIDDEN = ['__SIGX_DEVTOOLS_HOOK__', 'process.env.NODE_ENV', 'called outside of component setup'];
+    for (const file of bundles) {
+        const content = readFileSync(join(assetsDir, file), 'utf-8');
+        for (const marker of FORBIDDEN) {
+            if (content.includes(marker)) {
+                throw new Error(
+                    `Production bundle ${file} contains "${marker}" — the production export condition ` +
+                    'did not resolve to the .prod.js dist, or the prod dist is not fully stripped.'
+                );
+            }
+        }
+    }
+    console.log(`   ✔ ${bundles.length} bundle(s) clean: no devtools hook, no NODE_ENV checks, no dev warnings`);
+
     step('✅ Pack smoke test passed');
 }
 
