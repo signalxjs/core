@@ -112,10 +112,10 @@ integration for `<link rel="modulepreload">` of rendered `lazy()` chunks.
 | 1 | `benchmarks/` workspace: mitata suites vs Vue / React / Preact, streaming TTFB harness, committed baseline | F9 |
 | 2 | Quick wins: `escapeHtml` skip-scan, null-proto kebab cache, allocation trims | F5, F7 (partial) |
 | 3 | Core restructure: sync generator + shared buffer, suspension protocol at awaits, delete duplicated sync walker and the double render | F1, F7 |
-| 4 | `stateSerializationPlugin()`: capture `ssr.load()` signal state, emit XSS-safe `window.__SIGX_STATE__`, auto-restore on hydrate (opt-in; auto only in `renderDocument`) | F6 |
+| 4 | State serialization: resolved async values emitted as the XSS-safe, key-addressed `window.__SIGX_ASYNC__` blob, auto-restored on hydrate (opt-in plugin; automatic in `renderDocument`). *Final API: keyed `useAsync` — the interim `ssr.load`/`__SIGX_STATE__` design was replaced mid-program by the unification in `docs/rfc-use-async.md`.* | F6 |
 | 5 | `renderDocument` / `renderDocumentToNodeStream` / `renderDocumentToWebStream`: template + head auto-injection, shell promise for status codes, `AbortSignal`, `mode: 'blocking'` bot/crawler mode; head moved to per-request context | F2, F3, F9 |
 | 6 | Suspense-integrated streaming: fallback streamed, content swapped via the existing replace machinery; string/blocking mode awaits real content | F4 |
-| 7 | `ssr.stream()`: progressive text streaming (AI/LLM token-style) via `$SIGX_APPEND`, text-only v1 | AI-readiness |
+| 7 | `useStream()`: progressive text streaming (AI/LLM token-style) via `$SIGX_APPEND`, text-only v1. *Originally shipped as `ssr.stream()`, renamed in the `useAsync` unification.* | AI-readiness |
 | 8 | `pnpm bench:quick` regression guardrail against the committed baseline | F9 |
 | 9 | `examples/spa-ssr` rewritten as the reference integration (document streaming, state serialization, Suspense, LLM-style route, bot mode) | all, end-to-end |
 | — | **Deferred**: Vite ssr-manifest → `modulepreload`/stylesheet links for rendered `lazy()` chunks | F9 (remainder) |
@@ -125,7 +125,7 @@ integration for `<link rel="modulepreload">` of rendered `lazy()` chunks.
 Two deliberate positions rather than speculation:
 
 1. **Serving AI-generated content**: token streams need progressive append,
-   not one-shot placeholder replacement. `ssr.stream()` (Stage 7) gives a
+   not one-shot placeholder replacement. `useStream()` (Stage 7) gives a
    component an `AsyncIterable<string>` whose chunks append into the live
    page over the same SSR stream and finalize into hydratable state.
 2. **Being read by AI agents/crawlers**: `renderDocument(..., { mode:

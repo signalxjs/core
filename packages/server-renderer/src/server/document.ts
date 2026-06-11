@@ -11,9 +11,11 @@
  * Modes:
  * - `'stream'`  — shell-first with async placeholders, out-of-order
  *   replacement chunks over the wire (default for the stream variants).
- * - `'blocking'` — every `useAsync()`/`useStream()` resolves inline: complete, script-free
- *   content (default for `renderDocument`). Useful for crawlers and AI
- *   agents: the app can pick the mode per user-agent.
+ * - `'blocking'` — every keyed `useAsync()`/`useStream()` resolves inline:
+ *   complete content, no placeholders, no streaming replacement/bootstrap
+ *   scripts (default for `renderDocument`). Useful for crawlers and AI
+ *   agents: the app can pick the mode per user-agent. The state blob
+ *   `<script>` is still emitted unless `serializeState: false`.
  *
  * State serialization is ON by default here (`serializeState: false` to
  * disable) — this is the zero-config entry point; the lower-level render
