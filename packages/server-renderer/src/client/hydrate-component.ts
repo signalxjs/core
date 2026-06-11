@@ -32,6 +32,7 @@ import type { SchedulerJob } from 'sigx/internals';
 import {
     InternalVNode,
     createRestoringSignal,
+    createClientStream,
     getCurrentAppContext,
     lookupServerState
 } from './hydrate-context';
@@ -160,6 +161,10 @@ export function hydrateComponent(vnode: VNode, dom: Node | null, parent: Node, s
         load(_fn: () => Promise<void>): void {
             // No-op on client when hydrating - signal state was restored from server
         },
+        // With server state: signal restores the final streamed text and the
+        // source is not re-run. Without: not re-run either (consistent with
+        // load) — enable state serialization to keep streamed content.
+        stream: createClientStream(signalFn, false),
         isServer: false,
         isHydrating: hasServerState
     };

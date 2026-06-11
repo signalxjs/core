@@ -97,6 +97,13 @@ export interface SSRContext {
     _headConfigs: any[];
 
     /**
+     * Progressive text streams registered via ssr.stream() in streaming mode.
+     * Each generator yields $SIGX_APPEND scripts per token; the streaming
+     * race loop consumes them alongside async component replacements.
+     */
+    _pendingStreams: AsyncGenerator<string>[];
+
+    /**
      * Generate next component ID
      */
     nextId(): number;
@@ -150,6 +157,7 @@ export function createSSRContext(options: SSRContextOptions = {}): SSRContext {
         _streaming: false,
         _pendingAsync: [],
         _headConfigs: [],
+        _pendingStreams: [],
 
         nextId() {
             return ++componentId;

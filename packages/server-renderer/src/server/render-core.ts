@@ -37,6 +37,7 @@ import {
     resolveBuiltInDirective,
 } from 'sigx/internals';
 import type { SSRContext } from './context';
+import { generateAppendScript } from './streaming';
 
 // ============= HTML Utilities =============
 
@@ -223,10 +224,13 @@ function createComponentState(
     // Create SSR helper for async data loading.
     // _ctx lets per-request consumers (useHead) reach the SSRContext through
     // getCurrentInstance().ssr without module-level state.
+    // stream() is assigned below, once the final componentCtx (and its
+    // possibly plugin-swapped signal fn) exists.
     const ssrHelper = {
         load(fn: () => Promise<void>): void {
             ssrLoads.push(fn());
         },
+        stream: null as any,
         isServer: true,
         isHydrating: false,
         _ctx: ctx
@@ -265,6 +269,51 @@ function createComponentState(
     if (!parentCtx && appContext) {
         provideAppContext(componentCtx, appContext);
     }
+
+    // Progressive text streaming (ssr.stream). Assigned onto the FINAL
+    // context's helper so the signal goes through any plugin-swapped signal
+    // fn (state serialization tracks it like any other named signal).
+    (componentCtx.ssr as any).stream = (name: string, source: () => AsyncIterable<string>) => {
+        const sig = (componentCtx.signal as any)('', name);
+
+        if (ctx._streaming) {
+            // Tokens append into the placeholder as they arrive; when the
+            // source completes, `done` resolves and the standard deferred
+            // re-render swaps in the final markup (with final signal text).
+            let resolveDone!: () => void;
+            let rejectDone!: (e: unknown) => void;
+            const done = new Promise<void>((res, rej) => { resolveDone = res; rejectDone = rej; });
+
+            const pump = (async function* () {
+                let acc = '';
+                try {
+                    for await (const token of source()) {
+                        acc += token;
+                        yield generateAppendScript(id, token);
+                    }
+                    sig.value = acc;
+                    resolveDone();
+                } catch (e) {
+                    sig.value = acc;
+                    rejectDone(e);
+                }
+            })();
+
+            ctx._pendingStreams.push(pump);
+            ssrLoads.push(done);
+        } else {
+            // Blocking/string mode: drain fully, render final text inline
+            ssrLoads.push((async () => {
+                let acc = '';
+                for await (const token of source()) {
+                    acc += token;
+                }
+                sig.value = acc;
+            })());
+        }
+
+        return sig;
+    };
 
     return { componentName, id, ssrLoads, componentCtx };
 }

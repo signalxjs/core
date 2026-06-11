@@ -43,6 +43,32 @@ window.$SIGX_REPLACE = function(id, html) {
 }
 
 /**
+ * Generate the progressive-text bootstrap (injected once before any append).
+ * Defines `window.$SIGX_APPEND`, which appends a TEXT node into an async
+ * placeholder — XSS-safe by construction (no HTML parsing of streamed
+ * tokens). Used by `ssr.stream()` for LLM-token-style progressive content.
+ */
+export function generateAppendBootstrap(): string {
+    return `
+<script>
+window.$SIGX_APPEND = function(id, text) {
+    var placeholder = document.querySelector('[data-async-placeholder="' + id + '"]');
+    if (placeholder) {
+        placeholder.appendChild(document.createTextNode(text));
+    }
+};
+</script>`;
+}
+
+/**
+ * Generate an append script for one progressive-text chunk.
+ * The token travels as a JSON string and lands via createTextNode.
+ */
+export function generateAppendScript(id: number, text: string): string {
+    return `<script>$SIGX_APPEND(${id}, ${escapeJsonForScript(JSON.stringify(text))});</script>`;
+}
+
+/**
  * Generate a replacement script for a resolved async component.
  *
  * @param extraScript - raw JS appended AFTER the $SIGX_REPLACE call

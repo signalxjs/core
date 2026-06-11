@@ -33,6 +33,29 @@ export interface SSRHelper {
     load(fn: () => Promise<void>): void;
 
     /**
+     * Progressive text streaming (LLM-token-style content). Returns a string
+     * signal that accumulates the source's chunks.
+     *
+     * - Server, streaming mode: tokens append into the component's async
+     *   placeholder as they arrive ($SIGX_APPEND text nodes); when the source
+     *   completes, the component re-renders with the final text and swaps in
+     *   via the standard replacement script.
+     * - Server, blocking/string mode: the source is drained fully and the
+     *   final text renders inline.
+     * - Client, hydrating: the final text is restored from serialized state
+     *   (the source is NOT re-run).
+     * - Client, navigation: the source runs live; the signal updates per
+     *   chunk and re-renders reactively.
+     *
+     * Text-only in v1 — tokens are rendered as text nodes, never parsed as
+     * HTML.
+     *
+     * @param name - serialization key for hydration state transfer
+     * @param source - factory returning the async chunk iterable
+     */
+    stream(name: string, source: () => AsyncIterable<string>): { value: string };
+
+    /**
      * Whether we're currently running on the server (SSR context).
      */
     readonly isServer: boolean;

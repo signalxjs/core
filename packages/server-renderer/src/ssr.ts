@@ -20,7 +20,7 @@ import type { App, AppContext } from 'sigx';
 import { Readable } from 'node:stream';
 import { SSRContext, createSSRContext, SSRContextOptions, CorePendingAsync } from './server/context';
 import { renderToChunks, renderVNodeToString } from './server/render-core';
-import { generateStreamingScript, generateReplacementScript } from './server/streaming';
+import { generateStreamingScript, generateReplacementScript, generateAppendBootstrap } from './server/streaming';
 import { enableSSRHead, collectSSRHead, renderHeadToString } from './head';
 import type { StreamCallbacks } from './server/types';
 import { stateSerializationPlugin } from './server/state-plugin';
@@ -78,7 +78,7 @@ async function* streamAllAsyncChunks(
     }
 
     // Nothing to stream
-    if (ctx._pendingAsync.length === 0 && pluginGenerators.length === 0) return;
+    if (ctx._pendingAsync.length === 0 && pluginGenerators.length === 0 && ctx._pendingStreams.length === 0) return;
 
     // Emit the $SIGX_REPLACE bootstrap script (needed by core replacements).
     // If core async only appears mid-stream (deferred renders), the loop
@@ -87,6 +87,15 @@ async function* streamAllAsyncChunks(
     if (ctx._pendingAsync.length > 0) {
         yield generateStreamingScript();
         bootstrapEmitted = true;
+    }
+
+    // $SIGX_APPEND bootstrap for progressive text streams (ssr.stream) —
+    // upfront when streams registered during the shell render; just-in-time
+    // for streams that appear mid-stream (inside deferred renders).
+    let appendBootstrapEmitted = false;
+    if (ctx._pendingStreams.length > 0) {
+        yield generateAppendBootstrap();
+        appendBootstrapEmitted = true;
     }
 
     // Tagged promises for core-managed async components, keyed by their
@@ -139,12 +148,16 @@ async function* streamAllAsyncChunks(
         }
     }
 
-    // Set up pump pattern for plugin generators so they can be raced alongside core
+    // Set up pump pattern for plugin generators and ssr.stream() token
+    // streams so they can be raced alongside core
     interface PumpState {
         generator: AsyncGenerator<string>;
         done: boolean;
+        /** Progressive ssr.stream() pump — its chunks need $SIGX_APPEND */
+        isStream: boolean;
     }
-    const pumps: PumpState[] = pluginGenerators.map(g => ({ generator: g, done: false }));
+    const pumps: PumpState[] = pluginGenerators.map(g => ({ generator: g, done: false, isStream: false }));
+    let streamCount = 0;
 
     // Active pump promises, keyed by their slot index (PUMP_BASE + i)
     const activePumps = new Map<number, Promise<TaggedResult>>();
@@ -180,8 +193,19 @@ async function* streamAllAsyncChunks(
         activePumps.set(PUMP_BASE + i, pumpNext(i));
     }
 
+    /** Pick up ssr.stream() pumps registered since the last check. */
+    function syncStreamPumps(): void {
+        while (streamCount < ctx._pendingStreams.length) {
+            const generator = ctx._pendingStreams[streamCount++];
+            const pumpIdx = pumps.length;
+            pumps.push({ generator, done: false, isStream: true });
+            activePumps.set(PUMP_BASE + pumpIdx, pumpNext(pumpIdx));
+        }
+    }
+
     function getRaceablePromises(): Promise<TaggedResult>[] {
         syncCorePromises();
+        syncStreamPumps();
         const promises: Promise<TaggedResult>[] = [...corePromises.values()];
         for (const [, p] of activePumps) {
             promises.push(p);
@@ -196,11 +220,14 @@ async function* streamAllAsyncChunks(
         const winner = await Promise.race(raceable);
 
         if (winner.script) {
-            // Just-in-time bootstrap for core replacements that only appeared
-            // mid-stream (no upfront core async existed).
+            // Just-in-time bootstraps for work that only appeared mid-stream
             if (!bootstrapEmitted && winner.index < PUMP_BASE) {
                 yield generateStreamingScript();
                 bootstrapEmitted = true;
+            }
+            if (!appendBootstrapEmitted && winner.index >= PUMP_BASE && pumps[winner.index - PUMP_BASE].isStream) {
+                yield generateAppendBootstrap();
+                appendBootstrapEmitted = true;
             }
             yield winner.script;
         }

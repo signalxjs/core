@@ -21,7 +21,7 @@ export type { DocumentOptions } from './document';
 export { renderVNodeToString } from './render-core';
 export { createSSRContext } from './context';
 export type { SSRContext, SSRContextOptions, RenderOptions, CorePendingAsync } from './context';
-export { generateStreamingScript, generateReplacementScript, escapeJsonForScript } from './streaming';
+export { generateStreamingScript, generateReplacementScript, escapeJsonForScript, generateAppendBootstrap, generateAppendScript } from './streaming';
 export type { SSRSignalFn, StreamCallbacks } from './types';
 export { generateSignalKey } from './types';
 export { stateSerializationPlugin } from './state-plugin';

@@ -146,6 +146,33 @@ export function createRestoringSignal(serverState: Record<string, any>): SSRSign
     } as SSRSignalFn;
 }
 
+// ============= Client ssr.stream =============
+
+/**
+ * Client-side ssr.stream() implementation factory.
+ *
+ * - `live: false` (hydrating with server state): returns the signal as-is —
+ *   the restoring signal fn already holds the final streamed text; the
+ *   source is NOT re-run (re-running would repeat e.g. an LLM call).
+ * - `live: true` (client navigation): runs the source and accumulates chunks
+ *   into the signal, re-rendering reactively per chunk.
+ */
+export function createClientStream(signalFn: any, live: boolean) {
+    return function stream(name: string, source: () => AsyncIterable<string>): { value: string } {
+        const sig = signalFn('', name);
+        if (live) {
+            (async () => {
+                let acc = '';
+                for await (const token of source()) {
+                    acc += token;
+                    sig.value = acc;
+                }
+            })().catch((err: unknown) => console.error('[SSR] stream error:', err));
+        }
+        return sig;
+    };
+}
+
 // ============= Element Normalization =============
 
 /**
@@ -192,6 +219,7 @@ registerContextExtension((ctx: any) => {
             load: (_fn: () => Promise<void>) => {
                 // Skip - using restored server state
             },
+            stream: createClientStream(ctx.signal, false),
             isServer: false,
             isHydrating: true
         };
@@ -201,6 +229,7 @@ registerContextExtension((ctx: any) => {
             load: (_fn: () => Promise<void>) => {
                 // Skip - using restored server state
             },
+            stream: createClientStream(ctx.signal, false),
             isServer: false,
             isHydrating: true
         };
@@ -211,6 +240,7 @@ registerContextExtension((ctx: any) => {
                 // On client-side navigation (not hydration), execute the async function
                 fn().catch(err => console.error('[SSR] load error:', err));
             },
+            stream: createClientStream(ctx.signal, true),
             isServer: false,
             isHydrating: false
         };
