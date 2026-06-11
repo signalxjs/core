@@ -178,8 +178,14 @@ export function useAsync<T>(
                     // controller still gates whether IT observes the result.
                     promise = fetcher({ signal: new AbortController().signal });
                     const k = key;
-                    inflight.set(k, promise);
-                    void promise.catch(() => { }).then(() => inflight.delete(k));
+                    const p = promise;
+                    inflight.set(k, p);
+                    // Identity-guarded cleanup: a refresh(force) may have
+                    // replaced the entry with a NEWER in-flight promise —
+                    // an unconditional delete would drop it and break dedupe.
+                    void p.catch(() => { }).then(() => {
+                        if (inflight.get(k) === p) inflight.delete(k);
+                    });
                 } else {
                     promise = fetcher({ signal: abortSignal });
                 }

@@ -363,6 +363,40 @@ describe('useAsync', () => {
         expect(container.querySelector('.card')?.textContent).toBe('survived');
     });
 
+    it("a stale fetch settling does not evict a newer refresh()'s in-flight entry", async () => {
+        const resolvers: Array<(v: string) => void> = [];
+        const fetcher = vi.fn(() => new Promise<string>(r => { resolvers.push(r); }));
+        let state: any;
+
+        const App = component(() => {
+            state = useAsync('race-key', fetcher);
+            return () => <div class="v">{state.value ?? 'loading'}</div>;
+        }, { name: 'App' });
+
+        mount(jsx(App, {}));
+        expect(fetcher).toHaveBeenCalledTimes(1);   // fetch #1 pending
+
+        void state.refresh();                        // force: fetch #2 in flight
+        await tick();
+        expect(fetcher).toHaveBeenCalledTimes(2);
+
+        resolvers[0]('stale');                       // settle the OLD promise
+        await settle();
+
+        // The old promise's cleanup must NOT have evicted fetch #2's entry:
+        // a third consumer joins the in-flight fetch instead of starting one
+        const Joiner = component(() => {
+            const data = useAsync('race-key', fetcher);
+            return () => <span class="j">{data.value ?? 'loading'}</span>;
+        }, { name: 'Joiner' });
+        const el2 = mount(jsx(Joiner, {}));
+        expect(fetcher).toHaveBeenCalledTimes(2);    // joined, no new fetch
+
+        resolvers[1]('newest');
+        await settle();
+        expect(el2.querySelector('.j')?.textContent).toBe('newest');
+    });
+
     it('keeps the stale value while a refresh is in flight (stale-while-revalidate)', async () => {
         let resolve!: (v: string) => void;
         let calls = 0;
