@@ -121,11 +121,12 @@ async function prepareDocument(
     // Render the app shell. In streaming mode async components leave
     // placeholders, so this completes quickly; in blocking mode every
     // useAsync/useStream resolves inline.
-    let shellHtml = '';
+    const shellChunks: string[] = [];
     for await (const chunk of renderToChunks(input.element, ctx, null, input.appContext)) {
-        shellHtml += chunk;
+        shellChunks.push(chunk);
         throwIfAborted(options.signal);
     }
+    const shellHtml = shellChunks.join('');
 
     // Head: collected per-request by useHead via the component instances
     const headConfigs = ctx._headConfigs;

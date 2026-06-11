@@ -323,6 +323,45 @@ describe('useAsync', () => {
         expect(container.querySelector('.n')?.textContent).toBe('2');
     });
 
+    it('unmounting one consumer of a shared key does NOT abort the shared fetch', async () => {
+        let resolve!: (val: string) => void;
+        let fetcherSignal!: AbortSignal;
+        const fetcher = vi.fn(({ signal: sig }: { signal: AbortSignal }) => {
+            fetcherSignal = sig;
+            return new Promise<string>(r => { resolve = r; });
+        });
+
+        const Card = component(() => {
+            const data = useAsync('shared-abort-key', fetcher);
+            return () => <span class="card">{data.value ?? 'loading'}</span>;
+        }, { name: 'Card' });
+
+        const showFirst = signal({ value: true });
+        const App = component(() => {
+            return () => (
+                <div>
+                    {showFirst.value && jsx(Card, {})}
+                    {jsx(Card, {})}
+                </div>
+            );
+        }, { name: 'App' });
+
+        const container = mount(jsx(App, {}));
+        expect(fetcher).toHaveBeenCalledTimes(1);
+
+        // Unmount the FIRST consumer (the one whose mount started the fetch)
+        showFirst.value = false;
+        await tick();
+
+        // The shared fetch must survive — its signal is detached from any
+        // single consumer's lifecycle
+        expect(fetcherSignal.aborted).toBe(false);
+
+        resolve('survived');
+        await settle();
+        expect(container.querySelector('.card')?.textContent).toBe('survived');
+    });
+
     // ========================================================================
     // Unmount before resolve
     // ========================================================================
@@ -481,6 +520,42 @@ describe('useStream', () => {
         expect(sourceSpy).not.toHaveBeenCalled();
         // Page-lifetime cache: the entry persists for later mounts
         expect('restored-stream' in (globalThis as any).__SIGX_ASYNC__).toBe(true);
+    });
+
+    it('stops pulling tokens after the component unmounts', async () => {
+        let pulls = 0;
+        let release!: () => void;
+        async function* slowTokens(): AsyncGenerator<string> {
+            for (;;) {
+                pulls++;
+                await new Promise<void>(r => { release = r; });
+                yield 't';
+            }
+        }
+
+        const show = signal({ value: true });
+        const App = component(() => {
+            const text = useStream('unmount-stream', () => slowTokens());
+            return () => <div class="out">{text.value}</div>;
+        }, { name: 'App' });
+        const Wrapper = component(() => {
+            return () => show.value ? jsx(App, {}) : <div class="gone" />;
+        }, { name: 'Wrapper' });
+
+        mount(jsx(Wrapper, {}));
+        await tick();
+        const pullsBeforeUnmount = pulls;
+
+        show.value = false;
+        await tick();
+        release();          // resolve the pending pull
+        await settle();
+        release?.();        // and any follow-up
+        await settle();
+
+        // The loop broke on unmount: at most one in-flight pull completed,
+        // and no NEW pulls were issued afterwards
+        expect(pulls).toBeLessThanOrEqual(pullsBeforeUnmount + 1);
     });
 
     it('throws when called outside component setup', () => {

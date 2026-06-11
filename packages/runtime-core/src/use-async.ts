@@ -23,8 +23,13 @@ import { getCurrentInstance } from './component-lifecycle.js';
 
 export interface AsyncFetcherContext {
     /**
-     * Aborted when the component unmounts or a refresh() supersedes this
-     * run. Pass it straight to fetch():  fetch(url, { signal })
+     * Pass it straight to fetch():  fetch(url, { signal })
+     *
+     * Unkeyed calls: aborted when the component unmounts or a refresh()
+     * supersedes the run. Keyed calls: the fetch may be SHARED by several
+     * components (dedupe), so the signal is detached from any single
+     * consumer's lifecycle — each consumer independently stops observing
+     * the result when it unmounts.
      */
     signal: AbortSignal;
 }
@@ -137,7 +142,7 @@ export function useAsync<T>(
 
     let controller: AbortController | null = null;
 
-    async function run(): Promise<void> {
+    async function run(force = false): Promise<void> {
         controller?.abort();
         controller = new AbortController();
         const { signal: abortSignal } = controller;
@@ -152,13 +157,24 @@ export function useAsync<T>(
         });
 
         try {
+            // refresh() forces a fresh fetch instead of joining an in-flight
+            // one (other consumers of the old promise are unaffected).
+            if (force && key !== null) inflight.delete(key);
+
             let promise = key !== null ? (inflight.get(key) as Promise<T> | undefined) : undefined;
             if (!promise) {
-                promise = fetcher({ signal: abortSignal });
                 if (key !== null) {
+                    // Keyed fetches may be SHARED across components — the
+                    // fetcher's signal must not be tied to whichever
+                    // component happened to start the request (its unmount
+                    // would abort everyone's fetch). Each consumer's own
+                    // controller still gates whether IT observes the result.
+                    promise = fetcher({ signal: new AbortController().signal });
                     const k = key;
                     inflight.set(k, promise);
                     void promise.catch(() => { }).then(() => inflight.delete(k));
+                } else {
+                    promise = fetcher({ signal: abortSignal });
                 }
             }
             const result = await promise;
@@ -191,7 +207,7 @@ export function useAsync<T>(
             if (options.throwOnError && state.failure) throw state.failure;
             return state.failure;
         },
-        refresh: run
+        refresh: () => run(true)
     };
 }
 
@@ -226,9 +242,15 @@ export function useStream(
     const text = signal(restored.hit ? String(restored.value) : '');
 
     if (!restored.hit && typeof window !== 'undefined') {
+        // Stop pulling when the component unmounts — breaking the for-await
+        // closes the iterator (its return() runs), releasing the source.
+        let stopped = false;
+        instance.onUnmounted(() => { stopped = true; });
+
         void (async () => {
             let acc = '';
             for await (const token of source()) {
+                if (stopped) break;
                 acc += token;
                 text.value = acc;
             }
