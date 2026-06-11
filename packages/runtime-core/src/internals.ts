@@ -36,7 +36,7 @@ export type { InternalSlotsObject } from './utils/slots.js';
 export { normalizeSubTree } from './utils/normalize.js';
 
 // Platform bridge
-export { setPlatformModelProcessor, getPlatformModelProcessor } from './platform.js';
+export { setPlatformModelProcessor, getPlatformModelProcessor, registerModelProcessor, getModelProcessors } from './platform.js';
 export { setDefaultMount, getDefaultMount } from './app.js';
 
 // Plugin system internals

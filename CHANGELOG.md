@@ -8,8 +8,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- **`@sigx/runtime-core`**: `registerModelProcessor(fn)` — extension tier for intrinsic-element model handling. Extension processors run before the platform processor (first returning `true` wins), so packs and apps can ADD model behaviors (custom elements, widget libraries) without replacing the platform's. `setPlatformModelProcessor` is unchanged — platform packages (DOM, Lynx, Terminal) keep registering their processor as part of platform identity. (#77)
+- **`@sigx/runtime-dom`**: `registerShowDirective()` — global registration for the `use:show` shorthand in apps using bare `render()`. (#77)
 - **all packages**: dual dist builds — every package now ships `dist/*.js` (development: runtime `process.env.NODE_ENV` checks, dev warnings, devtools hook) alongside `dist/*.prod.js` (production: warnings and the devtools integration compiled out). Bundlers pick the right one automatically through the `development`/`production` export conditions (Vite needs no configuration); resolvers without those conditions keep getting the development build, which consumer-side `NODE_ENV` defines still strip — the status quo. Plain Node SSR can opt into the stripped build with `--conditions=production`. (#67)
 - **`@sigx/vite`**: `defineLibConfig` is now mode-aware — `vite build --mode prod-dist` emits the production dist (`.prod.js` suffix, `NODE_ENV` defined away) next to the default build. This is the sigx-standard mechanism; other sigx repos adopt dual dists by upgrading `@sigx/vite`, adding the second build pass, and mirroring the export-conditions map. (#67)
+
+### Changed (breaking)
+
+- **`@sigx/runtime-dom`**: the `show` directive no longer self-registers at import time. Directives are content, not platform identity — register per app with `app.directive('show', show)` (works on the client and during SSR) or globally with `registerShowDirective()`. The tuple form `use:show={[show, value]}` needs no registration. Model handling is NOT affected: the DOM form model processor remains automatic (platform identity, like Lynx's). (#77)
+- **`sigx` / `@sigx/runtime-dom`**: the DOM form model processor now ships as its own dist entry (`@sigx/runtime-dom/platform`), named precisely in `sideEffects`; `sigx` keeps a precise `sideEffects` allowlist (its entries carry the platform import) and imports it by subpath. Packages tree-shake fully (unused `Portal`/`useHead`/`show` drop from app bundles) while platform side effects are bundler-proof — previously they survived only by entry-statement retention. (#77)
+- **`@sigx/server-renderer`**: the internal lazy patching of `getSSRProps` onto built-in directives is gone — `show` now declares its own `getSSRProps`, and the hook is part of `DirectiveDefinition` in `@sigx/runtime-core` proper (directives are isomorphic). The `DirectiveDefinitionExtensions` augmentation seam remains for other extensions. (#77)
 
 ### Changed
 

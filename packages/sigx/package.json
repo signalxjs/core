@@ -63,7 +63,7 @@
         "./src/index.ts",
         "./src/jsx-runtime.ts",
         "./dist/sigx.js",
-        "./dist/jsx-runtime.js"
+        "./dist/sigx.prod.js"
     ],
     "engines": {
         "node": "^20.19.0 || >=22.12.0"

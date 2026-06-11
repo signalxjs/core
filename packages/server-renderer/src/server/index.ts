@@ -8,13 +8,6 @@
 // Load SSR type augmentations (SSRHelper, ComponentSetupContext extensions)
 import '../client-directives.js';
 
-// Load SSR directive type augmentation (adds getSSRProps to DirectiveDefinition)
-import '../directive-ssr-types.js';
-
-// Patch getSSRProps onto built-in directives (show, etc.)
-import { initDirectivesForSSR } from '../builtin-ssr-directives.js';
-initDirectivesForSSR();
-
 export { renderToStream, renderToNodeStream, renderToString, renderToStreamWithCallbacks } from './render-api';
 export { renderDocument, renderDocumentToNodeStream, renderDocumentToWebStream } from './render-api';
 export type { DocumentOptions } from './document';

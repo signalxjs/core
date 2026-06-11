@@ -5,9 +5,13 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { render } from '../src/index';
+import { render, registerShowDirective } from '../src/index';
 import { show } from '../src/directives/show';
-import { jsx, signal } from 'sigx';
+import { jsx } from 'sigx';
+
+// `show` no longer self-registers — the use:show={value} shorthand needs
+// explicit registration (per-app via app.directive, or globally like here).
+registerShowDirective();
 
 describe('show directive', () => {
     let container: HTMLElement;

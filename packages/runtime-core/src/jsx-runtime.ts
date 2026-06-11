@@ -2,11 +2,11 @@
 
 import { detectAccess, isComputed } from '@sigx/reactivity';
 import { createModel, isModel, type Model } from './model.js';
-import { getPlatformModelProcessor } from './platform.js';
+import { getModelProcessors } from './platform.js';
 import { isComponent } from './utils/is-component.js';
 
 // Re-export platform types and functions
-export { setPlatformModelProcessor, getPlatformModelProcessor } from './platform.js';
+export { setPlatformModelProcessor, getPlatformModelProcessor, registerModelProcessor } from './platform.js';
 export type { ModelProcessor } from './platform.js';
 export { createModel, isModel, type Model } from './model.js';
 
@@ -204,10 +204,16 @@ export function jsx(
                         };
                     }
 
-                    // Let platform handle intrinsic element model (e.g., DOM checkbox/radio)
-                    const platformProcessor = getPlatformModelProcessor();
-                    if (typeof type === "string" && platformProcessor) {
-                        handled = platformProcessor(type, processedProps, tuple, props);
+                    // Let registered processors handle intrinsic element models:
+                    // extension processors first, then the platform processor
+                    // (e.g., DOM checkbox/radio). First returning true wins.
+                    if (typeof type === "string") {
+                        for (const processor of getModelProcessors()) {
+                            if (processor(type, processedProps, tuple, props)) {
+                                handled = true;
+                                break;
+                            }
+                        }
                     }
 
                     // For components: create Model<T> object

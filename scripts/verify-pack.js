@@ -143,8 +143,12 @@ function main() {
             '',
             'const Counter = component(() => {',
             '  const count = signal(0);',
+            '  const form = signal({ name: \'\' });',
             '  return () => (',
-            '    <button onClick={() => count.value++}>count: {count.value}</button>',
+            '    <div>',
+            '      <button onClick={() => count.value++}>count: {count.value}</button>',
+            '      <input model={[form, \'name\']} />',
+            '    </div>',
             '  );',
             '});',
             '',
@@ -177,18 +181,31 @@ function main() {
         throw new Error('Scratch app build produced no JS assets to inspect.');
     }
     const FORBIDDEN = ['__SIGX_DEVTOOLS_HOOK__', 'process.env.NODE_ENV', 'called outside of component setup'];
-    for (const file of bundles) {
-        const content = readFileSync(join(assetsDir, file), 'utf-8');
+    // Platform side effects must SURVIVE tree-shaking: the scratch app uses
+    // model={...} on an input, so the DOM form model processor (reached via
+    // the sideEffects-listed @sigx/runtime-dom/platform entry) must be in
+    // the bundle. Guards the side-effect chain across bundlers.
+    const REQUIRED = ['checkbox'];
+    const allContent = bundles.map((f) => readFileSync(join(assetsDir, f), 'utf-8'));
+    for (let i = 0; i < bundles.length; i++) {
         for (const marker of FORBIDDEN) {
-            if (content.includes(marker)) {
+            if (allContent[i].includes(marker)) {
                 throw new Error(
-                    `Production bundle ${file} contains "${marker}" — the production export condition ` +
+                    `Production bundle ${bundles[i]} contains "${marker}" — the production export condition ` +
                     'did not resolve to the .prod.js dist, or the prod dist is not fully stripped.'
                 );
             }
         }
     }
-    console.log(`   ✔ ${bundles.length} bundle(s) clean: no devtools hook, no NODE_ENV checks, no dev warnings`);
+    for (const marker of REQUIRED) {
+        if (!allContent.some((c) => c.includes(marker))) {
+            throw new Error(
+                `No production bundle contains "${marker}" — the platform model processor was ` +
+                'tree-shaken away; the @sigx/runtime-dom/platform side-effect chain is broken.'
+            );
+        }
+    }
+    console.log(`   ✔ ${bundles.length} bundle(s) clean and platform side effects retained`);
 
     step('✅ Pack smoke test passed');
 }
