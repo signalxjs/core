@@ -8,7 +8,8 @@
   "workspaces": [
     "packages/*",
     "examples",
-    "examples/*"
+    "examples/*",
+    "benchmarks"
   ],
   "scripts": {
     "test": "vitest run",
@@ -17,6 +18,9 @@
     "bench": "vitest bench --run",
     "bench:json": "vitest bench --run --outputJson bench-results.json",
     "bench:compare": "vitest bench --run --compare bench-results.json",
+    "bench:ssr": "pnpm --filter @sigx/benchmarks bench",
+    "bench:ssr:stream": "pnpm --filter @sigx/benchmarks bench:stream",
+    "bench:ssr:baseline": "pnpm --filter @sigx/benchmarks bench:baseline",
     "build": "pnpm run build:core && pnpm --filter @sigx/server-renderer run build && pnpm --filter @sigx/vite run build",
     "build:core": "pnpm --filter @sigx/reactivity run build && pnpm --filter @sigx/runtime-core run build && pnpm --filter @sigx/runtime-dom run build && pnpm --filter sigx run build",
     "build:sigx": "pnpm --filter sigx run build",

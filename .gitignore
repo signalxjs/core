@@ -59,3 +59,7 @@ coverage/
 
 # benchmark output (pnpm bench:json)
 bench-results.json
+
+# SSR benchmark results (pnpm bench:ssr) — only the committed baseline is kept
+benchmarks/results/*
+!benchmarks/results/baseline.json
