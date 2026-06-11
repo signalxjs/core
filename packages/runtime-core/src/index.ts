@@ -95,7 +95,7 @@ export {
 } from './errors.js';
 
 // Utilities
-export { Utils } from './utils/index.js';
+export { Utils, isPromise } from './utils/index.js';
 
 // Domain models & messaging
 export * from './models/index.js';
