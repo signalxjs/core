@@ -12,9 +12,6 @@ import {
 } from './async-context.js';
 import { getDevtoolsHook } from './devtools-hook.js';
 
-// Dev mode - can be set to false in production builds
-const _DEV = true;
-
 let currentComponentContext: ComponentSetupContext<any, any, any> | null = null;
 
 /**
@@ -122,7 +119,7 @@ export function setCurrentInstance(ctx: ComponentSetupContext<any, any, any> | n
 export function onMounted(fn: (ctx: MountContext) => void) {
     if (currentComponentContext) {
         currentComponentContext.onMounted(fn);
-    } else if (_DEV) {
+    } else if (process.env.NODE_ENV !== 'production') {
         console.warn("onMounted called outside of component setup");
     }
 }
@@ -145,7 +142,7 @@ export function onMounted(fn: (ctx: MountContext) => void) {
 export function onUnmounted(fn: (ctx: MountContext) => void) {
     if (currentComponentContext) {
         currentComponentContext.onUnmounted(fn);
-    } else if (_DEV) {
+    } else if (process.env.NODE_ENV !== 'production') {
         console.warn("onUnmounted called outside of component setup");
     }
 }
@@ -165,7 +162,7 @@ export function onUnmounted(fn: (ctx: MountContext) => void) {
 export function onCreated(fn: () => void) {
     if (currentComponentContext) {
         currentComponentContext.onCreated(fn);
-    } else if (_DEV) {
+    } else if (process.env.NODE_ENV !== 'production') {
         console.warn("onCreated called outside of component setup");
     }
 }
@@ -186,7 +183,7 @@ export function onCreated(fn: () => void) {
 export function onUpdated(fn: () => void) {
     if (currentComponentContext) {
         currentComponentContext.onUpdated(fn);
-    } else if (_DEV) {
+    } else if (process.env.NODE_ENV !== 'production') {
         console.warn("onUpdated called outside of component setup");
     }
 }

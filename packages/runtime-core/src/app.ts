@@ -37,12 +37,6 @@ import { getDevtoolsHook } from './devtools-hook.js';
 import { getInstanceId, getParentInstanceId } from './component-lifecycle.js';
 
 // ============================================================================
-// Dev mode flag - must be at top before any usage
-// ============================================================================
-
-const isDev = typeof process !== 'undefined' && process.env?.NODE_ENV !== 'production' || true;
-
-// ============================================================================
 // Constants
 // ============================================================================
 
@@ -124,7 +118,7 @@ export function defineApp<TContainer = any>(rootComponent: JSXElement): App<TCon
         use(plugin, options) {
             if (installedPlugins.has(plugin)) {
                 // Plugin already installed, skip
-                if (isDev) {
+                if (process.env.NODE_ENV !== 'production') {
                     console.warn(`Plugin ${(plugin as Plugin).name || 'anonymous'} is already installed.`);
                 }
                 return app;
@@ -138,7 +132,7 @@ export function defineApp<TContainer = any>(rootComponent: JSXElement): App<TCon
             } else if (plugin && typeof plugin.install === 'function') {
                 // Object-style plugin
                 plugin.install(app, options);
-            } else if (isDev) {
+            } else if (process.env.NODE_ENV !== 'production') {
                 console.warn('Invalid plugin: must be a function or have an install() method.');
             }
 
@@ -180,7 +174,7 @@ export function defineApp<TContainer = any>(rootComponent: JSXElement): App<TCon
 
         directive(name: string, definition?: any): any {
             if (definition !== undefined) {
-                if (isDev && !isDirective(definition)) {
+                if (process.env.NODE_ENV !== 'production' && !isDirective(definition)) {
                     console.warn(
                         `[sigx] app.directive('${name}', ...) received a value that is not a valid directive definition. ` +
                         `Use defineDirective() to create directive definitions.`
@@ -194,7 +188,7 @@ export function defineApp<TContainer = any>(rootComponent: JSXElement): App<TCon
 
         mount(target, renderFn?) {
             if (isMounted) {
-                if (isDev) {
+                if (process.env.NODE_ENV !== 'production') {
                     console.warn('App is already mounted. Call app.unmount() first.');
                 }
                 return app;
@@ -228,7 +222,7 @@ export function defineApp<TContainer = any>(rootComponent: JSXElement): App<TCon
 
         unmount() {
             if (!isMounted) {
-                if (isDev) {
+                if (process.env.NODE_ENV !== 'production') {
                     console.warn('App is not mounted.');
                 }
                 return;

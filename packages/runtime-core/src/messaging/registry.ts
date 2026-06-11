@@ -22,7 +22,11 @@ export function registerTopic(topic: Topic<unknown>): void {
         try {
             handler(topic);
         } catch (err) {
-            console.error('[sigx] Error in onTopicCreated handler:', err);
+            if (process.env.NODE_ENV !== 'production') {
+                console.error('[sigx] Error in onTopicCreated handler:', err);
+            } else {
+                console.error(err);
+            }
         }
     }
 }
@@ -34,7 +38,11 @@ export function unregisterTopic(topic: Topic<unknown>): void {
         try {
             handler(topic);
         } catch (err) {
-            console.error('[sigx] Error in topic removal handler:', err);
+            if (process.env.NODE_ENV !== 'production') {
+                console.error('[sigx] Error in topic removal handler:', err);
+            } else {
+                console.error(err);
+            }
         }
     }
 }

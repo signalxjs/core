@@ -1,6 +1,6 @@
 import { describe, it, expect, expectTypeOf, vi, afterEach } from 'vitest';
 import { createTopic, toSubscriber, createTopicGroup } from '../src/messaging';
-import { listTopics } from '../src/messaging/registry';
+import { listTopics, onTopicCreated } from '../src/messaging/registry';
 import type { Topic } from '../src/models';
 
 // The registry is realm-global: destroy any topics a test left registered so
@@ -390,5 +390,71 @@ describe('createTopicGroup', () => {
         void (group.topics as { then?: unknown }).then;
 
         expect(listTopics('grp.proto.*')).toHaveLength(0);
+    });
+});
+
+describe('production error reporting', () => {
+    afterEach(() => {
+        vi.unstubAllEnvs();
+    });
+
+    it('reports hook and subscriber errors as the bare error, without dev labels', () => {
+        vi.stubEnv('NODE_ENV', 'production');
+        const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+        const boom = new Error('boom');
+
+        const topic = createTopic<number>({
+            onActivate: () => {
+                throw boom;
+            },
+            onDeactivate: () => {
+                throw boom;
+            }
+        });
+        topic.subscribe(() => {
+            throw boom;
+        });          // first subscriber → activate → onActivate throws
+        topic.publish(1);    // subscriber throws
+        topic.destroy();     // last subscriber gone → deactivate throws
+
+        expect(errorSpy).toHaveBeenCalledTimes(3);
+        for (const call of errorSpy.mock.calls) {
+            expect(call).toEqual([boom]);
+        }
+
+        errorSpy.mockRestore();
+    });
+
+    it('reports onTopicCreated handler errors with a label in dev', () => {
+        const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+        const boom = new Error('boom');
+
+        const sub = onTopicCreated(() => {
+            throw boom;
+        });
+        const topic = createTopic<number>({ namespace: 'ns.dev', name: 'x' });
+
+        expect(errorSpy).toHaveBeenCalledWith('[sigx] Error in onTopicCreated handler:', boom);
+
+        sub.unsubscribe();
+        topic.destroy();
+        errorSpy.mockRestore();
+    });
+
+    it('reports onTopicCreated handler errors as the bare error', () => {
+        vi.stubEnv('NODE_ENV', 'production');
+        const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+        const boom = new Error('boom');
+
+        const sub = onTopicCreated(() => {
+            throw boom;
+        });
+        const topic = createTopic<number>({ namespace: 'ns.prod', name: 'x' });
+
+        expect(errorSpy).toHaveBeenCalledWith(boom);
+
+        sub.unsubscribe();
+        topic.destroy();
+        errorSpy.mockRestore();
     });
 });

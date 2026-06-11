@@ -19,7 +19,7 @@ import { fileURLToPath } from 'node:url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const packages = resolve(__dirname, '../..');
 
-async function bundleClientApp(entrySource: string): Promise<string> {
+async function bundleClientApp(entrySource: string, options: { minifySyntax?: boolean } = {}): Promise<string> {
     const result = await build({
         stdin: {
             contents: entrySource,
@@ -31,6 +31,7 @@ async function bundleClientApp(entrySource: string): Promise<string> {
         format: 'esm',
         platform: 'browser',
         treeShaking: true,
+        minifySyntax: options.minifySyntax ?? false,
         plugins: [{
             // Resolve workspace packages (incl. subpaths like
             // 'sigx/jsx-runtime', '@sigx/runtime-core/foo') to their SOURCE
@@ -106,5 +107,31 @@ describe('client-only bundle layering guarantees', () => {
         expect(output).toContain(HEAD_MARKER);
         expect(output).not.toContain(DATA_LAYER_MARKER);
         expect(output).not.toContain(SSR_MARKER);
+    });
+});
+
+describe('production bundle strips dev-only warnings', () => {
+    it('a production-define bundle carries no dev warning strings', async () => {
+        // minifySyntax models the minify step every production build runs:
+        // the define folds the gates to \`if (false)\` and minification
+        // removes the dead branches with their warning strings.
+        const output = await bundleClientApp(`
+            import { component, defineApp, createTopic } from 'sigx';
+            const topic = createTopic<number>({ namespace: 'ns', name: 'x' });
+            topic.subscribe(() => {});
+            const App = component((ctx) => {
+                const count = ctx.signal(0);
+                return () => count.value;
+            });
+            const app = defineApp((App as any)({}));
+            app.mount(document.getElementById('app')!);
+        `, { minifySyntax: true });
+
+        // One marker per module this PR gated: component-lifecycle, app,
+        // runtime-dom directives, and messaging.
+        expect(output).not.toContain('called outside of component setup');
+        expect(output).not.toContain('is already installed');
+        expect(output).not.toContain('could not be resolved');
+        expect(output).not.toContain('Error in topic subscriber');
     });
 });
