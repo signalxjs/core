@@ -228,6 +228,19 @@ describe('createSlots', () => {
         expect(second).not.toBe(first);
     });
 
+    it('a slot named __proto__ is stored as a plain key without prototype pollution', () => {
+        const child = { type: 'div', props: { slot: '__proto__' }, key: null, children: [], dom: null };
+        const slots = createSlots([child]);
+
+        // Force extraction.
+        expect(slots.default()).toEqual([]);
+
+        expect(({} as any).polluted).toBeUndefined();
+        expect(Object.prototype.hasOwnProperty.call(Object.prototype, '0')).toBe(false);
+        // The default slot stays clean and repeated extraction is stable.
+        expect(slots.default()).toEqual([]);
+    });
+
     it('re-extracts after a version bump swaps the children', () => {
         const a = { type: 'span', props: {}, key: null, children: [], dom: null };
         const b = { type: 'em', props: { slot: 'side' }, key: null, children: [], dom: null };

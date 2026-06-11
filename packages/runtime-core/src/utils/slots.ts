@@ -54,16 +54,19 @@ export function createSlots(children: any, slotsFromProps?: Record<string, any>)
     // repeated slot calls per render skip the O(n) walk and its
     // allocations. Results are sliced on return so callers can't
     // corrupt the cache.
+    // Null-prototype dictionaries: slot names come from user-controlled
+    // `slot` props, so a name like "__proto__" must be a plain key, not
+    // a prototype mutation.
     let cachedVersion = -1;
     let cachedDefault: any[] = [];
-    let cachedNamed: Record<string, any[]> = {};
+    let cachedNamed: Record<string, any[]> = Object.create(null);
 
     // Extract default children (filtered of null/boolean conditional
     // results) and named slots (children with a `slot` prop).
     function extract(target: { _children: any }, version: number): void {
         if (version === cachedVersion) return;
         const defaultChildren: any[] = [];
-        const namedSlots: Record<string, any[]> = {};
+        const namedSlots: Record<string, any[]> = Object.create(null);
         const c = target._children;
         if (c != null) {
             const items = Array.isArray(c) ? c : [c];
