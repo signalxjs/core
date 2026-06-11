@@ -60,7 +60,7 @@ async function bundleClientApp(entrySource: string, options: { minifySyntax?: bo
 const DATA_LAYER_MARKER = '__SIGX_ASYNC__';            // use-async.ts
 const HEAD_MARKER = 'data-sigx-head';                  // use-head.ts
 const SSR_MARKER = 'data-async-placeholder';           // @sigx/server-renderer only
-const HYDRATION_MARKER = 'client:idle';                // hydration/index.ts only
+const HYDRATION_MARKER = 'client:only';                // hydration/index.ts only
 
 describe('client-only bundle layering guarantees', () => {
     it('an app using only component/render/signal ships no data layer, head, or SSR bytes', async () => {

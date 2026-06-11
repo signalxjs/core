@@ -44,6 +44,7 @@ export function splitComponentProps(initialProps: Record<string, any>): {
  */
 export function createEmit(reactiveProps: { value?: Record<string, any> } | Record<string, any>): (event: string, ...args: any[]) => void {
     return (event: string, ...args: any[]) => {
+        if (!event) return; // emit('') is a no-op, like a missing handler
         const eventName = `on${event[0].toUpperCase() + event.slice(1)}`;
         // A reactive props proxy IS the props object — a component's own
         // `value` prop must not trigger unwrapping. Only plain
