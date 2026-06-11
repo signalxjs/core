@@ -205,6 +205,22 @@ export function hydrateComponent(vnode: VNode, dom: Node | null, parent: Node, s
         setCurrentInstance(prev);
     }
 
+    // Streamed async components (and Suspense boundaries) render inside a
+    // <div data-async-placeholder> wrapper that is NOT part of the vnode
+    // tree. Hydrate against the wrapper's children — matching the wrapper
+    // itself against the component's first element would mismatch and mount
+    // a duplicate copy of the content.
+    let hydrateDom: Node | null = dom;
+    let hydrateParent: Node = parent;
+    if (
+        dom &&
+        dom.nodeType === Node.ELEMENT_NODE &&
+        (dom as Element).hasAttribute('data-async-placeholder')
+    ) {
+        hydrateParent = dom;
+        hydrateDom = dom.firstChild;
+    }
+
     // Track where the component's DOM starts
     let endDom: Node | null = dom;
 
@@ -243,7 +259,7 @@ export function hydrateComponent(vnode: VNode, dom: Node | null, parent: Node, s
                         // In that case, keep isFirstRender=true so the next render (after the
                         // lazy component resolves) will hydrate against the existing SSR DOM
                         // instead of mounting a duplicate.
-                        const hasSSRContent = dom != null && anchor != null && dom !== anchor;
+                        const hasSSRContent = hydrateDom != null && anchor != null && hydrateDom !== anchor;
                         if (!hasSSRContent) {
                             // Truly null first render — SSR also rendered nothing
                             isFirstRender = false;
@@ -271,10 +287,14 @@ export function hydrateComponent(vnode: VNode, dom: Node | null, parent: Node, s
                     // SSR rendered nothing (e.g., lazy() returned null on the server).
                     // In that case, mount fresh instead of trying to hydrate
                     // against non-existent DOM.
-                    const hasSSRContent = dom != null && dom !== anchor;
+                    const hasSSRContent = hydrateDom != null && hydrateDom !== anchor;
                     if (hasSSRContent) {
-                        // Hydrate against existing SSR DOM
-                        endDom = hydrateNode(subTree, dom, parent);
+                        // Hydrate against existing SSR DOM (inside the
+                        // placeholder wrapper when one exists)
+                        endDom = hydrateNode(subTree, hydrateDom, hydrateParent);
+                    } else if (hydrateParent !== parent) {
+                        // Empty placeholder wrapper — mount inside it
+                        mount(subTree, hydrateParent as Element, null);
                     } else {
                         // No SSR content — mount fresh before the anchor
                         mount(subTree, parent as Element, anchor || null);
@@ -286,6 +306,9 @@ export function hydrateComponent(vnode: VNode, dom: Node | null, parent: Node, s
                     if (prevSubTree) {
                         const patchContainer = prevSubTree.dom?.parentNode as Element || parent;
                         patch(prevSubTree, subTree, patchContainer);
+                    } else if (hydrateParent !== parent) {
+                        // No previous subtree — mount inside the placeholder wrapper
+                        mount(subTree, hydrateParent as Element, null);
                     } else {
                         // No previous subtree - mount fresh using the component's anchor
                         mount(subTree, parent as Element, anchor || null);

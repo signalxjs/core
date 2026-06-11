@@ -661,6 +661,12 @@ function* renderNode(
 
             ctx._pendingAsync.push({ id, promise: deferredRender });
 
+            // Trailing marker for hydration parity with regular components —
+            // the client's component walk anchors on it.
+            const marker = `<!--$c:${id}-->`;
+            buf.push(marker);
+            state.len += marker.length;
+
             if (state.len >= state.threshold) yield FLUSH;
             return;
         }
