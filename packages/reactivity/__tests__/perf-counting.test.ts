@@ -284,6 +284,19 @@ describe('propagation counts', () => {
             expect(runs).toHaveBeenCalledTimes(2);
         });
 
+        it('array length truncation runs an effect reading a cut index + length exactly once', () => {
+            const arr = signal<(string | undefined)[]>(['a', 'b', 'c']);
+            const runs = vi.fn();
+            effect(() => { runs(arr[2], arr.length); });
+            expect(runs).toHaveBeenCalledTimes(1);
+
+            // Shrinking the length fires the length dep AND every now-out-of-
+            // bounds index dep as one batch.
+            arr.length = 1;
+            expect(runs).toHaveBeenCalledTimes(2);
+            expect(runs).toHaveBeenLastCalledWith(undefined, 1);
+        });
+
         it('array push runs an effect reading the array exactly once (already batched)', () => {
             const arr = signal<number[]>([1, 2]);
             const runs = vi.fn();
