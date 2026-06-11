@@ -94,6 +94,8 @@ export function camelToKebab(str: string): string {
 
 // ============= Style Parsing =============
 
+const styleCommentRE = /\/\*[^]*?\*\//g;
+
 /**
  * Parse a CSS string into a style object.
  *
@@ -102,8 +104,6 @@ export function camelToKebab(str: string): string {
  *
  * @internal exported for direct unit tests only
  */
-const styleCommentRE = /\/\*[^]*?\*\//g;
-
 export function parseStringStyle(cssText: string): Record<string, string> {
     const ret: Record<string, string> = {};
     const stripped = cssText.replace(styleCommentRE, '');
