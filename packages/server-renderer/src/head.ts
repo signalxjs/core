@@ -284,8 +284,18 @@ function applyHeadClient(config: HeadConfig): (() => void) {
  * @param config - Head configuration (title, meta, link, script, etc.)
  */
 export function useHead(config: HeadConfig): void {
+    // Server-side, inside a component: collect on the render's SSRContext —
+    // safe under concurrent renders (the legacy module-level collection below
+    // interleaves configs when two renders await at the same time).
+    const instance = getCurrentInstance() as any;
+    const ssrCtx = instance?.ssr?.isServer ? instance.ssr._ctx : null;
+    if (ssrCtx) {
+        ssrCtx._headConfigs.push(config);
+        return;
+    }
+
     if (_isSSR) {
-        // Server-side: collect configs
+        // Server-side fallback (no component instance): module-level collection
         _ssrHeadConfigs.push(config);
         return;
     }
@@ -294,7 +304,6 @@ export function useHead(config: HeadConfig): void {
     const cleanup = applyHeadClient(config);
 
     // If we're inside a component setup, register cleanup on unmount
-    const instance = getCurrentInstance();
     if (instance) {
         instance.onUnmounted(() => cleanup());
     }

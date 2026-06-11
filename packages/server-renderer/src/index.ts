@@ -51,6 +51,8 @@ export type { SSRPlugin } from './plugin.js';
 
 // Re-export from server (convenience)
 export { renderToStream, renderToString, renderVNodeToString } from './server/index.js';
+export { renderDocument, renderDocumentToNodeStream, renderDocumentToWebStream } from './server/index.js';
+export type { DocumentOptions } from './server/document.js';
 export { createSSRContext } from './server/context.js';
 export type { SSRContext, SSRContextOptions, RenderOptions, CorePendingAsync } from './server/context.js';
 

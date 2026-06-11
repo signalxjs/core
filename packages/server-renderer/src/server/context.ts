@@ -90,6 +90,13 @@ export interface SSRContext {
     _pendingAsync: CorePendingAsync[];
 
     /**
+     * Per-request head configs collected from useHead() calls during this
+     * render. Unlike the legacy module-level collection in head.ts, this is
+     * safe under concurrent renders (each request has its own context).
+     */
+    _headConfigs: any[];
+
+    /**
      * Generate next component ID
      */
     nextId(): number;
@@ -142,6 +149,7 @@ export function createSSRContext(options: SSRContextOptions = {}): SSRContext {
         _onComponentError: options.onComponentError,
         _streaming: false,
         _pendingAsync: [],
+        _headConfigs: [],
 
         nextId() {
             return ++componentId;

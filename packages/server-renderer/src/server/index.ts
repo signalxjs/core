@@ -16,6 +16,8 @@ import { initDirectivesForSSR } from '../builtin-ssr-directives.js';
 initDirectivesForSSR();
 
 export { renderToStream, renderToNodeStream, renderToString, renderToStreamWithCallbacks } from './render-api';
+export { renderDocument, renderDocumentToNodeStream, renderDocumentToWebStream } from './render-api';
+export type { DocumentOptions } from './document';
 export { renderVNodeToString } from './render-core';
 export { createSSRContext } from './context';
 export type { SSRContext, SSRContextOptions, RenderOptions, CorePendingAsync } from './context';

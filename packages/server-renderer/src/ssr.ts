@@ -23,6 +23,14 @@ import { renderToChunks, renderVNodeToString } from './server/render-core';
 import { generateStreamingScript, generateReplacementScript } from './server/streaming';
 import { enableSSRHead, collectSSRHead, renderHeadToString } from './head';
 import type { StreamCallbacks } from './server/types';
+import { stateSerializationPlugin } from './server/state-plugin';
+import {
+    renderDocumentImpl,
+    renderDocumentToNodeStreamImpl,
+    renderDocumentToWebStreamImpl,
+    type DocumentOptions,
+    type DocumentEngine
+} from './server/document';
 
 /**
  * Check if the input is an App instance (created via defineApp)
@@ -212,6 +220,26 @@ export interface SSRInstance {
         options?: SSRContextOptions | SSRContext
     ): Promise<void>;
 
+    /**
+     * Render a COMPLETE HTML document from a template (head auto-injection,
+     * state blob, async content). Default mode: 'blocking' — full content
+     * inline, no placeholders or scripts (crawler/AI-agent friendly).
+     */
+    renderDocument(input: JSXElement | App, options: DocumentOptions): Promise<string>;
+
+    /**
+     * Stream a complete HTML document as a Node.js Readable. The `shell`
+     * promise settles before any byte is produced — await it to pick the
+     * HTTP status code, then pipe. Default mode: 'stream'.
+     */
+    renderDocumentToNodeStream(
+        input: JSXElement | App,
+        options: DocumentOptions
+    ): { stream: import('node:stream').Readable; shell: Promise<void> };
+
+    /** Stream a complete HTML document as UTF-8 bytes (edge-friendly). Default mode: 'stream'. */
+    renderDocumentToWebStream(input: JSXElement | App, options: DocumentOptions): ReadableStream<Uint8Array>;
+
     /** Create a raw SSRContext with plugins pre-configured */
     createContext(options?: SSRContextOptions): SSRContext;
 }
@@ -271,7 +299,7 @@ export function createSSR(): SSRInstance {
             }
 
             // Collect head elements from useHead() calls during rendering
-            const headConfigs = collectSSRHead();
+            const headConfigs = [...ctx._headConfigs, ...collectSSRHead()];
             if (headConfigs.length > 0) {
                 ctx.addHead(renderHeadToString(headConfigs));
             }
@@ -306,7 +334,7 @@ export function createSSR(): SSRInstance {
                 if (buffer) { yield buffer; buffer = ''; }
 
                 // Collect head from useHead() calls
-                const headConfigs = collectSSRHead();
+                const headConfigs = [...ctx._headConfigs, ...collectSSRHead()];
                 if (headConfigs.length > 0) {
                     ctx.addHead(renderHeadToString(headConfigs));
                 }
@@ -369,7 +397,7 @@ export function createSSR(): SSRInstance {
                 if (buffer) { yield buffer; buffer = ''; }
 
                 // Collect head from useHead() calls
-                const headConfigs = collectSSRHead();
+                const headConfigs = [...ctx._headConfigs, ...collectSSRHead()];
                 if (headConfigs.length > 0) {
                     ctx.addHead(renderHeadToString(headConfigs));
                 }
@@ -411,7 +439,7 @@ export function createSSR(): SSRInstance {
                 }
 
                 // Collect head from useHead() calls
-                const headConfigs = collectSSRHead();
+                const headConfigs = [...ctx._headConfigs, ...collectSSRHead()];
                 if (headConfigs.length > 0) {
                     ctx.addHead(renderHeadToString(headConfigs));
                 }
@@ -439,8 +467,43 @@ export function createSSR(): SSRInstance {
             }
         },
 
+        renderDocument(input, options) {
+            const { element, appContext } = extractInput(input);
+            const engine = makeDocumentEngine(options);
+            return renderDocumentImpl(engine, { element, appContext }, options);
+        },
+
+        renderDocumentToNodeStream(input, options) {
+            const { element, appContext } = extractInput(input);
+            const engine = makeDocumentEngine(options);
+            return renderDocumentToNodeStreamImpl(engine, { element, appContext }, options);
+        },
+
+        renderDocumentToWebStream(input, options) {
+            const { element, appContext } = extractInput(input);
+            const engine = makeDocumentEngine(options);
+            return renderDocumentToWebStreamImpl(engine, { element, appContext }, options);
+        },
+
         createContext(options?) {
             return makeContext(options);
         }
     };
+
+    /**
+     * Document engine: instance plugins, with stateSerializationPlugin
+     * appended by default (serializeState: false opts out; an instance that
+     * already registered it is left as-is).
+     */
+    function makeDocumentEngine(options: DocumentOptions): DocumentEngine {
+        const wantsState = options.serializeState !== false;
+        const hasState = plugins.some(p => p.name === 'sigx:state');
+        const effective = wantsState && !hasState
+            ? [...plugins, stateSerializationPlugin()]
+            : plugins;
+        return {
+            plugins: effective,
+            streamAsyncChunks: (ctx) => streamAllAsyncChunks(ctx, effective)
+        };
+    }
 }

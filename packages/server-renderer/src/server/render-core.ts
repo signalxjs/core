@@ -220,13 +220,16 @@ function createComponentState(
     // Track SSR loads for this component
     const ssrLoads: Promise<void>[] = [];
 
-    // Create SSR helper for async data loading
+    // Create SSR helper for async data loading.
+    // _ctx lets per-request consumers (useHead) reach the SSRContext through
+    // getCurrentInstance().ssr without module-level state.
     const ssrHelper = {
         load(fn: () => Promise<void>): void {
             ssrLoads.push(fn());
         },
         isServer: true,
-        isHydrating: false
+        isHydrating: false,
+        _ctx: ctx
     };
 
     let componentCtx: ComponentSetupContext = {
