@@ -73,8 +73,8 @@ export { lazy, Suspense, isLazyComponent } from './lazy.js';
 export type { LazyComponentFactory, SuspenseProps } from './lazy.js';
 
 // Async composable
-export { useAsync } from './use-async.js';
-export type { AsyncState } from './use-async.js';
+export { useAsync, useStream } from './use-async.js';
+export type { AsyncState, AsyncOptions, AsyncFetcherContext } from './use-async.js';
 
 // Model (two-way binding)
 export { createModel, createModelFromBinding, isModel } from './model.js';

@@ -10,5 +10,8 @@ export default defineLibConfig({
         'server/index': 'src/server/index.ts',
         'client/index': 'src/client/index.ts'
     },
-    external: ['sigx', /@sigx\/.*/, '@sigx/runtime-core', '@sigx/runtime-dom', '@sigx/reactivity']
+    // node: builtins must stay external (renderToNodeStream needs node:stream);
+    // the default browser platform otherwise stubs them to empty modules,
+    // which breaks the node streaming API in the built dist.
+    external: ['sigx', /@sigx\/.*/, '@sigx/runtime-core', '@sigx/runtime-dom', '@sigx/reactivity', /^node:/]
 });

@@ -1,0 +1,36 @@
+name: Bench
+
+# Informational only: quick SSR benchmark numbers from shared runners are too
+# noisy to gate on, so this never runs with --enforce and never fails on
+# regressions. Trigger it manually and inspect the uploaded artifact.
+on:
+  workflow_dispatch:
+
+jobs:
+  bench-quick:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          # The benchmarks run erasable TS directly via `node` (type stripping).
+          node-version: '24'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+
+      - name: Quick SSR bench (informational)
+        run: pnpm bench:ssr:quick
+
+      - name: Upload quick results
+        uses: actions/upload-artifact@v4
+        with:
+          name: quick-latest
+          path: benchmarks/results/quick-latest.json
