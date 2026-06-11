@@ -1,44 +1,23 @@
 /**
  * SSR type augmentations for runtime-core.
  *
- * Extends ComponentSetupContext with SSR-specific fields (`ssr`, `_serverState`, etc.).
+ * Extends ComponentSetupContext with SSR-specific fields (`ssr`, `_ssrLoads`).
  * Strategy-specific client hydration directive types are contributed by SSR plugins.
  */
 
 /**
- * SSR helper object for async data loading.
- * Provides clean async data loading that works seamlessly across server and client.
+ * SSR environment flags exposed as `ctx.ssr`.
+ * Data loading lives in the useAsync/useStream composables (runtime-core),
+ * which server renderers override per environment — see docs/rfc-use-async.md.
  */
 export interface SSRHelper {
-    /**
-     * Load async data during SSR. The callback runs on the server and is skipped
-     * during client hydration (state is automatically restored from server).
-     *
-     * @example
-     * ```tsx
-     * export const UserCard = component(({ signal, props, ssr }) => {
-     *     const state = signal({ user: null, loading: true });
-     *
-     *     ssr.load(async () => {
-     *         state.user = await fetchUser(props.userId);
-     *         state.loading = false;
-     *     });
-     *
-     *     return () => state.loading
-     *         ? <div>Loading...</div>
-     *         : <div>{state.user.name}</div>;
-     * });
-     * ```
-     */
-    load(fn: () => Promise<void>): void;
-
     /**
      * Whether we're currently running on the server (SSR context).
      */
     readonly isServer: boolean;
 
     /**
-     * Whether we're hydrating on the client with server state.
+     * Whether we're hydrating server-rendered DOM on the client.
      */
     readonly isHydrating: boolean;
 }
@@ -48,20 +27,10 @@ declare module '@sigx/runtime-core' {
     // Extend ComponentSetupContext with SSR-specific fields
     interface ComponentSetupContext {
         /**
-         * SSR helper for async data loading.
-         * Use `ssr.load()` to fetch data that runs on server and is skipped on client hydration.
+         * SSR environment flags (`isServer` / `isHydrating`).
+         * Async data loading lives in `useAsync()`/`useStream()` (runtime-core).
          */
         ssr: SSRHelper;
-
-        /**
-         * @internal Map of signal names to their current values (for SSR state capture)
-         */
-        _signals?: Map<string, any>;
-
-        /**
-         * @internal Pre-captured server state (for client hydration restoration)
-         */
-        _serverState?: Record<string, any>;
 
         /**
          * @internal Array of pending SSR load promises

@@ -17,11 +17,17 @@
   {
     "name": "@sigx/runtime-dom",
     "path": "packages/runtime-dom/dist/index.js",
-    "limit": "10.5 KB"
+    "limit": "11.5 KB"
   },
   {
     "name": "@sigx/server-renderer",
     "path": "packages/server-renderer/dist/index.js",
-    "limit": "18 KB"
+    "limit": "22 KB",
+    "ignore": ["node:stream"]
+  },
+  {
+    "name": "@sigx/server-renderer/client (browser entry)",
+    "path": "packages/server-renderer/dist/client/index.js",
+    "limit": "14 KB"
   }
 ]

@@ -19,9 +19,10 @@
 import type { JSXElement } from 'sigx';
 import type { App } from 'sigx';
 import type { Readable } from 'node:stream';
-import type { SSRContext, SSRContextOptions } from './context';
+import type { SSRContext } from './context';
 import { createSSR } from '../ssr';
 import type { StreamCallbacks } from './types';
+import type { DocumentOptions } from './document';
 
 // Re-export StreamCallbacks from shared types (avoids circular dependency)
 export type { StreamCallbacks } from './types';
@@ -101,4 +102,46 @@ export async function renderToStreamWithCallbacks(
  */
 export async function renderToString(input: JSXElement | App, context?: SSRContext): Promise<string> {
     return _defaultSSR.render(input, context);
+}
+
+/**
+ * Render a complete HTML document from a template — head auto-injection,
+ * state serialization (default on), async content inlined.
+ * Default mode: 'blocking' (crawler/AI-agent friendly full content).
+ *
+ * @example
+ * ```tsx
+ * const html = await renderDocument(app, { template, mode: isBot ? 'blocking' : 'stream' });
+ * ```
+ */
+export function renderDocument(input: JSXElement | App, options: DocumentOptions): Promise<string> {
+    return _defaultSSR.renderDocument(input, options);
+}
+
+/**
+ * Stream a complete HTML document as a Node.js Readable.
+ * `shell` settles before any byte is produced — await it, set the status
+ * code, then pipe.
+ *
+ * @example
+ * ```tsx
+ * const { stream, shell } = renderDocumentToNodeStream(app, { template });
+ * try { await shell; } catch { return res.status(500).send(errorPage); }
+ * res.status(200).setHeader('content-type', 'text/html');
+ * stream.pipe(res);
+ * ```
+ */
+export function renderDocumentToNodeStream(
+    input: JSXElement | App,
+    options: DocumentOptions
+): { stream: Readable; shell: Promise<void> } {
+    return _defaultSSR.renderDocumentToNodeStream(input, options);
+}
+
+/** Stream a complete HTML document as UTF-8 bytes (edge runtimes / Response body). */
+export function renderDocumentToWebStream(
+    input: JSXElement | App,
+    options: DocumentOptions
+): ReadableStream<Uint8Array> {
+    return _defaultSSR.renderDocumentToWebStream(input, options);
 }

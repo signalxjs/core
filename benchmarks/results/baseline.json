@@ -1,0 +1,512 @@
+{
+  "string": [
+    {
+      "scenario": "small-page",
+      "framework": "sigx",
+      "stats": {
+        "avgNs": 20527.297346052506,
+        "minNs": 12861,
+        "maxNs": 1999380,
+        "p25Ns": 14337,
+        "p50Ns": 15053,
+        "p75Ns": 17925,
+        "p99Ns": 97738,
+        "samples": 32706
+      }
+    },
+    {
+      "scenario": "small-page",
+      "framework": "vue",
+      "stats": {
+        "avgNs": 26606.011524609843,
+        "minNs": 13810,
+        "maxNs": 7815813,
+        "p25Ns": 15581,
+        "p50Ns": 17310,
+        "p75Ns": 25567,
+        "p99Ns": 100187,
+        "samples": 24990
+      }
+    },
+    {
+      "scenario": "small-page",
+      "framework": "react",
+      "stats": {
+        "avgNs": 14849.360156267541,
+        "minNs": 10122,
+        "maxNs": 959908,
+        "p25Ns": 11078,
+        "p50Ns": 11613,
+        "p75Ns": 13392,
+        "p99Ns": 53685,
+        "samples": 44539
+      }
+    },
+    {
+      "scenario": "small-page",
+      "framework": "preact",
+      "stats": {
+        "avgNs": 14889.764494257644,
+        "minNs": 7663,
+        "maxNs": 6108050,
+        "p25Ns": 8997,
+        "p50Ns": 10509,
+        "p75Ns": 14179,
+        "p99Ns": 64899,
+        "samples": 43362
+      }
+    },
+    {
+      "scenario": "large-table-1k",
+      "framework": "sigx",
+      "stats": {
+        "avgNs": 6768663.95959596,
+        "minNs": 5259632,
+        "maxNs": 12299661,
+        "p25Ns": 5899982,
+        "p50Ns": 6453108,
+        "p75Ns": 7234904,
+        "p99Ns": 10286669,
+        "samples": 99
+      }
+    },
+    {
+      "scenario": "large-table-1k",
+      "framework": "vue",
+      "stats": {
+        "avgNs": 4816275.345588123,
+        "minNs": 3598455.0000009537,
+        "maxNs": 10909318,
+        "p25Ns": 3828578,
+        "p50Ns": 4305649.999998093,
+        "p75Ns": 5306902,
+        "p99Ns": 10037481,
+        "samples": 136
+      }
+    },
+    {
+      "scenario": "large-table-1k",
+      "framework": "react",
+      "stats": {
+        "avgNs": 3784122.289772727,
+        "minNs": 2779282,
+        "maxNs": 7065241,
+        "p25Ns": 3174021,
+        "p50Ns": 3398648,
+        "p75Ns": 4214216,
+        "p99Ns": 6640303,
+        "samples": 176
+      }
+    },
+    {
+      "scenario": "large-table-1k",
+      "framework": "preact",
+      "stats": {
+        "avgNs": 3448930.764102564,
+        "minNs": 2213569,
+        "maxNs": 12146585,
+        "p25Ns": 2466136,
+        "p50Ns": 2786412,
+        "p75Ns": 3635762,
+        "p99Ns": 11085469,
+        "samples": 195
+      }
+    },
+    {
+      "scenario": "large-table",
+      "framework": "sigx",
+      "stats": {
+        "avgNs": 73937460.5,
+        "minNs": 58694638,
+        "maxNs": 108604783,
+        "p25Ns": 62117940,
+        "p50Ns": 71862959,
+        "p75Ns": 76130724,
+        "p99Ns": 83764503,
+        "samples": 12
+      }
+    },
+    {
+      "scenario": "large-table",
+      "framework": "vue",
+      "stats": {
+        "avgNs": 74138827,
+        "minNs": 56922770,
+        "maxNs": 130373136,
+        "p25Ns": 57912462,
+        "p50Ns": 63838675,
+        "p75Ns": 75662533,
+        "p99Ns": 103204099,
+        "samples": 12
+      }
+    },
+    {
+      "scenario": "large-table",
+      "framework": "react",
+      "stats": {
+        "avgNs": 42290593.615384616,
+        "minNs": 36059212,
+        "maxNs": 52082107,
+        "p25Ns": 38926819,
+        "p50Ns": 39946691,
+        "p75Ns": 48142587,
+        "p99Ns": 50578345,
+        "samples": 13
+      }
+    },
+    {
+      "scenario": "large-table",
+      "framework": "preact",
+      "stats": {
+        "avgNs": 37348033.71428572,
+        "minNs": 27608319,
+        "maxNs": 50662280,
+        "p25Ns": 30554109,
+        "p50Ns": 34755097,
+        "p75Ns": 43226413,
+        "p99Ns": 47030774,
+        "samples": 14
+      }
+    },
+    {
+      "scenario": "deep-tree",
+      "framework": "sigx",
+      "stats": {
+        "avgNs": 567272106.5000001,
+        "minNs": 503164084,
+        "maxNs": 659408570,
+        "p25Ns": 526872850,
+        "p50Ns": 566510187,
+        "p75Ns": 571225866.0000019,
+        "p99Ns": 630812570,
+        "samples": 12
+      }
+    },
+    {
+      "scenario": "deep-tree",
+      "framework": "vue",
+      "stats": {
+        "avgNs": 815289651.25,
+        "minNs": 685528369,
+        "maxNs": 1210341791,
+        "p25Ns": 702631048,
+        "p50Ns": 710322588,
+        "p75Ns": 830232293,
+        "p99Ns": 1056936130,
+        "samples": 12
+      }
+    },
+    {
+      "scenario": "deep-tree",
+      "framework": "react",
+      "stats": {
+        "avgNs": 393187480.583333,
+        "minNs": 314955251,
+        "maxNs": 452601642,
+        "p25Ns": 358395879.9999962,
+        "p50Ns": 383487728,
+        "p75Ns": 420140525,
+        "p99Ns": 446127509.9999962,
+        "samples": 12
+      }
+    },
+    {
+      "scenario": "deep-tree",
+      "framework": "preact",
+      "stats": {
+        "avgNs": 230529208.91666666,
+        "minNs": 210393064,
+        "maxNs": 258470406,
+        "p25Ns": 213620711,
+        "p50Ns": 224037733,
+        "p75Ns": 239778169,
+        "p99Ns": 257984798,
+        "samples": 12
+      }
+    },
+    {
+      "scenario": "attr-style-heavy",
+      "framework": "sigx",
+      "stats": {
+        "avgNs": 5103644.121212121,
+        "minNs": 4196496,
+        "maxNs": 8540033,
+        "p25Ns": 4482874,
+        "p50Ns": 4752516,
+        "p75Ns": 5343291,
+        "p99Ns": 7674785,
+        "samples": 132
+      }
+    },
+    {
+      "scenario": "attr-style-heavy",
+      "framework": "vue",
+      "stats": {
+        "avgNs": 4520505.390410959,
+        "minNs": 3588251,
+        "maxNs": 8681863,
+        "p25Ns": 3823477,
+        "p50Ns": 4055287,
+        "p75Ns": 4756641,
+        "p99Ns": 7832784,
+        "samples": 146
+      }
+    },
+    {
+      "scenario": "attr-style-heavy",
+      "framework": "react",
+      "stats": {
+        "avgNs": 4620224.363013699,
+        "minNs": 3364190,
+        "maxNs": 10610129,
+        "p25Ns": 3731812,
+        "p50Ns": 4136108,
+        "p75Ns": 4776461,
+        "p99Ns": 9016095,
+        "samples": 146
+      }
+    },
+    {
+      "scenario": "attr-style-heavy",
+      "framework": "preact",
+      "stats": {
+        "avgNs": 3631230.1475409837,
+        "minNs": 2812051,
+        "maxNs": 9963681,
+        "p25Ns": 3020188,
+        "p50Ns": 3302044,
+        "p75Ns": 3903389,
+        "p99Ns": 6635592,
+        "samples": 183
+      }
+    },
+    {
+      "scenario": "escape-heavy",
+      "framework": "sigx",
+      "stats": {
+        "avgNs": 1230993.3774597496,
+        "minNs": 981766,
+        "maxNs": 4151382,
+        "p25Ns": 1072772,
+        "p50Ns": 1133519,
+        "p75Ns": 1272123,
+        "p99Ns": 2111949,
+        "samples": 559
+      }
+    },
+    {
+      "scenario": "escape-heavy",
+      "framework": "vue",
+      "stats": {
+        "avgNs": 481814.97842727904,
+        "minNs": 341549,
+        "maxNs": 3410537,
+        "p25Ns": 386265,
+        "p50Ns": 411938,
+        "p75Ns": 472867,
+        "p99Ns": 1991986,
+        "samples": 1437
+      }
+    },
+    {
+      "scenario": "escape-heavy",
+      "framework": "react",
+      "stats": {
+        "avgNs": 503600.8273328435,
+        "minNs": 355808,
+        "maxNs": 5523469,
+        "p25Ns": 390550,
+        "p50Ns": 424230,
+        "p75Ns": 518775,
+        "p99Ns": 1410339,
+        "samples": 1361
+      }
+    },
+    {
+      "scenario": "escape-heavy",
+      "framework": "preact",
+      "stats": {
+        "avgNs": 345844.89974811085,
+        "minNs": 265668,
+        "maxNs": 2045349,
+        "p25Ns": 289480,
+        "p50Ns": 304709,
+        "p75Ns": 342228,
+        "p99Ns": 1076377,
+        "samples": 1985
+      }
+    },
+    {
+      "scenario": "escape-clean",
+      "framework": "sigx",
+      "stats": {
+        "avgNs": 36473.19551595052,
+        "minNs": 31201.815185546875,
+        "maxNs": 45443.98095703125,
+        "p25Ns": 32099.34228515625,
+        "p50Ns": 34511.179931640625,
+        "p75Ns": 40977.5986328125,
+        "p99Ns": 42282.5537109375,
+        "samples": 12
+      }
+    },
+    {
+      "scenario": "escape-clean",
+      "framework": "vue",
+      "stats": {
+        "avgNs": 32811.43046061198,
+        "minNs": 29336.1298828125,
+        "maxNs": 41218.437255859375,
+        "p25Ns": 30860.262939453125,
+        "p50Ns": 32088.23486328125,
+        "p75Ns": 33747.312255859375,
+        "p99Ns": 36139.64111328125,
+        "samples": 12
+      }
+    },
+    {
+      "scenario": "escape-clean",
+      "framework": "react",
+      "stats": {
+        "avgNs": 20070.367899576824,
+        "minNs": 17658.406982421875,
+        "maxNs": 29969.571533203125,
+        "p25Ns": 18761.855712890625,
+        "p50Ns": 18983.40087890625,
+        "p75Ns": 19624.544677734375,
+        "p99Ns": 20784.46533203125,
+        "samples": 12
+      }
+    },
+    {
+      "scenario": "escape-clean",
+      "framework": "preact",
+      "stats": {
+        "avgNs": 15008.686218261719,
+        "minNs": 13489.85107421875,
+        "maxNs": 17171.58203125,
+        "p25Ns": 14002.126953125,
+        "p50Ns": 14668.796142578125,
+        "p75Ns": 15774.092529296875,
+        "p99Ns": 17163.90478515625,
+        "samples": 12
+      }
+    }
+  ],
+  "meta": {
+    "date": "2026-06-11T08:04:53.557Z",
+    "node": "v24.16.0",
+    "cpu": "12th Gen Intel(R) Core(TM) i9-12900HK"
+  },
+  "stream": {
+    "scenario": "large-table",
+    "warmup": 5,
+    "iterations": 30,
+    "results": [
+      {
+        "framework": "sigx",
+        "bytes": 1950663,
+        "ttfbMs": {
+          "p50": 2.049,
+          "p75": 2.541,
+          "p99": 4.023
+        },
+        "totalMs": {
+          "p50": 214.221,
+          "p75": 235.009,
+          "p99": 280.728
+        }
+      },
+      {
+        "framework": "vue",
+        "bytes": 1811651,
+        "ttfbMs": {
+          "p50": 61.454,
+          "p75": 71.141,
+          "p99": 93.275
+        },
+        "totalMs": {
+          "p50": 62.294,
+          "p75": 71.785,
+          "p99": 93.934
+        }
+      },
+      {
+        "framework": "react",
+        "bytes": 1801651,
+        "ttfbMs": {
+          "p50": 38.587,
+          "p75": 40.395,
+          "p99": 48.72
+        },
+        "totalMs": {
+          "p50": 58.013,
+          "p75": 62.102,
+          "p99": 78.501
+        }
+      }
+    ]
+  },
+  "quick": {
+    "meta": {
+      "date": "2026-06-11T08:04:53.557Z",
+      "node": "v24.16.0",
+      "cpu": "12th Gen Intel(R) Core(TM) i9-12900HK"
+    },
+    "string": [
+      {
+        "scenario": "escape-heavy",
+        "framework": "sigx",
+        "stats": {
+          "avgNs": 853555.6642066409,
+          "p50Ns": 679454,
+          "samples": 271
+        }
+      },
+      {
+        "scenario": "escape-clean",
+        "framework": "sigx",
+        "stats": {
+          "avgNs": 26873.893981933583,
+          "p50Ns": 26933.115478515625,
+          "samples": 12
+        }
+      },
+      {
+        "scenario": "small-page",
+        "framework": "sigx",
+        "stats": {
+          "avgNs": 16948.095692090395,
+          "p50Ns": 13220,
+          "samples": 14160
+        }
+      },
+      {
+        "scenario": "large-table-1k",
+        "framework": "sigx",
+        "stats": {
+          "avgNs": 5474237.625,
+          "p50Ns": 4759332,
+          "samples": 40
+        }
+      }
+    ],
+    "stream": {
+      "scenario": "large-table-1k",
+      "warmup": 3,
+      "iterations": 10,
+      "results": [
+        {
+          "framework": "sigx",
+          "bytes": 191925,
+          "ttfbMs": {
+            "p50": 0.342
+          },
+          "totalMs": {
+            "p50": 4.688
+          }
+        }
+      ]
+    }
+  }
+}
