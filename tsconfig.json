@@ -17,7 +17,7 @@
       "@sigx/runtime-core/jsx-runtime": ["./packages/runtime-core/src/index.ts"],
       "@sigx/runtime-core/jsx-dev-runtime": ["./packages/runtime-core/src/index.ts"],
       "@sigx/runtime-dom": ["./packages/runtime-dom/src/index.ts"],
-      "@sigx/runtime-dom/platform": ["./packages/runtime-dom/src/model-processor.ts"],
+      "@sigx/runtime-dom/platform": ["./packages/runtime-dom/src/platform.ts"],
       "@sigx/runtime-dom/internals": ["./packages/runtime-dom/src/internals.ts"],
       "@sigx/server-renderer": ["./packages/server-renderer/src/index.ts"],
       "@sigx/server-renderer/server": ["./packages/server-renderer/src/server/index.ts"],

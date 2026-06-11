@@ -19,10 +19,10 @@
             "import": "./dist/internals.js"
         },
         "./platform": {
-            "types": "./dist/model-processor.d.ts",
-            "development": "./dist/model-processor.js",
-            "production": "./dist/model-processor.prod.js",
-            "import": "./dist/model-processor.js"
+            "types": "./dist/platform.d.ts",
+            "development": "./dist/platform.js",
+            "production": "./dist/platform.prod.js",
+            "import": "./dist/platform.js"
         }
     },
     "files": [
@@ -48,10 +48,11 @@
         "url": "https://github.com/signalxjs/core/issues"
     },
     "sideEffects": [
+        "./src/platform.ts",
         "./src/model-processor.ts",
         "./src/render.ts",
-        "./dist/model-processor.js",
-        "./dist/model-processor.prod.js"
+        "./dist/platform.js",
+        "./dist/platform.prod.js"
     ],
     "engines": {
         "node": "^20.19.0 || >=22.12.0"

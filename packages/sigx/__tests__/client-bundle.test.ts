@@ -47,7 +47,7 @@ async function bundleClientApp(entrySource: string, options: { minifySyntax?: bo
                         : args.path.slice('sigx'.length + 1);
                     // Subpaths whose dist name differs from the source file
                     const SUBPATH_SOURCES: Record<string, string> = {
-                        'runtime-dom/platform': 'model-processor.ts'
+                        'runtime-dom/platform': 'platform.ts'
                     };
                     const file = SUBPATH_SOURCES[`${pkg}/${sub}`] ?? (sub ? `${sub}.ts` : 'index.ts');
                     return { path: resolve(packages, pkg, 'src', file) };

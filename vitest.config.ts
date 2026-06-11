@@ -30,7 +30,7 @@ export default defineConfig({
             '@sigx/runtime-core/internals': resolve(__dirname, 'packages/runtime-core/src/internals.ts'),
             '@sigx/runtime-core': resolve(__dirname, 'packages/runtime-core/src/index.ts'),
             '@sigx/runtime-dom/internals': resolve(__dirname, 'packages/runtime-dom/src/internals.ts'),
-            '@sigx/runtime-dom/platform': resolve(__dirname, 'packages/runtime-dom/src/model-processor.ts'),
+            '@sigx/runtime-dom/platform': resolve(__dirname, 'packages/runtime-dom/src/platform.ts'),
             '@sigx/runtime-dom': resolve(__dirname, 'packages/runtime-dom/src/index.ts'),
             '@sigx/server-renderer/server': resolve(__dirname, 'packages/server-renderer/src/server/index.ts'),
             '@sigx/server-renderer/client': resolve(__dirname, 'packages/server-renderer/src/client/index.ts'),

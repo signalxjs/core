@@ -6,7 +6,7 @@ import './types';
 import './directives/show-jsx-types';
 
 // Platform setup (side effects)
-import './model-processor.js';
+import './platform.js';
 
 // Re-export public API from focused modules
 export { render, patch, mount, unmount, mountComponent } from './render.js';
