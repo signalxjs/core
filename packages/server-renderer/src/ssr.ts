@@ -19,7 +19,7 @@ import type { JSXElement } from 'sigx';
 import type { App, AppContext } from 'sigx';
 import { Readable } from 'node:stream';
 import { SSRContext, createSSRContext, SSRContextOptions, CorePendingAsync } from './server/context';
-import { renderToChunks, renderToStringSync } from './server/render-core';
+import { renderToChunks, renderVNodeToString } from './server/render-core';
 import { generateStreamingScript, generateReplacementScript } from './server/streaming';
 import { enableSSRHead, collectSSRHead, renderHeadToString } from './head';
 import type { StreamCallbacks } from './server/types';
@@ -245,27 +245,10 @@ export function createSSR(): SSRInstance {
             // Enable head collection during SSR rendering
             enableSSRHead();
 
-            let result = '';
-            let ctx: SSRContext;
-
-            // Try fast synchronous render path first (works with or without plugins).
-            // All plugin hooks called during the tree walk are synchronous.
-            const syncCtx = makeContext(options);
-            const buf: string[] = [];
-            const syncOk = renderToStringSync(element, syncCtx, null, appContext, buf);
-
-            if (syncOk) {
-                result = buf.join('');
-                ctx = syncCtx;
-            } else {
-                // Tree has async operations — fall back to async generator path.
-                // We need a fresh context since the sync attempt may have partially
-                // modified plugin state.
-                ctx = makeContext(options);
-                for await (const chunk of renderToChunks(element, ctx, null, appContext)) {
-                    result += chunk;
-                }
-            }
+            // Single walk: fully-sync trees complete without suspending, async
+            // trees suspend at their awaits — no sync-attempt/re-render fallback.
+            const ctx = makeContext(options);
+            let result = await renderVNodeToString(element, ctx, appContext);
 
             // Collect injected HTML from all plugins
             for (const plugin of plugins) {

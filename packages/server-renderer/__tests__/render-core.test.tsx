@@ -208,6 +208,33 @@ describe('renderToString — component error handling', () => {
         expect(html).toContain('<div data-error="Boom">boom</div>');
         consoleErr.mockRestore();
     });
+
+    it('emits the error fallback when ssr.load() rejects in block mode', async () => {
+        // Block mode (string render) awaits ssr.load() inline — a rejection
+        // must land in the component-level catch, not escape the render.
+        const consoleErr = vi.spyOn(console, 'error').mockImplementation(() => {});
+        const LoadFail = component((ctx: any) => {
+            ctx.ssr.load(async () => {
+                throw new Error('load-fail');
+            });
+            return () => ({
+                type: 'div',
+                props: {},
+                key: null,
+                children: ['never shown'],
+                dom: null
+            } as any);
+        }, { name: 'LoadFail' });
+
+        const ssr = createSSR();
+        const ctx = createSSRContext({
+            onComponentError: (err: Error, name: string) => `<i data-failed="${name}">${err.message}</i>`
+        });
+        const html = await ssr.render((LoadFail as any)({}), ctx);
+        expect(html).toContain('<i data-failed="LoadFail">load-fail</i>');
+        expect(html).not.toContain('never shown');
+        consoleErr.mockRestore();
+    });
 });
 
 describe('renderToString — async setup (Promise-returning)', () => {
