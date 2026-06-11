@@ -5,7 +5,7 @@
  * land on SSRContext._headConfigs via the component instance's ssr._ctx).
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { component, useHead } from 'sigx';
 import { renderHeadToString } from '../src/head';
 import { createSSR } from '../src/index';
@@ -164,5 +164,20 @@ describe('useHead during server rendering', () => {
         expect(ctxA._headConfigs[0].title).toBe('A');
         expect(ctxB._headConfigs).toHaveLength(1);
         expect(ctxB._headConfigs[0].title).toBe('B');
+    });
+});
+
+// ============= useHead without a DOM =============
+
+describe('useHead without a DOM', () => {
+    it('warns and ignores the config outside a component when no document exists', () => {
+        vi.stubGlobal('document', undefined);
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+        expect(() => useHead({ title: 'ignored' })).not.toThrow();
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('[useHead]'));
+
+        warnSpy.mockRestore();
+        vi.unstubAllGlobals();
     });
 });

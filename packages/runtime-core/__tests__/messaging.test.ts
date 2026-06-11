@@ -425,6 +425,22 @@ describe('production error reporting', () => {
         errorSpy.mockRestore();
     });
 
+    it('reports onTopicCreated handler errors with a label in dev', () => {
+        const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+        const boom = new Error('boom');
+
+        const sub = onTopicCreated(() => {
+            throw boom;
+        });
+        const topic = createTopic<number>({ namespace: 'ns.dev', name: 'x' });
+
+        expect(errorSpy).toHaveBeenCalledWith('[sigx] Error in onTopicCreated handler:', boom);
+
+        sub.unsubscribe();
+        topic.destroy();
+        errorSpy.mockRestore();
+    });
+
     it('reports onTopicCreated handler errors as the bare error', () => {
         vi.stubEnv('NODE_ENV', 'production');
         const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
