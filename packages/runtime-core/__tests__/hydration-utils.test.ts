@@ -9,6 +9,7 @@ import {
 } from '../src/hydration/index';
 import { createEmit, splitComponentProps } from '../src/utils/component-props';
 import { createModel } from '../src/model';
+import { signal } from '@sigx/reactivity';
 
 describe('CLIENT_DIRECTIVE_PREFIX', () => {
     it("is 'client:'", () => {
@@ -234,5 +235,33 @@ describe('splitComponentProps', () => {
         expect(result.children).toBeUndefined();
         expect(result.slotsFromProps).toBeUndefined();
         expect(result.propsWithModels).toEqual({});
+    });
+});
+
+describe('createEmit with reactive props', () => {
+    it('finds handlers on a reactive props proxy even when a "value" prop exists', () => {
+        const handler = vi.fn();
+        const reactiveProps = signal({ value: 'input-text', onPing: handler });
+
+        const emit = createEmit(reactiveProps);
+        emit('ping', 1);
+
+        expect(handler).toHaveBeenCalledWith(1);
+    });
+});
+
+describe('splitComponentProps hardening', () => {
+    it('never assigns prototype-mutating $models keys', () => {
+        const m = createModel([{ v: 1 }, 'v'], () => {});
+        const modelsData = Object.defineProperty({ ok: m } as Record<string, any>, '__proto__', {
+            value: m,
+            enumerable: true
+        });
+
+        const result = splitComponentProps({ $models: modelsData });
+
+        expect(result.propsWithModels.ok).toBe(m);
+        expect(Object.getPrototypeOf(result.propsWithModels)).toBe(Object.prototype);
+        expect(Object.prototype.hasOwnProperty.call(result.propsWithModels, '__proto__')).toBe(false);
     });
 });
