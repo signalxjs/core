@@ -3,7 +3,7 @@
 The reference SSR integration for SignalX: an Express server using the
 document-streaming engine (`renderDocumentToNodeStream`), automatic state
 serialization, `useHead` titles, Suspense + lazy chunks, AI token streaming
-(`ssr.stream`), and a crawler/AI-agent blocking mode — with history-API
+(`useStream`), and a crawler/AI-agent blocking mode — with history-API
 routing, client hydration, and per-request DI scoping.
 
 ```bash
@@ -18,10 +18,10 @@ Open http://localhost:3000.
 
 | Route | Shows |
 |---|---|
-| `/` | `ssr.load()` data fetched on the server, serialized into `window.__SIGX_STATE__`, restored during hydration — the browser never refetches (watch the server log / network tab). |
+| `/` | `useAsync()` data fetched on the server, serialized into `window.__SIGX_ASYNC__`, restored during hydration — the browser never refetches (watch the server log / network tab). |
 | `/counter` | Hydration is real — the button works because handlers attach to the server-rendered DOM. |
 | `/forms` | Model bindings, props/events, custom `Define.Model`. |
-| `/ai` | **AI token streaming**: `ssr.stream()` pushes fake-LLM tokens into the initial HTTP response word by word (server streaming, not client JS), then swaps in the final markup. Swap the generator for a real model SDK call. |
+| `/ai` | **AI token streaming**: `useStream()` pushes fake-LLM tokens into the initial HTTP response word by word (server streaming, not client JS), then swaps in the final markup. Swap the generator for a real model SDK call. |
 | `/about` | `<Suspense>` + `lazy()` section: fallback flushes with the shell, the code-split content streams in and replaces it. `entry-client.tsx` preloads the chunk before hydrating. |
 
 ## Verify SSR is real
@@ -72,4 +72,4 @@ This is the same pattern the official `@sigx/router` package uses (separate repo
 | `src/entry-server.tsx` | `render(url, template, { bot })` — fresh `defineApp` per request, per-request router, then `renderDocumentToNodeStream` (or blocking `renderDocument` for bots). |
 | `src/entry-client.tsx` | One `defineApp`, per-page router, preloads route-relevant lazy chunks, `.use(ssrClientPlugin).hydrate('#app')`. |
 | `src/router.ts` | `createRouter(initialPath)` factory + `useRouter` injectable token. No module-level state. |
-| `src/App.tsx`, `src/pages/*.tsx` | Pages incl. `Ai.tsx` (`ssr.stream`) and the lazy `sections/TechDetails.tsx`. App sets `useHead` defaults; pages override titles. |
+| `src/App.tsx`, `src/pages/*.tsx` | Pages incl. `Ai.tsx` (`useStream`) and the lazy `sections/TechDetails.tsx`. App sets `useHead` defaults; pages override titles. |

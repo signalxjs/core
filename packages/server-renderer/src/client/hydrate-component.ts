@@ -31,10 +31,7 @@ import {
 import type { SchedulerJob } from 'sigx/internals';
 import {
     InternalVNode,
-    createRestoringSignal,
-    createClientStream,
-    getCurrentAppContext,
-    lookupServerState
+    getCurrentAppContext
 } from './hydrate-context';
 import { hydrateNode } from './hydrate-core';
 
@@ -58,10 +55,9 @@ export interface ComponentFactory {
  * @param vnode - The VNode to hydrate
  * @param dom - The DOM node to start from (content starts here)
  * @param parent - The parent node
- * @param serverState - Optional state captured from server for async components
  * @param trailingMarker - Optional trailing marker comment (the component anchor)
  */
-export function hydrateComponent(vnode: VNode, dom: Node | null, parent: Node, serverState?: Record<string, any>, trailingMarker?: Comment | null): Node | null {
+export function hydrateComponent(vnode: VNode, dom: Node | null, parent: Node, trailingMarker?: Comment | null): Node | null {
     const componentFactory = vnode.type as unknown as ComponentFactory;
     const setup = componentFactory.__setup;
     const componentName = componentFactory.__name || 'Anonymous';
@@ -112,13 +108,6 @@ export function hydrateComponent(vnode: VNode, dom: Node | null, parent: Node, s
         }
     }
 
-    // Automatic state pickup: when no explicit state was passed and the
-    // server serialized this component's signals (stateSerializationPlugin),
-    // restore from window.__SIGX_STATE__ — ssr.load() then no-ops below.
-    if (!serverState && componentId != null) {
-        serverState = lookupServerState(componentId);
-    }
-
     const internalVNode = vnode as InternalVNode;
     const initialProps = vnode.props || {};
     const { children, slots: slotsFromProps, $models: modelsData, ...propsData } = filterClientDirectives(initialProps);
@@ -149,29 +138,16 @@ export function hydrateComponent(vnode: VNode, dom: Node | null, parent: Node, s
 
     const parentInstance = getCurrentInstance();
 
-    // Use restoring signal when we have server state to restore
-    const signalFn = serverState
-        ? createRestoringSignal(serverState)
-        : signal;
-
-    // Create SSR helper for client-side
-    // When hydrating with server state, ssr.load() is a no-op (data already restored)
-    const hasServerState = !!serverState;
+    // Environment flags: hydrating server-rendered DOM. Data loading lives
+    // in useAsync/useStream — restored values come from window.__SIGX_ASYNC__.
     const ssrHelper = {
-        load(_fn: () => Promise<void>): void {
-            // No-op on client when hydrating - signal state was restored from server
-        },
-        // With server state: signal restores the final streamed text and the
-        // source is not re-run. Without: not re-run either (consistent with
-        // load) — enable state serialization to keep streamed content.
-        stream: createClientStream(signalFn, false),
         isServer: false,
-        isHydrating: hasServerState
+        isHydrating: true
     };
 
     const componentCtx: ComponentSetupContext = {
         el: parent as HTMLElement,
-        signal: signalFn as typeof signal,
+        signal: signal,
         props: createPropsAccessor(reactiveProps),
         slots: slots,
         emit: createEmit(reactiveProps),
@@ -183,8 +159,7 @@ export function hydrateComponent(vnode: VNode, dom: Node | null, parent: Node, s
         expose: () => { },
         renderFn: null,
         update: () => { },
-        ssr: ssrHelper,
-        _serverState: serverState
+        ssr: ssrHelper
     };
 
     // For ROOT component only (no parent), provide the AppContext

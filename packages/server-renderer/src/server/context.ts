@@ -14,7 +14,7 @@ import type { SSRPlugin } from '../plugin';
 export interface CorePendingAsync {
     /** Component ID */
     id: number;
-    /** Resolves to rendered HTML when ssr.load() completes */
+    /** Resolves to rendered HTML when the component's useAsync/useStream work completes */
     promise: Promise<string>;
 }
 
@@ -97,11 +97,30 @@ export interface SSRContext {
     _headConfigs: any[];
 
     /**
-     * Progressive text streams registered via ssr.stream() in streaming mode.
+     * Progressive text streams registered via useStream() in streaming mode.
      * Each generator yields $SIGX_APPEND scripts per token; the streaming
      * race loop consumes them alongside async component replacements.
      */
     _pendingStreams: AsyncGenerator<string>[];
+
+    /**
+     * Request-level useAsync dedupe: key → in-flight fetcher promise.
+     * Two components using the same key share one fetch.
+     */
+    _asyncCache: Map<string, Promise<unknown>>;
+
+    /**
+     * Resolved useAsync/useStream values by key — the source for the
+     * __SIGX_ASYNC__ hydration blob.
+     */
+    _asyncResults: Map<string, unknown>;
+
+    /**
+     * Which keys each component registered (componentId → keys) — lets the
+     * streaming path emit per-component preScripts with exactly the keys
+     * that component resolved.
+     */
+    _asyncKeysByComponent: Map<number, string[]>;
 
     /**
      * Generate next component ID
@@ -158,6 +177,9 @@ export function createSSRContext(options: SSRContextOptions = {}): SSRContext {
         _pendingAsync: [],
         _headConfigs: [],
         _pendingStreams: [],
+        _asyncCache: new Map(),
+        _asyncResults: new Map(),
+        _asyncKeysByComponent: new Map(),
 
         nextId() {
             return ++componentId;

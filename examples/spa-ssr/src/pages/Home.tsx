@@ -1,4 +1,4 @@
-import { component } from 'sigx';
+import { component, useAsync } from 'sigx';
 import { useHead } from '@sigx/server-renderer/client';
 import { useRouter, type Route } from '../router';
 
@@ -10,6 +10,7 @@ interface Stats {
 
 /** Fake database/API call — stands in for any per-request data source. */
 async function fetchStats(): Promise<Stats> {
+    console.log('[server] fetching stats…');
     await new Promise(r => setTimeout(r, 150));
     return { stars: 1842, downloads: 96512, renderedAt: new Date().toISOString() };
 }
@@ -18,26 +19,22 @@ async function fetchStats(): Promise<Stats> {
  * The async boundary lives in its OWN component, scoped to the data it owns.
  * In streaming mode only THIS card gets a placeholder and is swapped when the
  * fetch resolves — everything else on the page streams as plain shell HTML,
- * exactly once. (Putting ssr.load in the page component would wrap the whole
+ * exactly once. (Putting useAsync in the page component would wrap the whole
  * page in the boundary: the full content would ship twice and visibly swap.)
  */
-const StatsCard = component((ctx) => {
-    // Runs on the server; serialized into window.__SIGX_STATE__ by
-    // renderDocument and restored during hydration — the client does NOT
-    // refetch (watch the network tab / server log).
-    const stats = (ctx.signal as any)(null, 'stats') as { value: Stats | null };
-    ctx.ssr.load(async () => {
-        console.log('[server] fetching stats…');
-        stats.value = await fetchStats();
-    });
+const StatsCard = component(() => {
+    // Keyed useAsync runs on the server; serialized into
+    // window.__SIGX_ASYNC__ by renderDocument and restored during hydration
+    // — the client does NOT refetch (watch the network tab / server log).
+    const stats = useAsync('stats', fetchStats);
 
     return () => (
         <div class="card">
             <h3 style="margin-top: 0;">Server-loaded data (no client refetch)</h3>
             {stats.value
-                ? <p><code>ssr.load()</code> fetched on the server: ⭐ {stats.value.stars} · ⬇ {stats.value.downloads} · rendered {stats.value.renderedAt}</p>
+                ? <p><code>useAsync()</code> fetched on the server: ⭐ {stats.value.stars} · ⬇ {stats.value.downloads} · rendered {stats.value.renderedAt}</p>
                 : <p>Loading stats…</p>}
-            <p style="color: #555; font-size: 0.95em;">The values were serialized into <code>window.__SIGX_STATE__</code> and restored during hydration — the fetch did not run again in your browser.</p>
+            <p style="color: #555; font-size: 0.95em;">The values were serialized into <code>window.__SIGX_ASYNC__</code> and restored during hydration — the fetch did not run again in your browser.</p>
         </div>
     );
 }, { name: 'StatsCard' });

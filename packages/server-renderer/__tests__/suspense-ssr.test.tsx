@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { component, lazy, Suspense } from 'sigx';
+import { component, lazy, Suspense, useAsync } from 'sigx';
 import { createSSR, renderToString } from '../src/index';
 
 function deferredLazy(name: string) {
@@ -116,18 +116,17 @@ describe('Suspense in streaming mode', () => {
     });
 
     it('streams async components nested INSIDE deferred Suspense children', async () => {
-        // A component with ssr.load inside a Suspense boundary: its own
+        // A component with keyed useAsync inside a Suspense boundary: its own
         // pendingAsync entry is created while the stream is already running.
         const { Lazy, resolveLoader } = deferredLazy('wrapper');
         setTimeout(resolveLoader, 5);
 
-        const DataComp = component((ctx) => {
-            const data = ctx.signal('pending');
-            (ctx as any).ssr.load(async () => {
+        const DataComp = component(() => {
+            const data = useAsync('suspense-late-data', async () => {
                 await new Promise(r => setTimeout(r, 10));
-                data.value = 'late-data';
+                return 'late-data';
             });
-            return () => <p class="late">{data.value}</p>;
+            return () => <p class="late">{data.value ?? 'pending'}</p>;
         }, { name: 'DataComp' });
 
         const ssr = createSSR();
@@ -138,7 +137,7 @@ describe('Suspense in streaming mode', () => {
             </Suspense>
         ));
 
-        // The nested ssr.load component must also be streamed and resolved
+        // The nested useAsync component must also be streamed and resolved
         expect(html).toContain('late-data');
     });
 });

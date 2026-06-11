@@ -1,5 +1,6 @@
 /**
- * Full streamed-SSR → hydration round trip for async (ssr.load) components.
+ * Full streamed-SSR → hydration round trip for async (keyed useAsync)
+ * components.
  *
  * Streaming mode wraps async components in a <div data-async-placeholder>
  * wrapper that is NOT part of the component's vnode tree. Hydration must
@@ -9,11 +10,10 @@
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { component } from 'sigx';
+import { component, useAsync } from 'sigx';
 import { createSSR, stateSerializationPlugin } from '../src/index';
 import { hydrateComponent } from '../src/client/hydrate-component';
 import { createSSRContainer, cleanupContainer, nextTick } from './test-utils';
-import type { SSRSignalFn } from './test-utils';
 
 async function collectStream(stream: ReadableStream<string>): Promise<string> {
     const reader = stream.getReader();
@@ -35,9 +35,9 @@ function splitShell(html: string): { shell: string; scripts: string } {
 
 /** Do what the browser would: install state blobs and apply $SIGX_REPLACE swaps. */
 function executeStreamScripts(container: HTMLElement, scripts: string): void {
-    for (const m of scripts.matchAll(/window\.__SIGX_STATE__=Object\.assign\(window\.__SIGX_STATE__\|\|\{\},(\{.*?\})\);/g)) {
+    for (const m of scripts.matchAll(/window\.__SIGX_ASYNC__=Object\.assign\(window\.__SIGX_ASYNC__\|\|\{\},(\{.*?\})\);/g)) {
         const blob = JSON.parse(m[1]);
-        (globalThis as any).__SIGX_STATE__ = Object.assign((globalThis as any).__SIGX_STATE__ || {}, blob);
+        (globalThis as any).__SIGX_ASYNC__ = Object.assign((globalThis as any).__SIGX_ASYNC__ || {}, blob);
     }
     for (const m of scripts.matchAll(/\$SIGX_REPLACE\((\d+), ("(?:[^"\\]|\\.)*")\)/g)) {
         const placeholder = container.querySelector(`[data-async-placeholder="${m[1]}"]`);
@@ -46,13 +46,9 @@ function executeStreamScripts(container: HTMLElement, scripts: string): void {
 }
 
 function makeHomeLike() {
-    const clientLoad = vi.fn(async () => {});
-    const Page = (load: () => Promise<void> | void) => component((ctx) => {
-        const stats = (ctx.signal as SSRSignalFn)(null as any, 'stats');
-        (ctx as any).ssr.load(async () => {
-            await load();
-            stats.value = { stars: 42 };
-        });
+    const clientLoad = vi.fn(async () => ({ stars: 0 }));
+    const Page = (load: () => Promise<{ stars: number }>) => component(() => {
+        const stats = useAsync('home-stats', load);
         return () => (
             <>
                 <h1>Server-rendered</h1>
@@ -69,12 +65,12 @@ describe('hydrating streamed async components (placeholder wrappers)', () => {
 
     afterEach(() => {
         if (container) cleanupContainer(container);
-        delete (globalThis as any).__SIGX_STATE__;
+        delete (globalThis as any).__SIGX_ASYNC__;
     });
 
     it('hydrates inside the placeholder without duplicating content', async () => {
         const { Page } = makeHomeLike();
-        const Server = Page(() => new Promise(r => setTimeout(r, 5)));
+        const Server = Page(() => new Promise<{ stars: number }>(r => setTimeout(() => r({ stars: 42 }), 5)));
 
         const ssr = createSSR().use(stateSerializationPlugin());
         const html = await collectStream(ssr.renderStream((Server as any)({})));

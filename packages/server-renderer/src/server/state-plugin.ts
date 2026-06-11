@@ -1,45 +1,49 @@
 /**
  * Built-in state serialization plugin.
  *
- * Captures the signal state of components that fetch data via `ssr.load()`
- * and ships it to the client as `window.__SIGX_STATE__`, keyed by component
- * ID. The hydration walk picks the blob up automatically (see
- * client/hydrate-component.ts), turning `ssr.load()` into a no-op on the
- * client — no duplicate fetch, no flicker.
+ * Ships the values resolved by useAsync/useStream to the client as
+ * `window.__SIGX_ASYNC__`, keyed by the calls' explicit keys. The client
+ * composables consume the blob on first use, so fetchers don't re-run after
+ * hydration — no duplicate requests, no flicker.
  *
  * Opt-in: `createSSR().use(stateSerializationPlugin())`. The `renderDocument`
- * API enables it by default. Implemented entirely on the public SSRPlugin
- * surface — it is also the reference plugin for custom state strategies.
+ * API enables it by default.
  *
- * Notes:
- * - Only components with `ssr.load()` calls are captured (components without
- *   loads re-run their setup deterministically on the client and need no
- *   state transfer).
- * - Components a plugin handled with `mode: 'skip'` are still captured if
- *   they registered loads; skip-mode plugins that manage their own state
- *   should order themselves before this plugin and clear the context.
+ * Emission points:
+ * - `getInjectedHTML`: everything resolved by shell time (blocked-inline
+ *   values) — flushed with the shell.
+ * - `onAsyncComponentResolved` → `preScript`: per-component keys for
+ *   streamed components, installed BEFORE the `$SIGX_REPLACE` call fires
+ *   hydration listeners.
  */
 
 import type { SSRPlugin } from '../plugin';
-import {
-    createTrackingSignal,
-    captureSignalState,
-    serializeStateScript,
-    stateAssignmentJs,
-    type TrackedSignalStore
-} from './state';
+import type { SSRContext } from './context';
+import { asyncAssignmentJs, serializeAsyncScript, isSerializable } from './state';
 
 const PLUGIN_NAME = 'sigx:state';
 
 interface StateData {
-    /** componentId → tracked signals for that component */
-    stores: Map<number, TrackedSignalStore>;
-    /** componentId → ssrLoads array ref (length read after render) */
-    loads: Map<number, Promise<void>[]>;
-    /** componentId → component name (for dev warnings) */
-    names: Map<number, string>;
-    /** accumulated captures for inline (blocked) components */
-    captured: Record<number, Record<string, any>>;
+    emitted: Set<string>;
+}
+
+function takeUnemitted(
+    ctx: SSRContext,
+    emitted: Set<string>,
+    keys: string[] | null
+): Record<string, unknown> | null {
+    const source = keys ?? [...ctx._asyncResults.keys()];
+    let out: Record<string, unknown> | null = null;
+
+    for (const key of source) {
+        if (emitted.has(key) || !ctx._asyncResults.has(key)) continue;
+        const value = ctx._asyncResults.get(key);
+        emitted.add(key);
+        if (!isSerializable(key, value)) continue;
+        (out ??= {})[key] = value;
+    }
+
+    return out;
 }
 
 export function stateSerializationPlugin(): SSRPlugin {
@@ -48,64 +52,24 @@ export function stateSerializationPlugin(): SSRPlugin {
 
         server: {
             setup(ctx) {
-                ctx.setPluginData<StateData>(PLUGIN_NAME, {
-                    stores: new Map(),
-                    loads: new Map(),
-                    names: new Map(),
-                    captured: {}
-                });
-            },
-
-            transformComponentContext(ctx, vnode, componentCtx) {
-                const data = ctx.getPluginData<StateData>(PLUGIN_NAME)!;
-                // The component's ID was pushed onto the stack just before
-                // this hook runs.
-                const id = ctx._componentStack[ctx._componentStack.length - 1];
-
-                const store: TrackedSignalStore = new Map();
-                data.stores.set(id, store);
-                if (componentCtx._ssrLoads) data.loads.set(id, componentCtx._ssrLoads);
-                data.names.set(id, (vnode.type as any).__name || 'Anonymous');
-
-                componentCtx.signal = createTrackingSignal(store) as any;
-                return componentCtx;
-            },
-
-            afterRenderComponent(id, _vnode, _html, ctx) {
-                const data = ctx.getPluginData<StateData>(PLUGIN_NAME)!;
-                const loads = data.loads.get(id);
-                if (!loads || loads.length === 0) return; // no ssr.load() — nothing to transfer
-
-                // Streamed components are captured later, in
-                // onAsyncComponentResolved, once their loads have resolved.
-                for (const pending of ctx._pendingAsync) {
-                    if (pending.id === id) return;
-                }
-
-                // Blocked inline: loads have resolved, signals hold final values.
-                const store = data.stores.get(id);
-                const state = store && captureSignalState(store, data.names.get(id) || 'Anonymous');
-                if (state) data.captured[id] = state;
-            },
-
-            onAsyncComponentResolved(id, _html, ctx) {
-                const data = ctx.getPluginData<StateData>(PLUGIN_NAME)!;
-                const store = data.stores.get(id);
-                if (!store) return;
-
-                const state = captureSignalState(store, data.names.get(id) || 'Anonymous');
-                if (!state) return;
-
-                // preScript runs BEFORE $SIGX_REPLACE — the state must be
-                // installed before the replace dispatches sigx:async-ready
-                // and hydration listeners fire.
-                return { preScript: stateAssignmentJs({ [id]: state }) };
+                ctx.setPluginData<StateData>(PLUGIN_NAME, { emitted: new Set() });
             },
 
             getInjectedHTML(ctx) {
                 const data = ctx.getPluginData<StateData>(PLUGIN_NAME)!;
-                if (Object.keys(data.captured).length === 0) return '';
-                return serializeStateScript(data.captured);
+                const values = takeUnemitted(ctx, data.emitted, null);
+                return values ? serializeAsyncScript(values) : '';
+            },
+
+            onAsyncComponentResolved(id, _html, ctx) {
+                const data = ctx.getPluginData<StateData>(PLUGIN_NAME)!;
+                const keys = ctx._asyncKeysByComponent.get(id);
+                if (!keys) return;
+                const values = takeUnemitted(ctx, data.emitted, keys);
+                if (!values) return;
+                // preScript runs BEFORE $SIGX_REPLACE — the state must be
+                // installed before the replace dispatches sigx:async-ready.
+                return { preScript: asyncAssignmentJs(values) };
             }
         }
     };

@@ -61,10 +61,9 @@ export { ssrClientPlugin } from './client/index.js';
 
 // SSR types (shared across server-renderer and plugins)
 export type { SSRHelper } from './client-directives.js';
-export type { SSRSignalFn } from './server/types.js';
-export { generateSignalKey } from './server/types.js';
 
-// State serialization (server capture → client restore; opt-in plugin)
+// State serialization (__SIGX_ASYNC__ transfer for useAsync/useStream;
+// opt-in plugin — automatic under renderDocument)
 export { stateSerializationPlugin } from './server/state-plugin.js';
 
 // Head management

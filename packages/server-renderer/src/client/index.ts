@@ -32,9 +32,7 @@ export {
     registerClientPlugin,
     getClientPlugins,
     clearClientPlugins,
-    setPendingServerState,
     getCurrentAppContext,
-    setCurrentAppContext,
-    createRestoringSignal
+    setCurrentAppContext
 } from './hydrate-context';
-export type { SSRSignalFn, InternalVNode } from './hydrate-context';
+export type { InternalVNode } from './hydrate-context';

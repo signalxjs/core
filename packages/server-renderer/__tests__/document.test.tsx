@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { component } from 'sigx';
+import { component, useAsync } from 'sigx';
 import {
     createSSR,
     renderDocument,
@@ -15,7 +15,6 @@ import {
     useHead
 } from '../src/index';
 import type { Readable } from 'node:stream';
-import type { SSRSignalFn } from './test-utils';
 
 const TEMPLATE = `<!doctype html>
 <html>
@@ -29,14 +28,13 @@ const TEMPLATE = `<!doctype html>
 </html>`;
 
 function makePage(title: string, loadedText = 'loaded-data') {
-    return component((ctx) => {
+    return component(() => {
         useHead({ title, meta: [{ name: 'description', content: `${title} page` }] });
-        const data = (ctx.signal as SSRSignalFn)('pending', 'data');
-        (ctx as any).ssr.load(async () => {
+        const data = useAsync('data-' + title, async () => {
             await new Promise(r => setTimeout(r, 5));
-            data.value = loadedText;
+            return loadedText;
         });
-        return () => <main class="page">{data.value}</main>;
+        return () => <main class="page">{data.value ?? 'Loading…'}</main>;
     }, { name: 'Page' });
 }
 
@@ -87,14 +85,15 @@ describe('renderDocument — blocking mode (default)', () => {
     it('serializes state by default and can opt out', async () => {
         const Page = makePage('State');
         const withState = await renderDocument((Page as any)({}), { template: TEMPLATE });
-        expect(withState).toContain('window.__SIGX_STATE__');
-        expect(withState).toContain('"data":"loaded-data"');
+        expect(withState).toContain('window.__SIGX_ASYNC__');
+        // The blob is keyed by the useAsync key, not by component id
+        expect(withState).toContain('"data-State":"loaded-data"');
 
         const without = await renderDocument((Page as any)({}), {
             template: TEMPLATE,
             serializeState: false
         });
-        expect(without).not.toContain('__SIGX_STATE__');
+        expect(without).not.toContain('__SIGX_ASYNC__');
     });
 
     it('throws when the outlet marker is missing', async () => {
@@ -119,7 +118,7 @@ describe('renderDocumentToNodeStream — streaming mode (default)', () => {
         expect(html).toContain('$SIGX_REPLACE(1,');
         expect(html).toContain('loaded-data');
         // State installs before the replace fires
-        expect(html.indexOf('window.__SIGX_STATE__')).toBeLessThan(html.indexOf('$SIGX_REPLACE(1,'));
+        expect(html.indexOf('window.__SIGX_ASYNC__')).toBeLessThan(html.indexOf('$SIGX_REPLACE(1,'));
         // Completion + tail, in order
         const completionIdx = html.indexOf('__SIGX_STREAMING_COMPLETE__');
         expect(completionIdx).toBeGreaterThan(-1);
@@ -196,8 +195,8 @@ describe('createSSR().renderDocument with instance plugins', () => {
         const html = await createSSR().use(probe).renderDocument((Page as any)({}), { template: TEMPLATE });
 
         expect(seen).toEqual(['setup']);
-        expect(html).toContain('window.__SIGX_STATE__');
+        expect(html).toContain('window.__SIGX_ASYNC__');
         // Exactly one state blob script
-        expect(html.split('window.__SIGX_STATE__=Object.assign').length - 1).toBe(1);
+        expect(html.split('window.__SIGX_ASYNC__=Object.assign').length - 1).toBe(1);
     });
 });

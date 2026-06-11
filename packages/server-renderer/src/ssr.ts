@@ -65,7 +65,7 @@ async function* streamAllAsyncChunks(
     type TaggedResult = { index: number; script: string };
 
     // Pump slots live at PUMP_BASE and above. Core slots can GROW while
-    // streaming — deferred renders (Suspense children, nested ssr.load
+    // streaming — deferred renders (Suspense children, nested useAsync
     // components) push new entries onto ctx._pendingAsync mid-stream — so
     // they get the open-ended range below PUMP_BASE.
     const PUMP_BASE = 1 << 30;
@@ -89,7 +89,7 @@ async function* streamAllAsyncChunks(
         bootstrapEmitted = true;
     }
 
-    // $SIGX_APPEND bootstrap for progressive text streams (ssr.stream) —
+    // $SIGX_APPEND bootstrap for progressive text streams (useStream) —
     // upfront when streams registered during the shell render; just-in-time
     // for streams that appear mid-stream (inside deferred renders).
     let appendBootstrapEmitted = false;
@@ -148,12 +148,12 @@ async function* streamAllAsyncChunks(
         }
     }
 
-    // Set up pump pattern for plugin generators and ssr.stream() token
+    // Set up pump pattern for plugin generators and useStream() token
     // streams so they can be raced alongside core
     interface PumpState {
         generator: AsyncGenerator<string>;
         done: boolean;
-        /** Progressive ssr.stream() pump — its chunks need $SIGX_APPEND */
+        /** Progressive useStream() pump — its chunks need $SIGX_APPEND */
         isStream: boolean;
     }
     const pumps: PumpState[] = pluginGenerators.map(g => ({ generator: g, done: false, isStream: false }));
@@ -193,7 +193,7 @@ async function* streamAllAsyncChunks(
         activePumps.set(PUMP_BASE + i, pumpNext(i));
     }
 
-    /** Pick up ssr.stream() pumps registered since the last check. */
+    /** Pick up useStream() pumps registered since the last check. */
     function syncStreamPumps(): void {
         while (streamCount < ctx._pendingStreams.length) {
             const generator = ctx._pendingStreams[streamCount++];

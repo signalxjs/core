@@ -11,7 +11,7 @@
  * Modes:
  * - `'stream'`  — shell-first with async placeholders, out-of-order
  *   replacement chunks over the wire (default for the stream variants).
- * - `'blocking'` — every `ssr.load()` awaits inline: complete, script-free
+ * - `'blocking'` — every `useAsync()`/`useStream()` resolves inline: complete, script-free
  *   content (default for `renderDocument`). Useful for crawlers and AI
  *   agents: the app can pick the mode per user-agent.
  *
@@ -59,7 +59,7 @@ export interface DocumentOptions extends SSRContextOptions {
     onError?: (error: Error, phase: 'shell' | 'stream') => void;
 
     /**
-     * Serialize ssr.load() signal state for hydration pickup.
+     * Serialize resolved useAsync/useStream values for hydration pickup.
      * Default: true (unlike the lower-level render APIs, which are opt-in).
      */
     serializeState?: boolean;
@@ -122,7 +122,7 @@ async function prepareDocument(
 
     // Render the app shell. In streaming mode async components leave
     // placeholders, so this completes quickly; in blocking mode every
-    // ssr.load() awaits inline.
+    // useAsync/useStream resolves inline.
     let shellHtml = '';
     for await (const chunk of renderToChunks(input.element, ctx, null, input.appContext)) {
         shellHtml += chunk;

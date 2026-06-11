@@ -218,25 +218,25 @@ function createComponentState(
         ? { default: defaultSlot, ...slotsFromProps }
         : { default: defaultSlot };
 
-    // Track SSR loads for this component
+    // Pending async work for this component (useAsync/useStream register
+    // here; block mode awaits these inline, streaming mode defers behind a
+    // placeholder)
     const ssrLoads: Promise<void>[] = [];
 
-    // Create SSR helper for async data loading.
-    // _ctx lets per-request consumers (useHead) reach the SSRContext through
-    // getCurrentInstance().ssr without module-level state.
-    // stream() is assigned below, once the final componentCtx (and its
-    // possibly plugin-swapped signal fn) exists.
+    // Environment flags exposed as ctx.ssr; _ctx lets per-request consumers
+    // (useHead) reach the SSRContext through getCurrentInstance().ssr
+    // without module-level state.
     const ssrHelper = {
-        load(fn: () => Promise<void>): void {
-            ssrLoads.push(fn());
-        },
-        stream: null as any,
         isServer: true,
         isHydrating: false,
         _ctx: ctx
     };
 
-    let componentCtx: ComponentSetupContext = {
+    // NOTE: the __ssr*/_use* fields are part of the literal so every
+    // component context shares ONE object shape — adding them after creation
+    // caused per-component hidden-class transitions (bistable render times
+    // on component-heavy pages).
+    const componentCtxInit = {
         el: null as any,
         signal: signal,
         props: createPropsAccessor(propsData),
@@ -251,8 +251,16 @@ function createComponentState(
         renderFn: null,
         update: NOOP,
         ssr: ssrHelper,
-        _ssrLoads: ssrLoads
+        _ssrLoads: ssrLoads,
+        // useAsync/useStream server providers: SHARED module-level functions
+        // reading per-component state through `this` at call time — no
+        // closures allocated for components that never load data.
+        __ssrCtx: ctx,
+        __ssrId: id,
+        _useAsync: serverUseAsync,
+        _useStream: serverUseStream
     };
+    let componentCtx: ComponentSetupContext = componentCtxInit as unknown as ComponentSetupContext;
 
     // Plugin hook: transformComponentContext
     // Allows plugins (e.g., islands) to swap signal fn, filter props, set up tracking, etc.
@@ -263,6 +271,15 @@ function createComponentState(
                 componentCtx = transformed;
             }
         }
+        // A plugin may have replaced the context with a fresh object — keep
+        // the useAsync/useStream provider wiring intact on whatever object
+        // setup() will actually receive.
+        if (!(componentCtx as any)._useAsync) {
+            (componentCtx as any).__ssrCtx = ctx;
+            (componentCtx as any).__ssrId = id;
+            (componentCtx as any)._useAsync = serverUseAsync;
+            (componentCtx as any)._useStream = serverUseStream;
+        }
     }
 
     // For ROOT component only (no parent), provide the AppContext
@@ -270,52 +287,143 @@ function createComponentState(
         provideAppContext(componentCtx, appContext);
     }
 
-    // Progressive text streaming (ssr.stream). Assigned onto the FINAL
-    // context's helper so the signal goes through any plugin-swapped signal
-    // fn (state serialization tracks it like any other named signal).
-    (componentCtx.ssr as any).stream = (name: string, source: () => AsyncIterable<string>) => {
-        const sig = (componentCtx.signal as any)('', name);
+    return { componentName, id, ssrLoads, componentCtx };
+}
 
-        if (ctx._streaming) {
-            // Tokens append into the placeholder as they arrive; when the
-            // source completes, `done` resolves and the standard deferred
-            // re-render swaps in the final markup (with final signal text).
-            let resolveDone!: () => void;
-            let rejectDone!: (e: unknown) => void;
-            const done = new Promise<void>((res, rej) => { resolveDone = res; rejectDone = rej; });
+/** Append a serialization key to the component's record (for streaming preScripts). */
+function recordComponentKey(ctx: SSRContext, id: number, key: string): void {
+    const keys = ctx._asyncKeysByComponent.get(id);
+    if (keys) {
+        if (!keys.includes(key)) keys.push(key);
+    } else {
+        ctx._asyncKeysByComponent.set(id, [key]);
+    }
+}
 
-            const pump = (async function* () {
-                let acc = '';
-                try {
-                    for await (const token of source()) {
-                        acc += token;
-                        yield generateAppendScript(id, token);
-                    }
-                    sig.value = acc;
-                    resolveDone();
-                } catch (e) {
-                    sig.value = acc;
-                    rejectDone(e);
-                }
-            })();
+/** Shared inert state for unkeyed / { server: false } calls on the server. */
+const INERT_ASYNC_STATE = {
+    value: null,
+    loading: true,
+    error: null,
+    refresh: () => Promise.resolve()
+};
 
-            ctx._pendingStreams.push(pump);
-            ssrLoads.push(done);
-        } else {
-            // Blocking/string mode: drain fully, render final text inline
-            ssrLoads.push((async () => {
-                let acc = '';
-                for await (const token of source()) {
-                    acc += token;
-                }
-                sig.value = acc;
-            })());
+/**
+ * useAsync server provider (shared; invoked as instance._useAsync(...)).
+ *
+ * Keyed calls fetch on the server (deduped per request by key), settle
+ * through the component's ssrLoads (block: awaited inline; streaming:
+ * deferred behind the placeholder), and record their value for the
+ * __SIGX_ASYNC__ hydration blob. Unkeyed / { server: false } calls never
+ * run here — the loading branch renders into the HTML and the client
+ * fetches after hydration.
+ */
+function serverUseAsync(
+    this: any,
+    key: string | null,
+    fetcher: (fctx: { signal: AbortSignal }) => Promise<unknown>,
+    options: { throwOnError?: boolean; server?: boolean } = {}
+) {
+    if (key === null || options.server === false) {
+        return INERT_ASYNC_STATE;
+    }
+
+    const ctx: SSRContext = this.__ssrCtx;
+    const id: number = this.__ssrId;
+    const ssrLoads: Promise<void>[] = this._ssrLoads;
+
+    const state = { data: null as unknown, pending: true, failure: null as Error | null };
+
+    // Request-level dedupe: same key → one fetch, shared result
+    let promise = ctx._asyncCache.get(key);
+    if (!promise) {
+        promise = fetcher({ signal: new AbortController().signal });
+        ctx._asyncCache.set(key, promise);
+    }
+
+    const settled = (promise as Promise<unknown>).then(value => {
+        state.data = value;
+        state.pending = false;
+        ctx._asyncResults.set(key, value);
+        recordComponentKey(ctx, id, key);
+    }, e => {
+        state.failure = e instanceof Error ? e : new Error(String(e));
+        state.pending = false;
+        if (options.throwOnError) {
+            // Reject the load → component error fallback (block mode) or
+            // error replacement (streaming) — same as a setup throw.
+            throw state.failure;
         }
+        // Soft failure: the component renders its own error branch.
+        // Nothing is serialized — the client refetches (fail-safe).
+    });
+    ssrLoads.push(settled);
 
-        return sig;
+    return {
+        get value() { return state.data; },
+        get loading() { return state.pending; },
+        get error() {
+            if (options.throwOnError && state.failure) throw state.failure;
+            return state.failure;
+        },
+        refresh: () => Promise.resolve() // no-op on the server
+    };
+}
+
+/**
+ * useStream server provider (shared; invoked as instance._useStream(...)).
+ *
+ * Streaming mode: tokens append into the placeholder as they arrive; when
+ * the source completes the standard deferred re-render swaps in the final
+ * markup. Blocking/string mode: drained fully, rendered inline. The final
+ * text serializes under the key either way.
+ */
+function serverUseStream(this: any, key: string, source: () => AsyncIterable<string>) {
+    const ctx: SSRContext = this.__ssrCtx;
+    const id: number = this.__ssrId;
+    const ssrLoads: Promise<void>[] = this._ssrLoads;
+
+    const state = { text: '' };
+
+    const finish = (acc: string) => {
+        state.text = acc;
+        ctx._asyncResults.set(key, acc);
+        recordComponentKey(ctx, id, key);
     };
 
-    return { componentName, id, ssrLoads, componentCtx };
+    if (ctx._streaming) {
+        let resolveDone!: () => void;
+        let rejectDone!: (e: unknown) => void;
+        const done = new Promise<void>((res, rej) => { resolveDone = res; rejectDone = rej; });
+
+        const pump = (async function* () {
+            let acc = '';
+            try {
+                for await (const token of source()) {
+                    acc += token;
+                    yield generateAppendScript(id, token);
+                }
+                finish(acc);
+                resolveDone();
+            } catch (e) {
+                finish(acc);
+                rejectDone(e);
+            }
+        })();
+
+        ctx._pendingStreams.push(pump);
+        ssrLoads.push(done);
+    } else {
+        ssrLoads.push((async () => {
+            let acc = '';
+            for await (const token of source()) {
+                acc += token;
+            }
+            finish(acc);
+        })());
+    }
+
+    return { get value() { return state.text; } };
 }
 
 /**
@@ -676,7 +784,7 @@ function* renderNode(
 
         const prev = setCurrentInstance(componentCtx);
         try {
-            // Run setup synchronously — it registers ssr.load() callbacks
+            // Run setup synchronously — it registers useAsync/useStream work
             let renderFn = setup(componentCtx);
 
             // Support legacy async setup — suspend if it returns a promise
@@ -684,7 +792,7 @@ function* renderNode(
                 renderFn = (yield { p: renderFn as Promise<any> }) as any;
             }
 
-            // Check if we have pending ssr.load() calls
+            // Check if we have pending useAsync/useStream work
             if (ssrLoads.length > 0) {
                 // Plugin hook: handleAsyncSetup
                 // Plugins can override the async mode.

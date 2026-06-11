@@ -1,12 +1,12 @@
 /**
- * Tests for ssr.stream() — progressive text streaming (LLM-token-style):
+ * Tests for useStream() — progressive text streaming (LLM-token-style):
  * ordered $SIGX_APPEND chunks in streaming mode, final markup replacement,
  * blocking-mode inlining, script-breakout safety, interleaving with normal
  * async components, and hydration restoring the final text.
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { component } from 'sigx';
+import { component, useAsync, useStream } from 'sigx';
 import { createSSR, stateSerializationPlugin, renderToString } from '../src/index';
 import { hydrateComponent } from '../src/client/hydrate-component';
 import {
@@ -24,8 +24,8 @@ async function* tokens(parts: string[], delayMs = 1) {
 }
 
 function makeAnswerComponent(parts: string[]) {
-    return component((ctx) => {
-        const answer = (ctx as any).ssr.stream('answer', () => tokens(parts));
+    return component(() => {
+        const answer = useStream('answer', () => tokens(parts));
         return () => <div class="answer">{answer.value}</div>;
     }, { name: 'Answer' });
 }
@@ -41,7 +41,7 @@ async function collectStream(stream: ReadableStream<string>): Promise<string> {
     return out;
 }
 
-describe('ssr.stream — blocking/string mode', () => {
+describe('useStream — blocking/string mode', () => {
     it('drains the source and renders the final text inline', async () => {
         const Answer = makeAnswerComponent(['Hello', ', ', 'world']);
         const html = await renderToString((Answer as any)({}));
@@ -50,7 +50,7 @@ describe('ssr.stream — blocking/string mode', () => {
     });
 });
 
-describe('ssr.stream — streaming mode', () => {
+describe('useStream — streaming mode', () => {
     it('appends tokens in order, then replaces with the final markup', async () => {
         const Answer = makeAnswerComponent(['alpha-', 'beta-', 'gamma']);
         const ssr = createSSR();
@@ -86,15 +86,14 @@ describe('ssr.stream — streaming mode', () => {
         expect(appendChunk).toContain('\\u003c/script\\u003e');
     });
 
-    it('interleaves with normal ssr.load async components', async () => {
+    it('interleaves with normal keyed useAsync components', async () => {
         const Answer = makeAnswerComponent(['tok1', 'tok2']);
-        const Data = component((ctx) => {
-            const data = ctx.signal('pending');
-            (ctx as any).ssr.load(async () => {
+        const Data = component(() => {
+            const data = useAsync('stream-text-data', async () => {
                 await new Promise(r => setTimeout(r, 5));
-                data.value = 'loaded';
+                return 'loaded';
             });
-            return () => <p class="data">{data.value}</p>;
+            return () => <p class="data">{data.value ?? 'pending'}</p>;
         }, { name: 'Data' });
 
         const ssr = createSSR();
@@ -125,13 +124,13 @@ describe('ssr.stream — streaming mode', () => {
     });
 });
 
-describe('ssr.stream — hydration', () => {
+describe('useStream — hydration', () => {
     it('restores the final streamed text without re-running the source', async () => {
         const sourceSpy = vi.fn();
         let restored: string | undefined;
 
-        const Answer = component((ctx) => {
-            const answer = (ctx as any).ssr.stream('answer', () => {
+        const Answer = component(() => {
+            const answer = useStream('answer', () => {
                 sourceSpy();
                 return tokens(['should', 'not', 'run']);
             });
@@ -139,7 +138,8 @@ describe('ssr.stream — hydration', () => {
             return () => <div class="answer">{answer.value}</div>;
         }, { name: 'Answer' });
 
-        (globalThis as any).__SIGX_STATE__ = { 1: { answer: 'restored stream text' } };
+        // Request-global blob, keyed by the useStream key (no component-id nesting)
+        (globalThis as any).__SIGX_ASYNC__ = { answer: 'restored stream text' };
         const container = createSSRContainer(
             ssrComponentMarkers(1, '<div class="answer">restored stream text</div>')
         );
@@ -156,7 +156,7 @@ describe('ssr.stream — hydration', () => {
             expect(container.querySelector('.answer')!.textContent).toBe('restored stream text');
         } finally {
             cleanupContainer(container);
-            delete (globalThis as any).__SIGX_STATE__;
+            delete (globalThis as any).__SIGX_ASYNC__;
         }
     });
 });

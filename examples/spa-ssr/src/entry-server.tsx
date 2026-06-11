@@ -20,7 +20,7 @@ export function render(url: string, template: string, opts: RenderOpts): RenderR
     app.defineProvide(useRouter, () => createRouter(parseUrl(url)));
 
     if (opts.bot) {
-        // Blocking document: every ssr.load()/ssr.stream() resolves inline —
+        // Blocking document: every useAsync()/useStream() resolves inline —
         // crawlers and AI agents get the full content with zero client JS work.
         return { kind: 'blocking', html: renderDocument(app, { template, mode: 'blocking' }) };
     }

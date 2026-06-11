@@ -3,7 +3,7 @@
  *
  * Provides the client-side `$SIGX_REPLACE` function and replacement script
  * generation used by core async streaming. These are strategy-agnostic —
- * any async component with `ssr.load()` gets streamed without needing a plugin.
+ * any async component with keyed `useAsync()` work gets streamed without needing a plugin.
  *
  * Plugins (e.g., islands) can augment replacements via `onAsyncComponentResolved`.
  */
@@ -46,7 +46,7 @@ window.$SIGX_REPLACE = function(id, html) {
  * Generate the progressive-text bootstrap (injected once before any append).
  * Defines `window.$SIGX_APPEND`, which appends a TEXT node into an async
  * placeholder — XSS-safe by construction (no HTML parsing of streamed
- * tokens). Used by `ssr.stream()` for LLM-token-style progressive content.
+ * tokens). Used by `useStream()` for LLM-token-style progressive content.
  */
 export function generateAppendBootstrap(): string {
     return `

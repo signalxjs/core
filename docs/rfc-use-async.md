@@ -1,7 +1,9 @@
 # RFC: `useAsync` — the unified async-data primitive
 
-Status: **draft, awaiting review** · Tracking: follow-up to signalxjs/core#61
-(`docs/ssr-review.md`). Nothing in this RFC is implemented yet.
+Status: **implemented** on the `ssr-next` branch (no-compat: `ssr.load`,
+`ssr.stream`, and the signal-name serialization machinery were REMOVED, per
+review decision — pre-1.0, one way to do it). Tracking: signalxjs/core#61
+(`docs/ssr-review.md`).
 
 ## Problem
 
@@ -278,7 +280,7 @@ Sequencing: spec'd here; built as its own program in the store repo **after**
 `ssr-next` is validated and merged (the adapter compiles against the
 published plugin surface).
 
-## Implementation plan (when approved — not started)
+## Implementation plan (DONE — kept for reference)
 
 1. `runtime-core`: `AsyncState<T>`/`AsyncOptions` types, `useAsync` export
    with the default client implementation + tests. Fix the `useAsync`
