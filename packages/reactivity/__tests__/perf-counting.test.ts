@@ -178,6 +178,32 @@ describe('propagation counts', () => {
             expect(c.value).toBe(1);
         });
 
+        it('an effect subscribed to a computed recovers after a transient getter error', () => {
+            const s = signal({ fail: true, v: 1 });
+            const getter = vi.fn(() => {
+                if (s.fail) throw new Error('boom');
+                return s.v;
+            });
+            const c = computed(getter);
+            const runs = vi.fn();
+
+            // The effect's first run reads the computed: the error
+            // surfaces at the read site (effect creation).
+            expect(() => effect(() => { runs(c.value); })).toThrow('boom');
+            expect(runs).not.toHaveBeenCalled();
+
+            // Fixing the source must re-notify through the errored
+            // computed: the effect runs with the recovered value.
+            s.fail = false;
+            expect(runs).toHaveBeenCalledTimes(1);
+            expect(runs).toHaveBeenCalledWith(1);
+
+            // And ordinary propagation works from here on.
+            s.v = 2;
+            expect(runs).toHaveBeenCalledTimes(2);
+            expect(runs).toHaveBeenLastCalledWith(2);
+        });
+
         it('self-reading computed yields its cached value instead of overflowing the stack', () => {
             const s = signal({ v: 1 });
             const c: { value: number } = computed((): number => s.v + (c ? (c.value ?? 0) : 0));

@@ -20,6 +20,15 @@ export const MAYBE_DIRTY = 1 << 1;
 export const COMPUTING = 1 << 2;
 /** Already sitting in the pending-effects queue (dedup without a Set). */
 const QUEUED = 1 << 3;
+/**
+ * The computed's last refresh threw. A computed normally propagates
+ * downstream only on its first dirtying per wave; an errored computed
+ * stays DIRTY across waves, which would suppress that propagation and
+ * wedge its subscribers after a transient getter error. This bit forces
+ * one extra downstream propagation per mark (cleared on propagation, so
+ * cycle termination is preserved) until a refresh succeeds.
+ */
+export const ERRORED = 1 << 4;
 
 /**
  * Pull-validate a subscriber whose sources are all "maybe dirty":
@@ -152,11 +161,12 @@ function mark(dep: Dep, bit: number): void {
     for (const sub of dep.subs) {
         const prev = sub.flags;
         if (sub.ownDep) {
-            sub.flags = prev | bit;
+            sub.flags = (prev | bit) & ~ERRORED;
             // Computed node: propagate downstream once per wave. An
             // already-flagged computed has already propagated (this also
-            // terminates cycles).
-            if ((prev & (DIRTY | MAYBE_DIRTY)) === 0) {
+            // terminates cycles) — unless its last refresh errored, in
+            // which case it must re-notify so subscribers can retry.
+            if ((prev & (DIRTY | MAYBE_DIRTY)) === 0 || (prev & ERRORED) !== 0) {
                 mark(sub.ownDep, MAYBE_DIRTY);
             }
         } else {

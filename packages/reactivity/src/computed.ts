@@ -22,6 +22,7 @@ import {
     DIRTY,
     MAYBE_DIRTY,
     COMPUTING,
+    ERRORED,
 } from './effect';
 import { getAccessObserver, setAccessObserver } from './signal';
 import { getDevtoolsHook, registerReactiveProxy } from './devtools-hook';
@@ -120,8 +121,11 @@ export function computed<T>(
                 if (hook) hook.emit({ type: 'computed:recomputed', id: computedId });
             }
         } catch (err) {
-            // Surface getter errors at read time and retry on the next read.
-            computedEffect.flags = DIRTY;
+            // Surface getter errors at read time and retry on the next
+            // read. ERRORED forces downstream re-notification on the next
+            // source write, so subscribed effects aren't wedged by a
+            // transient failure.
+            computedEffect.flags = DIRTY | ERRORED;
             throw err;
         } finally {
             setCurrentSubscriber(prevEffect);
