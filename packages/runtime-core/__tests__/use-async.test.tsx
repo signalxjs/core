@@ -362,6 +362,60 @@ describe('useAsync', () => {
         expect(container.querySelector('.card')?.textContent).toBe('survived');
     });
 
+    it('keeps the stale value while a refresh is in flight (stale-while-revalidate)', async () => {
+        let resolve!: (v: string) => void;
+        let calls = 0;
+        const fetcher = vi.fn(() => new Promise<string>(r => { resolve = r; calls++; }));
+        let state: any;
+
+        const App = component(() => {
+            state = useAsync('swr-key', fetcher);
+            return () => <div class="v">{state.value ?? 'empty'}</div>;
+        }, { name: 'App' });
+
+        const el = mount(jsx(App, {}));
+        resolve('first');
+        await settle();
+        expect(el.querySelector('.v')?.textContent).toBe('first');
+
+        const refreshing = state.refresh();
+        await tick();
+        // In flight: loading is true but the old value is KEPT
+        expect(state.loading).toBe(true);
+        expect(state.value).toBe('first');
+
+        resolve('second');
+        await refreshing;
+        await settle();
+        expect(el.querySelector('.v')?.textContent).toBe('second');
+        expect(calls).toBe(2);
+    });
+
+    it('clears value on fetch error — value and error are mutually exclusive', async () => {
+        let fail = false;
+        const fetcher = vi.fn(async () => {
+            if (fail) throw new Error('boom');
+            return 'good';
+        });
+        let state: any;
+
+        const App = component(() => {
+            state = useAsync('excl-key', fetcher);
+            return () => <div class="v">{state.error ? 'ERR' : state.value ?? 'empty'}</div>;
+        }, { name: 'App' });
+
+        const el = mount(jsx(App, {}));
+        await settle();
+        expect(el.querySelector('.v')?.textContent).toBe('good');
+
+        fail = true;
+        await state.refresh();
+        await settle();
+        expect(state.error).not.toBeNull();
+        expect(state.value).toBeNull();
+        expect(el.querySelector('.v')?.textContent).toBe('ERR');
+    });
+
     // ========================================================================
     // Unmount before resolve
     // ========================================================================

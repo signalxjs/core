@@ -7,8 +7,9 @@
  *
  *   <script>window.__SIGX_ASYNC__ = { "stats": {...}, "user:1": {...} }</script>
  *
- * The client consumes entries once on first use (see runtime-core
- * use-async.ts) — restored mounts skip their fetch entirely.
+ * The client treats the blob as the page's initial-data cache (see
+ * runtime-core use-async.ts): every mount of a key restores from it and
+ * skips its fetch; refresh() is the explicit invalidation.
  */
 
 import { escapeJsonForScript } from './streaming';

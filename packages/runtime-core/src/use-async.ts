@@ -55,11 +55,17 @@ export interface AsyncOptions {
  * render function subscribes it — the component re-renders on change.
  */
 export interface AsyncState<T> {
-    /** The resolved data; null while loading or after an error. */
+    /**
+     * The last successfully resolved data. Null until the first success.
+     * KEPT while a refresh() is in flight (stale-while-revalidate — check
+     * `loading` to show a revalidation indicator without dropping content).
+     * Cleared when a fetch fails: `value` and `error` are mutually
+     * exclusive, so success and error branches never render together.
+     */
     readonly value: T | null;
-    /** True while the fetcher is in flight. */
+    /** True while a fetcher is in flight (including refreshes). */
     readonly loading: boolean;
-    /** The fetch error, or null. */
+    /** The fetch error, or null. While set, `value` is null. */
     readonly error: Error | null;
     /** Re-run the fetcher (client; no-op during SSR). Aborts an in-flight run. */
     refresh(): Promise<void>;
@@ -186,6 +192,9 @@ export function useAsync<T>(
         } catch (e) {
             if (abortSignal.aborted) return;
             batch(() => {
+                // value/error are mutually exclusive — a failed fetch clears
+                // stale data so success and error branches can't co-render
+                state.data = null;
                 state.failure = e instanceof Error ? e : new Error(String(e));
                 state.pending = false;
             });
