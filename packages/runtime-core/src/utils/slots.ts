@@ -48,28 +48,40 @@ export function createSlots(children: any, slotsFromProps?: Record<string, any>)
     // Use a simple version signal - bump version to trigger reactivity
     const versionSignal = signal({ v: 0 });
 
-    // Extract named slots from children with slot prop
-    function extractNamedSlotsFromChildren(c: any): { defaultChildren: any[]; namedSlots: Record<string, any[]> } {
+    // Extraction cache keyed by the version counter. The renderer only
+    // reassigns _children together with a version bump, so a matching
+    // version means the cached scan of the children is still valid —
+    // repeated slot calls per render skip the O(n) walk and its
+    // allocations. Results are sliced on return so callers can't
+    // corrupt the cache.
+    let cachedVersion = -1;
+    let cachedDefault: any[] = [];
+    let cachedNamed: Record<string, any[]> = {};
+
+    // Extract default children (filtered of null/boolean conditional
+    // results) and named slots (children with a `slot` prop).
+    function extract(target: { _children: any }, version: number): void {
+        if (version === cachedVersion) return;
         const defaultChildren: any[] = [];
         const namedSlots: Record<string, any[]> = {};
-
-        if (c == null) return { defaultChildren, namedSlots };
-
-        const items = Array.isArray(c) ? c : [c];
-
-        for (const child of items) {
-            if (child && typeof child === 'object' && child.props && child.props.slot) {
-                const slotName = child.props.slot;
-                if (!namedSlots[slotName]) {
-                    namedSlots[slotName] = [];
+        const c = target._children;
+        if (c != null) {
+            const items = Array.isArray(c) ? c : [c];
+            for (const child of items) {
+                if (child && typeof child === 'object' && child.props && child.props.slot) {
+                    const slotName = child.props.slot;
+                    if (!namedSlots[slotName]) {
+                        namedSlots[slotName] = [];
+                    }
+                    namedSlots[slotName].push(child);
+                } else if (child != null && child !== false && child !== true) {
+                    defaultChildren.push(child);
                 }
-                namedSlots[slotName].push(child);
-            } else {
-                defaultChildren.push(child);
             }
         }
-
-        return { defaultChildren, namedSlots };
+        cachedVersion = version;
+        cachedDefault = defaultChildren;
+        cachedNamed = namedSlots;
     }
 
     const slotsObj = {
@@ -78,14 +90,17 @@ export function createSlots(children: any, slotsFromProps?: Record<string, any>)
         _version: versionSignal,
         _isPatching: false,  // Flag to prevent infinite loops during patching
         default: function () {
-            // Reading version creates a reactive dependency
-            void this._version.v;
-            const c = this._children;
-            const { defaultChildren } = extractNamedSlotsFromChildren(c);
-            // Filter out null, undefined, false, true (conditional rendering results)
-            return defaultChildren.filter((child: any) => child != null && child !== false && child !== true);
+            // Reading version creates a reactive dependency (and is the
+            // cache key)
+            const version = this._version.v;
+            extract(this, version);
+            return cachedDefault.slice();
         }
     };
+
+    // Named-slot accessor functions are minted once per name and reused
+    // across renders (they read live state on every call).
+    const namedSlotFns = new Map<string, (scopedProps?: any) => any[]>();
 
     // Create a proxy to handle named slot access dynamically
     return new Proxy(slotsObj, {
@@ -96,21 +111,28 @@ export function createSlots(children: any, slotsFromProps?: Record<string, any>)
 
             // Handle named slot access
             if (typeof prop === 'string') {
-                return function (scopedProps?: any) {
-                    // Reading version creates a reactive dependency
-                    const _ = target._version.v;
+                let fn = namedSlotFns.get(prop);
+                if (!fn) {
+                    fn = function (scopedProps?: any) {
+                        // Reading version creates a reactive dependency
+                        // (and is the cache key)
+                        const version = target._version.v;
 
-                    // First check for slots from the `slots` prop
-                    if (target._slotsFromProps && typeof target._slotsFromProps[prop] === 'function') {
-                        const result = target._slotsFromProps[prop](scopedProps);
-                        if (result == null) return [];
-                        return Array.isArray(result) ? result : [result];
-                    }
+                        // First check for slots from the `slots` prop
+                        if (target._slotsFromProps && typeof target._slotsFromProps[prop] === 'function') {
+                            const result = target._slotsFromProps[prop](scopedProps);
+                            if (result == null) return [];
+                            return Array.isArray(result) ? result : [result];
+                        }
 
-                    // Then check for element-based slots (children with slot prop)
-                    const { namedSlots } = extractNamedSlotsFromChildren(target._children);
-                    return namedSlots[prop] || [];
-                };
+                        // Then check for element-based slots (children with slot prop)
+                        extract(target, version);
+                        const list = cachedNamed[prop];
+                        return list ? list.slice() : [];
+                    };
+                    namedSlotFns.set(prop, fn);
+                }
+                return fn;
             }
 
             return undefined;
