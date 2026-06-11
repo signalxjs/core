@@ -74,7 +74,9 @@ export interface AsyncState<T> {
  */
 function peekRestored(key: string): { hit: boolean; value: unknown } {
     const blob = (globalThis as any).__SIGX_ASYNC__;
-    if (blob && key in blob) {
+    // Own-property check: `in` would also see inherited keys (and misbehave
+    // on keys like "__proto__"/"constructor").
+    if (blob && Object.prototype.hasOwnProperty.call(blob, key)) {
         return { hit: true, value: blob[key] };
     }
     return { hit: false, value: undefined };
@@ -83,7 +85,7 @@ function peekRestored(key: string): { hit: boolean; value: unknown } {
 /** Invalidate a restored entry — called by run()/refresh() before fetching. */
 function invalidateRestored(key: string): void {
     const blob = (globalThis as any).__SIGX_ASYNC__;
-    if (blob && key in blob) {
+    if (blob && Object.prototype.hasOwnProperty.call(blob, key)) {
         delete blob[key];
     }
 }

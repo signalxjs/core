@@ -130,7 +130,7 @@ describe('useHead during server rendering', () => {
 
         expect(ctx._headConfigs).toHaveLength(1);
         expect(ctx._headConfigs[0].title).toBe('SSR Title');
-        expect(ctx._headConfigs[0].meta[0].content).toBe('desc');
+        expect(ctx._headConfigs[0].meta![0].content).toBe('desc');
     });
 
     it('accumulates multiple useHead calls in render order', async () => {
@@ -145,8 +145,8 @@ describe('useHead during server rendering', () => {
 
         expect(ctx._headConfigs).toHaveLength(3);
         expect(ctx._headConfigs[0].title).toBe('Page');
-        expect(ctx._headConfigs[1].meta[0].name).toBe('author');
-        expect(ctx._headConfigs[2].link[0].href).toBe('/style.css');
+        expect(ctx._headConfigs[1].meta![0].name).toBe('author');
+        expect(ctx._headConfigs[2].link![0].href).toBe('/style.css');
     });
 
     it('does not leak configs between two render contexts', async () => {

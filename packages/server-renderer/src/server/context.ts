@@ -6,6 +6,7 @@
  */
 
 import type { SSRPlugin } from '../plugin';
+import type { HeadConfig } from 'sigx';
 
 /**
  * Core-managed pending async component.
@@ -94,7 +95,7 @@ export interface SSRContext {
      * render. Unlike the legacy module-level collection in head.ts, this is
      * safe under concurrent renders (each request has its own context).
      */
-    _headConfigs: any[];
+    _headConfigs: HeadConfig[];
 
     /**
      * Progressive text streams registered via useStream() in streaming mode.

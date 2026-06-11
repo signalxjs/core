@@ -45,7 +45,7 @@ describe('stateSerializationPlugin — server capture', () => {
         const html = await ssr.render((User as any)({}));
 
         expect(html).toContain('>Ada<');
-        expect(html).toContain('window.__SIGX_ASYNC__=Object.assign(window.__SIGX_ASYNC__||{},');
+        expect(html).toContain('window.__SIGX_ASYNC__=Object.assign(Object.create(null),window.__SIGX_ASYNC__,');
         // Keyed by the explicit useAsync key — never by component id
         expect(html).toContain('"blob-user":{"name":"Ada","role":"admin"}');
     });
@@ -97,6 +97,37 @@ describe('stateSerializationPlugin — server capture', () => {
         expect(html).not.toContain('"callback"');
         expect(warn).toHaveBeenCalledWith(expect.stringContaining('"callback"'));
         warn.mockRestore();
+    });
+});
+
+describe('prototype-pollution guards', () => {
+    it('rejects dangerous keys with a dev warning', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const Bad = component(() => {
+            const data = useAsync('__proto__', async () => ({ polluted: true }));
+            return () => <div>{data.value ? 'loaded' : 'loading'}</div>;
+        }, { name: 'Bad' });
+
+        const ssr = createSSR().use(stateSerializationPlugin());
+        const html = await ssr.render((Bad as any)({}));
+
+        expect(html).not.toContain('polluted');
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining('"__proto__"'));
+        warn.mockRestore();
+    });
+
+    it('emits a null-prototype assign target in the blob script', async () => {
+        const Page = component(() => {
+            const data = useAsync('safe-key', async () => 'v');
+            return () => <div>{data.value ?? 'loading'}</div>;
+        }, { name: 'Page' });
+
+        const ssr = createSSR().use(stateSerializationPlugin());
+        const html = await ssr.render((Page as any)({}));
+
+        // Object.assign onto a plain target routes "__proto__" through the
+        // prototype setter — the emitted script must use a null-proto target.
+        expect(html).toContain('Object.assign(Object.create(null),window.__SIGX_ASYNC__,');
     });
 });
 
@@ -167,8 +198,9 @@ describe('server → client round trip', () => {
         // way a browser would (install the blob).
         const scriptStart = html.indexOf('<script>');
         const appHtml = html.slice(0, scriptStart);
+        const marker = 'window.__SIGX_ASYNC__,';
         const stateJson = html.slice(
-            html.indexOf('||{},') + 5,
+            html.indexOf(marker) + marker.length,
             html.lastIndexOf(');</script>')
         );
         (globalThis as any).__SIGX_ASYNC__ = JSON.parse(stateJson);

@@ -20,7 +20,11 @@ import { escapeJsonForScript } from './streaming';
  */
 export function asyncAssignmentJs(values: Record<string, unknown>): string {
     const json = escapeJsonForScript(JSON.stringify(values));
-    return `window.__SIGX_ASYNC__=Object.assign(window.__SIGX_ASYNC__||{},${json});`;
+    // Null-prototype target: keys are user-defined strings, and assigning
+    // "__proto__" onto a plain object via Object.assign goes through the
+    // prototype setter (prototype pollution). With a null-prototype target
+    // dangerous keys become plain data properties.
+    return `window.__SIGX_ASYNC__=Object.assign(Object.create(null),window.__SIGX_ASYNC__,${json});`;
 }
 
 /** Full `<script>` tag emitting values — flushed with the shell. */
@@ -32,7 +36,20 @@ export function serializeAsyncScript(values: Record<string, unknown>): string {
  * Validate that a value survives a JSON round trip. Dev-warns and returns
  * false for functions, bigints, undefined, and circular structures.
  */
+const DANGEROUS_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
 export function isSerializable(key: string, value: unknown): boolean {
+    // Prototype-pollution guard: these keys are interpreted specially by JS
+    // object machinery — reject them outright rather than ship them.
+    if (DANGEROUS_KEYS.has(key)) {
+        if (process.env.NODE_ENV !== 'production') {
+            console.warn(
+                `[SSR] useAsync/useStream key "${key}" is not allowed ` +
+                `(prototype-pollution risk) — value skipped. Pick another key.`
+            );
+        }
+        return false;
+    }
     if (typeof value === 'function' || typeof value === 'bigint' || value === undefined) {
         if (process.env.NODE_ENV !== 'production') {
             console.warn(

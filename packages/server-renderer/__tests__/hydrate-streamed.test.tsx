@@ -35,7 +35,7 @@ function splitShell(html: string): { shell: string; scripts: string } {
 
 /** Do what the browser would: install state blobs and apply $SIGX_REPLACE swaps. */
 function executeStreamScripts(container: HTMLElement, scripts: string): void {
-    for (const m of scripts.matchAll(/window\.__SIGX_ASYNC__=Object\.assign\(window\.__SIGX_ASYNC__\|\|\{\},(\{.*?\})\);/g)) {
+    for (const m of scripts.matchAll(/window\.__SIGX_ASYNC__=Object\.assign\(Object\.create\(null\),window\.__SIGX_ASYNC__,(\{.*?\})\);/g)) {
         const blob = JSON.parse(m[1]);
         (globalThis as any).__SIGX_ASYNC__ = Object.assign((globalThis as any).__SIGX_ASYNC__ || {}, blob);
     }
