@@ -1,4 +1,4 @@
-# RFC: `ctx.query` — a unified resource primitive
+# RFC: `useAsync` — the unified async-data primitive
 
 Status: **draft, awaiting review** · Tracking: follow-up to signalxjs/core#61
 (`docs/ssr-review.md`). Nothing in this RFC is implemented yet.
@@ -37,16 +37,16 @@ structural DX problems:
 
 ## Proposal
 
-One value-returning, explicitly-keyed resource primitive — a standalone
-functional composable, subsuming the common uses of `ssr.load` and all of
-`useAsync`:
+One value-returning primitive — the existing `useAsync` composable,
+**upgraded in place** with an optional key that makes it server-transferable.
+The rule: *give it a key and it participates in SSR.*
 
 ```tsx
-import { component, useQuery } from 'sigx';
+import { component, useAsync } from 'sigx';
 
 const Stats = component(() => {
-    const stats = useQuery('stats', ({ signal }) => fetchStats({ signal }));
-    //    ^ Resource<Stats> — T inferred from the fetcher
+    const stats = useAsync('stats', ({ signal }) => fetchStats({ signal }));
+    //    ^ AsyncState<Stats> — T inferred from the fetcher
 
     return () => {
         if (stats.loading) return <Skeleton />;
@@ -56,8 +56,8 @@ const Stats = component(() => {
 });
 ```
 
-> **Inspectable mock:** `examples/spa-ssr/src/rfc-query-mock/` contains a
-> fully-typed mock implementation (`use-query.ts`) plus six real-world
+> **Inspectable mock:** `examples/spa-ssr/src/rfc-async-mock/` contains a
+> fully-typed mock implementation (`use-async.ts`) plus six real-world
 > usage examples (`examples.tsx`) — open them in an editor to explore the
 > inference and API ergonomics. They typecheck against the example app's
 > tsconfig and are not wired into the running app.
@@ -65,12 +65,12 @@ const Stats = component(() => {
 ### API surface
 
 ```ts
-interface QueryFetcherContext {
+interface AsyncFetcherContext {
     /** Aborted when the component unmounts or refresh() supersedes the run */
     signal: AbortSignal;
 }
 
-interface QueryOptions {
+interface AsyncOptions {
     /**
      * Throw the fetch error during render instead of exposing it on
      * `.error` — routes it to the nearest error boundary / component
@@ -88,7 +88,7 @@ interface QueryOptions {
 }
 
 /** Reactive — reads inside a render fn subscribe like any signal. */
-interface Resource<T> {
+interface AsyncState<T> {
     readonly value: T | undefined;
     readonly loading: boolean;
     readonly error: Error | null;
@@ -97,18 +97,24 @@ interface Resource<T> {
 }
 
 // Standalone composable, exported from 'sigx':
-function useQuery<T>(
+function useAsync<T>(
     key: string,
-    fetcher: (ctx: QueryFetcherContext) => Promise<T>,
-    opts?: QueryOptions
-): Resource<T>;
+    fetcher: (ctx: AsyncFetcherContext) => Promise<T>,
+    opts?: AsyncOptions
+): AsyncState<T>;
 ```
 
-Decided shape (user-confirmed): **functional `useQuery`**, matching the
+Decided shape (user-confirmed): **functional `useAsync`**, matching the
 existing composable convention (`useHead`, `useRouter`, DI tokens). It must
 be called synchronously during setup — the same rule every composable
-already has; it throws a clear error otherwise. A `ctx.query` context method
-was considered and dropped: one convention is better than two.
+already has; it throws a clear error otherwise.
+
+Naming history: `ctx.query` (context method) was dropped for the composable
+convention; `useQuery`/`useResource` were dropped because "query" connotes
+datastores and collides with the TanStack ecosystem, while "resource" added
+a second vocabulary. `useAsync` won because it describes the act AND it
+unifies: the broken composable of the same name becomes the real primitive —
+four async primitives collapse to three with zero migration churn.
 
 ### Semantics
 
@@ -137,7 +143,7 @@ A separate blob from component-state serialization, keyed by query key (no
 component IDs involved — immune to id drift between renders):
 
 ```html
-<script>window.__SIGX_QUERY__=Object.assign(window.__SIGX_QUERY__||{},{"stats":{...},"user:1":{...}});</script>
+<script>window.__SIGX_ASYNC__=Object.assign(window.__SIGX_ASYNC__||{},{"stats":{...},"user:1":{...}});</script>
 ```
 
 - Emitted by `stateSerializationPlugin` (extended) — automatic under
@@ -149,10 +155,10 @@ component IDs involved — immune to id drift between renders):
 
 ### Layering
 
-`useQuery` belongs to the component model, not to SSR — a pure SPA gets
+`useAsync` belongs to the component model, not to SSR — a pure SPA gets
 working client semantics with zero SSR packages installed:
 
-- **runtime-core** exports `useQuery` (resolving the instance via
+- **runtime-core** exports `useAsync` (resolving the instance via
   `getCurrentInstance()` synchronously at call time) and provides the
   default client implementation (fetch on setup, reactive states, abort on
   unmount) — this is `useAsync` done right.
@@ -170,12 +176,11 @@ rendering machinery.
 - **`ssr.load`** — stays, documented as the low-level escape hatch
   ("imperative multi-signal loads; you own naming and error handling").
   No breaking change.
-- **`useAsync`** — two steps:
-  1. *Bug fix now (independent of this RFC):* stop invoking the loader on
-     the server — today it fires, is never awaited, leaks an unhandled
-     promise, and bakes the loading skeleton into the HTML.
-  2. Deprecate in favor of `ctx.query(key, fn, { server: false })`; keep as
-     a thin alias for one minor cycle.
+- **`useAsync`** — upgraded in place. Existing unkeyed call sites keep
+  compiling and working, with the server-side loader leak fixed (today it
+  fires the loader, never awaits it, and bakes the loading skeleton into
+  the HTML; fixed semantics: unkeyed never runs on the server). Adding a
+  key opts a call into the full SSR story. No deprecation needed.
 - **`Suspense` / `ssr.stream`** — unchanged. A `{ suspense: true }` query
   option (register with the boundary instead of rendering a loading branch)
   is future work, intentionally out of v1.
@@ -184,7 +189,7 @@ rendering machinery.
 
 ```tsx
 // Before                                          // After
-const stats = (ctx.signal as any)(null, 'stats');  const stats = useQuery('stats',
+const stats = (ctx.signal as any)(null, 'stats');  const stats = useAsync('stats',
 ctx.ssr.load(async () => {                             () => fetchStats());
     stats.value = await fetchStats();
 });
@@ -219,7 +224,7 @@ The realistic strategy is to make the well-lit path not need the instance
 at all — which is the `query` design:
 
 - Everything instance-dependent happens **synchronously in setup**
-  (`ctx.query(...)` itself, `useHead`, DI).
+  (`useAsync(...)` itself, `useHead`, DI).
 - The fetcher is a **pure data function**: it receives what it needs
   (`{ signal }`; props values are captured by the closure at setup time)
   and returns data. There is nothing to look up mid-flight.
@@ -275,18 +280,18 @@ published plugin surface).
 
 ## Implementation plan (when approved — not started)
 
-1. `runtime-core`: `Resource<T>`/`QueryOptions` types, `useQuery` export
+1. `runtime-core`: `AsyncState<T>`/`AsyncOptions` types, `useAsync` export
    with the default client implementation + tests. Fix the `useAsync`
    server leak (separate commit; independent bug fix).
 2. `server-renderer`: server implementation in `createComponentState`
    (dedupe via `_queryCache`, registers through `ssr.load` machinery);
-   `__SIGX_QUERY__` capture in `stateSerializationPlugin`; hydration
+   `__SIGX_ASYNC__` capture in `stateSerializationPlugin`; hydration
    restore-or-refetch in the context extension + `hydrateComponent`.
 3. Tests: blocking/streaming/bot serialization, dedupe (one fetch per key),
    abort on unmount, fail-safe refetch when blob missing, `throwOnError`
    routing, round-trip hydration.
-4. `examples/spa-ssr`: StatsCard → `ctx.query`; README section.
-5. Docs: deprecation note on `useAsync`, "which async primitive do I use"
+4. `examples/spa-ssr`: StatsCard → `useAsync`; README section.
+5. Docs: "which async primitive do I use"
    table in the SSR docs.
 
 ## Open questions
@@ -296,12 +301,13 @@ published plugin surface).
    trust the SWR convention silently?
 2. **`refresh()` on the server** — no-op (recommended) or throw in dev?
 3. **Client-side cross-navigation cache** — v1 has none (each mount fetches
-   unless restored). Accept, or reserve `staleTime` in `QueryOptions` now to
+   unless restored). Accept, or reserve `staleTime` in `AsyncOptions` now to
    avoid a breaking change later?
-4. **Blob naming** — `__SIGX_QUERY__` separate from `__SIGX_STATE__`
+4. **Blob naming** — `__SIGX_ASYNC__` separate from `__SIGX_STATE__`
    (proposed, keeps contracts independent) vs. one merged blob.
-5. **`useAsync` end state** — deprecated alias for a cycle, or remove
-   outright before 1.0 (nothing shipped publicly depends on it yet)?
+5. **Unkeyed + `options`** — should the unkeyed overload accept
+   `AsyncOptions` too (`throwOnError` is meaningful without a key), or keep
+   its signature minimal?
 6. **Server-side per-component ALS scoping** — make `getCurrentInstance()`
    correct inside async continuations on the server (see "The async-context
    problem"), or keep one shared slot and warn in dev when the instance is

@@ -1,15 +1,15 @@
 /**
  * ════════════════════════════════════════════════════════════════════════
- *  DESIGN MOCK — usage examples for `useQuery` (docs/rfc-query.md).
+ *  DESIGN MOCK — usage examples for `useAsync` (docs/rfc-use-async.md).
  *  Not wired into the app; open in an editor and hover the types.
  * ════════════════════════════════════════════════════════════════════════
  */
 
 import { component, ErrorBoundary } from 'sigx';
-import { useQuery } from './use-query';
+import { useAsync } from './use-async';
 
 // ───────────────────────────────────────────────────────────────────────
-// Domain types — hover `profile.value` below: it's `UserProfile | undefined`,
+// Domain types — hover `profile.value` below: it's `UserProfile | null`,
 // inferred from the fetcher. No casts, no signal naming.
 // ───────────────────────────────────────────────────────────────────────
 
@@ -37,7 +37,7 @@ async function getJson<T>(url: string, signal: AbortSignal): Promise<T> {
 // ───────────────────────────────────────────────────────────────────────
 
 export const ProfileCard = component(() => {
-    const profile = useQuery('profile', ({ signal }) =>
+    const profile = useAsync('profile', ({ signal }) =>
         getJson<UserProfile>('/api/profile', signal));
 
     return () => {
@@ -73,7 +73,7 @@ export const ProfileCard = component(() => {
 export const ArticlePage = component<{ slug: string }>((ctx) => {
     const { slug } = ctx.props;
 
-    const article = useQuery(`article:${slug}`, ({ signal }) =>
+    const article = useAsync(`article:${slug}`, ({ signal }) =>
         getJson<Article>(`/api/articles/${slug}`, signal));
 
     return () => (
@@ -95,29 +95,29 @@ export const ArticlePage = component<{ slug: string }>((ctx) => {
 // ───────────────────────────────────────────────────────────────────────
 
 export const HeaderAvatar = component(() => {
-    const profile = useQuery('profile', ({ signal }) =>
+    const profile = useAsync('profile', ({ signal }) =>
         getJson<UserProfile>('/api/profile', signal));
     return () => <img class="avatar" alt={profile.value?.name ?? ''} />;
 });
 // <ProfileCard/> + <HeaderAvatar/> on one page → /api/profile is hit once.
 
 // ───────────────────────────────────────────────────────────────────────
-// 4. Client-only queries replace useAsync — browser-dependent work that
-//    must NOT run on the server. SSR ships the loading branch; the client
-//    fetches after hydration.
+// 4. Client-only async — browser-dependent work that
+//    must NOT run on the server. Just omit the key: unkeyed = client-only.
+//    (Keyed + { server: false } also works when you want client dedupe.)
 // ───────────────────────────────────────────────────────────────────────
 
 export const GeoGreeting = component(() => {
-    const city = useQuery(
-        'geo',
+    // UNKEYED form = client-only by definition (today's useAsync, fixed):
+    // SSR ships the loading branch; nothing runs on the server.
+    const city = useAsync(
         async () => {
             const pos = await new Promise<GeolocationPosition>((ok, err) =>
                 navigator.geolocation.getCurrentPosition(ok, err));
             return getJson<{ city: string }>(
                 `/api/geocode?lat=${pos.coords.latitude}&lng=${pos.coords.longitude}`,
                 new AbortController().signal);
-        },
-        { server: false }  // ← never runs during SSR
+        }
     );
 
     return () => <p>{city.value ? `Hello, ${city.value.city}!` : 'Locating…'}</p>;
@@ -129,7 +129,7 @@ export const GeoGreeting = component(() => {
 // ───────────────────────────────────────────────────────────────────────
 
 const BillingInner = component(() => {
-    const invoices = useQuery(
+    const invoices = useAsync(
         'invoices',
         ({ signal }) => getJson<Article[]>('/api/invoices', signal),
         { throwOnError: true }  // ← .error access throws → nearest boundary
@@ -157,7 +157,7 @@ export const BillingSection = component(() => {
 // ───────────────────────────────────────────────────────────────────────
 
 export const Inbox = component(() => {
-    const messages = useQuery('inbox', ({ signal }) =>
+    const messages = useAsync('inbox', ({ signal }) =>
         getJson<Article[]>('/api/inbox', signal));
 
     async function markAllRead(): Promise<void> {
