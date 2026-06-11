@@ -20,6 +20,7 @@
       "@sigx/runtime-core": ["../runtime-core/dist"],
       "@sigx/runtime-core/internals": ["../runtime-core/dist/internals"],
       "@sigx/runtime-dom": ["../runtime-dom/dist"],
+      "@sigx/runtime-dom/platform": ["../runtime-dom/dist/model-processor"],
       "@sigx/runtime-dom/internals": ["../runtime-dom/dist/internals"],
       "sigx": ["./src"]
     },

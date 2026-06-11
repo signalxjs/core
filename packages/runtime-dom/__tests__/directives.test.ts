@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render } from '../src/index';
+import { render, registerShowDirective } from '../src/index';
 import { component, jsx, defineDirective, defineApp, signal } from 'sigx';
 
 describe('DOM directive lifecycle', () => {
@@ -333,6 +333,7 @@ describe('Custom directive registration via app.directive()', () => {
     });
 
     it('should prioritize built-in directive over app-registered directive of same name', () => {
+        registerShowDirective();
         // Register a custom directive named 'show' — built-in should win
         const customMounted = vi.fn();
         const customDir = defineDirective<boolean, HTMLElement>({ mounted: customMounted });

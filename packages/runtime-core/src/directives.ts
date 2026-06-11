@@ -72,6 +72,13 @@ export interface DirectiveDefinitionExtensions<T = any> {
 export interface DirectiveDefinition<T = any, El = any> extends DirectiveDefinitionExtensions<T> {
     /** Called after the element is created but before it is inserted into the DOM */
     created?(el: El, binding: DirectiveBinding<T>): void;
+    /**
+     * Server rendering: produce props to merge into the element's HTML
+     * (e.g. `style`, `class`, attributes). Directives are isomorphic — the
+     * definition declares its server behavior alongside its DOM hooks; the
+     * server renderer reads this hook when serializing the element.
+     */
+    getSSRProps?(binding: DirectiveBinding<T>): Record<string, any> | void;
     /** Called after the element is inserted into the DOM */
     mounted?(el: El, binding: DirectiveBinding<T>): void;
     /** Called when the binding value changes */

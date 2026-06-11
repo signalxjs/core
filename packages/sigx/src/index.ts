@@ -1,11 +1,16 @@
-// Import for side effects (sets default mount function and registers JSX globals)
-import '@sigx/runtime-dom';
+// Platform identity side effects. The model processor is imported by its
+// precise subpath — it's the file named in runtime-dom's `sideEffects`, so
+// every bundler must keep it even when tree-shaking re-export chains. The
+// default mount registration rides with the render machinery (importing
+// `render` evaluates it). Directives do NOT register here; see `show` /
+// `registerShowDirective` below.
+import '@sigx/runtime-dom/platform';
 
 // Re-export public APIs only (internals available via 'sigx/internals')
 export * from '@sigx/reactivity';
 export * from '@sigx/runtime-core';
 
 // From runtime-dom: only public symbols
-export { render, Portal, supportsMoveBefore, moveNode, show, useHead } from '@sigx/runtime-dom';
+export { render, Portal, supportsMoveBefore, moveNode, show, registerShowDirective, useHead } from '@sigx/runtime-dom';
 export type { HeadConfig, HeadMeta, HeadLink, HeadScript } from '@sigx/runtime-dom';
 export type { DOMDirective } from '@sigx/runtime-dom';

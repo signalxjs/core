@@ -42,3 +42,29 @@ The full export list (`render`, `Portal`, the `show` directive) plus DOM patchin
 ## License
 
 [MIT](https://github.com/signalxjs/core/blob/main/LICENSE)
+
+## Directives are opt-in; model handling is automatic
+
+Importing `@sigx/runtime-dom` sets up the DOM platform: the renderer mount and
+the form model processor (two-way `model={...}` binding on inputs, checkboxes,
+radios, selects, textareas) register automatically — that's platform identity,
+the same way `@sigx/lynx` registers its own model processor.
+
+Directives are content, not identity, and register explicitly:
+
+```ts
+import { defineApp, show } from 'sigx';
+
+defineApp(<App />)
+    .directive('show', show)   // enables the use:show={value} shorthand
+    .mount('#app');
+```
+
+Apps using bare `render()` (no app context) register globally instead:
+
+```ts
+import { registerShowDirective } from 'sigx';
+registerShowDirective();
+```
+
+The explicit tuple form `use:show={[show, value]}` works without registration.

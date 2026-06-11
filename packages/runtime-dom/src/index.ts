@@ -18,13 +18,12 @@ export { nodeOps } from './nodeOps.js';
 // Export Portal component and moveBefore utilities
 export { Portal, supportsMoveBefore, moveNode } from './Portal.js';
 
-// Export built-in directives
+// Export built-in directives. Directives are content, not platform identity —
+// nothing registers automatically. Register per app via
+// `app.directive('show', show)` (works on the client and during SSR), or
+// globally via `registerShowDirective()` for apps using bare `render()`.
 export { show } from './directives/show.js';
-
-// Register built-in directives so use:show={value} works without importing
-import { show as _showDirective } from './directives/show.js';
-import { registerBuiltInDirective as _register } from './directives.js';
-_register('show', _showDirective);
+export { registerShowDirective } from './directives/register-show.js';
 
 // Head management (browser-standalone; server collection via instance seam)
 export { useHead } from './use-head.js';

@@ -59,12 +59,7 @@
     "bugs": {
         "url": "https://github.com/signalxjs/core/issues"
     },
-    "sideEffects": [
-        "./src/index.ts",
-        "./src/jsx-runtime.ts",
-        "./dist/sigx.js",
-        "./dist/jsx-runtime.js"
-    ],
+    "sideEffects": false,
     "engines": {
         "node": "^20.19.0 || >=22.12.0"
     },
