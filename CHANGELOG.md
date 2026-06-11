@@ -6,6 +6,40 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-06-11
+
+The SSR engine release (#61, #65): a ~5× faster streaming core measured against Vue/React/Preact, document-level rendering with an AI-agent serving mode, server-side Suspense, and ONE unified data-loading story — `useAsync`/`useStream` with automatic hydration state transfer. Breaking changes below (0.x line).
+
+### Added
+
+- **`sigx`**: `useAsync` — THE data primitive. `useAsync(fn)` is client-only; `useAsync(key, fn, opts)` runs on the server, serializes its resolved value under the explicit key into `window.__SIGX_ASYNC__` (page-lifetime cache, prototype-pollution-safe), restores on hydration without refetching, and dedupes per request/page by key. `AsyncState` gains `refresh()` (stale-while-revalidate; repopulates the cache); fetchers receive an `AbortSignal`; `value`/`error` are mutually exclusive; `{ throwOnError }` routes to error boundaries. (#61)
+- **`sigx`**: `useStream(key, source)` — progressive text streaming for AI/LLM-token content: tokens append into the page over the initial response (`$SIGX_APPEND` text nodes, XSS-safe by construction), the final markup swaps in through the standard replacement pipeline, and the final text hydrates from the key. Text-only v1. (#61)
+- **`sigx`**: `useHead` moved into core (browser-standalone: mutates `document.head`, cleans up on unmount, dedups meta incl. `charset`; SSR collects per-request via the instance seam). Import from `'sigx'`. (#61)
+- **`@sigx/server-renderer`**: `renderDocument` / `renderDocumentToNodeStream` / `renderDocumentToWebStream` — the engine owns the complete HTML response: template + `<!--ssr-outlet-->`, automatic head injection (streaming previously lost collected heads), automatic state serialization (`serializeState: false` to opt out), `AbortSignal`, `onError(e, 'shell' | 'stream')`. The node variant returns `{ stream, shell }` — `shell` settles before the first byte for status-code decisions. `mode: 'blocking'` serves crawlers/AI agents complete inline content with no placeholders or streaming scripts. Entry scripts flush with the shell (downloads start immediately; module execution can't race hydration). (#61)
+- **`@sigx/server-renderer`**: Suspense and `lazy()` now actually render on the server — lazy resolves inline; streaming mode emits the fallback and swaps in real content via the replacement machinery. Hydrating server-resolved Suspense content requires preloading the lazy chunk before `hydrate()`. (#61)
+- **`@sigx/server-renderer`**: `SSRPlugin.onAsyncComponentResolved` may return `preScript` — script content injected BEFORE the `$SIGX_REPLACE` call (state must install before hydration listeners fire). (#61)
+- **benchmarks/** workspace (not published): comparative SSR suites vs Vue/React/Preact with equivalence-verified trees, streaming TTFB harness, committed baseline, and the `pnpm bench:ssr:quick` regression guardrail. (#61)
+
+### Changed (breaking)
+
+- **`@sigx/server-renderer`**: `ssr.load()` and `ssr.stream()` are REMOVED — use keyed `useAsync`/`useStream` from `sigx`. `ctx.ssr` is now `{ isServer, isHydrating }` only. The signal-name serialization machinery is removed: `createTrackingSignal`, `createRestoringSignal`, `setPendingServerState`, `generateSignalKey`, `SSRSignalFn`, positional `$N` keys, and the per-component `window.__SIGX_STATE__` blob (replaced by the key-addressed `window.__SIGX_ASYNC__`). `hydrateComponent`'s signature drops the `serverState` parameter. `enableSSRHead`/`collectSSRHead` are removed (head collection is per-request on the SSRContext). `useHead` is no longer exported from `@sigx/server-renderer` — import from `'sigx'`. (#61)
+- **`sigx`**: `useAsync(fn)` no longer fires its loader during SSR (it previously started it, never awaited it, and leaked an unhandled promise while baking the loading state into the HTML). Existing unkeyed call sites keep compiling; behavior on the client is unchanged. (#61)
+- **`@sigx/server-renderer`**: `renderToString` of a Suspense tree now returns the awaited content instead of the fallback (the old behavior was a bug, but output changes). (#61)
+
+### Fixed
+
+- **`@sigx/server-renderer`**: `renderToNodeStream` was broken in the published artifact — the lib build stubbed `node:` builtins for the browser platform. (#61)
+- **`@sigx/server-renderer`**: streaming responses dropped all `useHead` tags; concurrent renders could cross-contaminate head configs through module-level collection. Head handling is per-request and document-injected. (#61)
+- **`@sigx/server-renderer`**: hydrating streamed async components duplicated their content — the walk mismatched on the `data-async-placeholder` wrapper and mounted a fresh copy below the SSR DOM. Hydration now descends into placeholder wrappers. (#61)
+- **`@sigx/server-renderer`**: async components nested inside deferred renders (e.g. Suspense children with their own data) were silently never streamed — the replacement race loop now picks up pending work added mid-stream. (#61)
+- **`@sigx/server-renderer`**: `camelToKebab('constructor')` returned `Function` through the prototype chain of a plain-object cache. (#61)
+- **`sigx`**: server components' default slot dropped valid falsy children (the number `0`, `''`) — only `null`/`undefined`/booleans mean "no children" now. (#61)
+- Review hardening (10 Copilot rounds on #65): prototype-pollution guards on the state blob (null-prototype target, dangerous-key rejection, own-property checks); shared keyed fetches no longer abort when their first consumer unmounts; a stale fetch settling can't evict a newer `refresh()`'s in-flight dedupe entry; `useStream` stops pulling tokens on unmount; string-mode `renderDocument` rejects on abort instead of returning truncated HTML; byte-oriented backpressure for document node streams.
+
+### Performance
+
+- Sync-generator render core (shared buffer + suspension protocol) replaces the per-vnode AsyncGenerator walk; component-free subtrees render through a plain recursive fast path; the sync/async double render on async pages is gone. Measured (committed baseline, i9-12900HK): string renders −9%…−45%; streaming a 10k-row table 214ms → ~41ms total with 1.7ms TTFB — fastest of sigx/Vue/React on both stream metrics. (#61)
+
 ## [0.5.0] — 2026-06-10
 
 Foundations release for the @sigx/store redesign: real factory lifetimes in the DI layer, Topic v2 with refCount hooks and an inspection registry, working effectScope disposal, and destructuring-safe signal views. Breaking changes are called out below (0.x line).
@@ -127,7 +161,8 @@ Initial public release of the SignalX (`sigx`) ecosystem on npm. Six packages pu
 - Node `^20.19.0 || >=22.12.0`
 - `@sigx/vite` peer-depends on `vite >=8.0.0`
 
-[Unreleased]: https://github.com/signalxjs/core/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/signalxjs/core/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/signalxjs/core/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/signalxjs/core/compare/v0.4.9...v0.5.0
 [0.4.9]: https://github.com/signalxjs/core/compare/v0.4.8...v0.4.9
 [0.4.1]: https://github.com/signalxjs/core/releases/tag/v0.4.1
