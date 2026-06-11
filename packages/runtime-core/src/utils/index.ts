@@ -1,6 +1,12 @@
+/** Check whether a value is thenable (Promise-like). */
+export function isPromise(value: any): boolean {
+    return !!value && (typeof value === 'object' || typeof value === 'function') && typeof value.then === 'function';
+}
+
+/** @deprecated Use the {@link isPromise} function export instead. Kept until dependents (e.g. @sigx/store) migrate. */
 export class Utils {
     static isPromise(value: any): boolean {
-        return !!value && (typeof value === 'object' || typeof value === 'function') && typeof value.then === 'function';
+        return isPromise(value);
     }
 }
 

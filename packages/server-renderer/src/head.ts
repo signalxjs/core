@@ -9,6 +9,7 @@
  */
 
 import type { HeadConfig } from 'sigx';
+import { escapeHtml } from './server/render-core.js';
 
 /**
  * Render collected head configs to an HTML string.
@@ -100,13 +101,6 @@ export function renderHeadToString(configs: HeadConfig[]): string {
 }
 
 // ============= Utilities =============
-
-function escapeHtml(s: string): string {
-    return s
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;');
-}
 
 function escapeAttr(s: string): string {
     return s

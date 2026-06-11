@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { Utils, guid } from '../src/utils/index';
+import { isPromise, Utils, guid } from '../src/utils/index';
 import { isComponent } from '../src/utils/is-component';
 import { normalizeSubTree } from '../src/utils/normalize';
 import { createSlots } from '../src/utils/slots';
@@ -260,5 +260,20 @@ describe('createSlots', () => {
 
         expect(slots.default()).toEqual([]);
         expect((slots as any).side()).toEqual([b]);
+    });
+});
+
+describe('isPromise (function export)', () => {
+    it('detects thenables and rejects non-thenables', () => {
+        expect(isPromise(Promise.resolve(1))).toBe(true);
+        expect(isPromise({ then: () => {} })).toBe(true);
+        expect(isPromise(null)).toBe(false);
+        expect(isPromise(42)).toBe(false);
+        expect(isPromise({ then: 'no' })).toBe(false);
+    });
+
+    it('backs the deprecated Utils.isPromise', () => {
+        expect(Utils.isPromise(Promise.resolve(1))).toBe(true);
+        expect(Utils.isPromise('x')).toBe(false);
     });
 });

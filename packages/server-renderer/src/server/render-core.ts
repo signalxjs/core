@@ -85,6 +85,7 @@ const NOOP = () => { };
 /** Void elements that cannot have children — hoisted to module scope as a Set for O(1) lookup */
 const VOID_ELEMENTS = new Set(['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'param', 'source', 'track', 'wbr']);
 
+/** @internal exported for direct unit tests only */
 export function camelToKebab(str: string): string {
     // CSS custom properties (--foo) are already kebab-case
     if (str.startsWith('--')) return str;
@@ -98,6 +99,8 @@ export function camelToKebab(str: string): string {
  *
  * Handles edge cases: parens in values (e.g., `linear-gradient(...)`),
  * CSS comments, and colons in values.
+ *
+ * @internal exported for direct unit tests only
  */
 const styleCommentRE = /\/\*[^]*?\*\//g;
 
