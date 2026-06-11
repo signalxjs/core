@@ -239,6 +239,10 @@ describe('createSlots', () => {
         expect(Object.prototype.hasOwnProperty.call(Object.prototype, '0')).toBe(false);
         // The default slot stays clean and repeated extraction is stable.
         expect(slots.default()).toEqual([]);
+
+        // The pathological name is still a WORKING named slot: the proxy
+        // must not let the inherited __proto__ accessor shadow it.
+        expect((slots as any)['__proto__']()).toEqual([child]);
     });
 
     it('re-extracts after a version bump swaps the children', () => {

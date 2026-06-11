@@ -108,7 +108,11 @@ export function createSlots(children: any, slotsFromProps?: Record<string, any>)
     // Create a proxy to handle named slot access dynamically
     return new Proxy(slotsObj, {
         get(target, prop) {
-            if (prop in target) {
+            // `in` sees inherited Object.prototype keys, which would make
+            // a slot literally named "__proto__" unreachable (the check
+            // matches the inherited accessor, never an own key here).
+            // Exclude it so it falls through to the named-slot path.
+            if (prop !== '__proto__' && prop in target) {
                 return (target as any)[prop];
             }
 

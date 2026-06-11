@@ -912,8 +912,10 @@ export function createRenderer<HostNode = any, HostElement = any>(
             notifyComponentCreated(currentAppContext, componentInstance);
             // Run component-level created hooks
             if (createdHooks) {
+                // Snapshot the length: hooks registered while running must
+                // not run in this phase (historical forEach semantics).
                 const hooks: (() => void)[] = createdHooks;
-                for (const hook of hooks) hook();
+                for (let i = 0, len = hooks.length; i < len; i++) hooks[i]();
             }
         } catch (err) {
             // Handle setup errors
@@ -979,7 +981,8 @@ export function createRenderer<HostNode = any, HostElement = any>(
                         notifyComponentUpdated(currentAppContext, componentInstance);
                         // Run component-level updated hooks
                         if (updatedHooks) {
-                            for (const hook of updatedHooks) hook();
+                            const hooks: (() => void)[] = updatedHooks;
+                            for (let i = 0, len = hooks.length; i < len; i++) hooks[i]();
                         }
                     } else {
                         mount(subTree, container, anchor);
@@ -1016,7 +1019,7 @@ export function createRenderer<HostNode = any, HostElement = any>(
         if (mountHooks) {
             const hooks: ((ctx: MountContext) => void)[] = mountHooks;
             untrack(() => {
-                for (const hook of hooks) hook(mountCtx);
+                for (let i = 0, len = hooks.length; i < len; i++) hooks[i](mountCtx);
             });
         }
 
@@ -1029,7 +1032,7 @@ export function createRenderer<HostNode = any, HostElement = any>(
             notifyComponentUnmounted(currentAppContext, componentInstance);
             if (unmountHooks) {
                 const hooks: ((ctx: MountContext) => void)[] = unmountHooks;
-                for (const hook of hooks) hook(mountCtx as MountContext);
+                for (let i = 0, len = hooks.length; i < len; i++) hooks[i](mountCtx as MountContext);
             }
         };
     }
