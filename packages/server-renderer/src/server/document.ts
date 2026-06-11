@@ -84,8 +84,15 @@ interface PreparedDocument {
     pre: string;
     /** App shell HTML + plugin-injected HTML (state blob included). */
     shell: string;
-    /** Template after the outlet. */
-    post: string;
+    /**
+     * Template after the outlet UP TO </body> — flushed WITH the shell so
+     * the browser starts downloading entry scripts immediately instead of
+     * after the last async chunk (module scripts execute after parsing
+     * completes either way, so this cannot race hydration).
+     */
+    postBody: string;
+    /** The closing tail (</body></html>…) — emitted after all chunks. */
+    postTail: string;
     streaming: boolean;
 }
 
@@ -151,7 +158,13 @@ async function prepareDocument(
             : pre + headHtml;
     }
 
-    return { ctx, pre, shell: shellHtml + injected, post, streaming };
+    // Split the tail at </body>: everything before it (entry scripts!)
+    // flushes with the shell; only the closing tags wait for the stream.
+    const bodyClose = post.search(/<\/body\s*>/i);
+    const postBody = bodyClose >= 0 ? post.slice(0, bodyClose) : '';
+    const postTail = bodyClose >= 0 ? post.slice(bodyClose) : post;
+
+    return { ctx, pre, shell: shellHtml + injected, postBody, postTail, streaming };
 }
 
 /**
@@ -168,7 +181,9 @@ async function* documentChunks(
     const p = await prep;
 
     // First flush: template head (with collected head tags) + shell + state
-    yield p.pre + p.shell;
+    // + the rest of the body markup incl. entry scripts (downloads start
+    // now; module execution waits for parse end regardless)
+    yield p.pre + p.shell + p.postBody;
 
     try {
         for await (const chunk of engine.streamAsyncChunks(p.ctx)) {
@@ -180,10 +195,10 @@ async function* documentChunks(
         }
     } catch (e) {
         options.onError?.(e as Error, 'stream');
-        return; // end without the tail — the document is visibly truncated
+        return; // end without the closing tail — visibly truncated
     }
 
-    yield p.post;
+    yield p.postTail;
 }
 
 /** Kick off shell preparation eagerly, routing failures to onError('shell'). */
@@ -230,7 +245,10 @@ export function renderDocumentToNodeStreamImpl(
     const shell = prep.then(() => undefined as void);
     shell.catch(() => { /* handled via onError / stream error */ });
     return {
-        stream: Readable.from(documentChunks(engine, prep, resolved), { objectMode: true }),
+        // Non-object mode: backpressure/highWaterMark measured in BYTES —
+        // in object mode a few large HTML strings buffer far more memory
+        // than intended under slow clients.
+        stream: Readable.from(documentChunks(engine, prep, resolved), { objectMode: false }),
         shell
     };
 }

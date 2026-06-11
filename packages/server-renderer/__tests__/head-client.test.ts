@@ -81,12 +81,12 @@ describe('useHead (client mode) — meta', () => {
         expect(matches[0].getAttribute('content')).toBe('10');
     });
 
-    it('does not dedup meta tags without name/property/http-equiv', () => {
+    it('dedups charset meta (a document has exactly one charset)', () => {
         useHead({ meta: [{ charset: 'utf-8' }] });
         useHead({ meta: [{ charset: 'iso-8859-1' }] });
-        const all = document.head.querySelectorAll('meta');
-        // Both should be present since charset has no selector path in applyHeadClient
-        expect(all.length).toBeGreaterThanOrEqual(2);
+        const all = document.head.querySelectorAll('meta[charset]');
+        expect(all.length).toBe(1);
+        expect(all[0].getAttribute('charset')).toBe('iso-8859-1');
     });
 });
 

@@ -130,7 +130,11 @@ describe('renderDocumentToNodeStream — streaming mode (default)', () => {
         expect(html).toContain('loaded-data');
         // State installs before the replace fires
         expect(html.indexOf('window.__SIGX_ASYNC__')).toBeLessThan(html.indexOf('$SIGX_REPLACE(1,'));
-        // Completion + tail, in order
+        // TTI: the entry <script> (after the outlet in the template) must
+        // flush WITH the shell — before any replacement chunk — so the
+        // browser starts downloading the bundle immediately.
+        expect(html.indexOf('src="/entry-client.js"')).toBeLessThan(html.indexOf('$SIGX_REPLACE(1,'));
+        // Completion + closing tail, in order
         const completionIdx = html.indexOf('__SIGX_STREAMING_COMPLETE__');
         expect(completionIdx).toBeGreaterThan(-1);
         expect(html.indexOf('</html>')).toBeGreaterThan(completionIdx);

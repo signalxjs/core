@@ -100,7 +100,8 @@ function applyHeadClient(config: HeadConfig): (() => void) {
             // Remove existing matching meta
             const selector = meta.name ? `meta[name="${meta.name}"]` :
                 meta.property ? `meta[property="${meta.property}"]` :
-                    meta['http-equiv'] ? `meta[http-equiv="${meta['http-equiv']}"]` : null;
+                    meta['http-equiv'] ? `meta[http-equiv="${meta['http-equiv']}"]` :
+                        meta.charset ? 'meta[charset]' : null;
 
             if (selector) {
                 const existing = document.querySelector(selector);
