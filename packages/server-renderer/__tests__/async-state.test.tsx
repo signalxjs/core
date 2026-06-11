@@ -189,7 +189,7 @@ describe('server → client round trip', () => {
 
         expect(clientFetch).not.toHaveBeenCalled();
         expect(container.querySelector('.user')!.textContent).toBe('Ada');
-        // Consume-once: the blob entry is gone after hydration
-        expect('rt-user' in (globalThis as any).__SIGX_ASYNC__).toBe(false);
+        // Page-lifetime cache: the entry persists (refresh() invalidates)
+        expect('rt-user' in (globalThis as any).__SIGX_ASYNC__).toBe(true);
     });
 });

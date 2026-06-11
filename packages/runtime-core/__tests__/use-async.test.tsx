@@ -189,10 +189,10 @@ describe('useAsync', () => {
     });
 
     // ========================================================================
-    // Keyed: restore from the server blob (consume-once)
+    // Keyed: restore from the server blob (page-lifetime initial-data cache)
     // ========================================================================
 
-    it('restores a keyed value from __SIGX_ASYNC__ without fetching; second mount refetches', async () => {
+    it('restores a keyed value from __SIGX_ASYNC__ without fetching; later mounts restore too', async () => {
         (globalThis as any).__SIGX_ASYNC__ = { 'restore-key': 'from-server' };
         const fetcher = vi.fn(async () => 'from-client');
 
@@ -205,19 +205,59 @@ describe('useAsync', () => {
             );
         }, { name: 'App' });
 
-        // First mount consumes the blob entry: no fetch, value synchronously
+        // First mount restores: no fetch, value synchronously
         const first = mount(jsx(App, {}));
         expect(first.querySelector('.v')?.textContent).toBe('from-server');
         expect(fetcher).not.toHaveBeenCalled();
-        // Consume-once: the entry is gone
-        expect('restore-key' in (globalThis as any).__SIGX_ASYNC__).toBe(false);
 
-        // Second mount of the same key: blob exhausted → fetches fresh data
+        // The blob is the page's initial-data cache — the entry persists, so
+        // a second mount (e.g. navigation back) restores too. refresh() is
+        // the explicit invalidation.
         const second = mount(jsx(App, {}));
-        expect(second.querySelector('.v')?.textContent).toBe('loading');
+        expect(second.querySelector('.v')?.textContent).toBe('from-server');
+        expect(fetcher).not.toHaveBeenCalled();
+    });
+
+    it('TWO components sharing a key both restore during hydration — zero fetches', async () => {
+        (globalThis as any).__SIGX_ASYNC__ = { 'shared-key': { n: 7 } };
+        const fetcher = vi.fn(async () => ({ n: -1 }));
+
+        const A = component(() => {
+            const data = useAsync('shared-key', fetcher);
+            return () => <span class="a">{data.value ? (data.value as any).n : 'loading'}</span>;
+        }, { name: 'A' });
+        const B = component(() => {
+            const data = useAsync('shared-key', fetcher);
+            return () => <span class="b">{data.value ? (data.value as any).n : 'loading'}</span>;
+        }, { name: 'B' });
+
+        const root = mount(jsx('div', { children: [jsx(A, {}), jsx(B, {})] }));
+        expect(root.querySelector('.a')?.textContent).toBe('7');
+        expect(root.querySelector('.b')?.textContent).toBe('7');
+        // Regression guard: consume-once restore made the SECOND consumer
+        // refetch — both must restore from the shared entry.
+        expect(fetcher).not.toHaveBeenCalled();
+    });
+
+    it('refresh() invalidates the restored entry and fetches fresh data', async () => {
+        (globalThis as any).__SIGX_ASYNC__ = { 'refresh-key': 'stale' };
+        const fetcher = vi.fn(async () => 'fresh');
+        let state: any;
+
+        const App = component(() => {
+            state = useAsync('refresh-key', fetcher);
+            return () => <div class="v">{state.value ?? 'loading'}</div>;
+        }, { name: 'App' });
+
+        const el = mount(jsx(App, {}));
+        expect(el.querySelector('.v')?.textContent).toBe('stale');
+
+        await state.refresh();
         await settle();
         expect(fetcher).toHaveBeenCalledTimes(1);
-        expect(second.querySelector('.v')?.textContent).toBe('from-client');
+        expect(el.querySelector('.v')?.textContent).toBe('fresh');
+        // The invalidated entry must not resurrect stale data on remount
+        expect('refresh-key' in (globalThis as any).__SIGX_ASYNC__).toBe(false);
     });
 
     // ========================================================================
@@ -439,8 +479,8 @@ describe('useStream', () => {
 
         expect(container.querySelector('.out')?.textContent).toBe('final server text');
         expect(sourceSpy).not.toHaveBeenCalled();
-        // Consume-once
-        expect('restored-stream' in (globalThis as any).__SIGX_ASYNC__).toBe(false);
+        // Page-lifetime cache: the entry persists for later mounts
+        expect('restored-stream' in (globalThis as any).__SIGX_ASYNC__).toBe(true);
     });
 
     it('throws when called outside component setup', () => {

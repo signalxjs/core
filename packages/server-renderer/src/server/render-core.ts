@@ -383,6 +383,22 @@ function serverUseStream(this: any, key: string, source: () => AsyncIterable<str
     const id: number = this.__ssrId;
     const ssrLoads: Promise<void>[] = this._ssrLoads;
 
+    // Streams are per-instance (an AsyncIterable can't be consumed twice),
+    // so keys must be UNIQUE per request — unlike useAsync, where sharing a
+    // key is the dedupe feature. Duplicates would race on the serialized
+    // final text (last finisher wins).
+    if (process.env.NODE_ENV !== 'production') {
+        const seen: Set<string> = ((ctx as any)._streamKeys ??= new Set());
+        if (seen.has(key)) {
+            console.warn(
+                `[useStream] duplicate key "${key}" in one request — stream keys ` +
+                `must be unique (the serialized text would be last-write-wins). ` +
+                `Only useAsync keys are shareable.`
+            );
+        }
+        seen.add(key);
+    }
+
     const state = { text: '' };
 
     const finish = (acc: string) => {

@@ -63,19 +63,29 @@ export interface AsyncState<T> {
 // ============= Serialized-state pickup =============
 
 /**
- * Consume a server-serialized value for `key` from the page blob
- * (`window.__SIGX_ASYNC__`, emitted by the server renderer). Consume-once:
- * the first mount restores without fetching; later mounts of the same key
- * fetch fresh data.
+ * Read a server-serialized value for `key` from the page blob
+ * (`window.__SIGX_ASYNC__`, emitted by the server renderer).
+ *
+ * The blob is the page's INITIAL-DATA CACHE for its lifetime: every mount
+ * of the same key restores from it (two components sharing a key both
+ * restore — neither refetches), including remounts after client-side
+ * navigation. `refresh()` is the explicit invalidation: it deletes the
+ * key's entry and fetches fresh data.
  */
-function consumeRestored(key: string): { hit: boolean; value: unknown } {
+function peekRestored(key: string): { hit: boolean; value: unknown } {
     const blob = (globalThis as any).__SIGX_ASYNC__;
     if (blob && key in blob) {
-        const value = blob[key];
-        delete blob[key];
-        return { hit: true, value };
+        return { hit: true, value: blob[key] };
     }
     return { hit: false, value: undefined };
+}
+
+/** Invalidate a restored entry — called by run()/refresh() before fetching. */
+function invalidateRestored(key: string): void {
+    const blob = (globalThis as any).__SIGX_ASYNC__;
+    if (blob && key in blob) {
+        delete blob[key];
+    }
 }
 
 /** In-flight dedupe for keyed client fetches (concurrent mounts share one run). */
@@ -115,7 +125,7 @@ export function useAsync<T>(
     }
 
     // ── Default client semantics ──
-    const restored = key !== null ? consumeRestored(key) : { hit: false, value: undefined };
+    const restored = key !== null ? peekRestored(key) : { hit: false, value: undefined };
 
     const state = signal({
         data: (restored.hit ? restored.value : null) as T | null,
@@ -129,6 +139,10 @@ export function useAsync<T>(
         controller?.abort();
         controller = new AbortController();
         const { signal: abortSignal } = controller;
+
+        // Fetching means the restored value (if any) is no longer the truth —
+        // invalidate so later mounts fetch instead of restoring stale data.
+        if (key !== null) invalidateRestored(key);
 
         batch(() => {
             state.pending = true;
@@ -206,7 +220,7 @@ export function useStream(
     }
 
     // ── Default client semantics ──
-    const restored = consumeRestored(key);
+    const restored = peekRestored(key);
     const text = signal(restored.hit ? String(restored.value) : '');
 
     if (!restored.hit && typeof window !== 'undefined') {

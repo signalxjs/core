@@ -125,9 +125,15 @@ four async primitives collapse to three with zero migration churn.
 | Server, blocking/string | Fetcher awaited inline (internally registers like `ssr.load`, so all existing plugin hooks — `handleAsyncSetup` etc. — apply unchanged) |
 | Server, streaming | Component renders its loading branch into the standard placeholder; replaced via `$SIGX_REPLACE` when the fetch resolves — existing machinery |
 | Server, any mode | Resolved value recorded under the **explicit key** for serialization |
-| Hydration, state present | `value` restored, `loading` starts `false`, fetcher **not** run |
+| Hydration, state present | `value` restored, `loading` starts `false`, fetcher **not** run. The blob is the page's initial-data cache: every mount of the key restores (two components sharing a key both restore), incl. remounts after client navigation; `refresh()` invalidates the entry and fetches |
 | Hydration, state absent | **Refetches** (fail-safe; today's `ssr.load` silently blanks — fail-quiet) |
 | Client navigation | Fetcher runs; `loading`/`error` reactive; in-flight run aborted on unmount |
+
+**Key semantics.** `useAsync` keys are SHAREABLE — that is the dedupe
+feature. `useStream` keys must be UNIQUE per request (an AsyncIterable
+cannot be consumed twice; duplicates would race last-write-wins on the
+serialized text — dev-warned on the server). Both kinds share the
+`__SIGX_ASYNC__` namespace, so don't reuse a key across the two.
 
 **Request-level dedupe.** The query cache is request-global, keyed by the
 user's key (`SSRContext._queryCache: Map<string, Promise<unknown>>`; a
