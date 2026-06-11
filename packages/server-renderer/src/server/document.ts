@@ -25,7 +25,7 @@ import type { JSXElement, AppContext } from 'sigx';
 import type { SSRPlugin } from '../plugin';
 import { createSSRContext, type SSRContext, type SSRContextOptions } from './context';
 import { renderToChunks } from './render-core';
-import { collectSSRHead, enableSSRHead, renderHeadToString } from '../head';
+import { renderHeadToString } from '../head';
 
 /** Same completion signal the plain streaming APIs emit. */
 const COMPLETION_SCRIPT = `<script>window.__SIGX_STREAMING_COMPLETE__=true;window.dispatchEvent(new Event('sigx:ready'));</script>`;
@@ -118,8 +118,6 @@ async function prepareDocument(
     const streaming = options.mode !== 'blocking';
     ctx._streaming = streaming;
 
-    enableSSRHead();
-
     // Render the app shell. In streaming mode async components leave
     // placeholders, so this completes quickly; in blocking mode every
     // useAsync/useStream resolves inline.
@@ -129,8 +127,8 @@ async function prepareDocument(
         throwIfAborted(options.signal);
     }
 
-    // Head: per-request context collection plus the legacy module-level path
-    const headConfigs = [...ctx._headConfigs, ...collectSSRHead()];
+    // Head: collected per-request by useHead via the component instances
+    const headConfigs = ctx._headConfigs;
     const headHtml = headConfigs.length > 0 ? renderHeadToString(headConfigs) : '';
 
     // Plugin-injected HTML (the state blob arrives through this hook)

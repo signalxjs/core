@@ -1,5 +1,5 @@
-import { component, useAsync } from 'sigx';
-import { useHead } from '@sigx/server-renderer/client';
+import { component, useAsync, useHead } from 'sigx';
+
 import { useRouter, type Route } from '../router';
 
 interface Stats {

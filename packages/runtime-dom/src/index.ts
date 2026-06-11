@@ -25,3 +25,7 @@ export { show } from './directives/show.js';
 import { show as _showDirective } from './directives/show.js';
 import { registerBuiltInDirective as _register } from './directives.js';
 _register('show', _showDirective);
+
+// Head management (browser-standalone; server collection via instance seam)
+export { useHead } from './use-head.js';
+export type { HeadConfig, HeadMeta, HeadLink, HeadScript } from './use-head.js';

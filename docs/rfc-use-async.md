@@ -203,6 +203,32 @@ No signal naming, no cast, no manual error handling, typed `value`.
 `examples/spa-ssr` migrates as part of the implementation (StatsCard becomes
 the `query` showcase).
 
+## Layering
+
+One rule decides where a composable lives:
+
+> **Runs standalone in a browser → `sigx`. Needs a server → `@sigx/server-renderer`.**
+
+- `useAsync`, `useStream`, and `useHead` live in core: each has a complete
+  browser implementation (client fetch with loading/error/refresh; live
+  token accumulation; direct `document.head` mutation). A pure SPA uses
+  them with zero server packages installed.
+- The dependency arrow forces this: `@sigx/server-renderer` depends on
+  `sigx`, never the reverse — so core could not re-export composables that
+  lived in the server package, and client-only apps must not need it.
+- Server behavior attaches through **provider seams**: the server walk
+  installs `_useAsync`/`_useStream` (and `ssr._ctx` for head collection) on
+  the component instance; the composables check for a provider first.
+  Core never imports server code — the seam is a property check.
+- `window.__SIGX_ASYNC__` pickup lives in core deliberately: components
+  mounted through the normal client renderer DURING hydration (e.g.
+  Suspense children) must restore too, not only the hydration walk.
+- **Enforced, not aspirational**: `packages/sigx/__tests__/client-bundle.test.ts`
+  bundles a client-only app from source (esbuild, tree-shaking,
+  `sideEffects` annotations in effect) and asserts zero bytes of the data
+  layer, head layer, or SSR machinery — with positive controls proving the
+  assertions can't go green vacuously.
+
 ## The async-context problem (why callbacks were the wrong shape)
 
 `getCurrentInstance()` is **not reliable inside async code**, and `ssr.load`'s

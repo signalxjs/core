@@ -7,12 +7,12 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { component, useAsync } from 'sigx';
+import { useHead } from 'sigx';
 import {
     createSSR,
     renderDocument,
     renderDocumentToNodeStream,
-    renderDocumentToWebStream,
-    useHead
+    renderDocumentToWebStream
 } from '../src/index';
 import type { Readable } from 'node:stream';
 

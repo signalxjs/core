@@ -66,6 +66,5 @@ export type { SSRHelper } from './client-directives.js';
 // opt-in plugin — automatic under renderDocument)
 export { stateSerializationPlugin } from './server/state-plugin.js';
 
-// Head management
-export { useHead, renderHeadToString, enableSSRHead, collectSSRHead } from './head.js';
-export type { HeadConfig, HeadMeta, HeadLink, HeadScript } from './head.js';
+// Server-side head rendering (useHead itself lives in sigx)
+export { renderHeadToString } from './head.js';

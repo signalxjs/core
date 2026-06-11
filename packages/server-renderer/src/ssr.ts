@@ -21,7 +21,7 @@ import { Readable } from 'node:stream';
 import { SSRContext, createSSRContext, SSRContextOptions, CorePendingAsync } from './server/context';
 import { renderToChunks, renderVNodeToString } from './server/render-core';
 import { generateStreamingScript, generateReplacementScript, generateAppendBootstrap } from './server/streaming';
-import { enableSSRHead, collectSSRHead, renderHeadToString } from './head';
+import { renderHeadToString } from './head';
 import type { StreamCallbacks } from './server/types';
 import { stateSerializationPlugin } from './server/state-plugin';
 import {
@@ -319,9 +319,6 @@ export function createSSR(): SSRInstance {
         async render(input, options?) {
             const { element, appContext } = extractInput(input);
 
-            // Enable head collection during SSR rendering
-            enableSSRHead();
-
             // Single walk: fully-sync trees complete without suspending, async
             // trees suspend at their awaits — no sync-attempt/re-render fallback.
             const ctx = makeContext(options);
@@ -346,7 +343,7 @@ export function createSSR(): SSRInstance {
             }
 
             // Collect head elements from useHead() calls during rendering
-            const headConfigs = [...ctx._headConfigs, ...collectSSRHead()];
+            const headConfigs = ctx._headConfigs;
             if (headConfigs.length > 0) {
                 ctx.addHead(renderHeadToString(headConfigs));
             }
@@ -364,8 +361,6 @@ export function createSSR(): SSRInstance {
             // throughput; pulling from a generator avoids it and provides
             // natural backpressure.
             async function* generateAll() {
-                enableSSRHead();
-
                 // Phase 1: Render main page with chunk batching (4KB threshold).
                 // Batched enqueues are ~24x faster than individual ones.
                 let buffer = '';
@@ -381,7 +376,7 @@ export function createSSR(): SSRInstance {
                 if (buffer) { yield buffer; buffer = ''; }
 
                 // Collect head from useHead() calls
-                const headConfigs = [...ctx._headConfigs, ...collectSSRHead()];
+                const headConfigs = ctx._headConfigs;
                 if (headConfigs.length > 0) {
                     ctx.addHead(renderHeadToString(headConfigs));
                 }
@@ -429,8 +424,6 @@ export function createSSR(): SSRInstance {
 
             async function* generate(): AsyncGenerator<string> {
                 // Enable head collection
-                enableSSRHead();
-
                 // Phase 1: Render the main page (placeholders for async components)
                 let buffer = '';
                 const FLUSH_THRESHOLD = 4096;
@@ -444,7 +437,7 @@ export function createSSR(): SSRInstance {
                 if (buffer) { yield buffer; buffer = ''; }
 
                 // Collect head from useHead() calls
-                const headConfigs = [...ctx._headConfigs, ...collectSSRHead()];
+                const headConfigs = ctx._headConfigs;
                 if (headConfigs.length > 0) {
                     ctx.addHead(renderHeadToString(headConfigs));
                 }
@@ -477,8 +470,6 @@ export function createSSR(): SSRInstance {
 
             try {
                 // Enable head collection
-                enableSSRHead();
-
                 // Phase 1: Render the shell
                 let shellHtml = '';
                 for await (const chunk of renderToChunks(element, ctx, null, appContext)) {
@@ -486,7 +477,7 @@ export function createSSR(): SSRInstance {
                 }
 
                 // Collect head from useHead() calls
-                const headConfigs = [...ctx._headConfigs, ...collectSSRHead()];
+                const headConfigs = ctx._headConfigs;
                 if (headConfigs.length > 0) {
                     ctx.addHead(renderHeadToString(headConfigs));
                 }

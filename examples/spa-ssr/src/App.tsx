@@ -1,5 +1,5 @@
-import { component } from 'sigx';
-import { useHead } from '@sigx/server-renderer/client';
+import { component, useHead } from 'sigx';
+
 import { useRouter, type Route } from './router';
 import { Home } from './pages/Home';
 import { Counter } from './pages/Counter';

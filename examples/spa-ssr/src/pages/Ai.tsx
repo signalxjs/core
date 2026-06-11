@@ -1,5 +1,5 @@
-import { component, useStream } from 'sigx';
-import { useHead } from '@sigx/server-renderer/client';
+import { component, useStream, useHead } from 'sigx';
+
 
 const ANSWER =
     'SignalX streams this answer over the same HTTP response as the page itself. ' +

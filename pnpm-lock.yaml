@@ -236,12 +236,15 @@ importers:
       '@sigx/vite':
         specifier: workspace:^
         version: link:../vite
+      esbuild:
+        specifier: ^0.25.0
+        version: 0.25.12
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
       vite:
         specifier: ^8.0.14
-        version: 8.0.14(@types/node@25.9.1)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)
+        version: 8.0.14(@types/node@25.9.1)(esbuild@0.25.12)(jiti@2.7.0)(tsx@4.22.3)
 
   packages/vite:
     devDependencies:
@@ -2968,6 +2971,20 @@ snapshots:
   unpipe@1.0.0: {}
 
   vary@1.1.2: {}
+
+  vite@8.0.14(@types/node@25.9.1)(esbuild@0.25.12)(jiti@2.7.0)(tsx@4.22.3):
+    dependencies:
+      lightningcss: 1.32.0
+      picomatch: 4.0.4
+      postcss: 8.5.15
+      rolldown: 1.0.2
+      tinyglobby: 0.2.16
+    optionalDependencies:
+      '@types/node': 25.9.1
+      esbuild: 0.25.12
+      fsevents: 2.3.3
+      jiti: 2.7.0
+      tsx: 4.22.3
 
   vite@8.0.14(@types/node@25.9.1)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3):
     dependencies:

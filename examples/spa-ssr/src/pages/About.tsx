@@ -1,5 +1,5 @@
-import { component, Suspense } from 'sigx';
-import { useHead } from '@sigx/server-renderer/client';
+import { component, Suspense, useHead } from 'sigx';
+
 import { TechDetails } from '../lazy-sections';
 
 export const About = component(() => {
