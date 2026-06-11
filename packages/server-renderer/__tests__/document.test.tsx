@@ -96,6 +96,17 @@ describe('renderDocument — blocking mode (default)', () => {
         expect(without).not.toContain('__SIGX_ASYNC__');
     });
 
+    it('rejects (never returns truncated HTML) when aborted in string mode', async () => {
+        const Page = makePage('AbortedString');
+        const controller = new AbortController();
+        const pending = renderDocument((Page as any)({}), {
+            template: TEMPLATE,
+            signal: controller.signal
+        });
+        controller.abort();
+        await expect(pending).rejects.toThrow();
+    });
+
     it('throws when the outlet marker is missing', async () => {
         const Page = makePage('X');
         await expect(

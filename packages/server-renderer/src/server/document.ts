@@ -203,11 +203,15 @@ export async function renderDocumentImpl(
 ): Promise<string> {
     const resolved: DocumentOptions = { ...options, mode: options.mode ?? 'blocking' };
     const prep = startPrepare(engine, input, resolved);
-    let out = '';
+    const out: string[] = [];
     for await (const chunk of documentChunks(engine, prep, resolved)) {
-        out += chunk;
+        out.push(chunk);
     }
-    return out;
+    // A stream may end early on abort (the consumer sees the truncation);
+    // a STRING render must reject — silently returning partial HTML would
+    // look like a successful render.
+    throwIfAborted(resolved.signal);
+    return out.join('');
 }
 
 /**
