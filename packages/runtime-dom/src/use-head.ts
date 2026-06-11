@@ -190,7 +190,7 @@ export function useHead(config: HeadConfig): void {
 
     // No DOM (server-side, outside a component) — nothing to apply to
     if (typeof document === 'undefined') {
-        if ((globalThis as any).process?.env?.NODE_ENV !== 'production') {
+        if (process.env.NODE_ENV !== 'production') {
             console.warn(
                 '[useHead] called on the server outside a component setup — ' +
                 'the config was ignored. Call useHead synchronously during setup.'

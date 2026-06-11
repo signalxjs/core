@@ -124,10 +124,12 @@ export function patchDirective(el: Element, name: string, prevValue: any, nextVa
                 def = custom;
                 value = nextValue;
             } else {
-                console.warn(
-                    `[sigx] Directive "use:${name}" could not be resolved. ` +
-                    `Make sure to register it via app.directive('${name}', definition) or pass a directive definition directly.`
-                );
+                if (process.env.NODE_ENV !== 'production') {
+                    console.warn(
+                        `[sigx] Directive "use:${name}" could not be resolved. ` +
+                        `Make sure to register it via app.directive('${name}', definition) or pass a directive definition directly.`
+                    );
+                }
                 return;
             }
         }

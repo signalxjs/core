@@ -72,7 +72,9 @@ function resolveTarget(target: string | Element | undefined): Element {
     if (typeof target === 'string') {
         const resolved = document.querySelector(target);
         if (!resolved) {
-            console.warn(`Portal: Target "${target}" not found, falling back to document.body`);
+            if (process.env.NODE_ENV !== 'production') {
+                console.warn(`Portal: Target "${target}" not found, falling back to document.body`);
+            }
             return document.body;
         }
         return resolved;
