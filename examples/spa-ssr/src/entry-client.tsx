@@ -14,9 +14,10 @@ async function start() {
     // component, so preload the lazy chunk(s) the current route renders
     // before walking the DOM.
     if (parseUrl(window.location.pathname) === '/about') {
-        await TechDetails.preload();
+        await TechDetails.preload?.();
     }
-    app.use(ssrClientPlugin).hydrate('#app');
+    // hydrate() is installed by ssrClientPlugin (declared optional on App)
+    app.use(ssrClientPlugin).hydrate!('#app');
 }
 
 void start();

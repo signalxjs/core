@@ -37,12 +37,15 @@ structural DX problems:
 
 ## Proposal
 
-One value-returning, explicitly-keyed resource primitive on the setup
-context, subsuming the common uses of `ssr.load` and all of `useAsync`:
+One value-returning, explicitly-keyed resource primitive — a standalone
+functional composable, subsuming the common uses of `ssr.load` and all of
+`useAsync`:
 
 ```tsx
-const Stats = component((ctx) => {
-    const stats = ctx.query('stats', ({ signal }) => fetchStats({ signal }));
+import { component, useQuery } from 'sigx';
+
+const Stats = component(() => {
+    const stats = useQuery('stats', ({ signal }) => fetchStats({ signal }));
     //    ^ Resource<Stats> — T inferred from the fetcher
 
     return () => {
@@ -52,6 +55,12 @@ const Stats = component((ctx) => {
     };
 });
 ```
+
+> **Inspectable mock:** `examples/spa-ssr/src/rfc-query-mock/` contains a
+> fully-typed mock implementation (`use-query.ts`) plus six real-world
+> usage examples (`examples.tsx`) — open them in an editor to explore the
+> inference and API ergonomics. They typecheck against the example app's
+> tsconfig and are not wired into the running app.
 
 ### API surface
 
@@ -87,13 +96,19 @@ interface Resource<T> {
     refresh(): Promise<void>;
 }
 
-// On ComponentSetupContext:
-query<T>(key: string, fetcher: (ctx: QueryFetcherContext) => Promise<T>, opts?: QueryOptions): Resource<T>;
+// Standalone composable, exported from 'sigx':
+function useQuery<T>(
+    key: string,
+    fetcher: (ctx: QueryFetcherContext) => Promise<T>,
+    opts?: QueryOptions
+): Resource<T>;
 ```
 
-Decided shape (user-confirmed): **`ctx.query`** on the setup context —
-discoverable next to `ctx.signal`/`ctx.ssr`, request-scoped by construction.
-A standalone `useQuery` re-export can be added later without design impact.
+Decided shape (user-confirmed): **functional `useQuery`**, matching the
+existing composable convention (`useHead`, `useRouter`, DI tokens). It must
+be called synchronously during setup — the same rule every composable
+already has; it throws a clear error otherwise. A `ctx.query` context method
+was considered and dropped: one convention is better than two.
 
 ### Semantics
 
@@ -134,12 +149,13 @@ component IDs involved — immune to id drift between renders):
 
 ### Layering
 
-`query` belongs to the component model, not to SSR — a pure SPA gets working
-client semantics with zero SSR packages installed:
+`useQuery` belongs to the component model, not to SSR — a pure SPA gets
+working client semantics with zero SSR packages installed:
 
-- **runtime-core** declares `query` on `ComponentSetupContext` and provides
-  the default client implementation (fetch on setup, reactive states, abort
-  on unmount) — this is `useAsync` done right.
+- **runtime-core** exports `useQuery` (resolving the instance via
+  `getCurrentInstance()` synchronously at call time) and provides the
+  default client implementation (fetch on setup, reactive states, abort on
+  unmount) — this is `useAsync` done right.
 - **server-renderer** swaps the implementation per environment, exactly as
   it already does for `ctx.ssr`: the server walk installs the
   await/stream/serialize variant in `createComponentState`; the hydration
@@ -168,7 +184,7 @@ rendering machinery.
 
 ```tsx
 // Before                                          // After
-const stats = (ctx.signal as any)(null, 'stats');  const stats = ctx.query('stats',
+const stats = (ctx.signal as any)(null, 'stats');  const stats = useQuery('stats',
 ctx.ssr.load(async () => {                             () => fetchStats());
     stats.value = await fetchStats();
 });
@@ -259,9 +275,9 @@ published plugin surface).
 
 ## Implementation plan (when approved — not started)
 
-1. `runtime-core`: `Resource<T>`/`QueryOptions` types, context slot, default
-   client implementation + tests. Fix the `useAsync` server leak (separate
-   commit; independent bug fix).
+1. `runtime-core`: `Resource<T>`/`QueryOptions` types, `useQuery` export
+   with the default client implementation + tests. Fix the `useAsync`
+   server leak (separate commit; independent bug fix).
 2. `server-renderer`: server implementation in `createComponentState`
    (dedupe via `_queryCache`, registers through `ssr.load` machinery);
    `__SIGX_QUERY__` capture in `stateSerializationPlugin`; hydration
