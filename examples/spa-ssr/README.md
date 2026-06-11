@@ -21,6 +21,7 @@ Open http://localhost:3000.
 | `/` | `useAsync()` data fetched on the server, serialized into `window.__SIGX_ASYNC__`, restored during hydration — the browser never refetches (watch the server log / network tab). |
 | `/counter` | Hydration is real — the button works because handlers attach to the server-rendered DOM. |
 | `/forms` | Model bindings, props/events, custom `Define.Model`. |
+| `/data` | **The full `useAsync` pattern set**: per-request dedupe (two components share one key → the rendered fetch counter proves a single fetch), soft errors + `refresh()` retry owned by the card (server renders the error branch; the client's fail-safe refetch recovers it after hydration), and unkeyed client-only calls (view source: the card ships as its loading branch). |
 | `/ai` | **AI token streaming**: `useStream()` pushes fake-LLM tokens into the initial HTTP response word by word (server streaming, not client JS), then swaps in the final markup. Swap the generator for a real model SDK call. |
 | `/about` | `<Suspense>` + `lazy()` section: fallback flushes with the shell, the code-split content streams in and replaces it. `entry-client.tsx` preloads the chunk before hydrating. |
 
