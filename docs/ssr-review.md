@@ -90,7 +90,15 @@ of thousands of avoidable microtasks. The mitigation —
 `renderToStringSync` — duplicates ~270 lines of component/attribute logic
 that must be kept in sync by hand.
 
-### F8 — No benchmarks, no document API, no asset preloads (gaps)
+### F8 — `renderToNodeStream` broken in the built package (bug)
+
+Found while wiring benchmarks against the built dist: the library build
+bundled for the default browser platform, which stubs `node:stream` to an
+empty module — `renderToNodeStream` threw in the published artifact (tests
+never caught it because they run against source via path aliases). Fixed by
+externalizing `node:` builtins in `packages/server-renderer/vite.config.ts`.
+
+### F9 — No benchmarks, no document API, no asset preloads (gaps)
 
 "Performant" was unmeasurable: no comparative or regression benchmarks.
 No API owns the full HTML document (head injection, state script, status-code
@@ -101,16 +109,16 @@ integration for `<link rel="modulepreload">` of rendered `lazy()` chunks.
 
 | Stage | What | Findings addressed |
 |---|---|---|
-| 1 | `benchmarks/` workspace: mitata suites vs Vue / React / Preact, streaming TTFB harness, committed baseline | F8 |
+| 1 | `benchmarks/` workspace: mitata suites vs Vue / React / Preact, streaming TTFB harness, committed baseline | F9 |
 | 2 | Quick wins: `escapeHtml` skip-scan, null-proto kebab cache, allocation trims | F5, F7 (partial) |
 | 3 | Core restructure: sync generator + shared buffer, suspension protocol at awaits, delete duplicated sync walker and the double render | F1, F7 |
 | 4 | `stateSerializationPlugin()`: capture `ssr.load()` signal state, emit XSS-safe `window.__SIGX_STATE__`, auto-restore on hydrate (opt-in; auto only in `renderDocument`) | F6 |
-| 5 | `renderDocument` / `renderDocumentToNodeStream` / `renderDocumentToWebStream`: template + head auto-injection, shell promise for status codes, `AbortSignal`, `mode: 'blocking'` bot/crawler mode; head moved to per-request context | F2, F3, F8 |
+| 5 | `renderDocument` / `renderDocumentToNodeStream` / `renderDocumentToWebStream`: template + head auto-injection, shell promise for status codes, `AbortSignal`, `mode: 'blocking'` bot/crawler mode; head moved to per-request context | F2, F3, F9 |
 | 6 | Suspense-integrated streaming: fallback streamed, content swapped via the existing replace machinery; string/blocking mode awaits real content | F4 |
 | 7 | `ssr.stream()`: progressive text streaming (AI/LLM token-style) via `$SIGX_APPEND`, text-only v1 | AI-readiness |
-| 8 | `pnpm bench:quick` regression guardrail against the committed baseline | F8 |
+| 8 | `pnpm bench:quick` regression guardrail against the committed baseline | F9 |
 | 9 | `examples/spa-ssr` rewritten as the reference integration (document streaming, state serialization, Suspense, LLM-style route, bot mode) | all, end-to-end |
-| — | **Deferred**: Vite ssr-manifest → `modulepreload`/stylesheet links for rendered `lazy()` chunks | F8 (remainder) |
+| — | **Deferred**: Vite ssr-manifest → `modulepreload`/stylesheet links for rendered `lazy()` chunks | F9 (remainder) |
 
 ### AI-era readiness, concretely
 
