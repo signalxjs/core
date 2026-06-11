@@ -4,7 +4,7 @@
  * This module provides a `defineLibConfig` helper that simplifies creating library builds
  * with consistent configuration across all @sigx/* packages.
  */
-import { defineConfig, type UserConfig, type UserConfigFnObject, type BuildEnvironmentOptions } from 'vite';
+import { defineConfig, type UserConfig, type UserConfigFnObject } from 'vite';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
