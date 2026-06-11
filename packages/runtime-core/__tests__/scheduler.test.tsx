@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render } from '@sigx/runtime-dom';
 import { component, jsx } from '@sigx/runtime-core';
 import { signal, batch, computed, effect } from '@sigx/reactivity';
+import { queueJob, flushJobs, nextJobId, type SchedulerJob } from '../src/scheduler';
 
 /**
  * Render queue semantics (#59): per-component dedup, parent-before-child
@@ -158,5 +159,83 @@ describe('render scheduler', () => {
         runner();
         expect(runs).toHaveBeenCalledTimes(2);
         expect(scheduled.length).toBe(0);
+    });
+
+    it('a scheduled job invoked while its effect is mid-run is dropped', () => {
+        const s = signal({ v: 0 });
+        const runs = vi.fn();
+        let captured: (() => void) | undefined;
+        let invokeCapturedDuringRun = false;
+
+        const runner = effect(() => {
+            runs(s.v);
+            if (invokeCapturedDuringRun && captured) {
+                const job = captured;
+                captured = undefined;
+                // A misbehaving/async scheduler firing the stored job
+                // while the effect is on the stack: must be a no-op.
+                job();
+            }
+        }, { scheduler: (run) => { captured = run; } });
+        expect(runs).toHaveBeenCalledTimes(1);
+
+        s.v = 1; // notification is captured, not run
+        expect(runs).toHaveBeenCalledTimes(1);
+        expect(captured).toBeDefined();
+
+        invokeCapturedDuringRun = true;
+        runner(); // manual run invokes the stale job from inside itself
+        expect(runs).toHaveBeenCalledTimes(2); // exactly the manual run — no re-entry
+
+        // Still fully functional afterwards.
+        invokeCapturedDuringRun = false;
+        s.v = 2;
+        captured!();
+        expect(runs).toHaveBeenCalledTimes(3);
+        expect(runs).toHaveBeenLastCalledWith(2);
+    });
+});
+
+describe('render queue internals', () => {
+    function makeJob(record: number[], id: number): SchedulerJob {
+        return Object.assign(() => { record.push(id); }, { id });
+    }
+
+    it('flushes jobs in id order regardless of queueing order', () => {
+        const order: number[] = [];
+        const a = makeJob(order, nextJobId());
+        const b = makeJob(order, nextJobId());
+        const c = makeJob(order, nextJobId());
+
+        // Out-of-order enqueue exercises both binary-insert branches;
+        // duplicate enqueue of a queued job is a no-op.
+        queueJob(c);
+        queueJob(a);
+        queueJob(b);
+        queueJob(b);
+        flushJobs();
+
+        expect(order).toEqual([a.id, b.id, c.id]);
+    });
+
+    it('a throwing job propagates, and later jobs are unmarked so they can re-queue', () => {
+        const order: number[] = [];
+        const boom: SchedulerJob = Object.assign(() => {
+            throw new Error('boom');
+        }, { id: nextJobId() });
+        const after = makeJob(order, nextJobId());
+
+        queueJob(boom);
+        queueJob(after);
+        expect(() => flushJobs()).toThrow('boom');
+
+        // The wedged flush dropped `after`, but unmarked it...
+        expect(order).toEqual([]);
+        expect(after.queued).toBe(false);
+
+        // ...so it can re-queue and run on the next wave.
+        queueJob(after);
+        flushJobs();
+        expect(order).toEqual([after.id]);
     });
 });
