@@ -7,16 +7,22 @@
     "types": "./dist/index.d.ts",
     "exports": {
         ".": {
-            "import": "./dist/index.js",
-            "types": "./dist/index.d.ts"
+            "types": "./dist/index.d.ts",
+            "development": "./dist/index.js",
+            "production": "./dist/index.prod.js",
+            "import": "./dist/index.js"
         },
         "./server": {
-            "import": "./dist/server/index.js",
-            "types": "./dist/server/index.d.ts"
+            "types": "./dist/server/index.d.ts",
+            "development": "./dist/server/index.js",
+            "production": "./dist/server/index.prod.js",
+            "import": "./dist/server/index.js"
         },
         "./client": {
-            "import": "./dist/client/index.js",
-            "types": "./dist/client/index.d.ts"
+            "types": "./dist/client/index.d.ts",
+            "development": "./dist/client/index.js",
+            "production": "./dist/client/index.prod.js",
+            "import": "./dist/client/index.js"
         }
     },
     "files": [
@@ -24,7 +30,7 @@
     ],
     "sideEffects": false,
     "scripts": {
-        "build": "vite build && tsgo --emitDeclarationOnly",
+        "build": "vite build && vite build --mode prod-dist && tsgo --emitDeclarationOnly",
         "dev": "vite build --watch",
         "prepublishOnly": "pnpm run build"
     },

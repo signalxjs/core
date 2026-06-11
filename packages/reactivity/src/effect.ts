@@ -192,9 +192,10 @@ function runEffect(fn: EffectFn, scheduler?: EffectScheduler): EffectRunner {
     // Devtools id minted at create time when a hook is installed.
     // `null` means "untracked by devtools" — the hot path in the
     // effect's body skips emission entirely.
-    const hookAtCreate = getDevtoolsHook();
-    const effectId: number | null = hookAtCreate ? hookAtCreate.nextId() : null;
-    if (hookAtCreate && effectId !== null) {
+    let effectId: number | null = null;
+    const hookAtCreate = process.env.NODE_ENV !== 'production' ? getDevtoolsHook() : null;
+    if (hookAtCreate) {
+        effectId = hookAtCreate.nextId();
         hookAtCreate.emit({
             type: 'effect:created',
             id: effectId,
@@ -245,7 +246,7 @@ function runEffect(fn: EffectFn, scheduler?: EffectScheduler): EffectRunner {
         cleanup(effectFn);
         const prev = currentSubscriber;
         currentSubscriber = effectFn;
-        if (effectId === null) {
+        if (process.env.NODE_ENV === 'production' || effectId === null) {
             try {
                 fn();
             } finally {
@@ -290,7 +291,7 @@ function runEffect(fn: EffectFn, scheduler?: EffectScheduler): EffectRunner {
     runner.stop = () => {
         stopped = true;
         cleanup(effectFn);
-        if (effectId !== null) {
+        if (process.env.NODE_ENV !== 'production' && effectId !== null) {
             const hook = getDevtoolsHook();
             if (hook) {
                 hook.emit({ type: 'effect:stopped', id: effectId });

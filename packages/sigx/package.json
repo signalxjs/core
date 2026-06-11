@@ -7,31 +7,41 @@
     "types": "./dist/index.d.ts",
     "exports": {
         ".": {
-            "import": "./dist/sigx.js",
-            "types": "./dist/index.d.ts"
+            "types": "./dist/index.d.ts",
+            "development": "./dist/sigx.js",
+            "production": "./dist/sigx.prod.js",
+            "import": "./dist/sigx.js"
         },
         "./hydration": {
-            "import": "./dist/hydration.js",
-            "types": "./dist/hydration.d.ts"
+            "types": "./dist/hydration.d.ts",
+            "development": "./dist/hydration.js",
+            "production": "./dist/hydration.prod.js",
+            "import": "./dist/hydration.js"
         },
         "./jsx-runtime": {
-            "import": "./dist/sigx.js",
-            "types": "./dist/index.d.ts"
+            "types": "./dist/index.d.ts",
+            "development": "./dist/sigx.js",
+            "production": "./dist/sigx.prod.js",
+            "import": "./dist/sigx.js"
         },
         "./jsx-dev-runtime": {
-            "import": "./dist/sigx.js",
-            "types": "./dist/index.d.ts"
+            "types": "./dist/index.d.ts",
+            "development": "./dist/sigx.js",
+            "production": "./dist/sigx.prod.js",
+            "import": "./dist/sigx.js"
         },
         "./internals": {
-            "import": "./dist/internals.js",
-            "types": "./dist/internals.d.ts"
+            "types": "./dist/internals.d.ts",
+            "development": "./dist/internals.js",
+            "production": "./dist/internals.prod.js",
+            "import": "./dist/internals.js"
         }
     },
     "files": [
         "dist"
     ],
     "scripts": {
-        "build": "vite build && tsgo --emitDeclarationOnly",
+        "build": "vite build && vite build --mode prod-dist && tsgo --emitDeclarationOnly",
         "dev": "vite build --watch",
         "prepublishOnly": "pnpm run build"
     },

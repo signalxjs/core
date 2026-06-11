@@ -82,17 +82,19 @@ export function setCurrentInstance(ctx: ComponentSetupContext<any, any, any> | n
     // On exit (ctx === null or another ctx), we set currentOwner to
     // the new ctx's id (or null) — this naturally restores parent
     // ownership when nested setups finish.
-    const hook = getDevtoolsHook();
-    if (hook) {
-        if (ctx) {
-            let id = ctxInstanceIds.get(ctx);
-            if (id === undefined) {
-                id = hook.nextId();
-                ctxInstanceIds.set(ctx, id);
+    if (process.env.NODE_ENV !== 'production') {
+        const hook = getDevtoolsHook();
+        if (hook) {
+            if (ctx) {
+                let id = ctxInstanceIds.get(ctx);
+                if (id === undefined) {
+                    id = hook.nextId();
+                    ctxInstanceIds.set(ctx, id);
+                }
+                hook.currentOwner = id;
+            } else {
+                hook.currentOwner = null;
             }
-            hook.currentOwner = id;
-        } else {
-            hook.currentOwner = null;
         }
     }
 
