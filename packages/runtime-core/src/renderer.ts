@@ -842,10 +842,13 @@ export function createRenderer<HostNode = any, HostElement = any>(
         const slots = withoutOwnerTracking(() => createSlots(children, slotsFromProps));
         internalVNode._slots = slots;
 
-        const createdHooks: (() => void)[] = [];
-        const mountHooks: ((ctx: MountContext) => void)[] = [];
-        const updatedHooks: (() => void)[] = [];
-        const unmountHooks: ((ctx: MountContext) => void)[] = [];
+        // Lifecycle hook lists are null until a hook is actually
+        // registered: most components register none, and four empty
+        // arrays per instance add up in component-heavy trees.
+        let createdHooks: (() => void)[] | null = null;
+        let mountHooks: ((ctx: MountContext) => void)[] | null = null;
+        let updatedHooks: (() => void)[] | null = null;
+        let unmountHooks: ((ctx: MountContext) => void)[] | null = null;
 
         // Capture the parent component context BEFORE creating the new one
         // This is crucial for Provide/Inject to work
@@ -865,10 +868,10 @@ export function createRenderer<HostNode = any, HostElement = any>(
             slots: slots,
             emit: createEmit(reactiveProps),
             parent: parentInstance, // Link to parent for DI traversal
-            onMounted: (fn: (ctx: MountContext) => void) => { mountHooks.push(fn); },
-            onUnmounted: (fn: (ctx: MountContext) => void) => { unmountHooks.push(fn); },
-            onCreated: (fn: () => void) => { createdHooks.push(fn); },
-            onUpdated: (fn: () => void) => { updatedHooks.push(fn); },
+            onMounted: (fn: (ctx: MountContext) => void) => { (mountHooks ??= []).push(fn); },
+            onUnmounted: (fn: (ctx: MountContext) => void) => { (unmountHooks ??= []).push(fn); },
+            onCreated: (fn: () => void) => { (createdHooks ??= []).push(fn); },
+            onUpdated: (fn: () => void) => { (updatedHooks ??= []).push(fn); },
             expose: (exposedValue: any) => {
                 exposed = exposedValue;
                 exposeCalled = true;
@@ -908,7 +911,10 @@ export function createRenderer<HostNode = any, HostElement = any>(
             // Notify plugins that component was created (setup completed)
             notifyComponentCreated(currentAppContext, componentInstance);
             // Run component-level created hooks
-            createdHooks.forEach(hook => hook());
+            if (createdHooks) {
+                const hooks: (() => void)[] = createdHooks;
+                for (const hook of hooks) hook();
+            }
         } catch (err) {
             // Handle setup errors
             const handled = handleComponentError(currentAppContext, err as Error, componentInstance, 'setup');
@@ -972,7 +978,9 @@ export function createRenderer<HostNode = any, HostElement = any>(
                         // Notify plugins of component update (re-render)
                         notifyComponentUpdated(currentAppContext, componentInstance);
                         // Run component-level updated hooks
-                        updatedHooks.forEach(hook => hook());
+                        if (updatedHooks) {
+                            for (const hook of updatedHooks) hook();
+                        }
                     } else {
                         mount(subTree, container, anchor);
                     }
@@ -1005,7 +1013,12 @@ export function createRenderer<HostNode = any, HostElement = any>(
         // Run mount hooks (untrack to prevent signal reads from
         // polluting the parent component's reactive subscriptions)
         const mountCtx = { el: container } as MountContext;
-        untrack(() => mountHooks.forEach(hook => hook(mountCtx)));
+        if (mountHooks) {
+            const hooks: ((ctx: MountContext) => void)[] = mountHooks;
+            untrack(() => {
+                for (const hook of hooks) hook(mountCtx);
+            });
+        }
 
         // Notify plugins that component was mounted
         notifyComponentMounted(currentAppContext, componentInstance);
@@ -1014,7 +1027,10 @@ export function createRenderer<HostNode = any, HostElement = any>(
         vnode.cleanup = () => {
             // Notify plugins that component is being unmounted
             notifyComponentUnmounted(currentAppContext, componentInstance);
-            unmountHooks.forEach(hook => hook(mountCtx as MountContext));
+            if (unmountHooks) {
+                const hooks: ((ctx: MountContext) => void)[] = unmountHooks;
+                for (const hook of hooks) hook(mountCtx as MountContext);
+            }
         };
     }
 
