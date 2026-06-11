@@ -30,20 +30,46 @@ import type { SSRContext } from './context';
 
 // ============= HTML Utilities =============
 
-const ESCAPE: Record<string, string> = {
-    '&': '&amp;',
-    '<': '&lt;',
-    '>': '&gt;',
-    '"': '&quot;',
-    "'": '&#39;'
-};
+const escapeRE = /[&<>"']/;
 
 export function escapeHtml(s: string): string {
-    return s.replace(/[&<>"']/g, c => ESCAPE[c]);
+    // Fast path: most strings contain nothing to escape — return the input
+    // without allocating.
+    const match = escapeRE.exec(s);
+    if (!match) return s;
+
+    let html = '';
+    let lastIndex = 0;
+    let escaped: string;
+    for (let i = match.index; i < s.length; i++) {
+        switch (s.charCodeAt(i)) {
+            case 38: escaped = '&amp;'; break;
+            case 60: escaped = '&lt;'; break;
+            case 62: escaped = '&gt;'; break;
+            case 34: escaped = '&quot;'; break;
+            case 39: escaped = '&#39;'; break;
+            default: continue;
+        }
+        if (lastIndex !== i) html += s.slice(lastIndex, i);
+        html += escaped;
+        lastIndex = i + 1;
+    }
+    return lastIndex === s.length ? html : html + s.slice(lastIndex);
 }
 
-/** Cache for camelCase → kebab-case conversions (same properties repeat across elements) */
-const kebabCache: Record<string, string> = {};
+/**
+ * Cache for camelCase → kebab-case conversions (same properties repeat across
+ * elements). Null prototype: a plain literal would resolve inherited keys like
+ * 'constructor' through Object.prototype.
+ */
+const kebabCache: Record<string, string> = Object.create(null);
+
+/**
+ * Shared no-op for the per-component context slots that are inert on the
+ * server (emit, lifecycle hooks, expose, update) — avoids 7 closure
+ * allocations per component.
+ */
+const NOOP = () => { };
 
 /** Void elements that cannot have children — hoisted to module scope as a Set for O(1) lookup */
 const VOID_ELEMENTS = new Set(['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'param', 'source', 'track', 'wbr']);
@@ -168,14 +194,14 @@ export async function* renderToChunks(
     }
 
     if (typeof element === 'string' || typeof element === 'number') {
-        yield escapeHtml(String(element));
+        yield escapeHtml(typeof element === 'string' ? element : String(element));
         return;
     }
 
     const vnode = element as VNode;
 
     if (vnode.type === Text) {
-        yield escapeHtml(String(vnode.text));
+        yield escapeHtml(typeof vnode.text === 'string' ? vnode.text : String(vnode.text));
         return;
     }
 
@@ -199,10 +225,10 @@ export async function* renderToChunks(
         ctx.pushComponent(id);
 
         // Create slots from children
-        const slots: SlotsObject<any> = {
-            default: () => children ? (Array.isArray(children) ? children : [children]) : [],
-            ...slotsFromProps
-        };
+        const defaultSlot = () => children ? (Array.isArray(children) ? children : [children]) : [];
+        const slots: SlotsObject<any> = slotsFromProps
+            ? { default: defaultSlot, ...slotsFromProps }
+            : { default: defaultSlot };
 
         // Track SSR loads for this component
         const ssrLoads: Promise<void>[] = [];
@@ -221,15 +247,15 @@ export async function* renderToChunks(
             signal: signal,
             props: createPropsAccessor(propsData),
             slots: slots,
-            emit: () => { },
+            emit: NOOP,
             parent: parentCtx,
-            onMounted: () => { },
-            onUnmounted: () => { },
-            onCreated: () => { },
-            onUpdated: () => { },
-            expose: () => { },
+            onMounted: NOOP,
+            onUnmounted: NOOP,
+            onCreated: NOOP,
+            onUpdated: NOOP,
+            expose: NOOP,
             renderFn: null,
-            update: () => { },
+            update: NOOP,
             ssr: ssrHelper,
             _ssrLoads: ssrLoads
         };
@@ -413,7 +439,8 @@ export async function* renderToChunks(
         let directiveSSRProps: Record<string, any> | null = null;
         if (vnode.props) {
             for (const key in vnode.props) {
-                if (key.startsWith('use:')) {
+                // charCode guard: skip the startsWith call for the common case
+                if (key.charCodeAt(0) === 117 /* u */ && key.startsWith('use:')) {
                     const propValue = vnode.props[key];
                     let def: DirectiveDefinition | undefined;
                     let value: any;
@@ -482,13 +509,13 @@ export async function* renderToChunks(
                     : String(value);
                 props += ` style="${escapeHtml(styleString)}"`;
             } else if (key === 'className') {
-                props += ` class="${escapeHtml(String(value))}"`;
+                props += ` class="${escapeHtml(typeof value === 'string' ? value : String(value))}"`;
             } else if (key.startsWith('on')) {
                 // Skip event listeners on server
             } else if (value === true) {
                 props += ` ${key}`;
             } else if (value !== false && value != null) {
-                props += ` ${key}="${escapeHtml(String(value))}"`;
+                props += ` ${key}="${escapeHtml(typeof value === 'string' ? value : String(value))}"`;
             }
         }
 
@@ -508,7 +535,8 @@ export async function* renderToChunks(
                 if (isText && prevWasText) html += '<!--t-->';
                 if (child != null && (child as any) !== false && (child as any) !== true) {
                     const cv = child as VNode;
-                    html += escapeHtml(String(cv.type === Text ? cv.text : child));
+                    const raw = cv.type === Text ? cv.text : child;
+                    html += escapeHtml(typeof raw === 'string' ? raw : String(raw));
                 }
                 prevWasText = isText;
             }
@@ -575,14 +603,14 @@ export function renderToStringSync(
     }
 
     if (typeof element === 'string' || typeof element === 'number') {
-        buf.push(escapeHtml(String(element)));
+        buf.push(escapeHtml(typeof element === 'string' ? element : String(element)));
         return true;
     }
 
     const vnode = element as VNode;
 
     if (vnode.type === Text) {
-        buf.push(escapeHtml(String(vnode.text)));
+        buf.push(escapeHtml(typeof vnode.text === 'string' ? vnode.text : String(vnode.text)));
         return true;
     }
 
@@ -604,10 +632,10 @@ export function renderToStringSync(
         const id = ctx.nextId();
         ctx.pushComponent(id);
 
-        const slots: SlotsObject<any> = {
-            default: () => children ? (Array.isArray(children) ? children : [children]) : [],
-            ...slotsFromProps
-        };
+        const defaultSlot = () => children ? (Array.isArray(children) ? children : [children]) : [];
+        const slots: SlotsObject<any> = slotsFromProps
+            ? { default: defaultSlot, ...slotsFromProps }
+            : { default: defaultSlot };
 
         const ssrLoads: Promise<void>[] = [];
 
@@ -624,15 +652,15 @@ export function renderToStringSync(
             signal: signal,
             props: createPropsAccessor(propsData),
             slots: slots,
-            emit: () => { },
+            emit: NOOP,
             parent: parentCtx,
-            onMounted: () => { },
-            onUnmounted: () => { },
-            onCreated: () => { },
-            onUpdated: () => { },
-            expose: () => { },
+            onMounted: NOOP,
+            onUnmounted: NOOP,
+            onCreated: NOOP,
+            onUpdated: NOOP,
+            expose: NOOP,
             renderFn: null,
-            update: () => { },
+            update: NOOP,
             ssr: ssrHelper,
             _ssrLoads: ssrLoads
         };
@@ -732,7 +760,8 @@ export function renderToStringSync(
         let directiveSSRProps: Record<string, any> | null = null;
         if (vnode.props) {
             for (const key in vnode.props) {
-                if (key.startsWith('use:')) {
+                // charCode guard: skip the startsWith call for the common case
+                if (key.charCodeAt(0) === 117 /* u */ && key.startsWith('use:')) {
                     const propValue = vnode.props[key];
                     let def: DirectiveDefinition | undefined;
                     let value: any;
@@ -796,13 +825,13 @@ export function renderToStringSync(
                     : String(value);
                 props += ` style="${escapeHtml(styleString)}"`;
             } else if (key === 'className') {
-                props += ` class="${escapeHtml(String(value))}"`;
+                props += ` class="${escapeHtml(typeof value === 'string' ? value : String(value))}"`;
             } else if (key.startsWith('on')) {
                 // Skip event listeners on server
             } else if (value === true) {
                 props += ` ${key}`;
             } else if (value !== false && value != null) {
-                props += ` ${key}="${escapeHtml(String(value))}"`;
+                props += ` ${key}="${escapeHtml(typeof value === 'string' ? value : String(value))}"`;
             }
         }
 

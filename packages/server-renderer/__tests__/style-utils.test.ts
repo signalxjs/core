@@ -140,4 +140,11 @@ describe('camelToKebab', () => {
     it('preserves already-kebab strings', () => {
         expect(camelToKebab('color')).toBe('color');
     });
+
+    it('is not confused by Object.prototype keys', () => {
+        // A plain-object cache would resolve these through the prototype chain
+        expect(camelToKebab('constructor')).toBe('constructor');
+        expect(camelToKebab('hasOwnProperty')).toBe('has-own-property');
+        expect(camelToKebab('toString')).toBe('to-string');
+    });
 });
