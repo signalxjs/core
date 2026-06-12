@@ -31,6 +31,23 @@ const Timer = component(() => {
 });
 ```
 
+### Dependency injection outside components
+
+Use-functions from `defineInjectable`/`defineFactory` resolve to app-context instances inside components. Code that runs outside component setup — router navigation guards, socket handlers, entry-scope code — must opt in with `app.runWithContext(fn)`, or it silently gets a separate realm-level fallback instance:
+
+```tsx
+const useAuthStore = defineFactory(() => createAuthStore(), 'scoped');
+const app = defineApp(<App />);
+
+router.beforeEach((to) => {
+  // Same instance the app's components see — not a realm copy.
+  const auth = app.runWithContext(() => useAuthStore());
+  if (!auth.isAuthenticated && to.meta.requiresAuth) return '/login';
+});
+```
+
+The context applies only to the **synchronous** portion of the callback — after an `await`, re-enter with another `runWithContext` call. Nested calls restore the previous context. Plugins receive the app in `install()` and can capture it to wrap their own callbacks.
+
 > **Note:** Most users should install [`sigx`](https://www.npmjs.com/package/sigx) instead, which bundles this package with a DOM renderer and the reactivity system.
 
 ## 📚 Documentation
