@@ -39,8 +39,9 @@ const StatsCard = component(() => {
     );
 }, { name: 'StatsCard' });
 
-export const Home = component(() => {
+export const Home = component((ctx) => {
     useHead({ title: 'Home' });
+    const tipVisible = ctx.signal(false);
     const router = useRouter();
 
     function onLink(e: MouseEvent, path: Route): void {
@@ -53,6 +54,19 @@ export const Home = component(() => {
             <h1>Server-rendered SignalX</h1>
             <p>This page was rendered to HTML on the server, then hydrated on the client. View source — the markup is already there.</p>
             <StatsCard />
+            <div class="card">
+                <button onClick={() => (tipVisible.value = !tipVisible.value)}>
+                    {tipVisible.value ? 'Hide' : 'Show'} the SSR tip
+                </button>
+                {/* use:show works on the server too: the directive's
+                    getSSRProps ships hidden elements with display:none
+                    inline, so there is no flash before hydration —
+                    view source to see it. */}
+                <p use:show={tipVisible.value}>
+                    This paragraph was server-rendered with <code>display:none</code> and
+                    toggles instantly after hydration — it never re-mounts.
+                </p>
+            </div>
             <div class="card">
                 <p>Each route is rendered server-side. Try loading any of them directly:</p>
                 <ul>

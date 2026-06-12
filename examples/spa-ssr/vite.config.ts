@@ -28,6 +28,7 @@ export default defineConfig({
             'sigx': pkg('sigx', 'dist/sigx.js'),
             '@sigx/runtime-core/internals': pkg('@sigx/runtime-core', 'dist/internals.js'),
             '@sigx/runtime-core': pkg('@sigx/runtime-core'),
+            '@sigx/runtime-dom/platform': pkg('@sigx/runtime-dom', 'dist/platform.js'),
             '@sigx/runtime-dom/internals': pkg('@sigx/runtime-dom', 'dist/internals.js'),
             '@sigx/runtime-dom': pkg('@sigx/runtime-dom'),
             '@sigx/reactivity/internals': pkg('@sigx/reactivity', 'dist/internals.js'),
