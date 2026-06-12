@@ -12,10 +12,16 @@
  * - `'stream'`  — shell-first with async placeholders, out-of-order
  *   replacement chunks over the wire (default for the stream variants).
  * - `'blocking'` — every keyed `useAsync()`/`useStream()` resolves inline:
- *   complete content, no placeholders, no streaming replacement/bootstrap
- *   scripts (default for `renderDocument`). Useful for crawlers and AI
- *   agents: the app can pick the mode per user-agent. The state blob
- *   `<script>` is still emitted unless `serializeState: false`.
+ *   complete content, no placeholders, no streaming replacement scripts
+ *   (default for `renderDocument`). Useful for crawlers and AI agents: the
+ *   app can pick the mode per user-agent. The state blob `<script>` is
+ *   still emitted unless `serializeState: false`.
+ *
+ * BOTH modes emit the completion script (`__SIGX_STREAMING_COMPLETE__` +
+ * `sigx:ready`) after the last content chunk — clients gate hydration on
+ * it, and a blocking document is complete when delivered. With a standard
+ * template it lands just before `</body>`; templates without a closing
+ * body tag get it appended after the template tail instead.
  *
  * State serialization is ON by default here (`serializeState: false` to
  * disable) — this is the zero-config entry point; the lower-level render
@@ -42,9 +48,10 @@ export interface DocumentOptions extends SSRContextOptions {
     /**
      * `'stream'`: shell + out-of-order async chunks (default for the stream
      * variants). `'blocking'`: all async data awaited inline — complete HTML,
-     * no placeholders, no streaming replacement/bootstrap scripts (default
-     * for renderDocument). The state blob is still emitted unless
-     * `serializeState: false`.
+     * no placeholders, no streaming replacement scripts (default for
+     * renderDocument). The state blob is still emitted unless
+     * `serializeState: false`, and both modes emit the hydration-gate
+     * completion script (`sigx:ready`) at the end of the body.
      */
     mode?: 'stream' | 'blocking';
 
@@ -95,7 +102,6 @@ interface PreparedDocument {
     postBody: string;
     /** The closing tail (</body></html>…) — emitted after all chunks. */
     postTail: string;
-    streaming: boolean;
 }
 
 function throwIfAborted(signal: AbortSignal | undefined): void {
@@ -126,8 +132,7 @@ async function prepareDocument(
     for (const plugin of engine.plugins) {
         plugin.server?.setup?.(ctx);
     }
-    const streaming = options.mode !== 'blocking';
-    ctx._streaming = streaming;
+    ctx._streaming = options.mode !== 'blocking';
 
     // Render the app shell. In streaming mode async components leave
     // placeholders, so this completes quickly; in blocking mode every
@@ -169,7 +174,7 @@ async function prepareDocument(
     const postBody = bodyClose >= 0 ? post.slice(0, bodyClose) : post;
     const postTail = bodyClose >= 0 ? post.slice(bodyClose) : '';
 
-    return { ctx, pre, shell: shellHtml + injected, postBody, postTail, streaming };
+    return { ctx, pre, shell: shellHtml + injected, postBody, postTail };
 }
 
 /**
@@ -195,14 +200,21 @@ async function* documentChunks(
             if (options.signal?.aborted) return;
             yield chunk;
         }
-        if (p.streaming) {
-            yield COMPLETION_SCRIPT;
-        }
+        // An abort after the final chunk still means "end early, no tail":
+        // don't signal completion for a document we're cutting short.
+        if (options.signal?.aborted) return;
+        // Emitted in BOTH modes: clients gate hydration on this flag/event
+        // (`__SIGX_STREAMING_COMPLETE__` / `sigx:ready`), and a blocking
+        // document is by definition complete when delivered. The inline
+        // script executes during parse, before deferred module scripts, so
+        // the entry's flag check always sees it.
+        yield COMPLETION_SCRIPT;
     } catch (e) {
         options.onError?.(e as Error, 'stream');
         return; // end without the closing tail — visibly truncated
     }
 
+    if (options.signal?.aborted) return;
     yield p.postTail;
 }
 
