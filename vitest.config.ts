@@ -36,7 +36,6 @@ export default defineConfig({
             '@sigx/server-renderer/client': resolve(__dirname, 'packages/server-renderer/src/client/index.ts'),
             '@sigx/server-renderer': resolve(__dirname, 'packages/server-renderer/src/index.ts'),
             'sigx/internals': resolve(__dirname, 'packages/sigx/src/internals.ts'),
-            'sigx/hydration': resolve(__dirname, 'packages/sigx/src/hydration.ts'),
             'sigx/jsx-runtime': resolve(__dirname, 'packages/sigx/src/jsx-runtime.ts'),
             'sigx/jsx-dev-runtime': resolve(__dirname, 'packages/sigx/src/jsx-runtime.ts'),
             'sigx': resolve(__dirname, 'packages/sigx/src/index.ts')

@@ -120,6 +120,3 @@ export { signal } from '@sigx/reactivity';
 // Component type guard
 export { isComponent } from './renderer.js';
 
-// Hydration types (public)
-export { CLIENT_DIRECTIVE_PREFIX, CLIENT_DIRECTIVES } from './hydration/index.js';
-export type { ClientDirective, HydrationStrategy, HydrationDirective } from './hydration/index.js';

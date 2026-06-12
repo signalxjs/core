@@ -62,14 +62,6 @@ export { __DIRECTIVE__ } from './directives.js';
 // Lazy loading internals
 export { registerPendingPromise } from './lazy.js';
 
-// Hydration utilities (for SSR)
-export {
-    filterClientDirectives,
-    getHydrationDirective,
-    hasClientDirective,
-    serializeProps
-} from './hydration/index.js';
-
 // Component-setup helpers shared with the client hydrator
 export { createEmit, splitComponentProps } from './utils/component-props.js';
 
