@@ -351,6 +351,17 @@ declare global {
         }
 
         /**
+         * The value shape a `use:<name>` prop accepts: the bare value
+         * (shorthand — the directive must be registered), the directive
+         * definition itself, or the explicit `[definition, value]` tuple.
+         * Use it to type your directive's JSX attribute in one line.
+         */
+        type DirectiveAttribute<T, El = HTMLElement> =
+            | T
+            | import('@sigx/runtime-core').DirectiveDefinition<T, El>
+            | [import('@sigx/runtime-core').DirectiveDefinition<T, El>, T];
+
+        /**
          * Extension point for directive `use:*` props with IntelliSense.
          *
          * Directive packages augment this interface to register named `use:*` props,
@@ -362,7 +373,7 @@ declare global {
          * declare global {
          *     namespace JSX {
          *         interface DirectiveAttributeExtensions {
-         *             'use:myDirective'?: DirectiveDefinition<string> | [DirectiveDefinition<string>, string];
+         *             'use:myDirective'?: JSX.DirectiveAttribute<string>;
          *         }
          *     }
          * }

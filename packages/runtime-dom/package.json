@@ -52,7 +52,9 @@
         "./src/model-processor.ts",
         "./src/render.ts",
         "./dist/platform.js",
-        "./dist/platform.prod.js"
+        "./dist/platform.prod.js",
+        "./dist/platform-*.js",
+        "./dist/platform-*.prod.js"
     ],
     "engines": {
         "node": "^20.19.0 || >=22.12.0"

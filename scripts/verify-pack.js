@@ -148,6 +148,7 @@ function main() {
             '    <div>',
             '      <button onClick={() => count.value++}>count: {count.value}</button>',
             '      <input model={[form, \'name\']} />',
+            '      <p use:show={count.value > 0}>visible after first click</p>',
             '    </div>',
             '  );',
             '});',
@@ -182,10 +183,11 @@ function main() {
     }
     const FORBIDDEN = ['__SIGX_DEVTOOLS_HOOK__', 'process.env.NODE_ENV', 'called outside of component setup'];
     // Platform side effects must SURVIVE tree-shaking: the scratch app uses
-    // model={...} on an input, so the DOM form model processor (reached via
-    // the sideEffects-listed @sigx/runtime-dom/platform entry) must be in
-    // the bundle. Guards the side-effect chain across bundlers.
-    const REQUIRED = ['checkbox'];
+    // model={...} and use:show, so the DOM form model processor and the
+    // auto-registered show directive (both reached via the sideEffects-listed
+    // @sigx/runtime-dom/platform entry) must be in the bundle. Guards the
+    // side-effect chain across bundlers.
+    const REQUIRED = ['checkbox', 'sigx.show.originalDisplay'];
     const allContent = bundles.map((f) => readFileSync(join(assetsDir, f), 'utf-8'));
     for (let i = 0; i < bundles.length; i++) {
         for (const marker of FORBIDDEN) {
