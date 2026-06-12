@@ -183,11 +183,18 @@ function main() {
     }
     const FORBIDDEN = ['__SIGX_DEVTOOLS_HOOK__', 'process.env.NODE_ENV', 'called outside of component setup'];
     // Platform side effects must SURVIVE tree-shaking: the scratch app uses
-    // model={...} and use:show, so the DOM form model processor and the
-    // auto-registered show directive (both reached via the sideEffects-listed
-    // @sigx/runtime-dom/platform entry) must be in the bundle. Guards the
-    // side-effect chain across bundlers.
-    const REQUIRED = ['checkbox', 'sigx.show.originalDisplay'];
+    // model={...} and use:show, both served by @sigx/runtime-dom's platform
+    // side-effect chunk (model processor + built-in directive registration
+    // live in the SAME chunk by construction). The show directive's Symbol
+    // description is the marker because it is unique to that chunk —
+    // protocol strings like 'checkbox'/'radio'/'onUpdate:modelValue' also
+    // appear in patchProp and would mask a dropped chunk.
+    const REQUIRED = [
+        {
+            marker: 'sigx.show.originalDisplay',
+            what: 'the @sigx/runtime-dom platform side-effect chunk (model processor + built-in directives)'
+        }
+    ];
     const allContent = bundles.map((f) => readFileSync(join(assetsDir, f), 'utf-8'));
     for (let i = 0; i < bundles.length; i++) {
         for (const marker of FORBIDDEN) {
@@ -199,11 +206,11 @@ function main() {
             }
         }
     }
-    for (const marker of REQUIRED) {
+    for (const { marker, what } of REQUIRED) {
         if (!allContent.some((c) => c.includes(marker))) {
             throw new Error(
-                `No production bundle contains "${marker}" — the platform model processor was ` +
-                'tree-shaken away; the @sigx/runtime-dom/platform side-effect chain is broken.'
+                `No production bundle contains "${marker}" — ${what} was tree-shaken away; ` +
+                'the sideEffects-listed platform entry/chunk chain is broken.'
             );
         }
     }
