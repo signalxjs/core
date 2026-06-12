@@ -21,7 +21,6 @@ import {
     patch,
     mount,
     patchProp,
-    filterClientDirectives,
     createEmit,
     splitComponentProps,
     provideAppContext,
@@ -110,7 +109,9 @@ export function hydrateComponent(vnode: VNode, dom: Node | null, parent: Node, t
 
     const internalVNode = vnode as InternalVNode;
     const initialProps = vnode.props || {};
-    const { children, slotsFromProps, propsWithModels } = splitComponentProps(filterClientDirectives(initialProps));
+    // Strategy packs (e.g. islands) strip their own marker props before
+    // delegating here — core has no knowledge of any directive prefix.
+    const { children, slotsFromProps, propsWithModels } = splitComponentProps(initialProps);
 
     // Create reactive props
     const reactiveProps = signal(propsWithModels);

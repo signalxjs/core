@@ -25,8 +25,7 @@
       "sigx": ["./packages/sigx/src/index.ts"],
       "sigx/internals": ["./packages/sigx/src/internals.ts"],
       "sigx/jsx-runtime": ["./packages/sigx/src/index.ts"],
-      "sigx/jsx-dev-runtime": ["./packages/sigx/src/index.ts"],
-      "sigx/hydration": ["./packages/sigx/src/hydration.ts"]
+      "sigx/jsx-dev-runtime": ["./packages/sigx/src/index.ts"]
     }
   },
   "include": [

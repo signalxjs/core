@@ -12,12 +12,6 @@
             "production": "./dist/sigx.prod.js",
             "import": "./dist/sigx.js"
         },
-        "./hydration": {
-            "types": "./dist/hydration.d.ts",
-            "development": "./dist/hydration.js",
-            "production": "./dist/hydration.prod.js",
-            "import": "./dist/hydration.js"
-        },
         "./jsx-runtime": {
             "types": "./dist/index.d.ts",
             "development": "./dist/sigx.js",
