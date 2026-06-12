@@ -737,12 +737,11 @@ describe('Bug 2: lazy() CSR conditional mount failure', () => {
         showAdmin.value = true;
         await nextTick();
 
-        // Wait for the lazy component to resolve
-        await wait(100);
-        await nextTick();
-
-        // Dashboard should appear after delay
-        expect(container.querySelectorAll('.dashboard').length).toBe(1);
+        // The load is gated on a real 30ms timer — poll instead of a fixed
+        // sleep, which flakes on slow CI runners (see #88)
+        await vi.waitFor(() => {
+            expect(container.querySelectorAll('.dashboard').length).toBe(1);
+        }, { timeout: 5000 });
         expect(container.querySelector('.dashboard')?.textContent).toBe('Delayed Dashboard');
     });
 

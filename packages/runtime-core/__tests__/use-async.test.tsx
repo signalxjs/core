@@ -588,10 +588,11 @@ describe('useStream', () => {
 
         expect(container.querySelector('.out')?.textContent).toBe('');
 
-        await wait(30);
-        await tick();
-
-        expect(container.querySelector('.out')?.textContent).toBe('Hello, world');
+        // The chunks arrive on real setTimeout timers — poll instead of a
+        // fixed sleep, which flakes on slow CI runners (broke main, see #88)
+        await vi.waitFor(() => {
+            expect(container.querySelector('.out')?.textContent).toBe('Hello, world');
+        }, { timeout: 5000 });
     });
 
     it('restores the final text from __SIGX_ASYNC__ without running the source', async () => {
