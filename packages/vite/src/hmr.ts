@@ -48,7 +48,7 @@ export async function installHMRPlugin(): Promise<void> {
     if (installed) return;
     installed = true;
 
-    const { registerComponentPlugin } = await import('sigx/internals');
+    const { registerComponentPlugin, setCurrentInstance } = await import('sigx/internals');
 
     registerComponentPlugin({
         onDefine(name: string | undefined, factory: any, setup: Function) {
@@ -65,8 +65,19 @@ export async function installHMRPlugin(): Promise<void> {
                 // HMR update: update all existing instances with new setup/render function
                 existingInstances.forEach(instance => {
                     try {
-                        // Re-run the NEW setup with the existing context to get new render fn
-                        const newRenderFn = setup(instance.ctx);
+                        // Re-run the NEW setup with the existing context to get
+                        // the new render fn. Mirror the renderer's mount path:
+                        // set the current instance around the setup call, so
+                        // module-level lifecycle hooks (onMounted/onUnmounted/…
+                        // imported from sigx) register on this instance instead
+                        // of warning and silently dropping the registration.
+                        const prevInstance = setCurrentInstance(instance.ctx);
+                        let newRenderFn;
+                        try {
+                            newRenderFn = setup(instance.ctx);
+                        } finally {
+                            setCurrentInstance(prevInstance);
+                        }
                         // Set the new render function and trigger re-render
                         instance.ctx.renderFn = newRenderFn;
                         instance.ctx.update();
