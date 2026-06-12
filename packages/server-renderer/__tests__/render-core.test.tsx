@@ -153,9 +153,10 @@ describe('renderToString — host element attribute serialization', () => {
         expect(await renderToString(HostHelper({ style: false }) as any)).toBe('<div></div>');
     });
 
-    it('omits className entirely when the value is null/undefined (#98)', async () => {
+    it('omits className entirely when the value is null/undefined/false (#98)', async () => {
         expect(await renderToString(HostHelper({ className: undefined }) as any)).toBe('<div></div>');
         expect(await renderToString(HostHelper({ className: null }) as any)).toBe('<div></div>');
+        expect(await renderToString(HostHelper({ className: false }) as any)).toBe('<div></div>');
     });
 
     it('serializes style object via stringifyStyle (camelCase → kebab-case)', async () => {
