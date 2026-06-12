@@ -72,14 +72,13 @@ export async function installHMRPlugin(): Promise<void> {
                         // imported from sigx) register on this instance instead
                         // of warning and silently dropping the registration.
                         const prevInstance = setCurrentInstance(instance.ctx);
-                        let newRenderFn;
                         try {
-                            newRenderFn = setup(instance.ctx);
+                            // Set the new render function (skipped if setup throws)
+                            instance.ctx.renderFn = setup(instance.ctx);
                         } finally {
                             setCurrentInstance(prevInstance);
                         }
-                        // Set the new render function and trigger re-render
-                        instance.ctx.renderFn = newRenderFn;
+                        // Trigger re-render
                         instance.ctx.update();
                     } catch (e) {
                         console.error(`[sigx] HMR failed for ${name || 'component'}:`, e);
