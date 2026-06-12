@@ -145,6 +145,20 @@ describe('renderToString — host element attribute serialization', () => {
         expect(html).toContain('class="foo bar"');
     });
 
+    it('omits style entirely when the value is null/undefined (#98)', async () => {
+        // Pass-through props like style={props.style} are undefined when unset —
+        // they must omit the attribute, not stringify to style="undefined".
+        expect(await renderToString(HostHelper({ style: undefined }) as any)).toBe('<div></div>');
+        expect(await renderToString(HostHelper({ style: null }) as any)).toBe('<div></div>');
+        expect(await renderToString(HostHelper({ style: false }) as any)).toBe('<div></div>');
+    });
+
+    it('omits className entirely when the value is null/undefined/false (#98)', async () => {
+        expect(await renderToString(HostHelper({ className: undefined }) as any)).toBe('<div></div>');
+        expect(await renderToString(HostHelper({ className: null }) as any)).toBe('<div></div>');
+        expect(await renderToString(HostHelper({ className: false }) as any)).toBe('<div></div>');
+    });
+
     it('serializes style object via stringifyStyle (camelCase → kebab-case)', async () => {
         const html = await renderToString(HostHelper({ style: { backgroundColor: 'red', fontSize: '14px' } }) as any);
         expect(html).toContain('style="background-color:red;font-size:14px;"');
@@ -326,5 +340,17 @@ describe('renderToString — text-boundary marker between adjacent text children
         } as any);
         // The fast path doesn't apply because of the non-leaf <span>, so we use the slow path
         expect(html).toContain('hello<!--t-->world');
+    });
+
+    it('renders an expression child adjacent to literal text — both texts, marker between (#97)', async () => {
+        // <span>By {expr}</span> compiles to children ['By ', value]. Both must
+        // render; the <!--t--> between them is the hydration text boundary, NOT
+        // a dropped child (it keeps the browser from merging the two text nodes
+        // so each Text vnode hydrates against its own DOM node).
+        const Author = component<{ author: string }>((ctx) => {
+            return () => <span>By {ctx.props.author}</span>;
+        }, { name: 'Author' });
+        const html = await renderToString((Author as any)({ author: 'SignalX' }));
+        expect(html).toContain('<span>By <!--t-->SignalX</span>');
     });
 });
