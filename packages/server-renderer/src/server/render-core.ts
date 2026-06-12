@@ -546,6 +546,11 @@ function serializeOpenTagProps(vnode: VNode, appContext: AppContext | null): str
         if (key === 'children' || key === 'key' || key === 'ref') continue;
         if (key.startsWith('client:')) continue; // Skip client directives
         if (key.startsWith('use:')) continue; // Skip element directives
+        // Nullish/false values omit the attribute entirely — matching the
+        // client, where patchProp clears the style and removeAttribute-like
+        // semantics apply. Without this, an unset pass-through prop like
+        // style={props.style} stringified to style="undefined" (#98).
+        if (value == null || value === false) continue;
 
         if (key === 'style') {
             const styleString = typeof value === 'object'
@@ -558,7 +563,7 @@ function serializeOpenTagProps(vnode: VNode, appContext: AppContext | null): str
             // Skip event listeners on server
         } else if (value === true) {
             props += ` ${key}`;
-        } else if (value !== false && value != null) {
+        } else {
             props += ` ${key}="${escapeHtml(typeof value === 'string' ? value : String(value))}"`;
         }
     }
