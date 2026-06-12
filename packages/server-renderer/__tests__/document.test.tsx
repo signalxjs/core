@@ -73,13 +73,26 @@ describe('renderDocument — blocking mode (default)', () => {
         expect(html).not.toContain('<!--ssr-outlet-->');
     });
 
-    it('emits zero streaming artifacts (crawler/bot audit)', async () => {
+    it('emits zero streaming replacement artifacts (crawler/bot audit)', async () => {
         const Page = makePage('Bot');
         const html = await renderDocument((Page as any)({}), { template: TEMPLATE });
 
         expect(html).not.toContain('data-async-placeholder');
         expect(html).not.toContain('$SIGX_REPLACE');
-        expect(html).not.toContain('__SIGX_STREAMING_COMPLETE__');
+    });
+
+    it('emits the completion script so sigx:ready-gated hydration runs', async () => {
+        const Page = makePage('Gate');
+        const html = await renderDocument((Page as any)({}), { template: TEMPLATE });
+
+        // Clients gate hydration on this flag/event; a blocking document is
+        // complete on delivery, so the signal must be present here too.
+        expect(html).toContain('window.__SIGX_STREAMING_COMPLETE__=true');
+        expect(html).toContain('sigx:ready');
+        // …inside the body, before the closing tags.
+        const completionIdx = html.indexOf('__SIGX_STREAMING_COMPLETE__');
+        expect(completionIdx).toBeGreaterThan(html.indexOf('<main class="page">'));
+        expect(completionIdx).toBeLessThan(html.indexOf('</body>'));
     });
 
     it('serializes state by default and can opt out', async () => {

@@ -24,6 +24,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - **`@sigx/reactivity` / `@sigx/runtime-core`**: all devtools emission paths (signal/computed/effect lifecycle events, app and component notifications, owner attribution) are gated behind `process.env.NODE_ENV !== 'production'` so production builds carry zero devtools plumbing. Devtools keep working in development builds exactly as before. (#67)
 
+### Fixed
+
+- **`@sigx/server-renderer`**: `renderDocument*` in `'blocking'` mode now emits the completion script (`window.__SIGX_STREAMING_COMPLETE__ = true` + the `sigx:ready` event) at the end of the body, exactly like streaming mode. Previously only streaming mode emitted it, so clients gating hydration on the flag/event (the documented pattern) never hydrated blocking-rendered pages — forms fell back to native submits. A blocking document is complete when delivered, so the signal is semantically correct; blocking output still contains no placeholders or `$SIGX_REPLACE` scripts. The fragment-level APIs (`renderToString` / `createSSR().render()`) are unchanged — they never emitted bootstrap scripts and their output stays stable. (#100)
+
 ## [0.6.0] — 2026-06-11
 
 The SSR engine release (#61, #65): a ~5× faster streaming core measured against Vue/React/Preact, document-level rendering with an AI-agent serving mode, server-side Suspense, and ONE unified data-loading story — `useAsync`/`useStream` with automatic hydration state transfer. Breaking changes below (0.x line).
