@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.6.1] — 2026-06-12
+
+Companion-alignment release: `app.runWithContext` (additive), the vite plugin's dev-mode fixes for companion packages (optimizeDeps/`ssr.noExternal`/HMR), the `sigx:ready` signal in blocking document mode, plus the post-0.6.0 packaging and registration work (dual dev/prod dists, layered directive registration, the islands runtime moving fully to `@sigx/ssr-islands`). Released as a patch so it stays inside the `>=0.6.0 <0.7.0` peer range the companion packages declare; the breaking entries below complete the 0.6 islands/directives reshuffle already coordinated with those companion releases.
+
 ### Added
 
 - **`@sigx/runtime-core`**: `app.runWithContext(fn)` — runs `fn` with the app's context as the current DI context, so use-functions from `defineFactory`/`defineInjectable` (and `useAppContext()`) called outside component setup — router navigation guards, socket handlers, entry-scope code — resolve to the app's instances, the same ones components receive, instead of silently splitting state into the realm-level fallback. The context applies to the synchronous portion of `fn` only (re-enter after `await`); nested calls restore the previous context; behavior outside `runWithContext` is unchanged. Plugins receive the app in `install()` and can capture it to wrap their callbacks. (#101)
@@ -31,6 +35,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **`@sigx/server-renderer`**: `renderDocument*` in `'blocking'` mode now emits the completion script (`window.__SIGX_STREAMING_COMPLETE__ = true` + the `sigx:ready` event) at the end of the body, exactly like streaming mode. Previously only streaming mode emitted it, so clients gating hydration on the flag/event (the documented pattern) never hydrated blocking-rendered pages — forms fell back to native submits. A blocking document is complete when delivered, so the signal is semantically correct; blocking output still contains no placeholders or `$SIGX_REPLACE` scripts. The fragment-level APIs (`renderToString` / `createSSR().render()`) are unchanged — they never emitted bootstrap scripts and their output stays stable. (#100)
 - **`@sigx/vite`**: the HMR runtime now sets the current component instance around the setup re-run on hot updates (mirroring the renderer's mount path). Previously the re-run executed user setups with no current instance, so module-level lifecycle hooks (`onMounted`/`onUnmounted`/`onCreated`/`onUpdated` imported from `sigx`) warned `onX called outside of component setup` and silently dropped the registration — cleanups registered by the new setup body were lost, leaking listeners/subscriptions across hot updates. (#105)
 - **`@sigx/vite`**: dev-mode module-instance split with companion packages. The plugin now excludes **all** `@sigx/*` packages from `optimizeDeps` — the hardcoded core list plus every `@sigx/*` dependency/devDependency enumerated from the project's `package.json` — and sets `ssr.noExternal: ['sigx', /^@sigx\//]`. Previously only the five core packages were excluded, so companions (`@sigx/store`, `@sigx/router`, `@sigx/daisyui`, …) were esbuild-prebundled into `.vite/deps` chunks carrying a **second** `@sigx/reactivity` instance — store/router signals never reached the renderer's effects (silently dead UI in dev, even with a single installed copy of every package). The same split existed server-side between the SSR module-runner graph and Node-loaded externalized packages. User-specified `optimizeDeps.exclude` / `ssr.noExternal` entries are merged with, not replaced by, the plugin's. (#102)
+- **`@sigx/server-renderer` / `@sigx/runtime-dom`**: nullish and `false` values for `style` and `className` now omit the attribute entirely. SSR previously rendered `style="undefined"` for unset pass-through style props (`<div style={props.style}>`) because the `style`/`className` serialization branches ran before any null check; the client-side `patchProp` now clears the attribute for falsy values symmetrically, matching the pre-existing behavior of generic attributes. (#98)
 
 ## [0.6.0] — 2026-06-11
 
@@ -187,7 +192,8 @@ Initial public release of the SignalX (`sigx`) ecosystem on npm. Six packages pu
 - Node `^20.19.0 || >=22.12.0`
 - `@sigx/vite` peer-depends on `vite >=8.0.0`
 
-[Unreleased]: https://github.com/signalxjs/core/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/signalxjs/core/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/signalxjs/core/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/signalxjs/core/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/signalxjs/core/compare/v0.4.9...v0.5.0
 [0.4.9]: https://github.com/signalxjs/core/compare/v0.4.8...v0.4.9
