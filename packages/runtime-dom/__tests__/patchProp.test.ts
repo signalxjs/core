@@ -281,6 +281,35 @@ describe('patchProp', () => {
         });
     });
 
+    describe('className handling — nullish/false removal (#98)', () => {
+        it('removes the class attribute when className is nullish, not class="undefined"', () => {
+            const el = document.createElement('div');
+            patchProp(el, 'className', null, undefined);
+            expect(el.hasAttribute('class')).toBe(false);
+            patchProp(el, 'className', null, null);
+            expect(el.hasAttribute('class')).toBe(false);
+        });
+
+        it('removes a previously set class when className becomes nullish or false', () => {
+            const el = document.createElement('div');
+            patchProp(el, 'className', null, 'foo');
+            expect(el.getAttribute('class')).toBe('foo');
+            patchProp(el, 'className', 'foo', false);
+            expect(el.hasAttribute('class')).toBe(false);
+        });
+
+        it('renders a pass-through undefined className with no class attribute', () => {
+            const props: any = {};
+            const App = component(() => {
+                return () => jsx('div', { className: props.className });
+            });
+            render(jsx(App, {}), container);
+
+            const div = container.firstElementChild as HTMLDivElement;
+            expect(div.hasAttribute('class')).toBe(false);
+        });
+    });
+
     describe('direct patchProp edge cases', () => {
         it('ignores a null element', () => {
             expect(() => patchProp(null as any, 'class', null, 'x')).not.toThrow();

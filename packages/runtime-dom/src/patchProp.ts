@@ -145,8 +145,14 @@ export function patchProp(dom: Element, key: string, prevValue: any, nextValue: 
             handlers.delete(eventName);
         }
     } else if (key === 'className') {
-        // For SVG, use setAttribute to preserve case (class works on both)
-        dom.setAttribute('class', String(newValue));
+        // Nullish/false removes the attribute — keeps mount/hydration output
+        // consistent with SSR, which omits the attribute for these values.
+        if (newValue == null || newValue === false) {
+            dom.removeAttribute('class');
+        } else {
+            // For SVG, use setAttribute to preserve case (class works on both)
+            dom.setAttribute('class', String(newValue));
+        }
     } else if (key.startsWith('.')) {
         const propName = key.slice(1);
         (dom as any)[propName] = newValue;
