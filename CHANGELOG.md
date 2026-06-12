@@ -28,6 +28,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- **`@sigx/vite`**: the HMR runtime now sets the current component instance around the setup re-run on hot updates (mirroring the renderer's mount path). Previously the re-run executed user setups with no current instance, so module-level lifecycle hooks (`onMounted`/`onUnmounted`/`onCreated`/`onUpdated` imported from `sigx`) warned `onX called outside of component setup` and silently dropped the registration — cleanups registered by the new setup body were lost, leaking listeners/subscriptions across hot updates. (#105)
 - **`@sigx/vite`**: dev-mode module-instance split with companion packages. The plugin now excludes **all** `@sigx/*` packages from `optimizeDeps` — the hardcoded core list plus every `@sigx/*` dependency/devDependency enumerated from the project's `package.json` — and sets `ssr.noExternal: ['sigx', /^@sigx\//]`. Previously only the five core packages were excluded, so companions (`@sigx/store`, `@sigx/router`, `@sigx/daisyui`, …) were esbuild-prebundled into `.vite/deps` chunks carrying a **second** `@sigx/reactivity` instance — store/router signals never reached the renderer's effects (silently dead UI in dev, even with a single installed copy of every package). The same split existed server-side between the SSR module-runner graph and Node-loaded externalized packages. User-specified `optimizeDeps.exclude` / `ssr.noExternal` entries are merged with, not replaced by, the plugin's. (#102)
 
 ## [0.6.0] — 2026-06-11

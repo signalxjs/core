@@ -1,17 +1,38 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type { ComponentSetupContext } from 'sigx/internals';
+// Module identity note: these static imports stay consistent with what the
+// freshly imported HMR module sees, despite `vi.resetModules()` in
+// loadFreshHmrModule(). `vi.resetModules()` does NOT reset mocked modules,
+// so 'sigx/internals' (mocked below, spreading the real module captured by
+// importOriginal at file load) is the same instance for this file and for
+// hmr.ts's lazy import. 'sigx' is imported only here, once, at file load —
+// the same epoch as importOriginal — so its onUnmounted reads the same
+// runtime-core current-instance state that setCurrentInstance writes.
+// (Re-importing 'sigx' dynamically after a reset would instead create a
+// second runtime-core instance and split that state.)
+import { setCurrentInstance, getCurrentInstance } from 'sigx/internals';
+import { onUnmounted } from 'sigx';
 
 type ComponentPlugin = {
     onDefine?: (name: string | undefined, factory: any, setup: Function) => void;
 };
 
-// Capture registered plugins via a mocked sigx/internals
-const registeredPlugins: ComponentPlugin[] = [];
-const registerComponentPluginMock = vi.fn((plugin: ComponentPlugin) => {
-    registeredPlugins.push(plugin);
+// Capture registered plugins via a mocked sigx/internals. Everything else
+// (setCurrentInstance & co.) stays real so module-level lifecycle hooks
+// behave as they do in an app. vi.hoisted: the mock factory is hoisted
+// above the static `sigx/internals` import, so its state must be too.
+const { registeredPlugins, registerComponentPluginMock } = vi.hoisted(() => {
+    const registeredPlugins: ComponentPlugin[] = [];
+    return {
+        registeredPlugins,
+        registerComponentPluginMock: vi.fn((plugin: ComponentPlugin) => {
+            registeredPlugins.push(plugin);
+        })
+    };
 });
 
-vi.mock('sigx/internals', () => ({
+vi.mock('sigx/internals', async (importOriginal) => ({
+    ...await importOriginal<typeof import('sigx/internals')>(),
     registerComponentPlugin: registerComponentPluginMock
 }));
 
@@ -174,6 +195,46 @@ describe('hmr — HMR update path', () => {
         expect(c2.renderFn).toBeUndefined();
 
         errSpy.mockRestore();
+    });
+
+    it('sets the current instance during the setup re-run so module-level lifecycle hooks register (#105)', async () => {
+        const { registerHMRModule, plugin } = await loadFreshHmrModule();
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+        registerHMRModule('moduleHooks');
+        const factory: any = {};
+        const setupWithHook = () => {
+            // Module-level hook (imported from sigx) — registers via the
+            // global current instance, unlike the ctx-bound setup hooks.
+            onUnmounted(() => {});
+            return () => null;
+        };
+        plugin.onDefine!('Hooked', factory, setupWithHook);
+
+        // Initial mount: the renderer sets the current instance around setup.
+        const ctx = makeCtx();
+        const prev = setCurrentInstance(ctx as any);
+        try {
+            factory.__setup(ctx);
+        } finally {
+            setCurrentInstance(prev);
+        }
+        // 1 from setupWithHook's onUnmounted + 1 from HMR instance tracking
+        expect(ctx.onUnmounted).toHaveBeenCalledTimes(2);
+
+        // Hot update: module re-executes and redefines the component. The HMR
+        // re-run must set the current instance itself — nothing else does.
+        registerHMRModule('moduleHooks');
+        plugin.onDefine!('Hooked', {} as any, setupWithHook);
+
+        // The module-level hook must register on the existing instance,
+        // not warn and silently drop the cleanup registration.
+        expect(warnSpy).not.toHaveBeenCalled();
+        expect(ctx.onUnmounted).toHaveBeenCalledTimes(3);
+        // And the current instance must be restored afterwards.
+        expect(getCurrentInstance()).toBe(null);
+
+        warnSpy.mockRestore();
     });
 
     it('removes instances from the registry on unmount', async () => {
