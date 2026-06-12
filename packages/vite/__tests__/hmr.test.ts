@@ -1,5 +1,15 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type { ComponentSetupContext } from 'sigx/internals';
+// Module identity note: these static imports stay consistent with what the
+// freshly imported HMR module sees, despite `vi.resetModules()` in
+// loadFreshHmrModule(). `vi.resetModules()` does NOT reset mocked modules,
+// so 'sigx/internals' (mocked below, spreading the real module captured by
+// importOriginal at file load) is the same instance for this file and for
+// hmr.ts's lazy import. 'sigx' is imported only here, once, at file load —
+// the same epoch as importOriginal — so its onUnmounted reads the same
+// runtime-core current-instance state that setCurrentInstance writes.
+// (Re-importing 'sigx' dynamically after a reset would instead create a
+// second runtime-core instance and split that state.)
 import { setCurrentInstance, getCurrentInstance } from 'sigx/internals';
 import { onUnmounted } from 'sigx';
 
