@@ -24,15 +24,40 @@ const globalInstances = new Map<symbol, unknown>();
 const appContextToken = Symbol('sigx:appContext');
 
 /**
+ * The app context made current by `app.runWithContext(fn)` for code running
+ * outside any component — router navigation guards, socket handlers,
+ * entry-scope code. Consulted only when there is no current component
+ * instance; component-tree provides always take precedence.
+ */
+let activeAppContext: AppContext | null = null;
+
+/**
+ * Swap the active app context, returning the previous one so the caller can
+ * restore it (nested runWithContext calls). Used by `app.runWithContext()`.
+ * @internal
+ */
+export function setActiveAppContext(context: AppContext | null): AppContext | null {
+    const prev = activeAppContext;
+    activeAppContext = context;
+    return prev;
+}
+
+/**
  * Lookup a provided value by token, traversing component tree.
  * The AppContext is provided at the root component level, so it's found
  * just like any other provided value.
+ * Outside any component, falls back to the app context made current by
+ * `app.runWithContext(fn)` (the AppContext token itself resolves this way
+ * too, since defineApp registers it in the app's provides).
  * Exported for the factory system's scoped-lifetime resolution.
  * @internal
  */
 export function lookupProvided<T>(token: symbol): T | undefined {
     const ctx = getCurrentInstance();
     if (!ctx) {
+        if (activeAppContext?.provides.has(token)) {
+            return activeAppContext.provides.get(token) as T;
+        }
         return undefined;
     }
 
@@ -184,7 +209,9 @@ export function defineProvide<T>(useFn: Providable<T>, factory?: () => T): T {
 /**
  * Get the current AppContext from the component tree.
  * The AppContext is provided at the root component level during mount/hydrate/SSR.
- * 
+ * Outside any component, returns the context made current by
+ * `app.runWithContext(fn)`, or null.
+ *
  * @example
  * ```typescript
  * const appContext = useAppContext();

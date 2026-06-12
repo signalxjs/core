@@ -29,7 +29,7 @@ import type {
     App
 } from './app-types.js';
 
-import { getAppContextToken, type Providable } from './di/injectable.js';
+import { getAppContextToken, setActiveAppContext, type Providable } from './di/injectable.js';
 import { isDirective } from './directives.js';
 import type { JSXElement } from './jsx-runtime.js';
 import { noMountFunctionError, provideInvalidInjectableError } from './errors.js';
@@ -165,6 +165,20 @@ export function defineApp<TContainer = any>(rootComponent: JSXElement): App<TCon
                 );
             }
             return instance;
+        },
+
+        runWithContext<T>(fn: () => T): T {
+            // Make this app's context the active fallback for DI resolution
+            // outside components (router guards, socket handlers, entry-scope
+            // code). Synchronous only: restored in finally, so the context
+            // never leaks past the first await of an async fn. Nested calls
+            // restore the previous context.
+            const prev = setActiveAppContext(context);
+            try {
+                return fn();
+            } finally {
+                setActiveAppContext(prev);
+            }
         },
 
         hook(hooks) {

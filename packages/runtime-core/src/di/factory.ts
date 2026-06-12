@@ -139,7 +139,11 @@ export function defineFactory<InferReturnSetup>(
     };
 
     // One-instance-per-realm fallback for singleton/scoped resolution outside
-    // any app context (tests, scripts). App-owned instances are disposed by
+    // any app context (tests, scripts). Non-component code that belongs to an
+    // app — router guards, socket handlers, entry-scope code — should resolve
+    // inside app.runWithContext(fn) instead, which yields the app's instance
+    // (the one components see); resolving bare from such code silently splits
+    // state into this realm instance. App-owned instances are disposed by
     // app.unmount(); the realm fallback has no owner and lives until manual
     // dispose().
     let realmInstance: { instance: Instance } | null = null;
