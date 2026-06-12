@@ -255,6 +255,39 @@ export interface App<TContainer = any> {
     defineProvide<T>(useFn: Providable<T>, factory?: () => T): T;
 
     /**
+     * Run a function with this app's context as the current DI context.
+     * Injections made inside the callback — use-functions from
+     * `defineInjectable`/`defineFactory`, and `useAppContext()` — resolve to
+     * THIS app's instances, the same ones components receive, instead of the
+     * realm-level fallback.
+     *
+     * Use it for code that runs outside component setup but belongs to the
+     * app: router navigation guards, socket/event handlers, entry-scope
+     * bootstrap code. Plugins receive the app in `install()` and can capture
+     * it to wrap their own callbacks.
+     *
+     * The context applies only to the **synchronous** portion of `fn` — it is
+     * restored before any awaited continuation runs. After an `await`,
+     * re-enter with another `runWithContext` call if you need to resolve more
+     * dependencies. Nested calls are supported; the previous context is
+     * restored when `fn` returns (or throws).
+     *
+     * @example
+     * ```typescript
+     * const useAuthStore = defineFactory(() => createAuthStore(), 'scoped');
+     *
+     * router.beforeEach((to) => {
+     *     // Same instance the app's components see — not a realm copy.
+     *     const auth = app.runWithContext(() => useAuthStore());
+     *     if (!auth.isAuthenticated && to.meta.requiresAuth) return '/login';
+     * });
+     * ```
+     *
+     * @returns The return value of `fn`.
+     */
+    runWithContext<T>(fn: () => T): T;
+
+    /**
      * Register lifecycle hooks to observe all components
      */
     hook(hooks: AppLifecycleHooks): App<TContainer>;

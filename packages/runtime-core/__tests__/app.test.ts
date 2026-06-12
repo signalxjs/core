@@ -15,6 +15,7 @@ import {
     handleComponentError,
 } from '../src/app';
 import { SigxError, SigxErrorCode } from '../src/errors';
+import { defineInjectable, useAppContext } from '../src/di/injectable';
 import { defineDirective } from '../src/directives';
 import type { AppContext, ComponentInstance, MountFn, Plugin, PluginInstallFn, AppLifecycleHooks } from '../src/app-types';
 
@@ -73,6 +74,7 @@ describe('defineApp', () => {
         expect(app).toHaveProperty('config');
         expect(app).toHaveProperty('use');
         expect(app).toHaveProperty('defineProvide');
+        expect(app).toHaveProperty('runWithContext');
         expect(app).toHaveProperty('hook');
         expect(app).toHaveProperty('directive');
         expect(app).toHaveProperty('mount');
@@ -465,6 +467,57 @@ describe('defineApp', () => {
             app.unmount();
             expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('not mounted'));
             warnSpy.mockRestore();
+        });
+    });
+
+    describe('app.runWithContext()', () => {
+        it('returns the callback return value', () => {
+            const app = defineApp(rootEl);
+            expect(app.runWithContext(() => 42)).toBe(42);
+        });
+
+        it('makes useAppContext() resolve to this app, and only for the duration', () => {
+            const app = defineApp(rootEl);
+
+            expect(useAppContext()).toBeNull();
+            const inside = app.runWithContext(() => useAppContext());
+            expect(inside).toBe(app._context);
+            expect(useAppContext()).toBeNull();
+        });
+
+        it('resolves app.defineProvide instances of defineInjectable (not the global singleton)', () => {
+            const useThing = defineInjectable(() => ({ id: {} }));
+            const app = defineApp(rootEl);
+            const provided = app.defineProvide(useThing);
+
+            expect(app.runWithContext(() => useThing())).toBe(provided);
+            expect(useThing()).not.toBe(provided); // outside: global singleton, unchanged
+        });
+
+        it('works before mount (plugin install time)', () => {
+            const app = defineApp(rootEl);
+            expect(app._isMounted).toBe(false);
+            expect(app.runWithContext(() => useAppContext())).toBe(app._context);
+        });
+
+        it('nested calls restore the previous app context', () => {
+            const app1 = defineApp(rootEl);
+            const app2 = defineApp(rootEl);
+
+            app1.runWithContext(() => {
+                expect(useAppContext()).toBe(app1._context);
+                app2.runWithContext(() => {
+                    expect(useAppContext()).toBe(app2._context);
+                });
+                expect(useAppContext()).toBe(app1._context);
+            });
+            expect(useAppContext()).toBeNull();
+        });
+
+        it('restores the previous context when the callback throws', () => {
+            const app = defineApp(rootEl);
+            expect(() => app.runWithContext(() => { throw new Error('boom'); })).toThrow('boom');
+            expect(useAppContext()).toBeNull();
         });
     });
 });

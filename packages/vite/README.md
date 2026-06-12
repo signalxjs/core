@@ -27,9 +27,39 @@ export default defineConfig({
 });
 ```
 
-That's it — the plugin handles the rest. In dev it aliases the `@sigx/*`
-packages to their source so a single reactivity instance is shared across the
-graph; in build mode it gets out of the way.
+That's it — the plugin handles the rest. Its job is keeping `@sigx/reactivity`
+a **single module instance** in every environment (two instances mean signals
+written through one never trigger effects tracked by the other — silently
+dead UI):
+
+- **Dev**: aliases the core `@sigx/*` packages to source, and excludes **all**
+  `@sigx/*` packages from `optimizeDeps` pre-bundling — the core packages plus
+  every `@sigx/*` dependency found in your `package.json` (store, router,
+  daisyui, …), so prebundled chunks can't carry a second reactivity copy.
+- **SSR**: sets `ssr.noExternal: ['sigx', /^@sigx\//]` so the whole family
+  stays in the SSR module graph instead of splitting between Vite's module
+  runner and Node's resolver.
+- **Build**: dedupes the core packages and pins the runtime into one shared
+  `sigx` chunk.
+
+Your own `optimizeDeps.exclude` / `ssr.noExternal` entries are merged with the
+plugin's, never replaced.
+
+## Options
+
+```ts
+sigx({
+  // Enable HMR for component() (default: true)
+  hmr: true,
+
+  // Port for Vite's HMR websocket. Only relevant in middleware mode (the
+  // standard SSR setup), where Vite's fixed default (24678) collides when
+  // two dev servers run on one machine. Unset: the plugin picks a free port
+  // automatically. Explicit `server.hmr` settings in your Vite config always
+  // take precedence.
+  hmrPort: undefined,
+})
+```
 
 ## 📚 Documentation
 
