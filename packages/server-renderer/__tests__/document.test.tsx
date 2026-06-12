@@ -181,6 +181,35 @@ describe('renderDocumentToNodeStream — streaming mode (default)', () => {
         expect(html).toContain('data-async-placeholder');
         expect(html).not.toContain('</html>');
     });
+
+    it('does not emit the completion script when aborted after the last chunk', async () => {
+        // No async work: streamAsyncChunks yields nothing, so the in-loop
+        // abort check never runs — only the post-loop check guards the
+        // window between the shell flush and the completion script.
+        const Page = component(() => () => <main class="page">static</main>, { name: 'Static' });
+        const controller = new AbortController();
+        // Web stream: pull-based, one generator step per read — abort lands
+        // deterministically after the shell chunk, before the generator
+        // resumes. An aborted stream must end early without signaling
+        // completion or closing the document.
+        const stream = renderDocumentToWebStream((Page as any)({}), {
+            template: TEMPLATE,
+            signal: controller.signal
+        });
+        const reader = stream.getReader();
+        const decoder = new TextDecoder();
+        let html = '';
+        for (;;) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            html += decoder.decode(value, { stream: true });
+            controller.abort(); // after the first (shell) chunk
+        }
+
+        expect(html).toContain('<main class="page">static</main>');
+        expect(html).not.toContain('__SIGX_STREAMING_COMPLETE__');
+        expect(html).not.toContain('</html>');
+    });
 });
 
 describe('renderDocumentToWebStream', () => {

@@ -198,6 +198,9 @@ async function* documentChunks(
             if (options.signal?.aborted) return;
             yield chunk;
         }
+        // An abort after the final chunk still means "end early, no tail":
+        // don't signal completion for a document we're cutting short.
+        if (options.signal?.aborted) return;
         // Emitted in BOTH modes: clients gate hydration on this flag/event
         // (`__SIGX_STREAMING_COMPLETE__` / `sigx:ready`), and a blocking
         // document is by definition complete when delivered. The inline
@@ -209,6 +212,7 @@ async function* documentChunks(
         return; // end without the closing tail — visibly truncated
     }
 
+    if (options.signal?.aborted) return;
     yield p.postTail;
 }
 
