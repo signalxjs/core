@@ -11,6 +11,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **`@sigx/runtime-core`**: `registerModelProcessor(fn)` — extension tier for intrinsic-element model handling. Extension processors run before the platform processor (first returning `true` wins), so packs and apps can ADD model behaviors (custom elements, widget libraries) without replacing the platform's. `setPlatformModelProcessor` is unchanged — platform packages (DOM, Lynx, Terminal) keep registering their processor as part of platform identity. (#77)
 - **all packages**: dual dist builds — every package now ships `dist/*.js` (development: runtime `process.env.NODE_ENV` checks, dev warnings, devtools hook) alongside `dist/*.prod.js` (production: warnings and the devtools integration compiled out). Bundlers pick the right one automatically through the `development`/`production` export conditions (Vite needs no configuration); resolvers without those conditions keep getting the development build, which consumer-side `NODE_ENV` defines still strip — the status quo. Plain Node SSR can opt into the stripped build with `--conditions=production`. (#67)
 - **`@sigx/vite`**: `defineLibConfig` is now mode-aware — `vite build --mode prod-dist` emits the production dist (`.prod.js` suffix, `NODE_ENV` defined away) next to the default build. This is the sigx-standard mechanism; other sigx repos adopt dual dists by upgrading `@sigx/vite`, adding the second build pass, and mirroring the export-conditions map. (#67)
+- **`@sigx/vite`**: `hmrPort` plugin option, plus automatic free-port selection for Vite's HMR websocket when the dev server runs in middleware mode — Vite's fixed default there (24678) collides as soon as two dev servers run on one machine: the browser connects to the *other* server's websocket, fails with a 400 token mismatch, and HMR breaks. Explicit `server.hmr` settings in the Vite config always take precedence. (#102)
 
 ### Changed (breaking)
 
@@ -23,6 +24,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Changed
 
 - **`@sigx/reactivity` / `@sigx/runtime-core`**: all devtools emission paths (signal/computed/effect lifecycle events, app and component notifications, owner attribution) are gated behind `process.env.NODE_ENV !== 'production'` so production builds carry zero devtools plumbing. Devtools keep working in development builds exactly as before. (#67)
+
+### Fixed
+
+- **`@sigx/vite`**: dev-mode module-instance split with companion packages. The plugin now excludes **all** `@sigx/*` packages from `optimizeDeps` — the hardcoded core list plus every `@sigx/*` dependency/devDependency enumerated from the project's `package.json` — and sets `ssr.noExternal: ['sigx', /^@sigx\//]`. Previously only the five core packages were excluded, so companions (`@sigx/store`, `@sigx/router`, `@sigx/daisyui`, …) were esbuild-prebundled into `.vite/deps` chunks carrying a **second** `@sigx/reactivity` instance — store/router signals never reached the renderer's effects (silently dead UI in dev, even with a single installed copy of every package). The same split existed server-side between the SSR module-runner graph and Node-loaded externalized packages. User-specified `optimizeDeps.exclude` / `ssr.noExternal` entries are merged with, not replaced by, the plugin's. (#102)
 
 ## [0.6.0] — 2026-06-11
 
