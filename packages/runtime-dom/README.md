@@ -43,28 +43,50 @@ The full export list (`render`, `Portal`, the `show` directive) plus DOM patchin
 
 [MIT](https://github.com/signalxjs/core/blob/main/LICENSE)
 
-## Directives are opt-in; model handling is automatic
+## Platform identity and directive registration
 
-Importing `@sigx/runtime-dom` sets up the DOM platform: the renderer mount and
-the form model processor (two-way `model={...}` binding on inputs, checkboxes,
-radios, selects, textareas) register automatically — that's platform identity,
-the same way `@sigx/lynx` registers its own model processor.
+Importing `@sigx/runtime-dom` sets up the DOM platform: the renderer mount,
+the form model processor (two-way `model={...}` binding on inputs,
+checkboxes, radios, selects, textareas), and the standard built-in
+directives (`show`) register automatically — that's platform identity, the
+same way `@sigx/lynx` registers its own model processor. `use:show={value}`
+and `model={...}` work with zero setup.
 
-Directives are content, not identity, and register explicitly:
+Custom directives register through the seams:
 
-```ts
-import { defineApp, show } from 'sigx';
+```tsx
+import { defineApp, defineDirective } from 'sigx';
+
+const focus = defineDirective<boolean, HTMLElement>({
+    mounted(el, { value }) {
+        if (value) el.focus();
+    }
+});
 
 defineApp(<App />)
-    .directive('show', show)   // enables the use:show={value} shorthand
+    .directive('focus', focus)   // per app — works on the client and in SSR
     .mount('#app');
+
+// or globally (e.g. for apps using bare render()):
+import { registerBuiltInDirective } from '@sigx/runtime-dom';
+registerBuiltInDirective('focus', focus);
 ```
 
-Apps using bare `render()` (no app context) register globally instead:
+To light up IntelliSense for your directive's `use:*` attribute, augment the
+JSX extension point with the one-line `DirectiveAttribute` alias:
 
 ```ts
-import { registerShowDirective } from 'sigx';
-registerShowDirective();
+declare global {
+    namespace JSX {
+        interface DirectiveAttributeExtensions {
+            /** Focus the element when the value is true. */
+            'use:focus'?: JSX.DirectiveAttribute<boolean>;
+        }
+    }
+}
 ```
 
-The explicit tuple form `use:show={[show, value]}` works without registration.
+The augmentation is program-wide: any file in the app (or a directive
+package's published types) can declare it, and every JSX file gets the
+typed attribute. Unregistered names still work untyped via the
+`use:${string}` catch-all.

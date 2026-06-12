@@ -7,13 +7,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { defineDirective, defineApp, component } from 'sigx';
-import { registerShowDirective } from '@sigx/runtime-dom';
 import { renderToString } from '../src/server/index';
-
-// `show` no longer self-registers — the use:show shorthand cases below rely
-// on the global registry (per-app `app.directive('show', show)` also works
-// in SSR, exercised in the app-registered directive tests).
-registerShowDirective();
 
 describe('SSR directives', () => {
     it('should not render use:* as HTML attributes', async () => {
