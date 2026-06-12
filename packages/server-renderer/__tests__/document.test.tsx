@@ -182,6 +182,19 @@ describe('renderDocumentToNodeStream — streaming mode (default)', () => {
         expect(html).not.toContain('</html>');
     });
 
+});
+
+describe('renderDocumentToWebStream', () => {
+    it('produces the same document as UTF-8 bytes', async () => {
+        const Page = makePage('Web');
+        const html = await collectWebStream(
+            renderDocumentToWebStream((Page as any)({}), { template: TEMPLATE })
+        );
+        expect(html).toContain('<title>Web</title>');
+        expect(html).toContain('loaded-data');
+        expect(html.trimEnd().endsWith('</html>')).toBe(true);
+    });
+
     it('does not emit the completion script when aborted after the last chunk', async () => {
         // No async work: streamAsyncChunks yields nothing, so the in-loop
         // abort check never runs — only the post-loop check guards the
@@ -209,18 +222,6 @@ describe('renderDocumentToNodeStream — streaming mode (default)', () => {
         expect(html).toContain('<main class="page">static</main>');
         expect(html).not.toContain('__SIGX_STREAMING_COMPLETE__');
         expect(html).not.toContain('</html>');
-    });
-});
-
-describe('renderDocumentToWebStream', () => {
-    it('produces the same document as UTF-8 bytes', async () => {
-        const Page = makePage('Web');
-        const html = await collectWebStream(
-            renderDocumentToWebStream((Page as any)({}), { template: TEMPLATE })
-        );
-        expect(html).toContain('<title>Web</title>');
-        expect(html).toContain('loaded-data');
-        expect(html.trimEnd().endsWith('</html>')).toBe(true);
     });
 });
 

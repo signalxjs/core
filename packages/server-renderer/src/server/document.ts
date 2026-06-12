@@ -17,9 +17,11 @@
  *   app can pick the mode per user-agent. The state blob `<script>` is
  *   still emitted unless `serializeState: false`.
  *
- * BOTH modes end the body with the completion script
- * (`__SIGX_STREAMING_COMPLETE__` + `sigx:ready`) — clients gate hydration
- * on it, and a blocking document is complete when delivered.
+ * BOTH modes emit the completion script (`__SIGX_STREAMING_COMPLETE__` +
+ * `sigx:ready`) after the last content chunk — clients gate hydration on
+ * it, and a blocking document is complete when delivered. With a standard
+ * template it lands just before `</body>`; templates without a closing
+ * body tag get it appended after the template tail instead.
  *
  * State serialization is ON by default here (`serializeState: false` to
  * disable) — this is the zero-config entry point; the lower-level render
