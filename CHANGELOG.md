@@ -6,13 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.6.2] — 2026-06-13
+
+Stability patch: component `setup()` (and created/mounted hooks) now run untracked in both the mount and hydration paths, eliminating a class of unbounded re-render loops diagnosed in a production app; development builds turn any remaining runaway render/effect loops into actionable errors instead of a frozen page.
+
 ### Added
 
-- **`@sigx/runtime-core` / `@sigx/reactivity`**: dev-mode runaway-loop guards. A render that writes reactive state a render depends on (directly, or via a store action called during render) used to wedge the synchronous flush forever — the page froze solid with zero feedback. Development builds now throw an actionable error instead: the render scheduler bounds each flush (a per-job re-queue counter catches ping-pong loops between existing components; a total-flush-length bound catches loops that remount fresh components each iteration), and the reactivity layer bounds each notification wave (`Runaway notification wave`) for runaway effect cascades outside the render queue. Limits sit far above anything a legitimate update produces; all checks are compiled out of production builds. Loops re-triggering on microtask cadence (each write in its own flush) remain undetectable by design. (#111)
+- **`@sigx/runtime-core` / `@sigx/reactivity`**: dev-mode runaway-loop guards. When a component's render writes reactive state that some render depends on (directly, or through a store action called mid-render), the synchronous flush used to re-queue itself forever — the page froze solid with zero feedback. Development builds now throw an actionable error instead: the render scheduler bounds each flush (a per-job re-queue counter catches ping-pong loops between existing components; a total-flush-length bound catches loops that remount fresh components each iteration), and the reactivity layer bounds each notification wave (`Runaway notification wave`) for runaway effect cascades outside the render queue. Limits sit far above anything a legitimate update produces; all checks are compiled out of production builds. Loops re-triggering on microtask cadence (each write in its own flush) remain undetectable by design. (#111)
 
 ### Fixed
 
-- **`@sigx/runtime-core` / `@sigx/server-renderer`**: component `setup()` now runs untracked, in both the renderer's mount path and the client hydration path. Children mount synchronously inside the parent's render effect, so every reactive read in a descendant's setup registered as a dependency of the *ancestor's* render effect — a later write to any such signal re-rendered the ancestor, remounted descendants (re-running their setups), and could re-queue the flush forever (observed as a full-page freeze in a production app after one store write). Reactive reads in setup now subscribe nothing, matching refs and mount hooks, which were already untracked; component reactivity belongs to the per-component render effect and explicit `watch`/`computed` scopes, which create their own subscriptions and are unaffected. (#111)
+- **`@sigx/runtime-core` / `@sigx/server-renderer`**: component `setup()` — and the `created`/`mounted` hooks that run during mounting — now run untracked, in both the renderer's mount path and the client hydration path. Children mount synchronously inside the parent's render effect, so every reactive read in a descendant's setup registered as a dependency of the *ancestor's* render effect — a later write to any such signal re-rendered the ancestor, remounted descendants (re-running their setups), and could re-queue the flush forever (observed as a full-page freeze in a production app after one store write). Reactive reads in setup now subscribe nothing, matching refs and mount hooks, which were already untracked; component reactivity belongs to the per-component render effect and explicit `watch`/`computed` scopes, which create their own subscriptions and are unaffected. (#111)
 
 ## [0.6.1] — 2026-06-12
 
@@ -200,7 +204,8 @@ Initial public release of the SignalX (`sigx`) ecosystem on npm. Six packages pu
 - Node `^20.19.0 || >=22.12.0`
 - `@sigx/vite` peer-depends on `vite >=8.0.0`
 
-[Unreleased]: https://github.com/signalxjs/core/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/signalxjs/core/compare/v0.6.2...HEAD
+[0.6.2]: https://github.com/signalxjs/core/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/signalxjs/core/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/signalxjs/core/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/signalxjs/core/compare/v0.4.9...v0.5.0
