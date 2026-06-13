@@ -10,7 +10,8 @@ import {
     VNode,
     getCurrentInstance,
     signal,
-    effect
+    effect,
+    untrack
 } from 'sigx';
 import type { ComponentSetupContext, SlotsObject } from 'sigx';
 import {
@@ -161,7 +162,10 @@ export function hydrateComponent(vnode: VNode, dom: Node | null, parent: Node, t
     let renderFn: (() => any) | undefined;
 
     try {
-        renderFn = setup(componentCtx);
+        // Untracked for the same reason as runtime-core's mountComponent
+        // (#111): hydration mounts descendants inside an ancestor's render
+        // effect — setup reads must not become ancestor dependencies.
+        renderFn = untrack(() => setup(componentCtx));
     } catch (err) {
         if (process.env.NODE_ENV !== 'production') {
             console.error(`Error hydrating component ${componentName}:`, err);

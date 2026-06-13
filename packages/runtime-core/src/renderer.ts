@@ -888,7 +888,13 @@ export function createRenderer<HostNode = any, HostElement = any>(
         const prev = setCurrentInstance(ctx);
         let renderFn: ViewFn | undefined;
         try {
-            const setupResult = setup(ctx);
+            // Untracked: mounting happens inside the parent's render effect,
+            // so without this every reactive read in a descendant's setup
+            // would register as a PARENT dependency — a later write to any
+            // such signal re-renders the parent, remounts descendants, and
+            // the flush can re-queue itself forever (#111). Reactivity in
+            // setup belongs to explicit watch/computed/render scopes only.
+            const setupResult = untrack(() => setup(ctx));
             // Async setup is only supported on server - check for promise
             if (setupResult && typeof (setupResult as any).then === 'function') {
                 throw asyncSetupClientError(componentName ?? 'anonymous');
