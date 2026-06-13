@@ -79,6 +79,27 @@ describe('setup runs untracked (issue #111)', () => {
         expect(parentRenders).toBe(1);
     });
 
+    it('reactive reads in onCreated hooks do not become ancestor deps', () => {
+        // Created hooks run right after setup, still inside the parent's
+        // render effect — they must be untracked for the same reason.
+        const s = signal(0);
+        let parentRenders = 0;
+
+        const Child = component((ctx) => {
+            ctx.onCreated(() => { void s.value; });
+            return () => jsx('span', { children: 'child' });
+        });
+        const Parent = component(() => () => {
+            parentRenders++;
+            return jsx('div', { children: jsx(Child, {}) });
+        });
+
+        render(jsx(Parent, {}), container);
+        s.value = 1;
+
+        expect(parentRenders).toBe(1);
+    });
+
     it('grandchild setup reads do not leak into ancestor effects', () => {
         const store = signal(0);
         let topRenders = 0;

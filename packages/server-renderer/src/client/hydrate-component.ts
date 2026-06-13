@@ -302,10 +302,15 @@ export function hydrateComponent(vnode: VNode, dom: Node | null, parent: Node, t
     // Use trailing anchor comment as the component's dom reference
     vnode.dom = anchor || endDom;
 
-    // Run mount hooks
+    // Run created + mount hooks — untracked, mirroring runtime-core's
+    // mount path (#111): during hydration these run inside an ancestor's
+    // render effect, so reactive reads in a hook must not become
+    // ancestor dependencies.
     const mountCtx = { el: parent as Element };
-    createdHooks.forEach(hook => hook());
-    mountHooks.forEach(hook => hook(mountCtx));
+    untrack(() => {
+        createdHooks.forEach(hook => hook());
+        mountHooks.forEach(hook => hook(mountCtx));
+    });
 
     // Store cleanup
     vnode.cleanup = () => {

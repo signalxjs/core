@@ -902,12 +902,16 @@ export function createRenderer<HostNode = any, HostElement = any>(
             renderFn = setupResult as ViewFn;
             // Notify plugins that component was created (setup completed)
             notifyComponentCreated(currentAppContext, componentInstance);
-            // Run component-level created hooks
+            // Run component-level created hooks (untracked like setup and
+            // the mount hooks below: they execute inside the parent's
+            // render effect, so reads must not become parent deps, #111)
             if (createdHooks) {
                 // Snapshot the length: hooks registered while running must
                 // not run in this phase (historical forEach semantics).
                 const hooks: (() => void)[] = createdHooks;
-                for (let i = 0, len = hooks.length; i < len; i++) hooks[i]();
+                untrack(() => {
+                    for (let i = 0, len = hooks.length; i < len; i++) hooks[i]();
+                });
             }
         } catch (err) {
             // Handle setup errors
