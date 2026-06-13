@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- **`@sigx/runtime-core` / `@sigx/reactivity`**: dev-mode runaway-loop guards. A render that writes reactive state a render depends on (directly, or via a store action called during render) used to wedge the synchronous flush forever — the page froze solid with zero feedback. Development builds now throw an actionable error instead: the render scheduler bounds each flush (a per-job re-queue counter catches ping-pong loops between existing components; a total-flush-length bound catches loops that remount fresh components each iteration), and the reactivity layer bounds each notification wave (`Runaway notification wave`) for runaway effect cascades outside the render queue. Limits sit far above anything a legitimate update produces; all checks are compiled out of production builds. Loops re-triggering on microtask cadence (each write in its own flush) remain undetectable by design. (#111)
+
+### Fixed
+
+- **`@sigx/runtime-core` / `@sigx/server-renderer`**: component `setup()` now runs untracked, in both the renderer's mount path and the client hydration path. Children mount synchronously inside the parent's render effect, so every reactive read in a descendant's setup registered as a dependency of the *ancestor's* render effect — a later write to any such signal re-rendered the ancestor, remounted descendants (re-running their setups), and could re-queue the flush forever (observed as a full-page freeze in a production app after one store write). Reactive reads in setup now subscribe nothing, matching refs and mount hooks, which were already untracked; component reactivity belongs to the per-component render effect and explicit `watch`/`computed` scopes, which create their own subscriptions and are unaffected. (#111)
+
 ## [0.6.1] — 2026-06-12
 
 Companion-alignment release: `app.runWithContext` (additive), the vite plugin's dev-mode fixes for companion packages (optimizeDeps/`ssr.noExternal`/HMR), the `sigx:ready` signal in blocking document mode, plus the post-0.6.0 packaging and registration work (dual dev/prod dists, layered directive registration, the islands runtime moving fully to `@sigx/ssr-islands`). Released as a patch so it stays inside the `>=0.6.0 <0.7.0` peer range the companion packages declare; the breaking entries below complete the 0.6 islands/directives reshuffle already coordinated with those companion releases.

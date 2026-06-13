@@ -86,20 +86,63 @@ export function batch(fn: () => void) {
     }
 }
 
+/**
+ * Dev-only runaway-wave guard (#111).
+ *
+ * An effect cascade that keeps writing reactive state effects depend on
+ * can re-trigger itself forever — synchronously — and wedge the main
+ * thread with zero feedback. Nested triggers flush depth-first via
+ * recursive `flushPendingEffects` calls, so the run counter is
+ * module-level and scoped to the OUTERMOST wave (counts accumulate
+ * across nesting, reset when the outermost flush unwinds). Loops that
+ * re-trigger on microtask cadence (each write in its own wave) cannot be
+ * caught here — the counter resets between waves by design.
+ *
+ * The limit is far above any legitimate wave; the check is compiled out
+ * of production builds. `setMaxWaveEffectRuns` exists for tests only.
+ */
+const MAX_WAVE_EFFECT_RUNS = 100000;
+let maxWaveEffectRuns = MAX_WAVE_EFFECT_RUNS;
+let waveRuns = 0;
+let waveDepth = 0;
+
+/**
+ * Test-only override for the dev-mode runaway-wave limit (the default is
+ * deliberately too large to reach in a unit test). Pass `null` to restore.
+ * @internal
+ */
+export function setMaxWaveEffectRuns(limit: number | null): void {
+    maxWaveEffectRuns = limit ?? MAX_WAVE_EFFECT_RUNS;
+}
+
 function flushPendingEffects(): void {
-    while (pendingEffects.length > 0) {
-        // Snapshot-and-clear: a nested trigger during a run flushes its
-        // own wave immediately (depth-first), exactly as before.
-        const effects = pendingEffects.splice(0, pendingEffects.length);
-        for (const effect of effects) {
-            effect.flags &= ~QUEUED;
-            effect();
+    if (process.env.NODE_ENV !== 'production') waveDepth++;
+    try {
+        while (pendingEffects.length > 0) {
+            // Snapshot-and-clear: a nested trigger during a run flushes its
+            // own wave immediately (depth-first), exactly as before.
+            const effects = pendingEffects.splice(0, pendingEffects.length);
+            for (const effect of effects) {
+                effect.flags &= ~QUEUED;
+                if (process.env.NODE_ENV !== 'production' && ++waveRuns > maxWaveEffectRuns) {
+                    throw new Error(
+                        `Runaway notification wave: more than ${maxWaveEffectRuns} effect ` +
+                        `runs in a single wave — an effect cascade is writing reactive ` +
+                        `state it depends on (directly or transitively).`
+                    );
+                }
+                effect();
+            }
+        }
+        // Every notification wave ends by draining scheduled work (e.g. the
+        // renderer's render queue), so scheduler users never need their own
+        // "am I mid-batch?" probe.
+        if (flushHandler) flushHandler();
+    } finally {
+        if (process.env.NODE_ENV !== 'production' && --waveDepth === 0) {
+            waveRuns = 0;
         }
     }
-    // Every notification wave ends by draining scheduled work (e.g. the
-    // renderer's render queue), so scheduler users never need their own
-    // "am I mid-batch?" probe.
-    if (flushHandler) flushHandler();
 }
 
 let flushHandler: (() => void) | null = null;

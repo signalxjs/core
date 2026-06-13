@@ -888,7 +888,13 @@ export function createRenderer<HostNode = any, HostElement = any>(
         const prev = setCurrentInstance(ctx);
         let renderFn: ViewFn | undefined;
         try {
-            const setupResult = setup(ctx);
+            // Untracked: mounting happens inside the parent's render effect,
+            // so without this every reactive read in a descendant's setup
+            // would register as a PARENT dependency — a later write to any
+            // such signal re-renders the parent, remounts descendants, and
+            // the flush can re-queue itself forever (#111). Reactivity in
+            // setup belongs to explicit watch/computed/render scopes only.
+            const setupResult = untrack(() => setup(ctx));
             // Async setup is only supported on server - check for promise
             if (setupResult && typeof (setupResult as any).then === 'function') {
                 throw asyncSetupClientError(componentName ?? 'anonymous');
@@ -896,12 +902,16 @@ export function createRenderer<HostNode = any, HostElement = any>(
             renderFn = setupResult as ViewFn;
             // Notify plugins that component was created (setup completed)
             notifyComponentCreated(currentAppContext, componentInstance);
-            // Run component-level created hooks
+            // Run component-level created hooks (untracked like setup and
+            // the mount hooks below: they execute inside the parent's
+            // render effect, so reads must not become parent deps, #111)
             if (createdHooks) {
                 // Snapshot the length: hooks registered while running must
                 // not run in this phase (historical forEach semantics).
                 const hooks: (() => void)[] = createdHooks;
-                for (let i = 0, len = hooks.length; i < len; i++) hooks[i]();
+                untrack(() => {
+                    for (let i = 0, len = hooks.length; i < len; i++) hooks[i]();
+                });
             }
         } catch (err) {
             // Handle setup errors

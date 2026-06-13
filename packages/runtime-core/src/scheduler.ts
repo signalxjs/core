@@ -37,6 +37,36 @@ let isFlushing = false;
 let registered = false;
 
 /**
+ * Dev-only runaway-flush guards (#111).
+ *
+ * The flush is synchronous, so a render that (directly or via a store
+ * action called during render) writes reactive state a render depends on
+ * re-queues work forever and wedges the main thread with zero feedback.
+ * Two loop shapes occur in practice and each evades the other's counter,
+ * so BOTH guards are needed:
+ *
+ * - Re-queue loops ("ping-pong"): a fixed set of jobs writing each
+ *   other's deps re-queue the same job ids over and over. The per-job
+ *   counter catches this early and names the offending job.
+ * - Fresh-mount loops: every iteration re-renders an ancestor that
+ *   remounts descendants, so each cycle queues NEW jobs with new ids —
+ *   no single job is ever re-queued and only the total flush length
+ *   gives the loop away.
+ *
+ * A third shape exists that CANNOT be caught here: loops that re-trigger
+ * on microtask cadence (each write lands in its own flush — e.g. a render
+ * kicks an async store action that writes after an await). Both counters
+ * are per-flush and reset between turns, so such loops never trip them.
+ *
+ * Limits are far above anything a legitimate update produces; checks are
+ * compiled out of production builds.
+ */
+const MAX_JOB_REQUEUES = 100;
+const MAX_FLUSH_JOBS = 10000;
+// Per-flush re-queue counts (dev only); cleared when the flush ends.
+const requeueCounts = new Map<SchedulerJob, number>();
+
+/**
  * Enqueue a render job, keeping the queue sorted by id. Duplicate
  * enqueues of a queued job are no-ops. Jobs queued mid-flush are placed
  * after the currently flushing position so the running loop picks them
@@ -54,6 +84,18 @@ export function queueJob(job: SchedulerJob): void {
         setFlushHandler(flushJobs);
     }
     if (job.queued) return;
+    if (process.env.NODE_ENV !== 'production' && isFlushing) {
+        // Runaway guard, ping-pong shape (see the guard docs above).
+        const n = (requeueCounts.get(job) ?? 0) + 1;
+        requeueCounts.set(job, n);
+        if (n > MAX_JOB_REQUEUES) {
+            throw new Error(
+                `Unbounded render flush: render job ${job.id} was re-queued more than ` +
+                `${MAX_JOB_REQUEUES} times in a single flush — a render is writing reactive ` +
+                `state it depends on (directly, or via a store action called during render).`
+            );
+        }
+    }
     job.queued = true;
     let lo = isFlushing ? flushIndex + 1 : 0;
     let hi = queue.length;
@@ -79,6 +121,14 @@ export function flushJobs(): void {
     isFlushing = true;
     try {
         for (flushIndex = 0; flushIndex < queue.length; flushIndex++) {
+            if (process.env.NODE_ENV !== 'production' && flushIndex >= MAX_FLUSH_JOBS) {
+                // Runaway guard, fresh-mount shape (see the guard docs above).
+                throw new Error(
+                    `Unbounded render flush: a single flush executed more than ` +
+                    `${MAX_FLUSH_JOBS} render jobs — a render is writing reactive state ` +
+                    `it depends on (directly, or via a store action called during render).`
+                );
+            }
             const job = queue[flushIndex];
             job.queued = false;
             job();
@@ -92,5 +142,6 @@ export function flushJobs(): void {
         queue.length = 0;
         flushIndex = -1;
         isFlushing = false;
+        if (process.env.NODE_ENV !== 'production') requeueCounts.clear();
     }
 }
