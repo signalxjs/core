@@ -8,11 +8,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [0.6.2] — 2026-06-13
 
-Stability patch: component `setup()` (and created/mount hooks) now run untracked in both the mount and hydration paths, eliminating a class of unbounded re-render loops diagnosed in a production app; development builds turn any remaining runaway render/effect loops into actionable errors instead of a frozen page.
+Stability patch: component `setup()` (and created/mounted hooks) now run untracked in both the mount and hydration paths, eliminating a class of unbounded re-render loops diagnosed in a production app; development builds turn any remaining runaway render/effect loops into actionable errors instead of a frozen page.
 
 ### Added
 
-- **`@sigx/runtime-core` / `@sigx/reactivity`**: dev-mode runaway-loop guards. A render that writes reactive state a render depends on (directly, or via a store action called during render) used to wedge the synchronous flush forever — the page froze solid with zero feedback. Development builds now throw an actionable error instead: the render scheduler bounds each flush (a per-job re-queue counter catches ping-pong loops between existing components; a total-flush-length bound catches loops that remount fresh components each iteration), and the reactivity layer bounds each notification wave (`Runaway notification wave`) for runaway effect cascades outside the render queue. Limits sit far above anything a legitimate update produces; all checks are compiled out of production builds. Loops re-triggering on microtask cadence (each write in its own flush) remain undetectable by design. (#111)
+- **`@sigx/runtime-core` / `@sigx/reactivity`**: dev-mode runaway-loop guards. When a component's render writes reactive state that some render depends on (directly, or through a store action called mid-render), the synchronous flush used to re-queue itself forever — the page froze solid with zero feedback. Development builds now throw an actionable error instead: the render scheduler bounds each flush (a per-job re-queue counter catches ping-pong loops between existing components; a total-flush-length bound catches loops that remount fresh components each iteration), and the reactivity layer bounds each notification wave (`Runaway notification wave`) for runaway effect cascades outside the render queue. Limits sit far above anything a legitimate update produces; all checks are compiled out of production builds. Loops re-triggering on microtask cadence (each write in its own flush) remain undetectable by design. (#111)
 
 ### Fixed
 
