@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.6.3] — 2026-06-13
+
+Hydration-robustness patch: a structural mismatch between the server-rendered DOM and a component's first client render is now self-healing — sigx discards the abandoned SSR subtree and re-renders it on the client instead of leaving duplicate/orphaned content visible.
+
 ### Fixed
 
 - **`@sigx/server-renderer`**: a structural hydration mismatch at the top of a component's subtree is now self-healing instead of leaving orphaned server-rendered nodes visible. When a component's first client render diverged structurally from the SSR DOM (e.g. the server rendered an empty-state placeholder but the client renders a populated list — common when client and server data differ, and acute with `lazy()` components that hydrate after a client fetch resolves), the hydrator bound the client VNode to a freshly created element but left the non-matching SSR nodes in place, so both the client tree and the abandoned server content stacked in the DOM (with an `[Hydrate] Expected element but got: …`/`got: null` warning cascade once the cursor diverged). The component hydrator now detects this top-of-subtree mismatch (the client's leading element tag differs from the element SSR produced for the component), discards the component's SSR DOM range — bounded by its trailing marker, so only that component's content is removed — and mounts the client subtree fresh in its place (React/Vue "bail to client render for this subtree" semantics). A mismatch may cost a re-mount, but it no longer leaves duplicate or unowned content. Residual: an element-level structural mismatch deep inside an already-hydrating subtree (no component boundary to bound the removable range) still falls back to mount-fresh and is not cleaned up — the high-value component-subtree case (including nested child components and the lazy/late-fetch empty-state-vs-list case) is covered. (#115)
@@ -208,7 +212,8 @@ Initial public release of the SignalX (`sigx`) ecosystem on npm. Six packages pu
 - Node `^20.19.0 || >=22.12.0`
 - `@sigx/vite` peer-depends on `vite >=8.0.0`
 
-[Unreleased]: https://github.com/signalxjs/core/compare/v0.6.2...HEAD
+[Unreleased]: https://github.com/signalxjs/core/compare/v0.6.3...HEAD
+[0.6.3]: https://github.com/signalxjs/core/compare/v0.6.2...v0.6.3
 [0.6.2]: https://github.com/signalxjs/core/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/signalxjs/core/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/signalxjs/core/compare/v0.5.0...v0.6.0
