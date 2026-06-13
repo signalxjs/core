@@ -262,8 +262,17 @@ export function hydrateComponent(vnode: VNode, dom: Node | null, parent: Node, t
                     // parent. Inside an async-placeholder wrapper the content is
                     // the wrapper's children (bounded by the end of the wrapper,
                     // i.e. null) and the marker lives outside the wrapper.
-                    const rangeEnd: Node | null = hydrateParent === parent ? anchor : null;
-                    if (hasSSRContent && !subtreeMatchesSSRDom(subTree, hydrateDom, rangeEnd)) {
+                    const inWrapper = hydrateParent !== parent;
+                    const rangeEnd: Node | null = inWrapper ? null : anchor;
+                    // The mismatch cleanup is only safe when the removable SSR
+                    // range is bounded: inside a wrapper (its children ARE the
+                    // range) or when the trailing marker exists (it terminates
+                    // the range within the shared parent). Without a marker and
+                    // outside a wrapper, rangeEnd is null and removing
+                    // [hydrateDom, null) would wipe following siblings owned by
+                    // other components — so fall through to in-place hydration.
+                    const rangeIsBounded = inWrapper || anchor != null;
+                    if (hasSSRContent && rangeIsBounded && !subtreeMatchesSSRDom(subTree, hydrateDom, rangeEnd)) {
                         // Structural mismatch at the top of this component's
                         // subtree (e.g. SSR rendered an empty-state, the client
                         // renders a populated list — common with client/server

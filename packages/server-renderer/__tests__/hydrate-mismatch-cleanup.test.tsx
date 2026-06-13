@@ -168,6 +168,33 @@ describe('hydration structural-mismatch cleanup (#115)', () => {
         expect(container.querySelector('.card')).toBe(originalCard);
     });
 
+    it('does NOT wipe sibling DOM when the SSR range is unbounded (no trailing marker)', async () => {
+        // Defensive: when a component has no trailing $c: marker, its SSR DOM
+        // range is unbounded within the shared parent. The mismatch cleanup
+        // must NOT run in that case — removing [hydrateDom, null) would delete
+        // following siblings owned by other content. Here we hydrate against
+        // mismatching SSR content with NO marker, plus an unrelated sibling
+        // node afterwards that must survive.
+        const Widget = component(() => {
+            return () => <table class="widget"><tbody><tr><td>x</td></tr></tbody></table>;
+        }, { name: 'Widget' });
+
+        // No <!--$c:N--> marker — anchor will be null during hydration.
+        container = createSSRContainer(
+            '<div class="ssr-widget">old</div><aside class="unrelated">keep me</aside>'
+        );
+
+        const vnode = { type: Widget, props: {}, key: null, children: [], dom: null };
+        hydrate(vnode, container);
+        await nextTick();
+        await wait(10);
+
+        // The unrelated sibling must still be present — the cleanup must have
+        // been skipped because the range was unbounded.
+        expect(container.querySelectorAll('.unrelated').length).toBe(1);
+        expect(container.textContent).toContain('keep me');
+    });
+
     it('mismatch recovery for a nested child component subtree leaves no orphans', async () => {
         // Inner component whose client structure differs from SSR.
         const Inner = component(() => {
