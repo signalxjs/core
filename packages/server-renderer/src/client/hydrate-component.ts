@@ -369,10 +369,16 @@ export function hydrateComponent(vnode: VNode, dom: Node | null, parent: Node, t
  * semantics) instead of hydrating in place and leaving orphaned SSR nodes.
  *
  * Conservative by design: returns true (hydrate normally) for anything it
- * can't confidently classify as a mismatch — Text/Comment subtrees (whose
- * mismatches hydrateNode already recovers from without orphaning), component
- * and fragment roots (whose own boundaries aren't known here), and cases where
- * SSR produced no element to compare against.
+ * does not classify as an element-root mismatch — Text/Comment/Fragment and
+ * component roots, and cases where SSR produced no element to compare against.
+ * This is a scoping decision, not a safety guarantee for those shapes: a
+ * Text/Comment subtree whose SSR DOM was an element (or vice versa) can still
+ * leave orphans, since hydrateNode's Text/Comment mismatch paths insert a
+ * fresh node without removing the mismatched SSR node and the component
+ * boundary means it is never revisited. Those residual cases are out of scope
+ * for this targeted fix (see the CHANGELOG note for #115); only the
+ * element-root tag mismatch — the reported empty-state-vs-list symptom — is
+ * cleaned up here.
  *
  * @param subTree     The normalized render result.
  * @param startDom    First SSR node of the component's content.
