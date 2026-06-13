@@ -47,14 +47,14 @@
   "devDependencies": {
     "@size-limit/preset-small-lib": "^11",
     "@typescript/native-preview": "7.0.0-dev.20260514.1",
-    "@vitest/coverage-v8": "^4.1.7",
-    "happy-dom": "^20.9.0",
-    "oxlint": "^1.66.0",
+    "@vitest/coverage-v8": "^4.1.8",
+    "happy-dom": "^20.10.3",
+    "oxlint": "^1.69.0",
     "playwright": "^1.60.0",
     "size-limit": "^11",
     "typescript": "^6.0.3",
-    "vite": "^8.0.14",
-    "vitest": "^4.1.7"
+    "vite": "^8.0.16",
+    "vitest": "^4.1.8"
   },
   "keywords": [
     "SignalX",
