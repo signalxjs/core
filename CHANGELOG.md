@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- **`@sigx/server-renderer`**: a structural hydration mismatch at the top of a component's subtree is now self-healing instead of leaving orphaned server-rendered nodes visible. When a component's first client render diverged structurally from the SSR DOM (e.g. the server rendered an empty-state placeholder but the client renders a populated list — common when client and server data differ, and acute with `lazy()` components that hydrate after a client fetch resolves), the hydrator bound the client VNode to a freshly created element but left the non-matching SSR nodes in place, so both the client tree and the abandoned server content stacked in the DOM (with an `[Hydrate] Expected element but got: …`/`got: null` warning cascade once the cursor diverged). The component hydrator now detects this top-of-subtree mismatch (the client's leading element tag differs from the element SSR produced for the component), discards the component's SSR DOM range — bounded by its trailing marker, so only that component's content is removed — and mounts the client subtree fresh in its place (React/Vue "bail to client render for this subtree" semantics). A mismatch may cost a re-mount, but it no longer leaves duplicate or unowned content. Residual: an element-level structural mismatch deep inside an already-hydrating subtree (no component boundary to bound the removable range) still falls back to mount-fresh and is not cleaned up — the high-value component-subtree case (including nested child components and the lazy/late-fetch empty-state-vs-list case) is covered. (#115)
+
 ## [0.6.2] — 2026-06-13
 
 Stability patch: component `setup()` (and created/mounted hooks) now run untracked in both the mount and hydration paths, eliminating a class of unbounded re-render loops diagnosed in a production app; development builds turn any remaining runaway render/effect loops into actionable errors instead of a frozen page.
