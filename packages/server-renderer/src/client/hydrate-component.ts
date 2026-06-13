@@ -257,7 +257,44 @@ export function hydrateComponent(vnode: VNode, dom: Node | null, parent: Node, t
                     // In that case, mount fresh instead of trying to hydrate
                     // against non-existent DOM.
                     const hasSSRContent = hydrateDom != null && hydrateDom !== anchor;
-                    if (hasSSRContent) {
+                    // The component's SSR content is bounded by its trailing
+                    // marker (anchor) when its content lives directly in the
+                    // parent. Inside an async-placeholder wrapper the content is
+                    // the wrapper's children (bounded by the end of the wrapper,
+                    // i.e. null) and the marker lives outside the wrapper.
+                    const inWrapper = hydrateParent !== parent;
+                    const rangeEnd: Node | null = inWrapper ? null : anchor;
+                    // The mismatch cleanup is only safe when the removable SSR
+                    // range is bounded: inside a wrapper (its children ARE the
+                    // range) or when the trailing marker exists (it terminates
+                    // the range within the shared parent). Without a marker and
+                    // outside a wrapper, rangeEnd is null and removing
+                    // [hydrateDom, null) would wipe following siblings owned by
+                    // other components — so fall through to in-place hydration.
+                    const rangeIsBounded = inWrapper || anchor != null;
+                    if (hasSSRContent && rangeIsBounded && !subtreeMatchesSSRDom(subTree, hydrateDom, rangeEnd)) {
+                        // Structural mismatch at the top of this component's
+                        // subtree (e.g. SSR rendered an empty-state, the client
+                        // renders a populated list — common with client/server
+                        // data differences and lazy() components that hydrate
+                        // late). Hydrating in place would abandon the SSR nodes
+                        // as visible orphans (#115). Bail to a clean client
+                        // render: discard the component's SSR DOM range
+                        // [hydrateDom, rangeEnd) and mount the subtree fresh in
+                        // its place. The range is bounded by the component's
+                        // trailing marker (or wrapper), so this removes exactly
+                        // this component's content and nothing a sibling owns.
+                        if (process.env.NODE_ENV !== 'production') {
+                            console.warn(
+                                `[Hydrate] Structural mismatch hydrating <${componentName}>; ` +
+                                'discarding server-rendered subtree and re-rendering on the client. ' +
+                                'SSR output did not match the client render for this component.'
+                            );
+                        }
+                        removeSSRRange(hydrateDom, rangeEnd, hydrateParent);
+                        mount(subTree, hydrateParent as Element, rangeEnd);
+                        endDom = rangeEnd;
+                    } else if (hasSSRContent) {
                         // Hydrate against existing SSR DOM (inside the
                         // placeholder wrapper when one exists)
                         endDom = hydrateNode(subTree, hydrateDom, hydrateParent);
@@ -319,4 +356,76 @@ export function hydrateComponent(vnode: VNode, dom: Node | null, parent: Node, t
 
     // With trailing markers, the anchor IS the end - return next sibling
     return anchor ? anchor.nextSibling : endDom;
+}
+
+/**
+ * Decide whether a component's render subtree structurally matches the SSR DOM
+ * it would hydrate against (#115).
+ *
+ * Returns false only when we can prove a top-of-subtree structural mismatch:
+ * the subtree's leading element has a tag that differs from the first element
+ * node SSR produced for this component. In that case the caller bails to a
+ * fresh client mount for the whole subtree (React/Vue "bail to client render"
+ * semantics) instead of hydrating in place and leaving orphaned SSR nodes.
+ *
+ * Conservative by design: returns true (hydrate normally) for anything it
+ * does not classify as an element-root mismatch — Text/Comment/Fragment and
+ * component roots, and cases where SSR produced no element to compare against.
+ * This is a scoping decision, not a safety guarantee for those shapes: a
+ * Text/Comment subtree whose SSR DOM was an element (or vice versa) can still
+ * leave orphans, since hydrateNode's Text/Comment mismatch paths insert a
+ * fresh node without removing the mismatched SSR node and the component
+ * boundary means it is never revisited. Those residual cases are out of scope
+ * for this targeted fix (see the CHANGELOG note for #115); only the
+ * element-root tag mismatch — the reported empty-state-vs-list symptom — is
+ * cleaned up here.
+ *
+ * @param subTree     The normalized render result.
+ * @param startDom    First SSR node of the component's content.
+ * @param anchor      The component's trailing marker (exclusive range end), or null.
+ */
+function subtreeMatchesSSRDom(subTree: VNode, startDom: Node | null, anchor: Node | null): boolean {
+    // Only element-rooted subtrees are classified here. A leading element with
+    // the wrong tag is the unambiguous, anchor-bounded mismatch case.
+    if (typeof subTree.type !== 'string') {
+        return true;
+    }
+
+    // Find the first element node in the SSR range [startDom, anchor), skipping
+    // comment artifacts (e.g. <!--t--> separators, nested $c: markers).
+    let node: Node | null = startDom;
+    while (node && node !== anchor) {
+        if (node.nodeType === Node.ELEMENT_NODE) {
+            return (node as Element).tagName.toLowerCase() === subTree.type.toLowerCase();
+        }
+        if (node.nodeType === Node.TEXT_NODE) {
+            // SSR produced leading text where the client wants an element.
+            // hydrateNode's element branch would scan past this text looking
+            // for a matching element and abandon it — treat as a mismatch so
+            // the range is cleaned up and remounted.
+            return false;
+        }
+        node = node.nextSibling;
+    }
+
+    // No element found in the range to compare against — let normal hydration
+    // (and its existing empty/null handling) deal with it.
+    return true;
+}
+
+/**
+ * Remove the SSR DOM nodes spanning a component's abandoned subtree —
+ * everything in [startDom, anchor) — so a fresh client mount leaves no
+ * orphaned/duplicate content (#115). The anchor itself is preserved as the
+ * mount insertion point.
+ */
+function removeSSRRange(startDom: Node | null, anchor: Node | null, parent: Node): void {
+    let node: Node | null = startDom;
+    while (node && node !== anchor) {
+        const next: Node | null = node.nextSibling;
+        if (node.parentNode === parent) {
+            parent.removeChild(node);
+        }
+        node = next;
+    }
 }
