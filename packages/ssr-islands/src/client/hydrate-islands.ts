@@ -184,10 +184,13 @@ export function scheduleComponentHydration(
             // hydrating. Fall back to in-place hydration when there is no
             // placeholder (back-compat with content that was SSR'd in place).
             // Bound the search by trailingMarker so we never drift into a sibling's
-            // DOM when this component produced no leading element.
+            // DOM when this component produced no leading element. Match the
+            // placeholder's data-island id against this component's marker id so we
+            // don't mistake user markup that happens to carry data-island.
+            const wantId = markerIslandId(trailingMarker);
             let ph: Node | null = contentStart;
             while (ph && ph !== trailingMarker && ph.nodeType !== Node.ELEMENT_NODE) ph = ph.nextSibling;
-            if (ph && ph !== trailingMarker && (ph as Element).hasAttribute?.('data-island')) {
+            if (ph && ph !== trailingMarker && wantId != null && (ph as Element).getAttribute?.('data-island') === wantId) {
                 const container = ph as Element;
                 container.innerHTML = '';
                 // Mount under the captured app context, mirroring doHydrate().
@@ -206,6 +209,13 @@ export function scheduleComponentHydration(
     }
 
     return trailingMarker ? trailingMarker.nextSibling : dom;
+}
+
+/** Extract the component id from a `$c:N` marker comment, or null if not one. */
+function markerIslandId(marker: Comment | null): string | null {
+    if (!marker) return null;
+    const data = marker.data;
+    return data.startsWith('$c:') ? data.slice(3) : null;
 }
 
 function findComponentBoundaries(dom: Node | null): { contentStart: Node | null; trailingMarker: Comment | null } {
@@ -510,10 +520,12 @@ function mountClientOnly(marker: Comment, component: ComponentFactory, info: Isl
         placeholder = placeholder.previousSibling;
     }
 
-    if (!placeholder || !(placeholder as Element).hasAttribute?.('data-island')) {
-        // No skip-SSR placeholder — the content was SSR'd in place (e.g. older
-        // output predating skip-SSR). Hydrate it like any eager island instead of
-        // silently doing nothing.
+    // The placeholder's data-island id must match this island's marker id —
+    // otherwise it's not our skip-SSR placeholder (e.g. user markup carrying
+    // data-island, or content SSR'd in place predating skip-SSR). In that case
+    // hydrate in place instead of mounting into the wrong element.
+    const wantId = markerIslandId(marker);
+    if (!placeholder || wantId == null || (placeholder as Element).getAttribute?.('data-island') !== wantId) {
         hydrateIsland(marker, component, info);
         return;
     }
