@@ -51,9 +51,6 @@ interface IslandsPluginData {
 
 const PLUGIN_NAME = 'islands';
 
-// Dev-only: warn once that client:only currently renders + hydrates in place (#122).
-let hasWarnedClientOnly = false;
-
 // ─── Plugin Options ─────────────────────────────────────────────
 
 export interface IslandsPluginOptions {
@@ -134,20 +131,14 @@ export function islandsPlugin(options?: IslandsPluginOptions): SSRPlugin {
 
                 data.islands.set(id, islandInfo);
 
-                // NOTE: client:only currently renders + hydrates in place like
-                // client:load. True skip-SSR needs a core seam: render-core captures
-                // the component's setup (vnode.type.__setup) BEFORE this hook runs,
-                // so the pack cannot suppress the server render from here. Tracked
-                // in #122. (The previous "return a placeholder from
-                // afterRenderComponent" trick produced a stray appended <div> under
-                // 0.6.x's append-only afterRenderComponent — removed.)
-                if (process.env.NODE_ENV !== 'production' && hydration.strategy === 'only' && !hasWarnedClientOnly) {
-                    hasWarnedClientOnly = true;
-                    console.warn(
-                        '[SSR Islands] `client:only` currently behaves like `client:load` — the component is ' +
-                        'server-rendered and hydrated in place. True skip-SSR rendering needs a core change; ' +
-                        'see https://github.com/signalxjs/core/issues/122.'
-                    );
+                // client:only is true skip-SSR: the component never renders on the
+                // server (see `suppressComponentRender` below), so there is no state
+                // to capture — don't bother swapping in a tracking signal. The
+                // island is still registered above so it appears in __SIGX_ISLANDS__
+                // (with no `state`), and the client mounts it fresh into the
+                // placeholder.
+                if (hydration.strategy === 'only') {
+                    return componentCtx;
                 }
 
                 // Set up signal tracking for state serialization
@@ -158,6 +149,23 @@ export function islandsPlugin(options?: IslandsPluginOptions): SSRPlugin {
                 componentCtx.signal = createTrackingSignal(signalMap) as typeof signal;
 
                 return componentCtx;
+            },
+
+            suppressComponentRender(
+                id: number,
+                _vnode: VNode,
+                ctx: SSRContext
+            ): { placeholder?: string } | void {
+                const data = ctx.getPluginData<IslandsPluginData>(PLUGIN_NAME);
+                if (!data) return;
+
+                const islandInfo = data.islands.get(id);
+                if (!islandInfo || islandInfo.strategy !== 'only') return;
+
+                // client:only — true skip-SSR. Emit an empty placeholder instead of
+                // rendering the component; the client clears it and mounts fresh.
+                // `display:contents` keeps the wrapper layout-transparent.
+                return { placeholder: `<div data-island="${id}" style="display:contents;"></div>` };
             },
 
             afterRenderComponent(
@@ -172,9 +180,9 @@ export function islandsPlugin(options?: IslandsPluginOptions): SSRPlugin {
                 const islandInfo = data.islands.get(id);
                 if (!islandInfo) return; // Not an island
 
-                // Capture signal state (client:only included — it renders in place
-                // under the current render path, so it captures state like any
-                // eager island).
+                // Capture signal state. client:only never reaches this hook — its
+                // render is suppressed (see suppressComponentRender) — so this only
+                // runs for eager/deferred islands that actually rendered.
                 const signalMap = data.signalMaps.get(id);
                 if (signalMap && signalMap.size > 0) {
                     const state = serializeSignalState(signalMap);

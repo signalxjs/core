@@ -326,6 +326,61 @@ describe('hydrateIslands with lazy components', () => {
         expect(hydrated).toBe(true);
     });
 
+    it('mounts a client:only island fresh into its data-island placeholder (#122)', async () => {
+        let setupCalled = false;
+        const name = uniqueName('ClientOnlyFresh');
+
+        const ClientOnlyComp = component(() => {
+            setupCalled = true;
+            return () => <span class="co-fresh">Fresh</span>;
+        }, { name });
+
+        registerComponent(name, ClientOnlyComp);
+
+        // Skip-SSR output: an empty <div data-island> placeholder, no content.
+        container = createSSRContainer(`<div data-island="1" style="display:contents;"></div><!--$c:1-->`);
+        createIslandDataScript({
+            '1': { strategy: 'only', componentId: name, props: {} }
+        });
+
+        hydrateIslands();
+        await vi.advanceTimersByTimeAsync(50);
+        await nextTick();
+
+        expect(setupCalled).toBe(true);
+        // Component mounted INSIDE the placeholder.
+        const placeholder = container.querySelector('[data-island]');
+        expect(placeholder).toBeTruthy();
+        expect(placeholder!.querySelector('.co-fresh')?.textContent).toBe('Fresh');
+    });
+
+    it('does not treat a data-island element without the display:contents sentinel as a placeholder (#122)', async () => {
+        const name = uniqueName('ClientOnlyInPlaceDataIsland');
+
+        const ClientOnlyComp = component(() => {
+            return () => <span class="co-keep">Only</span>;
+        }, { name });
+
+        registerComponent(name, ClientOnlyComp);
+
+        // Content SSR'd in place whose root coincidentally carries data-island="1"
+        // but lacks the display:contents sentinel — must be hydrated in place, not
+        // cleared and re-mounted (which would wipe the existing content first).
+        container = createSSRContainer(`<span class="co-keep" data-island="1">Only</span><!--$c:1-->`);
+        createIslandDataScript({
+            '1': { strategy: 'only', componentId: name, props: {} }
+        });
+
+        hydrateIslands();
+        await vi.advanceTimersByTimeAsync(50);
+        await nextTick();
+
+        // The original element is still present (hydrated in place, not cleared).
+        const el = container.querySelector('.co-keep');
+        expect(el).toBeTruthy();
+        expect(el!.textContent).toBe('Only');
+    });
+
     it('should hydrate client:idle island with lazily registered component', async () => {
         let hydrated = false;
         const name = uniqueName('LazyIdleIsland');

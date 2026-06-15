@@ -191,9 +191,36 @@ export function scheduleComponentHydration(
             }
             break;
 
-        case 'only':
-            doHydrate();
+        case 'only': {
+            // Skip-SSR: the server emitted an empty <div data-island> placeholder
+            // (no component content). Mount the component fresh into it instead of
+            // hydrating. Fall back to in-place hydration when there is no
+            // placeholder (back-compat with content that was SSR'd in place).
+            // Bound the search by trailingMarker so we never drift into a sibling's
+            // DOM when this component produced no leading element. Identify the
+            // placeholder by matching this component's marker id AND the
+            // display:contents sentinel, so user markup carrying a coincidental
+            // data-island isn't mistaken for it.
+            const wantId = trailingMarker ? parseMarkerId(trailingMarker) : null;
+            let ph: Node | null = contentStart;
+            while (ph && ph !== trailingMarker && ph.nodeType !== Node.ELEMENT_NODE) ph = ph.nextSibling;
+            if (ph && ph !== trailingMarker && isSkipSsrPlaceholder(ph as Element, wantId)) {
+                const container = ph as Element;
+                container.innerHTML = '';
+                // Mount under the captured app context, mirroring doHydrate(). A
+                // skip-SSR island has no server-rendered state to seed.
+                const prevAppContext = getCurrentAppContext();
+                setCurrentAppContext(capturedAppContext);
+                try {
+                    render(vnode, container);
+                } finally {
+                    setCurrentAppContext(prevAppContext);
+                }
+            } else {
+                doHydrate();
+            }
             break;
+        }
     }
 
     return trailingMarker ? trailingMarker.nextSibling : dom;
@@ -204,6 +231,18 @@ function parseMarkerId(marker: Comment): number | null {
     if (!marker.data.startsWith('$c:')) return null;
     const id = parseInt(marker.data.slice(3), 10);
     return isNaN(id) ? null : id;
+}
+
+/**
+ * Is this element the skip-SSR placeholder emitted by the islands server hook for
+ * component `wantId`? Matches both the `data-island` id AND the `display:contents`
+ * sentinel that `suppressComponentRender` always sets, so user markup that merely
+ * carries a coincidental `data-island="<id>"` is not mistaken for the placeholder.
+ */
+function isSkipSsrPlaceholder(el: Element | null, wantId: number | null): boolean {
+    return !!el && wantId != null
+        && el.getAttribute?.('data-island') === String(wantId)
+        && (el as HTMLElement).style?.display === 'contents';
 }
 
 function findComponentBoundaries(dom: Node | null): { contentStart: Node | null; trailingMarker: Comment | null } {
@@ -511,10 +550,12 @@ function mountClientOnly(marker: Comment, component: ComponentFactory, info: Isl
         placeholder = placeholder.previousSibling;
     }
 
-    if (!placeholder || !(placeholder as Element).hasAttribute?.('data-island')) {
-        // No skip-SSR placeholder. Under the current 0.6.x render path client:only
-        // is rendered in place (true skip-SSR needs core support — #122), so hydrate
-        // it like any eager island instead of silently doing nothing.
+    // Only treat this as a skip-SSR mount when the previous element is genuinely
+    // our placeholder (matching marker id + display:contents sentinel). Otherwise
+    // it's content SSR'd in place (older output) or unrelated user markup — hydrate
+    // in place instead of clearing/mounting into the wrong element.
+    const wantId = parseMarkerId(marker);
+    if (!isSkipSsrPlaceholder(placeholder as Element | null, wantId)) {
         hydrateIsland(marker, component, info);
         return;
     }
