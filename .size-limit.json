@@ -31,5 +31,18 @@
         "name": "@sigx/server-renderer/client (browser entry)",
         "path": "packages/server-renderer/dist/client/index.prod.js",
         "limit": "14 KB"
+    },
+    {
+        "name": "@sigx/ssr-islands",
+        "path": "packages/ssr-islands/dist/index.prod.js",
+        "limit": "22 KB",
+        "ignore": [
+            "node:stream"
+        ]
+    },
+    {
+        "name": "@sigx/ssr-islands/client (browser entry)",
+        "path": "packages/ssr-islands/dist/client/index.prod.js",
+        "limit": "15 KB"
     }
 ]
