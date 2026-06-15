@@ -18,6 +18,7 @@ import {
 import { registerComponent, type ComponentFactory } from './registry';
 import { loadIslandComponent } from './chunk-loader';
 import { getIslandServerState } from './island-context';
+import { filterClientDirectives, CLIENT_DIRECTIVE_PREFIX } from '../client-directives';
 import type { IslandInfo } from './types';
 
 // Import from server-renderer core. The app-context accessors propagate DI across
@@ -105,6 +106,23 @@ export function scheduleComponentHydration(
 
     const componentFactory = vnode.type as unknown as ComponentFactory;
     const componentName = componentFactory.__islandId || componentFactory.__name || 'Anonymous';
+
+    // Core has no directive knowledge (splitComponentProps keeps unknown keys),
+    // so strip client:* before delegating — mirrors the data-driven hydrateIsland()
+    // path, where props are already directive-free via filterClientDirectives.
+    // Mutate props on THIS vnode rather than cloning it: core attaches hydration
+    // state (_componentProps, _slots, dom) to the passed vnode and retains it for
+    // later patching/unmount, so its object identity must be preserved. Assigning
+    // a fresh filtered object leaves the caller's original props object intact.
+    // Only rewrite props when a directive is actually present.
+    if (vnode.props) {
+        for (const key in vnode.props) {
+            if (key.startsWith(CLIENT_DIRECTIVE_PREFIX)) {
+                vnode.props = filterClientDirectives(vnode.props);
+                break;
+            }
+        }
+    }
 
     // Skip async placeholders during hydration walk.
     if (contentStart && (contentStart as Element).hasAttribute?.('data-async-placeholder')) {
@@ -574,3 +592,4 @@ function mountClientOnly(marker: Comment, component: ComponentFactory, info: Isl
 
     render(vnode, container);
 }
+
