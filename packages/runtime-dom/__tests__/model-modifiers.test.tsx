@@ -217,6 +217,18 @@ describe('dev no-op modifier warning', () => {
         }
     });
 
+    it('warns when trim is bound to a non-string state value', () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        try {
+            const state = signal({ count: 5 as number });
+            jsx('input', { type: 'text', model: () => state.count, modelModifiers: { trim: true } as any });
+            expect(warn).toHaveBeenCalledTimes(1);
+            expect(String(warn.mock.calls[0][0])).toContain('string input values');
+        } finally {
+            warn.mockRestore();
+        }
+    });
+
     it('does not warn for trim on an initially-empty string field', () => {
         const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
         try {

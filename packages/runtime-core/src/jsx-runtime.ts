@@ -165,8 +165,10 @@ function warnNoOpModifiers(
             !(modifiers.number && typeof initial === 'number')
         ) {
             console.warn(
-                "[sigx] `modelModifiers` `trim`/`number` expect a string value, but the bound " +
-                `value is of type \`${typeof initial}\`; the modifier is skipped at write-back.`
+                "[sigx] `modelModifiers` `trim`/`number` operate on string input values, but the " +
+                `bound state is of type \`${typeof initial}\`. The transform still runs on the ` +
+                "input's string and writes back a string/number, which won't match the bound " +
+                "type — bind a string value, or remove the modifier."
             );
         }
     }
