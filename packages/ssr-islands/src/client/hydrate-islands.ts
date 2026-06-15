@@ -18,7 +18,7 @@ import {
 import { registerComponent, type ComponentFactory } from './registry';
 import { loadIslandComponent } from './chunk-loader';
 import { getIslandServerState } from './island-context';
-import { filterClientDirectives } from '../client-directives';
+import { filterClientDirectives, CLIENT_DIRECTIVE_PREFIX } from '../client-directives';
 import type { IslandInfo } from './types';
 
 // Import from server-renderer core. The app-context accessors propagate DI across
@@ -110,9 +110,17 @@ export function scheduleComponentHydration(
     // Core has no directive knowledge (splitComponentProps keeps unknown keys),
     // so strip client:* here — mirrors the data-driven hydrateIsland() path, where
     // props are already directive-free via the server's filterClientDirectives.
-    const cleanVnode: VNode = vnode.props
-        ? { ...vnode, props: filterClientDirectives(vnode.props) }
-        : vnode;
+    // Only clone+filter when a directive is actually present; otherwise reuse the
+    // original vnode so the no-directive path stays allocation-free.
+    let cleanVnode: VNode = vnode;
+    if (vnode.props) {
+        for (const key in vnode.props) {
+            if (key.startsWith(CLIENT_DIRECTIVE_PREFIX)) {
+                cleanVnode = { ...vnode, props: filterClientDirectives(vnode.props) };
+                break;
+            }
+        }
+    }
 
     // Skip async placeholders during hydration walk.
     if (contentStart && (contentStart as Element).hasAttribute?.('data-async-placeholder')) {
