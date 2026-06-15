@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-06-15
+
 ### Fixed
 
 - Full-tree (walk-path) hydration no longer leaks `client:*` directive props into

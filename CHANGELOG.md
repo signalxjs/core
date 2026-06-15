@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-06-15
+
 Slot-presence semantics fix: a slot is now a callable accessor only when the parent actually provided content for it — `default` included — and reads as `undefined` otherwise. This makes presence a plain truthiness / optional-call check and resurrects the documented `slots.x?.() ?? fallback` pattern, which previously could never render its fallback.
 
 ### Added
@@ -233,7 +235,8 @@ Initial public release of the SignalX (`sigx`) ecosystem on npm. Six packages pu
 - Node `^20.19.0 || >=22.12.0`
 - `@sigx/vite` peer-depends on `vite >=8.0.0`
 
-[Unreleased]: https://github.com/signalxjs/core/compare/v0.6.3...HEAD
+[Unreleased]: https://github.com/signalxjs/core/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/signalxjs/core/compare/v0.6.3...v0.7.0
 [0.6.3]: https://github.com/signalxjs/core/compare/v0.6.2...v0.6.3
 [0.6.2]: https://github.com/signalxjs/core/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/signalxjs/core/compare/v0.6.0...v0.6.1
