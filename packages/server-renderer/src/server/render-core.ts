@@ -236,7 +236,12 @@ function createComponentState(
             }
         }
     }
-    const slots: SlotsObject<any> = {};
+    // Null-prototype dictionary: slot names come from user-controlled `slot`
+    // props and the `slots` prop, so a name like "__proto__" must be a plain
+    // key (a normal object would route it through the prototype setter,
+    // polluting the prototype and breaking the client's "__proto__"-named
+    // slot parity).
+    const slots: SlotsObject<any> = Object.create(null);
     if (defaultChildren.length > 0) {
         slots.default = () => defaultChildren.slice();
     }

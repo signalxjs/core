@@ -258,6 +258,22 @@ describe('renderToString — slot presence parity', () => {
         expect(html).toContain('class="dfb"');     // default fell back
         expect(html).not.toContain('class="ffb"');  // footer did not
     });
+
+    it('treats a slot named __proto__ as a plain key without prototype pollution', async () => {
+        const Card = component((ctx) => {
+            return () => <div class="card">{(ctx.slots as any)['__proto__']?.()}</div>;
+        }, { name: 'Card' });
+
+        const html = await renderToString(
+            <Card><span slot="__proto__" class="pp">P</span></Card>
+        );
+
+        // The pathological name is a working named slot...
+        expect(html).toContain('class="pp"');
+        // ...and constructing the slots object did not pollute the prototype.
+        expect(({} as any).polluted).toBeUndefined();
+        expect(Object.getPrototypeOf({})).toBe(Object.prototype);
+    });
 });
 
 describe('renderToString — component error handling', () => {
