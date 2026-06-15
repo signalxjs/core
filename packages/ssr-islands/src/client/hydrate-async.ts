@@ -7,8 +7,7 @@
  * Moved from @sigx/server-renderer.
  */
 
-import { VNode } from 'sigx';
-import { getComponent, type ComponentFactory } from './registry';
+import type { VNode } from 'sigx';
 import { loadIslandComponent } from './chunk-loader';
 import type { IslandInfo } from './types';
 import { invalidateIslandCache, getIslandData } from './island-context';

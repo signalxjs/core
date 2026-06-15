@@ -92,12 +92,15 @@ describe('island rendering (renderToString)', () => {
             expect(html).toContain('5');
         });
 
-        it('should render client:only island with placeholder marker', async () => {
+        it('renders client:only in place (no stray placeholder div) and marks it strategy "only"', async () => {
             const ssr = createSSR().use(islandsPlugin());
             const html = await ssr.render(<IslandCounter client:only />);
-            expect(html).toContain('data-island=');
-            // In plugin architecture, client:only still renders content server-side
-            // but the island data marks it as strategy "only" for client-side fresh mount
+            // client:only currently renders + hydrates in place (true skip-SSR
+            // needs a core seam — see #122). It must NOT append a stray
+            // <div data-island> — that was the old afterRenderComponent trick,
+            // which under 0.6.x's append-only hook left a duplicate empty div.
+            expect(html).toContain('island-counter');
+            expect(html).not.toContain('data-island=');
             const islands = parseIslandData(html);
             const island = Object.values(islands)[0] as any;
             expect(island.strategy).toBe('only');
