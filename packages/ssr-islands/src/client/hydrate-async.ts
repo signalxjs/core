@@ -37,8 +37,14 @@ export function hydrateLeftoverAsyncComponents(container: Element): void {
         // become interactive. (Matches the sigx:async-ready listener path,
         // which gates on `info` alone.)
         if (info) {
-            hydrateAsyncComponent(placeholder as Element, info);
+            void hydrateAsyncComponent(placeholder as Element, info).catch(reportAsyncHydrateError);
         }
+    }
+}
+
+function reportAsyncHydrateError(err: unknown): void {
+    if (process.env.NODE_ENV !== 'production') {
+        console.error('[Hydrate] Failed to hydrate streamed async island:', err);
     }
 }
 
@@ -76,7 +82,7 @@ function ensureAsyncHydrationListener(): void {
             return;
         }
 
-        hydrateAsyncComponent(placeholder as Element, info);
+        void hydrateAsyncComponent(placeholder as Element, info).catch(reportAsyncHydrateError);
     });
 }
 
@@ -99,6 +105,10 @@ async function hydrateAsyncComponent(container: Element, info: IslandInfo): Prom
     if (container.hasAttribute('data-hydrated')) {
         return;
     }
+    // Mark synchronously, BEFORE any await, so duplicate triggers (the leftover
+    // scan racing the sigx:async-ready event, or repeated events for one id) can't
+    // both pass the guard above and double-mount the component.
+    container.setAttribute('data-hydrated', '');
 
     const component = await loadIslandComponent(info);
     if (!component) {
@@ -109,8 +119,6 @@ async function hydrateAsyncComponent(container: Element, info: IslandInfo): Prom
     }
 
     const props = info.props || {};
-
-    container.setAttribute('data-hydrated', '');
 
     const vnode: VNode = {
         type: component as any,

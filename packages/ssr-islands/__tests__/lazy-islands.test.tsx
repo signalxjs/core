@@ -185,8 +185,9 @@ describe('lazy registry', () => {
             __registerIslandChunk(name, () => Promise.reject(new Error('Network failure')));
 
             const result = await resolveComponent(name);
-            // Should not throw, returns undefined-ish
-            // (the catch returns undefined as any)
+            // A failed chunk load resolves to undefined (not a throw) and logs.
+            expect(result).toBeUndefined();
+            expect(consoleSpy).toHaveBeenCalled();
             consoleSpy.mockRestore();
         });
     });

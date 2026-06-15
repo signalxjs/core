@@ -19,15 +19,14 @@ import { registerComponent, type ComponentFactory } from './registry';
 import { loadIslandComponent } from './chunk-loader';
 import type { IslandInfo } from './types';
 
-// Import from server-renderer core (these stay there)
+// Import from server-renderer core.
 import { hydrateComponent } from '@sigx/server-renderer/client';
-
-// We need access to setPendingServerState — but that's in server-renderer's hydrate-context.
-// For now, we re-export the functions we need from server-renderer/client.
-// The plugin wires them together.
 
 // ============= Module State =============
 
+// Optional host-wired accessors for app context + server-state restoration. They
+// stay null unless a host calls initIslandHydration(); core does not yet expose a
+// client hydration seam to wire them, so they are currently inert (#120).
 let _getCurrentAppContext: (() => any) | null = null;
 let _setCurrentAppContext: ((ctx: any) => void) | null = null;
 let _setPendingServerState: ((state: Record<string, any> | null) => void) | null = null;
@@ -60,8 +59,11 @@ export function cleanupPendingHydrations(): void {
 }
 
 /**
- * Initialize island hydration with context accessors from server-renderer.
- * Called by the islands plugin during setup.
+ * Optional wiring hook: install host-provided accessors for app context and
+ * server-state restoration. NOT currently called — the islands plugin cannot wire
+ * these until core exposes a client hydration seam (#120), so app-context
+ * propagation and tracked-signal restoration to deferred islands stay inert until
+ * then. Kept as the ready integration point.
  */
 export function initIslandHydration(fns: {
     getCurrentAppContext: () => any;
