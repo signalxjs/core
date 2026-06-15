@@ -17,6 +17,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `suppressComponentRender` plugin hook in `@sigx/server-renderer`. The dev
   warning about `client:only` behaving like `client:load` is removed.
   (signalxjs/core#122)
+- Server-captured island *signal* state is now restored on hydration. The pack
+  implements the new client `transformComponentContext` seam in
+  `@sigx/server-renderer` (signalxjs/core#120) to swap `ctx.signal` for a
+  restoring variant that seeds each signal from `__SIGX_ISLANDS__[id].state`
+  (falling back to the literal initial), so an island resumes from its server
+  value across the eager, deferred-strategy, and async-streaming hydration paths.
 
 ### Changed
 
@@ -31,12 +37,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - Dropped the `generateSignalKey` and `SSRSignalFn` re-exports that proxied
   `@sigx/server-renderer` internals; `SSRSignalFn` is now this package's own type.
-
-### Known limitations
-
-- Client-side restoration of server-captured island *signal* state is inert
-  pending a client hydration plugin seam in core (signalxjs/core#120). Selective
-  hydration and `useAsync`/`useStream` state transfer are unaffected.
+- Removed the inert `initIslandHydration` wiring hook. It existed only to await
+  the core client hydration seam now delivered by signalxjs/core#120; signal-state
+  restoration is wired internally and app-context propagation across deferred
+  hydration imports the accessors directly from `@sigx/server-renderer/client`.
 
 ## [0.4.2] - 2026-05-10
 

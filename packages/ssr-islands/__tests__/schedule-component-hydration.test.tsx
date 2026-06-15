@@ -2,8 +2,7 @@
  * Tests for the full-tree scheduleComponentHydration() path (used by the islands
  * plugin's client.hydrateComponent hook). Complements hydration-strategies.test.tsx
  * by exercising the requestIdleCallback branch, the visible/media cleanup wiring,
- * and the async-placeholder skip path. Also covers initIslandHydration's host
- * accessor wiring.
+ * the async-placeholder skip path, and walk-path server-state restoration.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -11,14 +10,18 @@ import { component } from 'sigx';
 import {
     scheduleComponentHydration,
     cleanupPendingHydrations,
-    invalidateMarkerIndex,
-    initIslandHydration
+    invalidateMarkerIndex
 } from '../src/client/hydrate-islands';
+import { invalidateIslandCache } from '../src/client/island-context';
+import { islandsPlugin } from '../src/plugin';
+import { registerClientPlugin, clearClientPlugins } from '@sigx/server-renderer/client';
 import {
     createSSRContainer,
     cleanupContainer,
-    cleanupScripts
+    cleanupScripts,
+    createIslandDataScript
 } from './test-utils';
+import type { SSRSignalFn } from '../src/server/render-component';
 
 let testId = 0;
 function uniqueName(base: string): string {
@@ -164,43 +167,90 @@ describe('scheduleComponentHydration (full-tree path)', () => {
     });
 });
 
-describe('initIslandHydration', () => {
-    afterEach(() => {
-        // Reset the host accessors back to inert.
-        initIslandHydration({
-            getCurrentAppContext: () => undefined,
-            setCurrentAppContext: () => {},
-            setPendingServerState: () => {}
-        });
-        cleanupPendingHydrations();
+describe('scheduleComponentHydration — server-state restoration (#120)', () => {
+    let container: HTMLDivElement;
+
+    beforeEach(() => {
+        cleanupScripts();
+        invalidateIslandCache();
         invalidateMarkerIndex();
-        vi.useRealTimers();
+        clearClientPlugins();
+        registerClientPlugin(islandsPlugin());
+    });
+
+    afterEach(() => {
+        if (container) cleanupContainer(container);
+        cleanupScripts();
+        invalidateIslandCache();
+        invalidateMarkerIndex();
+        clearClientPlugins();
         vi.restoreAllMocks();
     });
 
-    it('wires host accessors that are then used during load hydration', () => {
-        vi.useFakeTimers({ shouldAdvanceTime: true });
-        const getCtx = vi.fn(() => ({ app: true }));
-        const setCtx = vi.fn();
-        const setState = vi.fn();
-        initIslandHydration({
-            getCurrentAppContext: getCtx,
-            setCurrentAppContext: setCtx,
-            setPendingServerState: setState
+    it('seeds an island signal from the server-captured state via the new client seam', async () => {
+        const name = `Restore_${++testId}`;
+        // Literal initial is 0; the server captured 7. The restoring signal must
+        // seed 7 so a subsequent increment produces 8 (not 1).
+        const Comp = component((ctx) => {
+            const ssrSignal = ctx.signal as unknown as SSRSignalFn;
+            const count = ssrSignal(0, 'count');
+            return () => (
+                <div>
+                    <span class="count">{count.value}</span>
+                    <button onClick={() => { count.value++; }}>+</button>
+                </div>
+            );
+        }, { name });
+
+        // SSR DOM reflects the captured value (server renders the final state).
+        container = createSSRContainer(
+            '<div><span class="count">7</span><button>+</button></div><!--$c:1-->'
+        );
+        createIslandDataScript({
+            '1': { strategy: 'load', componentId: name, props: {}, state: { count: 7 } }
         });
 
-        const container = createSSRContainer('<span class="sth">x</span><!--$c:1-->');
-        const name = `Init_${++testId}`;
-        const Comp = component(() => () => <span class="sth">x</span>, { name });
-        const vnode = { type: Comp as any, props: {}, key: null, children: [], dom: null };
-
+        const vnode = { type: Comp as any, props: { 'client:load': true }, key: null, children: [], dom: null };
         scheduleComponentHydration(vnode as any, container.firstChild, container, { strategy: 'load' });
+        await Promise.resolve();
 
-        // getCurrentAppContext is read to capture context; setCurrentAppContext is
-        // used to swap context around the hydrate call.
-        expect(getCtx).toHaveBeenCalled();
-        expect(setCtx).toHaveBeenCalled();
+        const button = container.querySelector('button')!;
+        button.click();
+        await Promise.resolve();
 
-        cleanupContainer(container);
+        // 7 (restored) + 1 = 8 — proves the signal was seeded from server state.
+        expect(container.querySelector('.count')!.textContent).toBe('8');
+    });
+
+    it('leaves a state-less island on its literal initial value', async () => {
+        const name = `NoState_${++testId}`;
+        const Comp = component((ctx) => {
+            const ssrSignal = ctx.signal as unknown as SSRSignalFn;
+            const count = ssrSignal(0, 'count');
+            return () => (
+                <div>
+                    <span class="count">{count.value}</span>
+                    <button onClick={() => { count.value++; }}>+</button>
+                </div>
+            );
+        }, { name });
+
+        container = createSSRContainer(
+            '<div><span class="count">0</span><button>+</button></div><!--$c:1-->'
+        );
+        // Island data without a `state` field.
+        createIslandDataScript({
+            '1': { strategy: 'load', componentId: name, props: {} }
+        });
+
+        const vnode = { type: Comp as any, props: { 'client:load': true }, key: null, children: [], dom: null };
+        scheduleComponentHydration(vnode as any, container.firstChild, container, { strategy: 'load' });
+        await Promise.resolve();
+
+        container.querySelector('button')!.click();
+        await Promise.resolve();
+
+        // 0 (initial) + 1 = 1 — no restoration, still interactive.
+        expect(container.querySelector('.count')!.textContent).toBe('1');
     });
 });

@@ -10,8 +10,7 @@ import '../client-directives';
 // Export islands hydration
 export {
     hydrateIslands,
-    scheduleComponentHydration,
-    initIslandHydration
+    scheduleComponentHydration
 } from './hydrate-islands';
 
 // Export async hydration

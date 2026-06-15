@@ -155,6 +155,27 @@ export interface SSRPlugin {
         beforeHydrate?(container: Element): boolean | void;
 
         /**
+         * Called after the ComponentSetupContext is constructed but BEFORE setup()
+         * runs during hydration. Client-side mirror of
+         * `server.transformComponentContext` — restores server/client symmetry so
+         * hydration is as pluggable as render. The plugin can mutate or replace the
+         * context: swap `ctx.signal` with a state-restoring variant, modify the ssr
+         * helper, etc.
+         *
+         * Return a new context to replace the default, or void to accept as-is.
+         *
+         * Unlike the server hook there is no `SSRContext` during hydration, so only
+         * the vnode and the built context are passed.
+         *
+         * @example Islands plugin swaps `ctx.signal` with a variant that seeds each
+         *          signal from the server-captured island state.
+         */
+        transformComponentContext?(
+            vnode: VNode,
+            componentCtx: ComponentSetupContext
+        ): ComponentSetupContext | void;
+
+        /**
          * Called for each component encountered during the hydration walk.
          * Return a `Node | null` to indicate the plugin handled this component
          * (the returned value is the next DOM sibling to process).

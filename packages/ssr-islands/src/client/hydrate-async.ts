@@ -131,5 +131,10 @@ async function hydrateAsyncComponent(container: Element, info: IslandInfo): Prom
     // Seed restored island signal state BEFORE hydrating (mirrors the islands
     // hydrate path) — the old `serverState` 4th arg to hydrateComponent is gone.
     seedPendingServerState(info.state);
-    hydrateComponent(vnode, container.firstChild, container);
+    try {
+        hydrateComponent(vnode, container.firstChild, container);
+    } finally {
+        // Clear even on throw so stale state can't seed the next hydration.
+        seedPendingServerState(null);
+    }
 }

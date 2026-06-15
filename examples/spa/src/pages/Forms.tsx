@@ -44,7 +44,9 @@ export const Forms = component(({ signal }) => {
         country: 'us',
         bio: '',
         rating: 3,
-        count: 0
+        count: 0,
+        trimmedName: '',
+        search: ''
     });
 
     return () => (
@@ -69,6 +71,20 @@ export const Forms = component(({ signal }) => {
                 </div>
                 <p style="margin-top: 1rem;">
                     Hello, <strong>{state.name || '(stranger)'}</strong> from <strong>{state.country}</strong>. Agreed: <strong>{state.agreed ? 'yes' : 'no'}</strong>. Bio length: <strong>{state.bio.length}</strong>.
+                </p>
+            </div>
+
+            <div class="card">
+                <h3 style="margin-top: 0;">Model modifiers</h3>
+                <p style="color: #555;">
+                    <code>modelModifiers</code> tunes write-back: <code>trim</code> strips whitespace, <code>lazy</code> syncs on blur/enter instead of every keystroke, <code>debounce</code> delays the update.
+                </p>
+                <div style="display: flex; flex-direction: column; gap: 0.75rem; margin-top: 1rem;">
+                    <input model={() => state.trimmedName} modelModifiers={{ trim: true, lazy: true }} placeholder="Trimmed + lazy (updates on blur)" />
+                    <input model={() => state.search} modelModifiers={{ debounce: 400 }} placeholder="Debounced search (400ms)" />
+                </div>
+                <p style="margin-top: 1rem;">
+                    Name: <strong>[{state.trimmedName}]</strong> · Search: <strong>{state.search || '(empty)'}</strong>
                 </p>
             </div>
 

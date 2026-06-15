@@ -1,6 +1,6 @@
 // JSX runtime for @sigx/runtime-core
 
-import { detectAccess, isComputed } from '@sigx/reactivity';
+import { detectAccess, detectAccessDev, isComputed } from '@sigx/reactivity';
 import { createModel, isModel, type Model } from './model.js';
 import { getModelProcessors } from './platform.js';
 import { isComponent } from './utils/is-component.js';
@@ -100,6 +100,29 @@ function normalizeChild(c: JSXChild): VNode {
 // isComponent is imported from ./utils/is-component.js
 
 /**
+ * Detect the `[stateObj, key]` tuple a model getter reads. In development,
+ * warns when the getter is a transformed expression (e.g. `() => state.x * 2`)
+ * that would silently mis-bind, since two-way binding writes back to the last
+ * property read. Production uses the lean {@link detectAccess} path.
+ */
+function detectModelBinding(selector: () => any): [any, string | symbol] | null {
+    if (process.env.NODE_ENV !== 'production') {
+        const { access, looksTransformed } = detectAccessDev(selector);
+        if (access && looksTransformed) {
+            console.warn(
+                "[sigx] A `model` getter should read a signal property directly, " +
+                "e.g. model={() => state.field}. The getter returned a value different " +
+                "from the property it read (`" + String(access[1]) + "`), so writes will " +
+                "go back to that property and won't match what the input shows. " +
+                "Bind to a signal property or a writable computed instead."
+            );
+        }
+        return access;
+    }
+    return detectAccess(selector);
+}
+
+/**
  * Create a JSX element - this is the core function called by TSX transpilation
  */
 export function jsx(
@@ -176,7 +199,7 @@ export function jsx(
                 }
                 // Convert getter function to tuple using detectAccess
                 else if (typeof modelBinding === "function") {
-                    const detected = detectAccess(modelBinding);
+                    const detected = detectModelBinding(modelBinding);
                     if (detected && typeof detected[1] === 'string') {
                         tuple = detected as [object, string];
                     }
@@ -214,6 +237,12 @@ export function jsx(
                                 break;
                             }
                         }
+                        // Surface model modifiers (trim/lazy/number/debounce) to the
+                        // platform by tagging the handler the processor produced.
+                        if (handled && props.modelModifiers) {
+                            const h = processedProps["onUpdate:modelValue"];
+                            if (typeof h === "function") (h as any).__sigx_modelModifiers = props.modelModifiers;
+                        }
                     }
 
                     // For components: create Model<T> object
@@ -242,7 +271,7 @@ export function jsx(
                 }
                 // Handle function form: model:propName={() => state.prop}
                 else if (typeof modelBinding === "function") {
-                    const detected = detectAccess(modelBinding);
+                    const detected = detectModelBinding(modelBinding);
                     if (detected && typeof detected[1] === 'string') {
                         tuple = detected as [object, string];
                     }
