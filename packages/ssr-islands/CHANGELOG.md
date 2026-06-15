@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Server-captured island *signal* state is now restored on hydration. The pack
+  implements the new client `transformComponentContext` seam in
+  `@sigx/server-renderer` (signalxjs/core#120) to swap `ctx.signal` for a
+  restoring variant that seeds each signal from `__SIGX_ISLANDS__[id].state`
+  (falling back to the literal initial), so an island resumes from its server
+  value across the eager, deferred-strategy, and async-streaming hydration paths.
+
 ### Changed
 
 - Now developed in the `signalxjs/core` monorepo and released in lockstep with
@@ -20,12 +29,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - Dropped the `generateSignalKey` and `SSRSignalFn` re-exports that proxied
   `@sigx/server-renderer` internals; `SSRSignalFn` is now this package's own type.
+- Removed the inert `initIslandHydration` wiring hook. It existed only to await
+  the core client hydration seam now delivered by signalxjs/core#120; signal-state
+  restoration is wired internally and app-context propagation across deferred
+  hydration imports the accessors directly from `@sigx/server-renderer/client`.
 
 ### Known limitations
 
-- Client-side restoration of server-captured island *signal* state is inert
-  pending a client hydration plugin seam in core (signalxjs/core#120). Selective
-  hydration and `useAsync`/`useStream` state transfer are unaffected.
 - `client:only` currently renders + hydrates in place like `client:load`; true
   skip-SSR (never running the component server-side) needs a core
   render-suppression seam (signalxjs/core#122).

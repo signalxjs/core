@@ -17,19 +17,28 @@ import {
 } from 'sigx';
 import { registerComponent, type ComponentFactory } from './registry';
 import { loadIslandComponent } from './chunk-loader';
+import { getIslandServerState } from './island-context';
 import type { IslandInfo } from './types';
 
-// Import from server-renderer core.
-import { hydrateComponent } from '@sigx/server-renderer/client';
+// Import from server-renderer core. The app-context accessors propagate DI across
+// deferred (async) hydration; the client `transformComponentContext` seam (#120)
+// consumes the pending server-state staged below.
+import {
+    hydrateComponent,
+    getCurrentAppContext,
+    setCurrentAppContext
+} from '@sigx/server-renderer/client';
 
 // ============= Module State =============
 
-// Optional host-wired accessors for app context + server-state restoration. They
-// stay null unless a host calls initIslandHydration(); core does not yet expose a
-// client hydration seam to wire them, so they are currently inert (#120).
-let _getCurrentAppContext: (() => any) | null = null;
-let _setCurrentAppContext: ((ctx: any) => void) | null = null;
-let _setPendingServerState: ((state: Record<string, any> | null) => void) | null = null;
+/**
+ * Island server-state staged for the next `hydrateComponent` call. The islands
+ * plugin's client `transformComponentContext` hook consumes it (via
+ * {@link consumePendingServerState}) to seed restored signal values into the
+ * island's signals. Set right before hydrating an island so it scopes to that
+ * component only.
+ */
+let _pendingServerState: Record<string, any> | null = null;
 
 /**
  * Pending hydration cleanup functions.
@@ -59,30 +68,25 @@ export function cleanupPendingHydrations(): void {
 }
 
 /**
- * Optional wiring hook: install host-provided accessors for app context and
- * server-state restoration. NOT currently called — the islands plugin cannot wire
- * these until core exposes a client hydration seam (#120), so app-context
- * propagation and tracked-signal restoration to deferred islands stay inert until
- * then. Kept as the ready integration point.
+ * Stage island server-state before a `hydrateComponent` call so the hydrated
+ * island restores its tracked signal values. The islands plugin's client
+ * `transformComponentContext` hook consumes it via {@link consumePendingServerState}
+ * during context construction. Shared by the async-streaming hydration path
+ * (`hydrate-async.ts`). A falsy state clears any stale pending value.
  */
-export function initIslandHydration(fns: {
-    getCurrentAppContext: () => any;
-    setCurrentAppContext: (ctx: any) => void;
-    setPendingServerState: (state: Record<string, any> | null) => void;
-}): void {
-    _getCurrentAppContext = fns.getCurrentAppContext;
-    _setCurrentAppContext = fns.setCurrentAppContext;
-    _setPendingServerState = fns.setPendingServerState;
+export function seedPendingServerState(state: Record<string, any> | null | undefined): void {
+    _pendingServerState = state || null;
 }
 
 /**
- * Seed the pending island server-state before a `hydrateComponent` call so the
- * hydrated island restores its tracked signal values. No-op unless a host has
- * wired a restoration sink via {@link initIslandHydration}. Shared by the
- * async-streaming hydration path (`hydrate-async.ts`).
+ * Read and clear the pending island server-state staged by
+ * {@link seedPendingServerState}. Returns null when nothing is staged (the common
+ * case — non-island components hydrate untouched).
  */
-export function seedPendingServerState(state: Record<string, any> | null | undefined): void {
-    if (state) _setPendingServerState?.(state);
+export function consumePendingServerState(): Record<string, any> | null {
+    const state = _pendingServerState;
+    _pendingServerState = null;
+    return state;
 }
 
 // ============= Full-tree Component Hydration Scheduling =============
@@ -110,18 +114,27 @@ export function scheduleComponentHydration(
         return trailingMarker ? trailingMarker.nextSibling : dom;
     }
 
-    const capturedAppContext = _getCurrentAppContext?.();
+    const capturedAppContext = getCurrentAppContext();
+
+    // Resolve this island's id from its trailing marker so we can restore the
+    // server-captured signal state for the walk-driven hydration path.
+    const componentId = trailingMarker ? parseMarkerId(trailingMarker) : null;
 
     const doHydrate = () => {
         // Remove our cleanup entry since we're actually hydrating
         if (cleanupFn) _pendingCleanups.delete(cleanupFn);
 
-        const prevAppContext = _getCurrentAppContext?.();
-        _setCurrentAppContext?.(capturedAppContext);
+        const prevAppContext = getCurrentAppContext();
+        setCurrentAppContext(capturedAppContext);
+        if (componentId !== null) seedPendingServerState(getIslandServerState(componentId));
         try {
             hydrateComponent(vnode, contentStart, parent, trailingMarker);
         } finally {
-            _setCurrentAppContext?.(prevAppContext);
+            setCurrentAppContext(prevAppContext);
+            // Defensively clear: if hydrateComponent threw before the plugin
+            // consumed it (or no islands plugin is registered), stale state must
+            // not leak into the next hydration.
+            seedPendingServerState(null);
         }
     };
 
@@ -184,6 +197,13 @@ export function scheduleComponentHydration(
     }
 
     return trailingMarker ? trailingMarker.nextSibling : dom;
+}
+
+/** Parse the component id out of a `<!--$c:N-->` trailing marker, or null. */
+function parseMarkerId(marker: Comment): number | null {
+    if (!marker.data.startsWith('$c:')) return null;
+    const id = parseInt(marker.data.slice(3), 10);
+    return isNaN(id) ? null : id;
 }
 
 function findComponentBoundaries(dom: Node | null): { contentStart: Node | null; trailingMarker: Comment | null } {
@@ -466,9 +486,7 @@ function hydrateIsland(marker: Comment, component: ComponentFactory, info: Islan
 
     const props = info.props || {};
 
-    if (info.state) {
-        _setPendingServerState?.(info.state);
-    }
+    seedPendingServerState(info.state);
 
     const vnode: VNode = {
         type: component as any,
@@ -479,7 +497,12 @@ function hydrateIsland(marker: Comment, component: ComponentFactory, info: Islan
     };
 
     const parent = container.parentNode!;
-    hydrateComponent(vnode, container, parent, marker);
+    try {
+        hydrateComponent(vnode, container, parent, marker);
+    } finally {
+        // Clear even on throw so stale state can't seed the next hydration.
+        seedPendingServerState(null);
+    }
 }
 
 function mountClientOnly(marker: Comment, component: ComponentFactory, info: IslandInfo): void {

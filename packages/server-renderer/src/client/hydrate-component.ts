@@ -31,7 +31,8 @@ import {
 import type { SchedulerJob } from 'sigx/internals';
 import {
     InternalVNode,
-    getCurrentAppContext
+    getCurrentAppContext,
+    getClientPlugins
 } from './hydrate-context';
 import { hydrateNode } from './hydrate-core';
 
@@ -136,7 +137,7 @@ export function hydrateComponent(vnode: VNode, dom: Node | null, parent: Node, t
         isHydrating: true
     };
 
-    const componentCtx: ComponentSetupContext = {
+    let componentCtx: ComponentSetupContext = {
         el: parent as HTMLElement,
         signal: signal,
         props: createPropsAccessor(reactiveProps),
@@ -153,7 +154,17 @@ export function hydrateComponent(vnode: VNode, dom: Node | null, parent: Node, t
         ssr: ssrHelper
     };
 
-    // For ROOT component only (no parent), provide the AppContext
+    // Let plugins transform the context before setup runs (mirror of the
+    // server's transformComponentContext). A strategy pack can swap ctx.signal
+    // for a state-restoring variant here — core stays strategy-agnostic.
+    for (const plugin of getClientPlugins()) {
+        const next = plugin.client?.transformComponentContext?.(vnode, componentCtx);
+        if (next) componentCtx = next;
+    }
+
+    // For ROOT component only (no parent), provide the AppContext. Run this AFTER
+    // the transform hooks so a plugin that returns a replacement context still
+    // receives the AppContext (the hook contract allows swapping the whole ctx).
     if (!parentInstance && getCurrentAppContext()) {
         provideAppContext(componentCtx, getCurrentAppContext()!);
     }

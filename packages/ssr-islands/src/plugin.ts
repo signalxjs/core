@@ -37,8 +37,9 @@ import {
 } from './server/render-islands';
 import type { IslandInfo, HydrationStrategy } from './types';
 
-import { scheduleComponentHydration } from './client/hydrate-islands';
+import { scheduleComponentHydration, consumePendingServerState } from './client/hydrate-islands';
 import { hydrateLeftoverAsyncComponents } from './client/hydrate-async';
+import { createRestoringSignal } from './client/restore-signal';
 
 // ─── Plugin Data Types ──────────────────────────────────────────
 
@@ -246,6 +247,22 @@ export function islandsPlugin(options?: IslandsPluginOptions): SSRPlugin {
         },
 
         client: {
+            transformComponentContext(
+                _vnode: VNode,
+                componentCtx: ComponentSetupContext
+            ): ComponentSetupContext | void {
+                // Restore the server-captured signal state staged just before this
+                // island's hydrateComponent call. Presence of pending state scopes
+                // this to islands — non-island components have none and are left
+                // untouched (mirrors the server hook guarding on the client:*
+                // directive).
+                const state = consumePendingServerState();
+                if (!state) return;
+
+                componentCtx.signal = createRestoringSignal(state) as typeof signal;
+                return componentCtx;
+            },
+
             hydrateComponent(
                 vnode: VNode,
                 dom: Node | null,

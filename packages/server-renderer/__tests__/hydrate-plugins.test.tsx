@@ -5,7 +5,7 @@
  * paths that hydrate.test.tsx doesn't cover.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { component } from 'sigx';
+import { component, signal } from 'sigx';
 import { hydrate } from '../src/client/hydrate-core';
 import {
     registerClientPlugin,
@@ -15,7 +15,8 @@ import type { SSRPlugin } from '../src/plugin';
 import {
     createSSRContainer,
     cleanupContainer,
-    TestCounter
+    TestCounter,
+    nextTick
 } from './test-utils';
 
 beforeEach(() => {
@@ -117,6 +118,104 @@ describe('hydrate() — plugin hooks', () => {
         hydrate({ type: 'div', props: {}, key: null, children: [], dom: null }, container);
 
         expect(order).toEqual(['before:first', 'before:second', 'after:first', 'after:second']);
+    });
+});
+
+describe('hydrate() — client transformComponentContext (#120)', () => {
+    let container: HTMLDivElement;
+
+    afterEach(() => {
+        if (container) cleanupContainer(container);
+    });
+
+    it('invokes the hook with (vnode, componentCtx) before setup runs', () => {
+        const seen: { signal: unknown; type: unknown } = { signal: null, type: null };
+        const plugin: SSRPlugin = {
+            name: 'ctx-observer',
+            client: {
+                transformComponentContext: (vnode, ctx) => {
+                    seen.type = vnode.type;
+                    seen.signal = ctx.signal;
+                }
+            }
+        };
+        registerClientPlugin(plugin);
+
+        container = createSSRContainer('<div class="counter"><span class="count">0</span><button>+</button></div><!--$c:1-->');
+        hydrate((TestCounter as any)({}), container);
+
+        // The hook saw this component's vnode and the built context's signal fn.
+        expect(seen.type).toBe(TestCounter);
+        expect(typeof seen.signal).toBe('function');
+    });
+
+    it('lets a plugin swap ctx.signal and the swapped fn is what setup uses', () => {
+        // A swapped factory that seeds a different value than the literal initial.
+        const swapped = vi.fn((_initial: any) => signal(99));
+        registerClientPlugin({
+            name: 'signal-swap',
+            client: {
+                transformComponentContext: (_vnode, ctx) => {
+                    ctx.signal = swapped as any;
+                    return ctx;
+                }
+            }
+        });
+
+        const Comp = component((ctx) => {
+            const s = ctx.signal(5);
+            return () => <span class="v">{s.value}</span>;
+        }, { name: 'CtxSwapComp' });
+
+        container = createSSRContainer('<span class="v">99</span><!--$c:1-->');
+        hydrate((Comp as any)({}), container);
+
+        // setup() called the swapped factory with the component's literal initial,
+        // proving the hook ran before setup.
+        expect(swapped).toHaveBeenCalledWith(5);
+        expect(container.querySelector('.v')!.textContent).toBe('99');
+    });
+
+    it('leaves the context unchanged when the hook returns void', async () => {
+        registerClientPlugin({
+            name: 'noop-transform',
+            client: { transformComponentContext: () => undefined }
+        });
+
+        container = createSSRContainer('<div class="counter"><span class="count">0</span><button>+</button></div><!--$c:1-->');
+        hydrate((TestCounter as any)({}), container);
+        await nextTick();
+
+        // Untouched context → component still hydrates and is interactive.
+        container.querySelector('button')!.click();
+        await nextTick();
+        expect(container.querySelector('.count')!.textContent).toBe('1');
+    });
+
+    it('runs multiple transforms in registration order; later sees the earlier mutation', () => {
+        const order: string[] = [];
+        registerClientPlugin({
+            name: 'first',
+            client: {
+                transformComponentContext: (_vnode, ctx) => {
+                    order.push('first');
+                    (ctx as any).__mark = 'first';
+                }
+            }
+        });
+        registerClientPlugin({
+            name: 'second',
+            client: {
+                transformComponentContext: (_vnode, ctx) => {
+                    order.push(`second:saw=${(ctx as any).__mark}`);
+                }
+            }
+        });
+
+        container = createSSRContainer('<div class="counter"><span class="count">0</span><button>+</button></div><!--$c:1-->');
+        hydrate((TestCounter as any)({}), container);
+
+        expect(order).toEqual(['first', 'second:saw=first']);
     });
 });
 
