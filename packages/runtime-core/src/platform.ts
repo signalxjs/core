@@ -78,13 +78,6 @@ export function registerModelProcessor(fn: ModelProcessor): () => void {
 }
 
 /**
- * Get the registered user model processors (for internal use by the JSX runtime).
- */
-export function getUserModelProcessors(): ModelProcessor[] {
-    return userModelProcessors;
-}
-
-/**
  * Run the full model-processor chain for an intrinsic element: user-registered
  * processors first (registration order, first `true` wins), then the platform
  * processor. Returns `true` if any processor handled the binding.
