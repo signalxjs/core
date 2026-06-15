@@ -299,6 +299,32 @@ describe('hydrateIslands with lazy components', () => {
         expect(hydrated).toBe(true);
     });
 
+    it('hydrates a client:only island in place when there is no placeholder (#122 regression)', async () => {
+        let hydrated = false;
+        const name = uniqueName('ClientOnlyInPlace');
+
+        const ClientOnlyComp = component(() => {
+            hydrated = true;
+            return () => <span class="co-inplace">Only</span>;
+        }, { name });
+
+        registerComponent(name, ClientOnlyComp);
+
+        // Under the current render path client:only is server-rendered IN PLACE
+        // (no <div data-island> placeholder), so hydrateIslands() must hydrate the
+        // existing content rather than silently do nothing.
+        container = createSSRContainer(`<span class="co-inplace">Only</span><!--$c:1-->`);
+        createIslandDataScript({
+            '1': { strategy: 'only', componentId: name, props: {} }
+        });
+
+        hydrateIslands();
+        await vi.advanceTimersByTimeAsync(50);
+        await nextTick();
+
+        expect(hydrated).toBe(true);
+    });
+
     it('should hydrate client:idle island with lazily registered component', async () => {
         let hydrated = false;
         const name = uniqueName('LazyIdleIsland');

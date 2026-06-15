@@ -171,9 +171,9 @@ export function islandsPlugin(options?: IslandsPluginOptions): SSRPlugin {
                 const islandInfo = data.islands.get(id);
                 if (!islandInfo) return; // Not an island
 
-                // (client:only is handled in transformComponentContext — its vnode
-                // was swapped to a placeholder stub there, so it has no signal map.)
-                // Capture signal state
+                // Capture signal state (client:only included — it renders in place
+                // under the current render path, so it captures state like any
+                // eager island).
                 const signalMap = data.signalMaps.get(id);
                 if (signalMap && signalMap.size > 0) {
                     const state = serializeSignalState(signalMap);

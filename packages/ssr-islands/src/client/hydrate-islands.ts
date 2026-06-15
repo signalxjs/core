@@ -489,6 +489,10 @@ function mountClientOnly(marker: Comment, component: ComponentFactory, info: Isl
     }
 
     if (!placeholder || !(placeholder as Element).hasAttribute?.('data-island')) {
+        // No skip-SSR placeholder. Under the current 0.6.x render path client:only
+        // is rendered in place (true skip-SSR needs core support — #122), so hydrate
+        // it like any eager island instead of silently doing nothing.
+        hydrateIsland(marker, component, info);
         return;
     }
 
