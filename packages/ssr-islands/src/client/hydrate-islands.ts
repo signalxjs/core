@@ -108,15 +108,17 @@ export function scheduleComponentHydration(
     const componentName = componentFactory.__islandId || componentFactory.__name || 'Anonymous';
 
     // Core has no directive knowledge (splitComponentProps keeps unknown keys),
-    // so strip client:* here — mirrors the data-driven hydrateIsland() path, where
-    // props are already directive-free via the server's filterClientDirectives.
-    // Only clone+filter when a directive is actually present; otherwise reuse the
-    // original vnode so the no-directive path stays allocation-free.
-    let cleanVnode: VNode = vnode;
+    // so strip client:* before delegating — mirrors the data-driven hydrateIsland()
+    // path, where props are already directive-free via filterClientDirectives.
+    // Mutate props on THIS vnode rather than cloning it: core attaches hydration
+    // state (_componentProps, _slots, dom) to the passed vnode and retains it for
+    // later patching/unmount, so its object identity must be preserved. Assigning
+    // a fresh filtered object leaves the caller's original props object intact.
+    // Only rewrite props when a directive is actually present.
     if (vnode.props) {
         for (const key in vnode.props) {
             if (key.startsWith(CLIENT_DIRECTIVE_PREFIX)) {
-                cleanVnode = { ...vnode, props: filterClientDirectives(vnode.props) };
+                vnode.props = filterClientDirectives(vnode.props);
                 break;
             }
         }
@@ -144,7 +146,7 @@ export function scheduleComponentHydration(
         setCurrentAppContext(capturedAppContext);
         if (componentId !== null) seedPendingServerState(getIslandServerState(componentId));
         try {
-            hydrateComponent(cleanVnode, contentStart, parent, trailingMarker);
+            hydrateComponent(vnode, contentStart, parent, trailingMarker);
         } finally {
             setCurrentAppContext(prevAppContext);
             // Defensively clear: if hydrateComponent threw before the plugin
@@ -228,7 +230,7 @@ export function scheduleComponentHydration(
                 const prevAppContext = getCurrentAppContext();
                 setCurrentAppContext(capturedAppContext);
                 try {
-                    render(cleanVnode, container);
+                    render(vnode, container);
                 } finally {
                     setCurrentAppContext(prevAppContext);
                 }

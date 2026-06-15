@@ -190,6 +190,10 @@ describe('scheduleComponentHydration (full-tree path)', () => {
         // Real prop survives; directive does not (neither as value nor as a spread key).
         expect(seen.title).toBe('hello');
         expect('client:load' in seen).toBe(false);
+        // Directives are stripped on the original vnode in place (not a clone), so
+        // core's hydration state lands on the retained vnode — keep its identity.
+        expect('client:load' in (vnode.props as Record<string, any>)).toBe(false);
+        expect((vnode.props as Record<string, any>).title).toBe('hello');
     });
 });
 
