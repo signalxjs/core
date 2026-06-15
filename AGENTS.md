@@ -127,7 +127,12 @@ free port automatically).
 - `packages/runtime-core` → `@sigx/runtime-core` — component model, renderer base.
 - `packages/runtime-dom` → `@sigx/runtime-dom` — DOM renderer.
 - `packages/sigx` → `sigx` — umbrella public package.
-- `packages/server-renderer` → `@sigx/server-renderer` — SSR + hydration.
+- `packages/server-renderer` → `@sigx/server-renderer` — SSR + hydration. A
+  strategy-agnostic plugin platform; hydration strategies are plugins, not core.
+- `packages/ssr-islands` → `@sigx/ssr-islands` — islands architecture (selective
+  hydration via `client:*` directives). The first-party *reference* strategy pack
+  riding `@sigx/server-renderer`'s public plugin API; a drop-in equal of any
+  third-party pack, with no privileged access to core.
 - `packages/vite` → `@sigx/vite` — Vite plugin for dev/build/HMR.
 - `examples/` — runnable apps (`hello`, `spa`, `spa-ssr`).
 
