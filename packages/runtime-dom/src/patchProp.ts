@@ -6,6 +6,8 @@
  * and custom property bindings.
  */
 
+import { resolveTiming, createDebounceScheduler, getHandlerModifiers } from '@sigx/runtime-core/internals';
+
 /**
  * Stable per-event listener wrapper: re-renders swap `invoker.value`
  * instead of removing and re-adding the DOM listener for every fresh
@@ -92,24 +94,20 @@ export function patchProp(dom: Element, key: string, prevValue: any, nextValue: 
             }
 
             if (newValue) {
-                // Modifiers travel on the model handler (attached by the DOM model
-                // processor) so they're available regardless of prop patch order.
-                const mods = (newValue as any).__sigx_modelModifiers as
-                    | { trim?: boolean; number?: boolean; lazy?: boolean; debounce?: number | boolean }
-                    | undefined;
+                // Value-transforms (trim/number/custom) already run inside the
+                // core write-back wrapper that `newValue` is. The platform only
+                // maps the timing hints (lazy/debounce) the wrapper carries.
+                const { lazy, debounceMs } = resolveTiming(getHandlerModifiers(newValue));
 
                 // Trailing-edge debounce wraps the value push; created once per
-                // handler instance so the timer persists across events.
+                // handler instance so the timer persists across events. Scheduling
+                // is shared with core; the platform owns the cancel wiring below.
                 let invoke = (v: any) => (newValue as Function)(v);
                 let cancel: (() => void) | undefined;
-                if (mods?.debounce) {
-                    const ms = typeof mods.debounce === 'number' ? mods.debounce : 300;
-                    let timer: ReturnType<typeof setTimeout> | undefined;
-                    cancel = () => { if (timer) clearTimeout(timer); };
-                    invoke = (v: any) => {
-                        if (timer) clearTimeout(timer);
-                        timer = setTimeout(() => (newValue as Function)(v), ms);
-                    };
+                if (debounceMs != null) {
+                    const scheduler = createDebounceScheduler((v) => (newValue as Function)(v), debounceMs);
+                    invoke = scheduler.invoke;
+                    cancel = scheduler.cancel;
                 }
 
                 const handler = (e: Event) => {
@@ -126,15 +124,6 @@ export function patchProp(dom: Element, key: string, prevValue: any, nextValue: 
                         val = target.value;
                     }
 
-                    // String-only modifiers: trim whitespace, coerce to number.
-                    if (mods && typeof val === 'string') {
-                        if (mods.trim) val = val.trim();
-                        if (mods.number) {
-                            const n = parseFloat(val);
-                            if (!Number.isNaN(n)) val = n;
-                        }
-                    }
-
                     invoke(val);
                 };
                 (newValue as any).__sigx_model_handler = handler;
@@ -144,7 +133,7 @@ export function patchProp(dom: Element, key: string, prevValue: any, nextValue: 
                 const inputType = (dom as HTMLInputElement).type;
                 const isToggle = tagName === 'input' && (inputType === 'checkbox' || inputType === 'radio');
                 // `.lazy` syncs text inputs on `change` (blur/enter) instead of `input`.
-                if (tagName === 'select' || isToggle || mods?.lazy) {
+                if (tagName === 'select' || isToggle || lazy) {
                     el.addEventListener('change', handler);
                 } else {
                     el.addEventListener('input', handler);
