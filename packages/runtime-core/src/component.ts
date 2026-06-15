@@ -109,7 +109,7 @@ type StripInternalMarkers<T> = {
  *     return () => (
  *         <div class="card">
  *             {slots.header?.() ?? <h2>{title}</h2>}
- *             {slots.default()}
+ *             {slots.default?.()}
  *         </div>
  *     );
  * });

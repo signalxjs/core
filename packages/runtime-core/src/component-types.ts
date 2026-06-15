@@ -102,7 +102,9 @@ export namespace Define {
      */
     export type Slot<TName extends string, TProps = void> = {
         __slots?: {
-            [K in TName]: TProps extends void
+            // Optional: a slot accessor is present only when the parent
+            // provided content for it, otherwise it reads as `undefined`.
+            [K in TName]?: TProps extends void
             ? () => JSXElement | JSXElement[] | null
             : (props: TProps) => JSXElement | JSXElement[] | null
         }
@@ -230,10 +232,13 @@ type ExtractSlots<T> = T extends { __slots?: infer S } ? S : {};
 type DefaultSlot = () => JSXElement[];
 
 /**
- * Slots object passed to components - always has default, plus any declared slots
+ * Slots object passed to components. Every slot — `default` included — is a
+ * callable accessor only when the parent provided content for it; an
+ * unprovided slot reads as `undefined`, so check presence with
+ * `slots.x?.()` / `slots.x?.() ?? fallback`.
  */
 export type SlotsObject<TSlots = {}> = {
-    default: DefaultSlot;
+    default?: DefaultSlot;
 } & TSlots;
 
 /**

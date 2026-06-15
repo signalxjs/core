@@ -363,7 +363,7 @@ describe('Portal conditional cleanup (reactivity bug investigation)', () => {
         const show = signal({ value: true });
 
         const Wrapper = component(({ slots }) => {
-            return () => jsx('div', { class: 'wrapper', children: slots.default() });
+            return () => jsx('div', { class: 'wrapper', children: slots.default?.() });
         });
 
         const TestComponent = component(() => {

@@ -202,11 +202,90 @@ describe('renderToString — Comment vnodes', () => {
 describe('renderToString — falsy slot children', () => {
     it('renders numeric 0 and empty-adjacent children passed to a component slot', async () => {
         const Wrap = component((ctx) => {
-            return () => <div class="wrap">{ctx.slots.default()}</div>;
+            return () => <div class="wrap">{ctx.slots.default?.()}</div>;
         }, { name: 'Wrap' });
 
         const html = await renderToString(<Wrap>{0}</Wrap>);
         expect(html).toContain('>0<');
+    });
+});
+
+describe('renderToString — slot presence parity', () => {
+    it('falls back for absent slots and renders content when provided', async () => {
+        const Card = component((ctx) => {
+            return () => (
+                <div class="card">
+                    {(ctx.slots as any).header?.() ?? <h2 class="fb">fallback</h2>}
+                    {ctx.slots.default?.() ?? <span class="dfb">no body</span>}
+                </div>
+            );
+        }, { name: 'Card' });
+
+        // Nothing provided → both fallbacks render (parity with the client,
+        // where absent slots read as undefined).
+        const empty = await renderToString(<Card />);
+        expect(empty).toContain('class="fb"');
+        expect(empty).toContain('class="dfb"');
+
+        // header via the slots prop, default via children → content, no fallbacks.
+        const CardWithSlots = Card as any;
+        const filled = await renderToString(
+            <CardWithSlots slots={{ header: () => <h1 class="h">H</h1> }}>
+                <p class="body">B</p>
+            </CardWithSlots>
+        );
+        expect(filled).toContain('class="h"');
+        expect(filled).toContain('class="body"');
+        expect(filled).not.toContain('class="fb"');
+        expect(filled).not.toContain('class="dfb"');
+    });
+
+    it('groups a slot-prop child into its named slot and excludes it from default', async () => {
+        const Card = component((ctx) => {
+            return () => (
+                <div class="card">
+                    {(ctx.slots as any).footer?.() ?? <span class="ffb">no footer</span>}
+                    {ctx.slots.default?.() ?? <span class="dfb">no body</span>}
+                </div>
+            );
+        }, { name: 'Card' });
+
+        // Only a footer slot-prop child → footer present, default absent.
+        const html = await renderToString(
+            <Card><div slot="footer" class="foot">F</div></Card>
+        );
+        expect(html).toContain('class="foot"');
+        expect(html).toContain('class="dfb"');     // default fell back
+        expect(html).not.toContain('class="ffb"');  // footer did not
+    });
+
+    it('drops a slot="default" child from the default slot, matching the client', async () => {
+        const Card = component((ctx) => {
+            return () => <div class="card">{ctx.slots.default?.() ?? <span class="dfb">no body</span>}</div>;
+        }, { name: 'Card' });
+
+        // An explicit slot="default" child is a named slot the client default
+        // accessor never reads — so for parity the server must not render it as
+        // default content (which would mismatch on hydration).
+        const html = await renderToString(<Card><p slot="default" class="explicit">X</p></Card>);
+        expect(html).toContain('class="dfb"');        // default fell back
+        expect(html).not.toContain('class="explicit"');
+    });
+
+    it('treats a slot named __proto__ as a plain key without prototype pollution', async () => {
+        const Card = component((ctx) => {
+            return () => <div class="card">{(ctx.slots as any)['__proto__']?.()}</div>;
+        }, { name: 'Card' });
+
+        const html = await renderToString(
+            <Card><span slot="__proto__" class="pp">P</span></Card>
+        );
+
+        // The pathological name is a working named slot...
+        expect(html).toContain('class="pp"');
+        // ...and constructing the slots object did not pollute the prototype.
+        expect(({} as any).polluted).toBeUndefined();
+        expect(Object.getPrototypeOf({})).toBe(Object.prototype);
     });
 });
 
