@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render } from '../src/index';
+import { render, patchProp } from '../src/index';
 import { component, jsx, signal } from 'sigx';
 
 describe('patchProp', () => {
@@ -278,6 +278,70 @@ describe('patchProp', () => {
             const div = container.firstElementChild as HTMLDivElement;
             expect(div.style.color).toBe('red');
             expect(div.style.fontSize).toBe('14px');
+        });
+    });
+
+    describe('className handling — nullish/false removal (#98)', () => {
+        it('removes the class attribute when className is nullish, not class="undefined"', () => {
+            const el = document.createElement('div');
+            patchProp(el, 'className', null, undefined);
+            expect(el.hasAttribute('class')).toBe(false);
+            patchProp(el, 'className', null, null);
+            expect(el.hasAttribute('class')).toBe(false);
+        });
+
+        it('removes a previously set class when className becomes nullish or false', () => {
+            const el = document.createElement('div');
+            patchProp(el, 'className', null, 'foo');
+            expect(el.getAttribute('class')).toBe('foo');
+            patchProp(el, 'className', 'foo', false);
+            expect(el.hasAttribute('class')).toBe(false);
+        });
+
+        it('renders a pass-through undefined className with no class attribute', () => {
+            const props: any = {};
+            const App = component(() => {
+                return () => jsx('div', { className: props.className });
+            });
+            render(jsx(App, {}), container);
+
+            const div = container.firstElementChild as HTMLDivElement;
+            expect(div.hasAttribute('class')).toBe(false);
+        });
+    });
+
+    describe('direct patchProp edge cases', () => {
+        it('ignores a null element', () => {
+            expect(() => patchProp(null as any, 'class', null, 'x')).not.toThrow();
+        });
+
+        it('unwraps CustomEvent detail for on* handlers', () => {
+            const el = document.createElement('div');
+            const handler = vi.fn();
+            patchProp(el, 'onThing', null, handler);
+
+            el.dispatchEvent(new CustomEvent('thing', { detail: { ok: 1 } }));
+            expect(handler).toHaveBeenCalledWith({ ok: 1 });
+
+            // swapped handler receives the detail through the same invoker
+            const next = vi.fn();
+            patchProp(el, 'onThing', handler, next);
+            el.dispatchEvent(new CustomEvent('thing', { detail: 2 }));
+            expect(next).toHaveBeenCalledWith(2);
+            expect(handler).toHaveBeenCalledTimes(1);
+        });
+
+        it('removes the listener when the handler becomes null', () => {
+            const el = document.createElement('button');
+            const handler = vi.fn();
+            patchProp(el, 'onClick', null, handler);
+
+            el.dispatchEvent(new MouseEvent('click'));
+            expect(handler).toHaveBeenCalledTimes(1);
+
+            patchProp(el, 'onClick', handler, null);
+            el.dispatchEvent(new MouseEvent('click'));
+            expect(handler).toHaveBeenCalledTimes(1);
         });
     });
 });

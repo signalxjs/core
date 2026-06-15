@@ -4,8 +4,6 @@
 
 // Platform types (public type only)
 export type { ModelProcessor } from './platform.js';
-
-// Model processor registry (public extension point for custom elements)
 export { registerModelProcessor } from './platform.js';
 
 // Plugin types (public type only)
@@ -40,12 +38,8 @@ export {
 export type {
     ComponentAttributeExtensions,
     Define,
-    DefineProp,
     ModelBinding,
-    DefineModel,
     EventDefinition,
-    DefineEvent,
-    DefineSlot,
     SlotsObject,
     EmitFn,
     PlatformTypes,
@@ -60,7 +54,6 @@ export type {
     ComponentFactory,
     AnyComponentFactory,
     ComponentOptions,
-    DefineExpose,
     Ref,
     Exposed,
     ComponentRef
@@ -76,8 +69,8 @@ export { lazy, Suspense, isLazyComponent } from './lazy.js';
 export type { LazyComponentFactory, SuspenseProps } from './lazy.js';
 
 // Async composable
-export { useAsync } from './use-async.js';
-export type { AsyncState } from './use-async.js';
+export { useAsync, useStream } from './use-async.js';
+export type { AsyncState, AsyncOptions, AsyncFetcherContext } from './use-async.js';
 
 // Model (two-way binding)
 export { createModel, createModelFromBinding, isModel } from './model.js';
@@ -98,7 +91,7 @@ export {
 } from './errors.js';
 
 // Utilities
-export { Utils } from './utils/index.js';
+export { Utils, isPromise } from './utils/index.js';
 
 // Domain models & messaging
 export * from './models/index.js';
@@ -106,7 +99,7 @@ export * from './messaging/index.js';
 
 // Dependency injection
 export { defineInjectable, defineProvide, useAppContext } from './di/injectable.js';
-export type { InjectableFunction } from './di/injectable.js';
+export type { InjectableFunction, Providable } from './di/injectable.js';
 export * from './di/factory.js';
 
 // Directives
@@ -122,6 +115,3 @@ export { signal } from '@sigx/reactivity';
 // Component type guard
 export { isComponent } from './renderer.js';
 
-// Hydration types (public)
-export { CLIENT_DIRECTIVE_PREFIX, CLIENT_DIRECTIVES } from './hydration/index.js';
-export type { ClientDirective, HydrationStrategy, HydrationDirective } from './hydration/index.js';

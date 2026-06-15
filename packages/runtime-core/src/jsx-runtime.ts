@@ -2,7 +2,7 @@
 
 import { detectAccess, detectAccessDev, isComputed } from '@sigx/reactivity';
 import { createModel, isModel, type Model } from './model.js';
-import { runModelProcessors } from './platform.js';
+import { getModelProcessors } from './platform.js';
 import { isComponent } from './utils/is-component.js';
 
 // Re-export platform types and functions
@@ -161,9 +161,18 @@ export function jsx(
         }
 
         const { children, ...rest } = (props || {});
+        // Share EMPTY_PROPS for prop-less elements so the renderer's
+        // `oldProps !== newProps` patch guard can skip the prop diff for
+        // bare wrappers entirely. Nothing in the runtime mutates element
+        // vnode props.
+        let hasProps = false;
+        for (const _k in rest) {
+            hasProps = true;
+            break;
+        }
         return {
             type: type as string | typeof Fragment,
-            props: rest,
+            props: hasProps ? rest : EMPTY_PROPS,
             key: key || rest.key || null,
             children: normalizeChildren(children),
             dom: null
@@ -218,10 +227,16 @@ export function jsx(
                         };
                     }
 
-                    // Let user/platform processors handle intrinsic element model
-                    // (e.g., custom elements, then DOM checkbox/radio/select)
+                    // Let registered processors handle intrinsic element models:
+                    // extension processors first, then the platform processor
+                    // (e.g., DOM checkbox/radio). First returning true wins.
                     if (typeof type === "string") {
-                        handled = runModelProcessors(type, processedProps, tuple, props);
+                        for (const processor of getModelProcessors()) {
+                            if (processor(type, processedProps, tuple, props)) {
+                                handled = true;
+                                break;
+                            }
+                        }
                         // Surface model modifiers (trim/lazy/number/debounce) to the
                         // platform by tagging the handler the processor produced.
                         if (handled && props.modelModifiers) {
@@ -290,16 +305,9 @@ export function jsx(
                         // Keep onUpdate handler for backward compatibility
                         processedProps[eventName] = updateHandler;
                     } else {
-                        // For intrinsic elements: let user/platform processors
-                        // handle the binding (e.g. native checkbox/select) just
-                        // like the default `model`; fall back to a direct prop write.
-                        const handled =
-                            typeof type === "string" &&
-                            runModelProcessors(type, processedProps, tuple, props);
-                        if (!handled) {
-                            processedProps[name] = (stateObj as Record<string, any>)[stateKey];
-                            processedProps[eventName] = updateHandler;
-                        }
+                        // For intrinsic elements: put value directly on props
+                        processedProps[name] = (stateObj as Record<string, any>)[stateKey];
+                        processedProps[eventName] = updateHandler;
                     }
                     delete processedProps[propKey];
                 }

@@ -25,6 +25,10 @@ export type {
 export { setCurrentInstance, getCurrentInstance } from './component.js';
 export type { SetupFn, ViewFn, ComponentSetupContext, SlotsObject } from './component.js';
 
+// Render scheduler (one job per component, parent-before-child flush)
+export { queueJob, flushJobs, nextJobId } from './scheduler.js';
+export type { SchedulerJob } from './scheduler.js';
+
 // Renderer utilities
 export { createPropsAccessor } from './utils/props-accessor.js';
 export { createSlots } from './utils/slots.js';
@@ -32,7 +36,7 @@ export type { InternalSlotsObject } from './utils/slots.js';
 export { normalizeSubTree } from './utils/normalize.js';
 
 // Platform bridge
-export { setPlatformModelProcessor, getPlatformModelProcessor } from './platform.js';
+export { setPlatformModelProcessor, getPlatformModelProcessor, registerModelProcessor, getModelProcessors } from './platform.js';
 export { setDefaultMount, getDefaultMount } from './app.js';
 
 // Plugin system internals
@@ -58,14 +62,8 @@ export { __DIRECTIVE__ } from './directives.js';
 // Lazy loading internals
 export { registerPendingPromise } from './lazy.js';
 
-// Hydration utilities (for SSR)
-export {
-    filterClientDirectives,
-    getHydrationDirective,
-    hasClientDirective,
-    serializeProps,
-    createEmit
-} from './hydration/index.js';
+// Component-setup helpers shared with the client hydrator
+export { createEmit, splitComponentProps } from './utils/component-props.js';
 
 // Async context (for SSR isolation)
 export { runInRequestScope, hasRequestIsolation } from './async-context.js';

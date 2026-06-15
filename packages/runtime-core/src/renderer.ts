@@ -1,4 +1,4 @@
-import { VNode, Fragment, JSXElement, Text, Comment } from './jsx-runtime.js';
+import { VNode, Fragment, JSXElement, Text, Comment, EMPTY_PROPS } from './jsx-runtime.js';
 import { effect, signal, untrack, EffectRunner } from '@sigx/reactivity';
 import { withoutOwnerTracking } from '@sigx/reactivity/internals';
 import { ComponentSetupContext, setCurrentInstance, getCurrentInstance, MountContext, ViewFn, SetupFn } from './component.js';
@@ -7,10 +7,11 @@ import { createSlots } from './utils/slots.js';
 import { normalizeSubTree } from './utils/normalize.js';
 import { applyContextExtensions } from './plugins.js';
 import { isComponent } from './utils/is-component.js';
-import { createEmit } from './hydration/index.js';
+import { createEmit, splitComponentProps } from './utils/component-props.js';
 import { provideAppContext } from './di/injectable.js';
 import { isModel } from './model.js';
 import { asyncSetupClientError } from './errors.js';
+import { queueJob, nextJobId, type SchedulerJob } from './scheduler.js';
 import {
     AppContext,
     ComponentInstance,
@@ -71,12 +72,60 @@ interface InternalComponentContext extends ComponentSetupContext {
 // ============================================================================
 
 function isSameVNode(n1: VNode, n2: VNode): boolean {
+    if (n1.type !== n2.type) return false;
     const k1 = n1.key == null ? null : n1.key;
     const k2 = n2.key == null ? null : n2.key;
-    if (n1.type !== n2.type) return false;
     if (k1 === k2) return true;
-
+    // Identity failed: only a string/number cross-type pair can still
+    // match (key coercion). Avoid the String() allocations on the hot
+    // same-type and null cases — this runs O(n) per keyed diff pass.
+    if (k1 === null || k2 === null || typeof k1 === typeof k2) return false;
     return String(k1) === String(k2);
+}
+
+/**
+ * Conservative structural equality for slot content (raw `props.children`
+ * values: vnodes, arrays, primitives). Used to elide the slot version
+ * bump when a parent re-render passes identical slot content. MUST err
+ * on the side of "different": any uncertainty returns false and the
+ * child re-renders exactly as it always did. Fresh inline closures in
+ * props make this return false naturally (`!==`), which is correct —
+ * the new handler must reach the DOM.
+ */
+function sameSlotChildren(a: any, b: any): boolean {
+    if (a === b) return true;
+    const aIsArray = Array.isArray(a);
+    const bIsArray = Array.isArray(b);
+    if (aIsArray || bIsArray) {
+        if (!aIsArray || !bIsArray || a.length !== b.length) return false;
+        for (let i = 0; i < a.length; i++) {
+            if (!sameSlotChildren(a[i], b[i])) return false;
+        }
+        return true;
+    }
+    if (a == null || b == null || typeof a !== 'object' || typeof b !== 'object') {
+        // primitives (and mismatched null/undefined): identity above was
+        // the only acceptable equality
+        return false;
+    }
+    // Only vnode-shaped objects can be compared structurally. Anything
+    // else (state proxies, arbitrary user objects) is only equal by the
+    // identity check above — comparing absent vnode fields would make
+    // two DIFFERENT opaque objects look identical.
+    if (a.type === undefined || b.type === undefined) return false;
+    if (a.type !== b.type || a.key !== b.key || a.text !== b.text) return false;
+    const aProps = a.props || EMPTY_PROPS;
+    const bProps = b.props || EMPTY_PROPS;
+    for (const k in aProps) {
+        if (k === 'children') continue;
+        if (aProps[k] !== bProps[k]) return false;
+    }
+    for (const k in bProps) {
+        if (k === 'children') continue;
+        if (!(k in aProps)) return false;
+    }
+    return sameSlotChildren(aProps.children, bProps.children)
+        && sameSlotChildren(a.children, b.children);
 }
 
 function createKeyToKeyIndexMap(children: VNode[], beginIdx: number, endIdx: number) {
@@ -220,6 +269,35 @@ export function createRenderer<HostNode = any, HostElement = any>(
     function isSvgTag(tag: string): boolean {
         return svgTags.has(tag);
     }
+
+    /**
+     * Apply a ref value to a ref prop (function or object).
+     * Wrapped in untrack() to prevent reactive loops when a ref handler
+     * happens to write to a signal.
+     */
+    function applyRef(ref: any, value: any): void {
+        if (!ref) return;
+        untrack(() => {
+            if (typeof ref === 'function') {
+                ref(value);
+            } else if (typeof ref === 'object') {
+                ref.current = value;
+            }
+        });
+    }
+
+    /**
+     * Reconcile a `ref` prop across a same-type patch. If the ref identity
+     * changed, null the old ref and call the new ref with the current value.
+     * Without this, ref swaps (e.g. `ref={cond() ? a : b}`) silently leave
+     * the old ref holding a stale reference and never invoke the new one.
+     */
+    function updateRef(oldRef: any, newRef: any, value: any): void {
+        if (oldRef === newRef) return;
+        if (oldRef) applyRef(oldRef, null);
+        if (newRef) applyRef(newRef, value);
+    }
+
     function mount(vnode: VNode, container: HostElement, before: HostNode | null = null, parentIsSVG: boolean = false): void {
         // Guard against null, undefined, boolean values (from conditional rendering)
         if (vnode == null || vnode === (false as unknown as VNode) || vnode === (true as unknown as VNode)) {
@@ -253,7 +331,10 @@ export function createRenderer<HostNode = any, HostElement = any>(
             vnode.dom = anchor;
             hostInsert(anchor, container, before);
             if (vnode.children) {
-                vnode.children.forEach((child: VNode) => mount(child, container, anchor, parentIsSVG));
+                const children = vnode.children;
+                for (let i = 0; i < children.length; i++) {
+                    mount(children[i], container, anchor, parentIsSVG);
+                }
             }
             return;
         }
@@ -288,24 +369,18 @@ export function createRenderer<HostNode = any, HostElement = any>(
             }
 
             // Handle ref - wrap in untrack to prevent reactive loops
-            if (vnode.props.ref) {
-                untrack(() => {
-                    if (typeof vnode.props.ref === 'function') {
-                        vnode.props.ref(element);
-                    } else if (typeof vnode.props.ref === 'object') {
-                        vnode.props.ref.current = element;
-                    }
-                });
-            }
+            applyRef(vnode.props.ref, element);
         }
 
         // Children - pass SVG context (reset for foreignObject)
         const childIsSVG = isSVG && tag !== 'foreignObject';
         if (vnode.children) {
-            vnode.children.forEach((child: VNode) => {
+            const children = vnode.children;
+            for (let i = 0; i < children.length; i++) {
+                const child = children[i];
                 child.parent = vnode;
-                mount(child, element, null, childIsSVG)
-            });
+                mount(child, element, null, childIsSVG);
+            }
         }
 
         hostInsert(element as unknown as HostNode, container, before);
@@ -338,21 +413,16 @@ export function createRenderer<HostNode = any, HostElement = any>(
                 hostRemove(vnode.dom);
             }
             // Handle ref cleanup - wrap in untrack to prevent reactive loops
-            if (vnode.props?.ref) {
-                untrack(() => {
-                    if (typeof vnode.props.ref === 'function') {
-                        vnode.props.ref(null);
-                    } else if (typeof vnode.props.ref === 'object') {
-                        vnode.props.ref.current = null;
-                    }
-                });
-            }
+            applyRef(vnode.props?.ref, null);
             return;
         }
 
         if (vnode.type === Fragment) {
             if (vnode.children) {
-                vnode.children.forEach((child: VNode) => unmount(child, container));
+                const children = vnode.children;
+                for (let i = 0; i < children.length; i++) {
+                    unmount(children[i], container);
+                }
             }
             // Remove anchor comment if exists
             if (vnode.dom) {
@@ -369,15 +439,7 @@ export function createRenderer<HostNode = any, HostElement = any>(
         }
 
         // Handle ref cleanup - wrap in untrack to prevent reactive loops
-        if (vnode.props?.ref) {
-            untrack(() => {
-                if (typeof vnode.props.ref === 'function') {
-                    vnode.props.ref(null);
-                } else if (vnode.props.ref && typeof vnode.props.ref === 'object') {
-                    vnode.props.ref.current = null;
-                }
-            });
-        }
+        applyRef(vnode.props?.ref, null);
 
         // Invoke platform element lifecycle (e.g., directive unmounted hooks in runtime-dom)
         if (hostOnElementUnmounted && vnode.dom) {
@@ -386,7 +448,10 @@ export function createRenderer<HostNode = any, HostElement = any>(
 
         // Recursively unmount children for regular elements
         if (vnode.children && vnode.children.length > 0) {
-            vnode.children.forEach((child: VNode) => unmount(child, vnode.dom as HostElement));
+            const children = vnode.children;
+            for (let i = 0; i < children.length; i++) {
+                unmount(children[i], vnode.dom as HostElement);
+            }
         }
 
         if (vnode.dom) {
@@ -417,6 +482,14 @@ export function createRenderer<HostNode = any, HostElement = any>(
             newInternal._subTree = oldInternal._subTree;
             newInternal._subTreeRef = oldInternal._subTreeRef;
             newInternal._slots = oldInternal._slots;
+            // Preserve the cleanup closure created during mountComponent.
+            // It notifies plugins of unmount and runs the component's
+            // unmountHooks; if we drop it here, the eventual unmount() finds
+            // vnode.cleanup === undefined and onUnmounted hooks never fire.
+            newVNode.cleanup = oldVNode.cleanup;
+            // Preserve the exposed-value snapshot so a later ref change can
+            // hand the new ref the same value the original mount captured.
+            newInternal._exposed = oldInternal._exposed;
 
             const props = oldInternal._componentProps;
             newInternal._componentProps = props;
@@ -476,20 +549,37 @@ export function createRenderer<HostNode = any, HostElement = any>(
             const newSlotsFromProps = newVNode.props?.slots;
 
             if (slotsRef) {
-                // Update children for default slot
+                let slotContentChanged = false;
+
+                // Update children for default slot — only when the new
+                // content structurally differs. On equality we keep the
+                // OLD vnodes (the ones the child's mounted subtree
+                // references) and skip the version bump entirely, so a
+                // parent-only re-render no longer forces every child
+                // with static slot content to re-render.
                 if (newChildren !== undefined) {
-                    slotsRef._children = newChildren;
+                    if (sameSlotChildren(slotsRef._children, newChildren)) {
+                        // keep mounted originals
+                    } else {
+                        slotsRef._children = newChildren;
+                        slotContentChanged = true;
+                    }
                 }
 
-                // Update slot functions from the slots prop
+                // Update slot functions from the slots prop. Function
+                // identity is the only cheap safe signal here: inline
+                // slot objects/closures always differ and always bump.
                 if (newSlotsFromProps !== undefined) {
-                    slotsRef._slotsFromProps = newSlotsFromProps;
+                    if (slotsRef._slotsFromProps !== newSlotsFromProps) {
+                        slotsRef._slotsFromProps = newSlotsFromProps;
+                        slotContentChanged = true;
+                    }
                 }
 
                 // Trigger component re-render by bumping version
                 // Use per-component flag to prevent infinite loops on the SAME component
                 // but allow nested components to update
-                if (!slotsRef._isPatching) {
+                if (slotContentChanged && !slotsRef._isPatching) {
                     slotsRef._isPatching = true;
                     try {
                         untrack(() => {
@@ -500,6 +590,11 @@ export function createRenderer<HostNode = any, HostElement = any>(
                     }
                 }
             }
+
+            // Reconcile ref changes AFTER props/slots are updated so the new ref
+            // callback observes a component whose props reflect the latest patch.
+            // The prop-diff loop above excludes 'ref', so we handle it here.
+            updateRef(oldVNode.props?.ref, newVNode.props?.ref, oldInternal._exposed);
 
             return;
         }
@@ -556,37 +651,47 @@ export function createRenderer<HostNode = any, HostElement = any>(
         const tag = newVNode.type as string;
         const isSVG = tag === 'svg' || isSvgTag(tag);
 
-        // Update props
-        const oldProps = oldVNode.props || {};
-        const newProps = newVNode.props || {};
+        // Update props — skipped entirely when both sides share the same
+        // props object (prop-less elements share EMPTY_PROPS). Compare the
+        // RAW references first: substituting fresh `{}` for a missing props
+        // object would make the identity guard never fire.
+        const oldProps = oldVNode.props || EMPTY_PROPS;
+        const newProps = newVNode.props || EMPTY_PROPS;
 
-        // Remove old props
-        for (const key in oldProps) {
-            if (!(key in newProps) && key !== 'children' && key !== 'key' && key !== 'ref') {
-                if (key.charCodeAt(0) === 117 /* 'u' */ && key.startsWith('use:')) {
-                    if (hostPatchDirective) {
-                        hostPatchDirective(element, key.slice(4), oldProps[key], null, currentAppContext);
+        if (oldProps !== newProps) {
+            // Remove old props
+            for (const key in oldProps) {
+                if (!(key in newProps) && key !== 'children' && key !== 'key' && key !== 'ref') {
+                    if (key.charCodeAt(0) === 117 /* 'u' */ && key.startsWith('use:')) {
+                        if (hostPatchDirective) {
+                            hostPatchDirective(element, key.slice(4), oldProps[key], null, currentAppContext);
+                        }
+                    } else {
+                        hostPatchProp(element, key, oldProps[key], null, isSVG);
                     }
-                } else {
-                    hostPatchProp(element, key, oldProps[key], null, isSVG);
+                }
+            }
+
+            // Set new props
+            for (const key in newProps) {
+                const oldValue = oldProps[key];
+                const newValue = newProps[key];
+                if (key !== 'children' && key !== 'key' && key !== 'ref' && oldValue !== newValue) {
+                    if (key.charCodeAt(0) === 117 /* 'u' */ && key.startsWith('use:')) {
+                        if (hostPatchDirective) {
+                            hostPatchDirective(element, key.slice(4), oldValue, newValue, currentAppContext);
+                        }
+                    } else {
+                        hostPatchProp(element, key, oldValue, newValue, isSVG);
+                    }
                 }
             }
         }
 
-        // Set new props
-        for (const key in newProps) {
-            const oldValue = oldProps[key];
-            const newValue = newProps[key];
-            if (key !== 'children' && key !== 'key' && key !== 'ref' && oldValue !== newValue) {
-                if (key.charCodeAt(0) === 117 /* 'u' */ && key.startsWith('use:')) {
-                    if (hostPatchDirective) {
-                        hostPatchDirective(element, key.slice(4), oldValue, newValue, currentAppContext);
-                    }
-                } else {
-                    hostPatchProp(element, key, oldValue, newValue, isSVG);
-                }
-            }
-        }
+        // Reconcile ref changes (function or object swap, add, or removal) AFTER
+        // props are applied so the new ref callback observes the updated element.
+        // The prop loops above exclude 'ref', so we handle it here.
+        updateRef(oldProps.ref, newProps.ref, element);
 
         // Update children - pass SVG context for child elements (reset for foreignObject)
         const childIsSVG = isSVG && tag !== 'foreignObject';
@@ -597,7 +702,9 @@ export function createRenderer<HostNode = any, HostElement = any>(
         const oldChildren = oldVNode.children;
         const newChildren = newVNode.children;
 
-        newChildren.forEach((c: VNode) => c.parent = newVNode);
+        for (let i = 0; i < newChildren.length; i++) {
+            newChildren[i].parent = newVNode;
+        }
 
         reconcileChildrenArray(container, oldChildren, newChildren, parentIsSVG, fallbackAnchor);
     }
@@ -695,8 +802,6 @@ export function createRenderer<HostNode = any, HostElement = any>(
         }
     }
 
-    // createPropsAccessor is now imported from component-helpers.ts
-
     function mountComponent(vnode: VNode, container: HostElement, before: HostNode | null, setup: SetupFn<any, any, any, any>) {
         // No wrapper element - we render directly into the container
         // Use an anchor comment to track the component's position
@@ -709,19 +814,7 @@ export function createRenderer<HostNode = any, HostElement = any>(
         let exposeCalled = false;
 
         const initialProps = vnode.props || {};
-        // Create reactive props - exclude children, slots, and $models to avoid deep recursion on VNodes
-        const { children, slots: slotsFromProps, $models: modelsData, ...propsData } = initialProps;
-        
-        // Merge Model<T> objects directly into props for unified access: props.model.value
-        const propsWithModels = { ...propsData };
-        if (modelsData) {
-            for (const modelKey in modelsData) {
-                const modelValue = modelsData[modelKey];
-                if (isModel(modelValue)) {
-                    propsWithModels[modelKey] = modelValue;
-                }
-            }
-        }
+        const { children, slotsFromProps, propsWithModels } = splitComponentProps(initialProps);
         
         // Wrap renderer-internal reactives so the devtools owner
         // attribution isn't polluted by the parent's render effect.
@@ -735,10 +828,13 @@ export function createRenderer<HostNode = any, HostElement = any>(
         const slots = withoutOwnerTracking(() => createSlots(children, slotsFromProps));
         internalVNode._slots = slots;
 
-        const createdHooks: (() => void)[] = [];
-        const mountHooks: ((ctx: MountContext) => void)[] = [];
-        const updatedHooks: (() => void)[] = [];
-        const unmountHooks: ((ctx: MountContext) => void)[] = [];
+        // Lifecycle hook lists are null until a hook is actually
+        // registered: most components register none, and four empty
+        // arrays per instance add up in component-heavy trees.
+        let createdHooks: (() => void)[] | null = null;
+        let mountHooks: ((ctx: MountContext) => void)[] | null = null;
+        let updatedHooks: (() => void)[] | null = null;
+        let unmountHooks: ((ctx: MountContext) => void)[] | null = null;
 
         // Capture the parent component context BEFORE creating the new one
         // This is crucial for Provide/Inject to work
@@ -758,10 +854,10 @@ export function createRenderer<HostNode = any, HostElement = any>(
             slots: slots,
             emit: createEmit(reactiveProps),
             parent: parentInstance, // Link to parent for DI traversal
-            onMounted: (fn: (ctx: MountContext) => void) => { mountHooks.push(fn); },
-            onUnmounted: (fn: (ctx: MountContext) => void) => { unmountHooks.push(fn); },
-            onCreated: (fn: () => void) => { createdHooks.push(fn); },
-            onUpdated: (fn: () => void) => { updatedHooks.push(fn); },
+            onMounted: (fn: (ctx: MountContext) => void) => { (mountHooks ??= []).push(fn); },
+            onUnmounted: (fn: (ctx: MountContext) => void) => { (unmountHooks ??= []).push(fn); },
+            onCreated: (fn: () => void) => { (createdHooks ??= []).push(fn); },
+            onUpdated: (fn: () => void) => { (updatedHooks ??= []).push(fn); },
             expose: (exposedValue: any) => {
                 exposed = exposedValue;
                 exposeCalled = true;
@@ -792,7 +888,13 @@ export function createRenderer<HostNode = any, HostElement = any>(
         const prev = setCurrentInstance(ctx);
         let renderFn: ViewFn | undefined;
         try {
-            const setupResult = setup(ctx);
+            // Untracked: mounting happens inside the parent's render effect,
+            // so without this every reactive read in a descendant's setup
+            // would register as a PARENT dependency — a later write to any
+            // such signal re-renders the parent, remounts descendants, and
+            // the flush can re-queue itself forever (#111). Reactivity in
+            // setup belongs to explicit watch/computed/render scopes only.
+            const setupResult = untrack(() => setup(ctx));
             // Async setup is only supported on server - check for promise
             if (setupResult && typeof (setupResult as any).then === 'function') {
                 throw asyncSetupClientError(componentName ?? 'anonymous');
@@ -800,8 +902,17 @@ export function createRenderer<HostNode = any, HostElement = any>(
             renderFn = setupResult as ViewFn;
             // Notify plugins that component was created (setup completed)
             notifyComponentCreated(currentAppContext, componentInstance);
-            // Run component-level created hooks
-            createdHooks.forEach(hook => hook());
+            // Run component-level created hooks (untracked like setup and
+            // the mount hooks below: they execute inside the parent's
+            // render effect, so reads must not become parent deps, #111)
+            if (createdHooks) {
+                // Snapshot the length: hooks registered while running must
+                // not run in this phase (historical forEach semantics).
+                const hooks: (() => void)[] = createdHooks;
+                untrack(() => {
+                    for (let i = 0, len = hooks.length; i < len; i++) hooks[i]();
+                });
+            }
         } catch (err) {
             // Handle setup errors
             const handled = handleComponentError(currentAppContext, err as Error, componentInstance, 'setup');
@@ -813,16 +924,9 @@ export function createRenderer<HostNode = any, HostElement = any>(
         }
 
         // Handle ref - wrap in untrack to prevent reactive loops
-        if (vnode.props?.ref) {
-            const refValue = exposeCalled ? exposed : null;
-            untrack(() => {
-                if (typeof vnode.props.ref === 'function') {
-                    vnode.props.ref(refValue);
-                } else if (vnode.props.ref && typeof vnode.props.ref === 'object') {
-                    vnode.props.ref.current = refValue;
-                }
-            });
-        }
+        const refValue = exposeCalled ? exposed : null;
+        internalVNode._exposed = refValue;
+        applyRef(vnode.props?.ref, refValue);
 
         if (renderFn) {
             ctx.renderFn = renderFn;
@@ -832,6 +936,15 @@ export function createRenderer<HostNode = any, HostElement = any>(
             // the effect closure and all aliased VNodes share the same subtree reference.
             const subTreeRef: { current: VNode | null } = { current: null };
             internalVNode._subTreeRef = subTreeRef;
+
+            // Route re-renders through the render queue: one job per
+            // component, deduped per notification wave, parents before
+            // children (mount-order id). The first render stays inline.
+            let scheduledRun: (() => void) | undefined;
+            const renderJob: SchedulerJob = Object.assign(
+                () => { if (scheduledRun) scheduledRun(); },
+                { id: nextJobId() }
+            );
 
             const componentEffect = effect(() => {
                 // Set current instance during render so child components can find their parent
@@ -863,7 +976,10 @@ export function createRenderer<HostNode = any, HostElement = any>(
                         // Notify plugins of component update (re-render)
                         notifyComponentUpdated(currentAppContext, componentInstance);
                         // Run component-level updated hooks
-                        updatedHooks.forEach(hook => hook());
+                        if (updatedHooks) {
+                            const hooks: (() => void)[] = updatedHooks;
+                            for (let i = 0, len = hooks.length; i < len; i++) hooks[i]();
+                        }
                     } else {
                         mount(subTree, container, anchor);
                     }
@@ -878,6 +994,11 @@ export function createRenderer<HostNode = any, HostElement = any>(
                 } finally {
                     setCurrentInstance(prevInstance);
                 }
+            }, {
+                scheduler: (run) => {
+                    scheduledRun = run;
+                    queueJob(renderJob);
+                },
             });
             internalVNode._effect = componentEffect;
 
@@ -891,7 +1012,12 @@ export function createRenderer<HostNode = any, HostElement = any>(
         // Run mount hooks (untrack to prevent signal reads from
         // polluting the parent component's reactive subscriptions)
         const mountCtx = { el: container } as MountContext;
-        untrack(() => mountHooks.forEach(hook => hook(mountCtx)));
+        if (mountHooks) {
+            const hooks: ((ctx: MountContext) => void)[] = mountHooks;
+            untrack(() => {
+                for (let i = 0, len = hooks.length; i < len; i++) hooks[i](mountCtx);
+            });
+        }
 
         // Notify plugins that component was mounted
         notifyComponentMounted(currentAppContext, componentInstance);
@@ -900,7 +1026,10 @@ export function createRenderer<HostNode = any, HostElement = any>(
         vnode.cleanup = () => {
             // Notify plugins that component is being unmounted
             notifyComponentUnmounted(currentAppContext, componentInstance);
-            unmountHooks.forEach(hook => hook(mountCtx as MountContext));
+            if (unmountHooks) {
+                const hooks: ((ctx: MountContext) => void)[] = unmountHooks;
+                for (let i = 0, len = hooks.length; i < len; i++) hooks[i](mountCtx as MountContext);
+            }
         };
     }
 

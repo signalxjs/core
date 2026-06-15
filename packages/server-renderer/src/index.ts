@@ -37,13 +37,6 @@
  * @module
  */
 
-// SSR directive type augmentation — adds getSSRProps to DirectiveDefinition
-import './directive-ssr-types.js';
-
-// Patch getSSRProps onto built-in directives (show, etc.)
-import { initDirectivesForSSR } from './builtin-ssr-directives.js';
-initDirectivesForSSR();
-
 // Plugin system
 export { createSSR } from './ssr.js';
 export type { SSRInstance } from './ssr.js';
@@ -51,6 +44,8 @@ export type { SSRPlugin } from './plugin.js';
 
 // Re-export from server (convenience)
 export { renderToStream, renderToString, renderVNodeToString } from './server/index.js';
+export { renderDocument, renderDocumentToNodeStream, renderDocumentToWebStream } from './server/index.js';
+export type { DocumentOptions } from './server/document.js';
 export { createSSRContext } from './server/context.js';
 export type { SSRContext, SSRContextOptions, RenderOptions, CorePendingAsync } from './server/context.js';
 
@@ -59,9 +54,10 @@ export { ssrClientPlugin } from './client/index.js';
 
 // SSR types (shared across server-renderer and plugins)
 export type { SSRHelper } from './client-directives.js';
-export type { SSRSignalFn } from './server/types.js';
-export { generateSignalKey } from './server/types.js';
 
-// Head management
-export { useHead, renderHeadToString, enableSSRHead, collectSSRHead } from './head.js';
-export type { HeadConfig, HeadMeta, HeadLink, HeadScript } from './head.js';
+// State serialization (__SIGX_ASYNC__ transfer for useAsync/useStream;
+// opt-in plugin — automatic under renderDocument)
+export { stateSerializationPlugin } from './server/state-plugin.js';
+
+// Server-side head rendering (useHead itself lives in sigx)
+export { renderHeadToString } from './head.js';

@@ -8,17 +8,13 @@
 // Load SSR type augmentations (SSRHelper, ComponentSetupContext extensions)
 import '../client-directives.js';
 
-// Load SSR directive type augmentation (adds getSSRProps to DirectiveDefinition)
-import '../directive-ssr-types.js';
-
-// Patch getSSRProps onto built-in directives (show, etc.)
-import { initDirectivesForSSR } from '../builtin-ssr-directives.js';
-initDirectivesForSSR();
-
 export { renderToStream, renderToNodeStream, renderToString, renderToStreamWithCallbacks } from './render-api';
+export { renderDocument, renderDocumentToNodeStream, renderDocumentToWebStream } from './render-api';
+export type { DocumentOptions } from './document';
 export { renderVNodeToString } from './render-core';
 export { createSSRContext } from './context';
 export type { SSRContext, SSRContextOptions, RenderOptions, CorePendingAsync } from './context';
-export { generateStreamingScript, generateReplacementScript, escapeJsonForScript } from './streaming';
-export type { SSRSignalFn, StreamCallbacks } from './types';
-export { generateSignalKey } from './types';
+export { generateStreamingScript, generateReplacementScript, escapeJsonForScript, generateAppendBootstrap, generateAppendScript } from './streaming';
+export type { StreamCallbacks } from './types';
+export { stateSerializationPlugin } from './state-plugin';
+export { serializeAsyncScript, asyncAssignmentJs } from './state';

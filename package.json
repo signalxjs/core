@@ -8,16 +8,25 @@
   "workspaces": [
     "packages/*",
     "examples",
-    "examples/*"
+    "examples/*",
+    "benchmarks"
   ],
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "build": "pnpm run build:core && pnpm --filter @sigx/server-renderer run build && pnpm --filter @sigx/vite run build",
+    "bench": "vitest bench --run",
+    "bench:json": "vitest bench --run --outputJson bench-results.json",
+    "bench:compare": "vitest bench --run --compare bench-results.json",
+    "bench:ssr": "pnpm --filter @sigx/benchmarks bench",
+    "bench:ssr:stream": "pnpm --filter @sigx/benchmarks bench:stream",
+    "bench:ssr:quick": "pnpm --filter @sigx/benchmarks bench:quick",
+    "bench:ssr:baseline": "pnpm --filter @sigx/benchmarks bench:baseline",
+    "build": "pnpm run build:core && pnpm --filter @sigx/server-renderer run build && pnpm --filter @sigx/ssr-islands run build && pnpm --filter @sigx/vite run build",
     "build:core": "pnpm --filter @sigx/reactivity run build && pnpm --filter @sigx/runtime-core run build && pnpm --filter @sigx/runtime-dom run build && pnpm --filter sigx run build",
     "build:sigx": "pnpm --filter sigx run build",
     "build:vite": "pnpm --filter @sigx/vite run build",
+    "build:ssr-islands": "pnpm --filter @sigx/ssr-islands run build",
     "build:server-renderer": "pnpm --filter @sigx/server-renderer run build",
     "dev:sigx": "pnpm --filter sigx run dev",
     "dev:vite": "pnpm --filter @sigx/vite run dev",
@@ -33,19 +42,20 @@
     "version:minor": "node scripts/bump-version.js minor",
     "version:major": "node scripts/bump-version.js major",
     "size": "size-limit",
+    "wt": "node scripts/worktree.mjs",
     "clean": "node -e \"const fs=require('fs'),p=require('path');const rm=x=>fs.rmSync(x,{recursive:true,force:true});for(const d of fs.readdirSync('packages')){rm(p.join('packages',d,'dist'));rm(p.join('packages',d,'node_modules'));}rm('node_modules');rm('pnpm-lock.yaml');\""
   },
   "devDependencies": {
     "@size-limit/preset-small-lib": "^11",
-    "@typescript/native-preview": "7.0.0-dev.20260507.1",
-    "@vitest/coverage-v8": "^4.1.5",
+    "@typescript/native-preview": "7.0.0-dev.20260514.1",
+    "@vitest/coverage-v8": "^4.1.7",
     "happy-dom": "^20.9.0",
-    "oxlint": "^1.63.0",
-    "playwright": "^1.59.1",
+    "oxlint": "^1.66.0",
+    "playwright": "^1.60.0",
     "size-limit": "^11",
     "typescript": "^6.0.3",
-    "vite": "^8.0.11",
-    "vitest": "^4.1.5"
+    "vite": "^8.0.14",
+    "vitest": "^4.1.7"
   },
   "keywords": [
     "SignalX",
@@ -60,7 +70,7 @@
     "type": "git",
     "url": "git+https://github.com/signalxjs/core.git"
   },
-  "homepage": "https://github.com/signalxjs/core",
+  "homepage": "https://sigx.dev/core/",
   "bugs": {
     "url": "https://github.com/signalxjs/core/issues"
   }

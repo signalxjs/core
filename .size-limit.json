@@ -1,27 +1,48 @@
 [
-  {
-    "name": "sigx",
-    "path": "packages/sigx/dist/sigx.js",
-    "limit": "20 KB"
-  },
-  {
-    "name": "@sigx/reactivity",
-    "path": "packages/reactivity/dist/index.js",
-    "limit": "5 KB"
-  },
-  {
-    "name": "@sigx/runtime-core",
-    "path": "packages/runtime-core/dist/index.js",
-    "limit": "12 KB"
-  },
-  {
-    "name": "@sigx/runtime-dom",
-    "path": "packages/runtime-dom/dist/index.js",
-    "limit": "10 KB"
-  },
-  {
-    "name": "@sigx/server-renderer",
-    "path": "packages/server-renderer/dist/index.js",
-    "limit": "18 KB"
-  }
+    {
+        "name": "sigx",
+        "path": "packages/sigx/dist/sigx.prod.js",
+        "limit": "20 KB"
+    },
+    {
+        "name": "@sigx/reactivity",
+        "path": "packages/reactivity/dist/index.prod.js",
+        "limit": "5 KB"
+    },
+    {
+        "name": "@sigx/runtime-core",
+        "path": "packages/runtime-core/dist/index.prod.js",
+        "limit": "12 KB"
+    },
+    {
+        "name": "@sigx/runtime-dom",
+        "path": "packages/runtime-dom/dist/index.prod.js",
+        "limit": "11.5 KB"
+    },
+    {
+        "name": "@sigx/server-renderer",
+        "path": "packages/server-renderer/dist/index.prod.js",
+        "limit": "22 KB",
+        "ignore": [
+            "node:stream"
+        ]
+    },
+    {
+        "name": "@sigx/server-renderer/client (browser entry)",
+        "path": "packages/server-renderer/dist/client/index.prod.js",
+        "limit": "14 KB"
+    },
+    {
+        "name": "@sigx/ssr-islands",
+        "path": "packages/ssr-islands/dist/index.prod.js",
+        "limit": "22 KB",
+        "ignore": [
+            "node:stream"
+        ]
+    },
+    {
+        "name": "@sigx/ssr-islands/client (browser entry)",
+        "path": "packages/ssr-islands/dist/client/index.prod.js",
+        "limit": "15 KB"
+    }
 ]

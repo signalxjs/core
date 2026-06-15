@@ -59,7 +59,8 @@ export interface SSRPlugin {
         ): string | void;
 
         /**
-         * Called when a component has pending `ssr.load()` calls.
+         * Called when a component has pending async setup work (keyed
+         * `useAsync()` fetchers / `useStream()` sources).
          * Plugin decides the async model:
          * - `'block'`: wait inline (overrides streaming default)
          * - `'stream'`: render placeholder now, stream replacement later (this is the default in streaming mode)
@@ -71,6 +72,11 @@ export interface SSRPlugin {
          *
          * When core handles streaming, it manages the deferred render and race loop.
          * Plugins that need to augment the streamed result should use `onAsyncComponentResolved`.
+         *
+         * Note: this hook keys off useAsync/useStream setup work only. Suspense-boundary async
+         * (lazy() children) does not pass through here — Suspense boundaries
+         * stream via the same placeholder machinery and are observable on
+         * `ctx._pendingAsync` and in `onAsyncComponentResolved`.
          *
          * @example Suspense plugin returns `{ mode: 'stream', placeholder: '<Spinner/>' }`
          * @example A plugin returns `{ mode: 'block' }` to force waiting
@@ -88,7 +94,11 @@ export interface SSRPlugin {
          *
          * Return an object with:
          * - `html`: replacement HTML (modified or as-is)
-         * - `script`: extra script content to inject alongside the replacement
+         * - `script`: extra script content to run AFTER the `$SIGX_REPLACE`
+         *   call (i.e. after hydration listeners may have fired)
+         * - `preScript`: script content to run BEFORE the `$SIGX_REPLACE`
+         *   call — use this for state that must be installed before the
+         *   replace dispatches `sigx:async-ready`
          *
          * Return void to accept the default (plain HTML replacement).
          *
@@ -98,7 +108,7 @@ export interface SSRPlugin {
             id: number,
             html: string,
             ctx: SSRContext
-        ): { html?: string; script?: string } | void;
+        ): { html?: string; script?: string; preScript?: string } | void;
 
         /**
          * Called after rendering finishes. Return HTML to append after the rendered content.
@@ -124,6 +134,27 @@ export interface SSRPlugin {
          * @example Islands plugin returns void (allows default walk)
          */
         beforeHydrate?(container: Element): boolean | void;
+
+        /**
+         * Called after the ComponentSetupContext is constructed but BEFORE setup()
+         * runs during hydration. Client-side mirror of
+         * `server.transformComponentContext` — restores server/client symmetry so
+         * hydration is as pluggable as render. The plugin can mutate or replace the
+         * context: swap `ctx.signal` with a state-restoring variant, modify the ssr
+         * helper, etc.
+         *
+         * Return a new context to replace the default, or void to accept as-is.
+         *
+         * Unlike the server hook there is no `SSRContext` during hydration, so only
+         * the vnode and the built context are passed.
+         *
+         * @example Islands plugin swaps `ctx.signal` with a variant that seeds each
+         *          signal from the server-captured island state.
+         */
+        transformComponentContext?(
+            vnode: VNode,
+            componentCtx: ComponentSetupContext
+        ): ComponentSetupContext | void;
 
         /**
          * Called for each component encountered during the hydration walk.

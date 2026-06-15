@@ -102,7 +102,9 @@ export namespace Define {
      */
     export type Slot<TName extends string, TProps = void> = {
         __slots?: {
-            [K in TName]: TProps extends void
+            // Optional: a slot accessor is present only when the parent
+            // provided content for it, otherwise it reads as `undefined`.
+            [K in TName]?: TProps extends void
             ? () => JSXElement | JSXElement[] | null
             : (props: TProps) => JSXElement | JSXElement[] | null
         }
@@ -122,12 +124,6 @@ export namespace Define {
 }
 
 /**
- * Define a single prop with type, required/optional status
- * @deprecated Use `Define.Prop` instead
- */
-export type DefineProp<TName extends string, TType, Required extends boolean = false> = Define.Prop<TName, TType, Required>;
-
-/**
  * Model binding tuple type - [stateObject, key] for forwarding
  * The state object can be a Signal or any object with the given key
  */
@@ -137,46 +133,6 @@ export type ModelBinding<_T> = [object, string];
  * Re-export Model type for convenience
  */
 export type { ModelType as Model };
-
-/**
- * Define a 2-way bound model.
- * 
- * The component receives a Model<T> object with:
- *   - `.value` - Get or set the current value
- *   - `.binding` - The underlying binding for forwarding
- * 
- * Default form: DefineModel<T>
- *   - props.model: Model<T> (read/write/forward)
- *   - props.model.value to read/write
- *   - <Child model={props.model} /> to forward
- * 
- * Named form: DefineModel<"name", T>
- *   - props.name: Model<T> (read/write/forward)
- *   - props.name.value to read/write
- *   - <Child model={props.name} /> to forward
- * 
- * Callers use: model={() => state.prop} or model:name={() => state.prop}
- * 
- * @example
- * ```tsx
- * interface InputProps extends DefineModel<string> {
- *     placeholder?: string;
- * }
- * 
- * const Input = component<InputProps>(({ props }) => {
- *     // Read
- *     console.log(props.model.value);
- *     
- *     // Write
- *     props.model.value = "new value";
- *     
- *     // Forward
- *     <Child model={props.model} />
- * });
- * ```
- * @deprecated Use `Define.Model` instead
- */
-export type DefineModel<TNameOrType, TType = void> = Define.Model<TNameOrType, TType>;
 
 /**
  * Extract model binding definitions from a component props type.
@@ -206,20 +162,6 @@ type ExternalModelProps<T> = {
 export type EventDefinition<T> = { __eventDetail: T };
 
 /**
- * Define a single custom event with its detail type
- * @deprecated Use `Define.Event` instead
- */
-export type DefineEvent<TName extends string, TDetail = void> = Define.Event<TName, TDetail>;
-
-/**
- * Define a slot with optional scoped props.
- * - DefineSlot<"header"> - a simple slot named "header"
- * - DefineSlot<"item", { item: T; index: number }> - a scoped slot with props
- * @deprecated Use `Define.Slot` instead
- */
-export type DefineSlot<TName extends string, TProps = void> = Define.Slot<TName, TProps>;
-
-/**
  * Extract slot definitions from a combined type
  */
 type ExtractSlots<T> = T extends { __slots?: infer S } ? S : {};
@@ -230,10 +172,13 @@ type ExtractSlots<T> = T extends { __slots?: infer S } ? S : {};
 type DefaultSlot = () => JSXElement[];
 
 /**
- * Slots object passed to components - always has default, plus any declared slots
+ * Slots object passed to components. Every slot — `default` included — is a
+ * callable accessor only when the parent provided content for it; an
+ * unprovided slot reads as `undefined`, so check presence with
+ * `slots.x?.()` / `slots.x?.() ?? fallback`.
  */
 export type SlotsObject<TSlots = {}> = {
-    default: DefaultSlot;
+    default?: DefaultSlot;
 } & TSlots;
 
 /**
@@ -401,11 +346,6 @@ export type SetupFn<
     TRef = any,
     TSlots = {}
 > = (ctx: ComponentSetupContext<PlatformElement, TProps, TEvents, TRef, TSlots>) => ViewFn | Promise<ViewFn>;
-
-/**
- * @deprecated Use `Define.Expose` instead
- */
-export type DefineExpose<T> = Define.Expose<T>;
 
 type ExtractExposed<T> = "__exposed" extends keyof T
     ? (NonNullable<T["__exposed"]> extends { __type: infer E } ? E : void)

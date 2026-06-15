@@ -5,7 +5,6 @@ import { defineLibConfig } from '../vite/src/lib.js';
 export default defineLibConfig({
     entry: {
         'sigx': 'src/index.ts',
-        'hydration': 'src/hydration.ts',
         'internals': 'src/internals.ts'
     },
     root: import.meta.url

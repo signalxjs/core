@@ -1,7 +1,8 @@
 /**
  * Coverage for client/hydrate-component.ts — branches the main
- * hydrate.test.tsx doesn't reach: setup errors, server-state restoration,
- * and trailing-marker discovery.
+ * hydrate.test.tsx doesn't reach: setup errors, trailing-marker discovery,
+ * and the null-first-render path. (Async-state restoration lives in
+ * useAsync/useStream — see async-state.test.tsx.)
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { component, signal } from 'sigx';
@@ -72,32 +73,6 @@ describe('hydrateComponent — trailing marker discovery', () => {
         const dom = container.firstChild;
         // No throw means the component bound to $c:1 (the outer/lowest marker)
         expect(() => hydrateComponent((Cmp as any)({}), dom, container)).not.toThrow();
-    });
-});
-
-describe('hydrateComponent — server-state restoration via createRestoringSignal', () => {
-    let container: HTMLDivElement;
-    afterEach(() => { if (container) cleanupContainer(container); });
-
-    it('uses restoring signal when serverState is passed directly', () => {
-        const seen: Array<number> = [];
-        const Cmp = component((ctx: any) => {
-            const s = ctx.signal(0, 'value');
-            seen.push(s.value);
-            return () => ({
-                type: 'span',
-                props: { class: 'restored' },
-                key: null,
-                children: [String(s.value)],
-                dom: null
-            } as any);
-        }, { name: 'Restored' });
-
-        container = createSSRContainer('<span class="restored">99</span><!--$c:1-->');
-        const dom = container.firstChild;
-        // Pass server state directly — bypasses pending-state route
-        hydrateComponent((Cmp as any)({}), dom, container, { value: 99 });
-        expect(seen).toEqual([99]);
     });
 });
 

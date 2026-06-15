@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { component, signal, defineApp } from 'sigx';
+import { component, useAsync, defineApp } from 'sigx';
 import { createSSR } from '../src/index';
 import { createSSRContext } from '../src/server/context';
 import type { SSRPlugin } from '../src/plugin';
@@ -104,16 +104,15 @@ describe('createSSR.render — sync-fail → async fallback', () => {
         expect(html).toContain('class="async-rendered"');
     });
 
-    it('falls back when a component calls ssr.load()', async () => {
-        const Loaded = component((ctx: any) => {
-            const data = signal({ v: 'pending' });
-            ctx.ssr.load(async () => {
+    it('falls back when a component registers useAsync work', async () => {
+        const Loaded = component(() => {
+            const data = useAsync('internals-fallback', async () => {
                 await Promise.resolve();
-                data.v = 'loaded';
+                return 'loaded';
             });
             return () => ({
                 type: 'span',
-                props: { 'data-state': data.v },
+                props: { 'data-state': data.value ?? 'pending' },
                 key: null,
                 children: [],
                 dom: null
@@ -127,18 +126,17 @@ describe('createSSR.render — sync-fail → async fallback', () => {
 });
 
 describe('createSSR.renderNodeStream — async chunk streaming', () => {
-    it('emits placeholders, then replacement scripts when ssr.load resolves', async () => {
-        const Async = component((ctx: any) => {
-            const data = signal({ v: 'placeholder' });
-            ctx.ssr.load(async () => {
+    it('emits placeholders, then replacement scripts when useAsync resolves', async () => {
+        const Async = component(() => {
+            const data = useAsync('internals-stream', async () => {
                 await Promise.resolve();
-                data.v = 'resolved';
+                return 'resolved';
             });
             return () => ({
                 type: 'div',
                 props: { class: 'async-target' },
                 key: null,
-                children: [data.v],
+                children: [data.value ?? 'placeholder'],
                 dom: null
             } as any);
         }, { name: 'AsyncStream' });
@@ -152,17 +150,16 @@ describe('createSSR.renderNodeStream — async chunk streaming', () => {
     });
 
     it('emits plugin onAsyncComponentResolved augmentation in replacement script', async () => {
-        const Async = component((ctx: any) => {
-            const ready = signal({ v: 'placeholder' });
-            ctx.ssr.load(async () => {
+        const Async = component(() => {
+            const ready = useAsync('internals-aug', async () => {
                 await Promise.resolve();
-                ready.v = 'resolved';
+                return 'resolved';
             });
             return () => ({
                 type: 'span',
                 props: { class: 'aug' },
                 key: null,
-                children: [ready.v],
+                children: [ready.value ?? 'placeholder'],
                 dom: null
             } as any);
         }, { name: 'Aug' });
@@ -207,12 +204,12 @@ describe('createSSR.renderStreamWithCallbacks — error path', () => {
 });
 
 describe('streamAllAsyncChunks — error path inside core promise', () => {
-    it('falls back to a red error replacement when ssr.load() rejects', async () => {
+    it('falls back to a red error replacement when a throwOnError fetcher rejects', async () => {
         const consoleErr = vi.spyOn(console, 'error').mockImplementation(() => {});
-        const Failing = component((ctx: any) => {
-            ctx.ssr.load(async () => {
+        const Failing = component(() => {
+            useAsync('internals-fail', async () => {
                 throw new Error('load-fail');
-            });
+            }, { throwOnError: true });
             return () => ({
                 type: 'div',
                 props: { class: 'placeholder-content' },
@@ -234,7 +231,7 @@ describe('streamAllAsyncChunks — error path inside core promise', () => {
 });
 
 describe('streamAllAsyncChunks — plugin-only streaming (no core async)', () => {
-    it('drains a single plugin getStreamingChunks chunk when there is no ssr.load()', async () => {
+    it('drains a single plugin getStreamingChunks chunk when there is no async component work', async () => {
         async function* gen() {
             yield '<plugin-chunk-only/>';
         }

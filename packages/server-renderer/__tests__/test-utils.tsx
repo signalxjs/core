@@ -3,41 +3,13 @@
  */
 
 import { component, signal, VNode, Fragment, Text } from 'sigx';
-import type { SSRSignalFn } from '../src/server/types';
-export type { SSRSignalFn };
 
 /**
- * Create a mock __SIGX_ISLANDS__ script tag with given island data
- */
-export function createIslandDataScript(data: Record<string, any>): HTMLScriptElement {
-    const script = document.createElement('script');
-    script.id = '__SIGX_ISLANDS__';
-    script.type = 'application/json';
-    script.textContent = JSON.stringify(data);
-    document.head.appendChild(script);
-    return script;
-}
-
-/**
- * Create a mock __SIGX_STATE__ script tag with given state data
- */
-export function createStateScript(data: Record<string, any>): HTMLScriptElement {
-    const script = document.createElement('script');
-    script.id = '__SIGX_STATE__';
-    script.type = 'application/json';
-    script.textContent = JSON.stringify(data);
-    document.head.appendChild(script);
-    return script;
-}
-
-/**
- * Remove island/state scripts from document
+ * Remove any leftover script tags injected into document.head by tests
  */
 export function cleanupScripts(): void {
     const islandScript = document.getElementById('__SIGX_ISLANDS__');
-    const stateScript = document.getElementById('__SIGX_STATE__');
     islandScript?.remove();
-    stateScript?.remove();
 }
 
 /**
@@ -150,20 +122,6 @@ export const TestCounterWithProps = component<{ initial?: number }>((ctx) => {
 }, { name: 'TestCounterWithProps' });
 
 /**
- * Component with named signal for state restoration testing
- */
-export const TestAsyncCounter = component((ctx) => {
-    const ssrSignal = ctx.signal as SSRSignalFn;
-    const count = ssrSignal({ value: 0 }, 'count');
-    
-    return () => (
-        <div class="async-counter">
-            <span class="count">{count.value}</span>
-        </div>
-    );
-}, { name: 'TestAsyncCounter' });
-
-/**
  * Simple text component for testing
  */
 export const TestText = component<{ text: string }>((ctx) => {
@@ -176,7 +134,7 @@ export const TestText = component<{ text: string }>((ctx) => {
 export const TestWrapper = component((ctx) => {
     return () => (
         <div class="wrapper">
-            {ctx.slots.default()}
+            {ctx.slots.default?.()}
         </div>
     );
 }, { name: 'TestWrapper' });

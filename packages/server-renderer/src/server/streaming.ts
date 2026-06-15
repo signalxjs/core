@@ -3,7 +3,7 @@
  *
  * Provides the client-side `$SIGX_REPLACE` function and replacement script
  * generation used by core async streaming. These are strategy-agnostic —
- * any async component with `ssr.load()` gets streamed without needing a plugin.
+ * any async component with keyed `useAsync()` work gets streamed without needing a plugin.
  *
  * Plugins (e.g., islands) can augment replacements via `onAsyncComponentResolved`.
  */
@@ -43,11 +43,45 @@ window.$SIGX_REPLACE = function(id, html) {
 }
 
 /**
- * Generate a replacement script for a resolved async component.
+ * Generate the progressive-text bootstrap (injected once before any append).
+ * Defines `window.$SIGX_APPEND`, which appends a TEXT node into an async
+ * placeholder — XSS-safe by construction (no HTML parsing of streamed
+ * tokens). Used by `useStream()` for LLM-token-style progressive content.
  */
-export function generateReplacementScript(id: number, html: string, extraScript?: string): string {
+export function generateAppendBootstrap(): string {
+    return `
+<script>
+window.$SIGX_APPEND = function(id, text) {
+    var placeholder = document.querySelector('[data-async-placeholder="' + id + '"]');
+    if (placeholder) {
+        placeholder.appendChild(document.createTextNode(text));
+    }
+};
+</script>`;
+}
+
+/**
+ * Generate an append script for one progressive-text chunk.
+ * The token travels as a JSON string and lands via createTextNode.
+ */
+export function generateAppendScript(id: number, text: string): string {
+    return `<script>$SIGX_APPEND(${id}, ${escapeJsonForScript(JSON.stringify(text))});</script>`;
+}
+
+/**
+ * Generate a replacement script for a resolved async component.
+ *
+ * @param extraScript - raw JS appended AFTER the $SIGX_REPLACE call
+ * @param preScript - raw JS prepended BEFORE the $SIGX_REPLACE call; runs
+ *   before the replace dispatches `sigx:async-ready` (e.g. state install)
+ */
+export function generateReplacementScript(id: number, html: string, extraScript?: string, preScript?: string): string {
     const escapedHtml = escapeJsonForScript(JSON.stringify(html));
-    let script = `<script>$SIGX_REPLACE(${id}, ${escapedHtml});`;
+    let script = `<script>`;
+    if (preScript) {
+        script += preScript;
+    }
+    script += `$SIGX_REPLACE(${id}, ${escapedHtml});`;
     if (extraScript) {
         script += extraScript;
     }

@@ -5,6 +5,8 @@
 // Types
 export type {
     EffectFn,
+    EffectOptions,
+    EffectScheduler,
     EffectRunner,
     Subscriber,
     Widen,
@@ -45,6 +47,10 @@ export {
     detectAccess,
     detectAccessDev
 } from './signal';
+
+// Per-property signal views
+export { toSignal, toSignals } from './toSignal';
+export type { PropertySignal, ToSignals } from './toSignal';
 
 // Watch
 export { watch } from './watch';

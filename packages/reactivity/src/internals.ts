@@ -6,7 +6,7 @@
  *
  * @internal
  */
-export { track, trigger, cleanup } from './effect';
+export { track, trigger, cleanup, setFlushHandler } from './effect';
 export { getSignalId } from './signal';
 
 // DevTools hook surface — used by @sigx/runtime-core, @sigx/devtools,

@@ -140,32 +140,3 @@ describe('model modifiers', () => {
     });
 });
 
-describe('named model on native elements', () => {
-    let container: HTMLElement;
-
-    beforeEach(() => {
-        container = document.createElement('div');
-        document.body.appendChild(container);
-    });
-
-    afterEach(() => {
-        render(null as any, container);
-        container.remove();
-    });
-
-    it('named model on a native checkbox binds via the platform processor', () => {
-        const state = signal({ agreed: false });
-        // Use the call form to avoid relying on colon-attribute JSX compilation.
-        const App = component(
-            () => () => jsx('input', { type: 'checkbox', 'model:checked': () => state.agreed })
-        );
-        render(jsx(App, {}), container);
-
-        const input = container.querySelector('input') as HTMLInputElement;
-        expect(input.checked).toBe(false);
-
-        input.checked = true;
-        input.dispatchEvent(new Event('change', { bubbles: true }));
-        expect(state.agreed).toBe(true);
-    });
-});

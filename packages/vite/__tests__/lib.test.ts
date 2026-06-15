@@ -6,9 +6,15 @@ import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { defineLibConfig } from '../src/lib';
 
+// defineLibConfig returns a mode-aware config function — resolve it the way
+// Vite does. Default to the standard build (mode 'production' → dev dist);
+// 'prod-dist' selects the stripped production dist pass.
+const resolveConfig = (options: any, mode = 'production'): any =>
+    (defineLibConfig(options) as any)({ command: 'build', mode });
+
 describe('defineLibConfig — defaults', () => {
     it('produces a sensible default config from a single entry path', () => {
-        const config: any = defineLibConfig({ entry: 'src/index.ts' });
+        const config: any = resolveConfig({ entry: 'src/index.ts' });
 
         expect(config.build).toBeDefined();
         expect(config.build.outDir).toBe('dist');
@@ -20,20 +26,20 @@ describe('defineLibConfig — defaults', () => {
     });
 
     it('renders fileName as `${entryName}.js`', () => {
-        const config: any = defineLibConfig({ entry: 'src/index.ts' });
+        const config: any = resolveConfig({ entry: 'src/index.ts' });
         expect(config.build.lib.fileName('es', 'index')).toBe('index.js');
         expect(config.build.lib.fileName('es', 'utils')).toBe('utils.js');
     });
 
     it('uses process.cwd() as the root when none provided', () => {
-        const config: any = defineLibConfig({ entry: 'src/index.ts' });
+        const config: any = resolveConfig({ entry: 'src/index.ts' });
         expect(config.root).toBe(process.cwd());
     });
 });
 
 describe('defineLibConfig — entry normalization', () => {
     it('accepts a record of entry paths', () => {
-        const config: any = defineLibConfig({
+        const config: any = resolveConfig({
             entry: { index: 'src/index.ts', client: 'src/client.ts' }
         });
         expect(config.build.lib.entry).toEqual({
@@ -43,7 +49,7 @@ describe('defineLibConfig — entry normalization', () => {
     });
 
     it('accepts a LibEntry[] array form', () => {
-        const config: any = defineLibConfig({
+        const config: any = resolveConfig({
             entry: [
                 { name: 'index', entry: 'src/index.ts' },
                 { name: 'server/index', entry: 'src/server/index.ts' }
@@ -64,7 +70,7 @@ describe('defineLibConfig — external merging', () => {
     }
 
     it('always prepends SIGX runtime externals before caller externals', () => {
-        const config: any = defineLibConfig({
+        const config: any = resolveConfig({
             entry: 'src/index.ts',
             external: ['lodash']
         });
@@ -76,7 +82,7 @@ describe('defineLibConfig — external merging', () => {
     });
 
     it('deduplicates string externals already present in runtime defaults', () => {
-        const config: any = defineLibConfig({
+        const config: any = resolveConfig({
             entry: 'src/index.ts',
             external: ['sigx', '@sigx/reactivity', 'lodash']
         });
@@ -88,7 +94,7 @@ describe('defineLibConfig — external merging', () => {
     });
 
     it('deduplicates RegExp externals by source', () => {
-        const config: any = defineLibConfig({
+        const config: any = resolveConfig({
             entry: 'src/index.ts',
             external: [/^sigx\//, /^custom\//]
         });
@@ -102,7 +108,7 @@ describe('defineLibConfig — external merging', () => {
 describe('defineLibConfig — alias resolution', () => {
     it('resolves alias paths against the supplied root', () => {
         const root = '/tmp/lib-test-root';
-        const config: any = defineLibConfig({
+        const config: any = resolveConfig({
             entry: 'src/index.ts',
             root,
             alias: { '@sigx/reactivity': '../reactivity/src/index.ts' }
@@ -119,7 +125,7 @@ describe('defineLibConfig — alias resolution', () => {
         const root = pathToFileURL(absFile).href;
         const expectedRootDir = path.dirname(fileURLToPath(root));
 
-        const config: any = defineLibConfig({
+        const config: any = resolveConfig({
             entry: 'src/index.ts',
             root,
             alias: { foo: 'bar.ts' }
@@ -129,59 +135,84 @@ describe('defineLibConfig — alias resolution', () => {
     });
 
     it('returns an empty alias map when no alias option provided', () => {
-        const config: any = defineLibConfig({ entry: 'src/index.ts' });
+        const config: any = resolveConfig({ entry: 'src/index.ts' });
         expect(config.resolve.alias).toEqual({});
     });
 });
 
 describe('defineLibConfig — options & flags', () => {
     it('disables minification when minify=false', () => {
-        const config: any = defineLibConfig({ entry: 'src/index.ts', minify: false });
+        const config: any = resolveConfig({ entry: 'src/index.ts', minify: false });
         expect(config.build.minify).toBe(false);
     });
 
     it('disables sourcemaps when sourcemap=false', () => {
-        const config: any = defineLibConfig({ entry: 'src/index.ts', sourcemap: false });
+        const config: any = resolveConfig({ entry: 'src/index.ts', sourcemap: false });
         expect(config.build.sourcemap).toBe(false);
     });
 
     it('emits a custom outDir', () => {
-        const config: any = defineLibConfig({ entry: 'src/index.ts', outDir: 'build/out' });
+        const config: any = resolveConfig({ entry: 'src/index.ts', outDir: 'build/out' });
         expect(config.build.outDir).toBe('build/out');
     });
 
     it('sets target=node18 when platform=node', () => {
-        const config: any = defineLibConfig({ entry: 'src/index.ts', platform: 'node' });
+        const config: any = resolveConfig({ entry: 'src/index.ts', platform: 'node' });
         expect(config.build.target).toBe('node18');
     });
 
     it('omits build.target for browser platform', () => {
-        const config: any = defineLibConfig({ entry: 'src/index.ts', platform: 'browser' });
+        const config: any = resolveConfig({ entry: 'src/index.ts', platform: 'browser' });
         expect(config.build.target).toBeUndefined();
     });
 
     it('attaches sigx JSX oxc config when jsx=true', () => {
-        const config: any = defineLibConfig({ entry: 'src/index.ts', jsx: true });
+        const config: any = resolveConfig({ entry: 'src/index.ts', jsx: true });
         expect(config.oxc).toEqual({
             jsx: { runtime: 'automatic', importSource: 'sigx' }
         });
     });
 
     it('omits oxc block when jsx defaults to false', () => {
-        const config: any = defineLibConfig({ entry: 'src/index.ts' });
+        const config: any = resolveConfig({ entry: 'src/index.ts' });
         expect(config.oxc).toBeUndefined();
     });
 
     it('propagates a banner into rolldownOptions.output', () => {
-        const config: any = defineLibConfig({
+        const config: any = resolveConfig({
             entry: 'src/index.ts',
             banner: '#!/usr/bin/env node'
         });
         expect(config.build.rolldownOptions.output.banner).toBe('#!/usr/bin/env node');
     });
 
-    it('omits rolldownOptions.output when no banner provided', () => {
-        const config: any = defineLibConfig({ entry: 'src/index.ts' });
-        expect(config.build.rolldownOptions.output).toBeUndefined();
+    it('sets no banner on rolldownOptions.output when none provided', () => {
+        const config: any = resolveConfig({ entry: 'src/index.ts' });
+        expect(config.build.rolldownOptions.output?.banner).toBeUndefined();
+    });
+});
+
+describe('defineLibConfig — prod-dist mode', () => {
+    it('suffixes every output file with .prod.js', () => {
+        const config = resolveConfig({ entry: 'src/index.ts' }, 'prod-dist');
+        expect(config.build.lib.fileName('es', 'index')).toBe('index.prod.js');
+        expect(config.build.rolldownOptions.output.chunkFileNames).toBe('[name]-[hash].prod.js');
+    });
+
+    it('defines process.env.NODE_ENV away', () => {
+        const config = resolveConfig({ entry: 'src/index.ts' }, 'prod-dist');
+        expect(config.define['process.env.NODE_ENV']).toBe('"production"');
+    });
+
+    it('does not empty the outDir (writes next to the dev dist)', () => {
+        const config = resolveConfig({ entry: 'src/index.ts' }, 'prod-dist');
+        expect(config.build.emptyOutDir).toBe(false);
+    });
+
+    it('the default build has no define and keeps plain filenames', () => {
+        const config = resolveConfig({ entry: 'src/index.ts' });
+        expect(config.define).toBeUndefined();
+        expect(config.build.lib.fileName('es', 'index')).toBe('index.js');
+        expect(config.build.emptyOutDir).toBe(true);
     });
 });

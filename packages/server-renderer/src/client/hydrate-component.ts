@@ -11,7 +11,7 @@ import {
     getCurrentInstance,
     signal,
     effect,
-    isModel
+    untrack
 } from 'sigx';
 import type { ComponentSetupContext, SlotsObject } from 'sigx';
 import {
@@ -22,14 +22,17 @@ import {
     patch,
     mount,
     patchProp,
-    filterClientDirectives,
     createEmit,
+    splitComponentProps,
     provideAppContext,
+    queueJob,
+    nextJobId,
 } from 'sigx/internals';
+import type { SchedulerJob } from 'sigx/internals';
 import {
     InternalVNode,
-    createRestoringSignal,
-    getCurrentAppContext
+    getCurrentAppContext,
+    getClientPlugins
 } from './hydrate-context';
 import { hydrateNode } from './hydrate-core';
 
@@ -53,10 +56,9 @@ export interface ComponentFactory {
  * @param vnode - The VNode to hydrate
  * @param dom - The DOM node to start from (content starts here)
  * @param parent - The parent node
- * @param serverState - Optional state captured from server for async components
  * @param trailingMarker - Optional trailing marker comment (the component anchor)
  */
-export function hydrateComponent(vnode: VNode, dom: Node | null, parent: Node, serverState?: Record<string, any>, trailingMarker?: Comment | null): Node | null {
+export function hydrateComponent(vnode: VNode, dom: Node | null, parent: Node, trailingMarker?: Comment | null): Node | null {
     const componentFactory = vnode.type as unknown as ComponentFactory;
     const setup = componentFactory.__setup;
     const componentName = componentFactory.__name || 'Anonymous';
@@ -109,18 +111,9 @@ export function hydrateComponent(vnode: VNode, dom: Node | null, parent: Node, s
 
     const internalVNode = vnode as InternalVNode;
     const initialProps = vnode.props || {};
-    const { children, slots: slotsFromProps, $models: modelsData, ...propsData } = filterClientDirectives(initialProps);
-
-    // Merge Model<T> objects directly into props for unified access: props.model.value
-    const propsWithModels = { ...propsData };
-    if (modelsData) {
-        for (const modelKey in modelsData) {
-            const modelValue = modelsData[modelKey];
-            if (isModel(modelValue)) {
-                propsWithModels[modelKey] = modelValue;
-            }
-        }
-    }
+    // Strategy packs (e.g. islands) strip their own marker props before
+    // delegating here — core has no knowledge of any directive prefix.
+    const { children, slotsFromProps, propsWithModels } = splitComponentProps(initialProps);
 
     // Create reactive props
     const reactiveProps = signal(propsWithModels);
@@ -137,25 +130,16 @@ export function hydrateComponent(vnode: VNode, dom: Node | null, parent: Node, s
 
     const parentInstance = getCurrentInstance();
 
-    // Use restoring signal when we have server state to restore
-    const signalFn = serverState
-        ? createRestoringSignal(serverState)
-        : signal;
-
-    // Create SSR helper for client-side
-    // When hydrating with server state, ssr.load() is a no-op (data already restored)
-    const hasServerState = !!serverState;
+    // Environment flags: hydrating server-rendered DOM. Data loading lives
+    // in useAsync/useStream — restored values come from window.__SIGX_ASYNC__.
     const ssrHelper = {
-        load(_fn: () => Promise<void>): void {
-            // No-op on client when hydrating - signal state was restored from server
-        },
         isServer: false,
-        isHydrating: hasServerState
+        isHydrating: true
     };
 
-    const componentCtx: ComponentSetupContext = {
+    let componentCtx: ComponentSetupContext = {
         el: parent as HTMLElement,
-        signal: signalFn as typeof signal,
+        signal: signal,
         props: createPropsAccessor(reactiveProps),
         slots: slots,
         emit: createEmit(reactiveProps),
@@ -167,11 +151,20 @@ export function hydrateComponent(vnode: VNode, dom: Node | null, parent: Node, s
         expose: () => { },
         renderFn: null,
         update: () => { },
-        ssr: ssrHelper,
-        _serverState: serverState
+        ssr: ssrHelper
     };
 
-    // For ROOT component only (no parent), provide the AppContext
+    // Let plugins transform the context before setup runs (mirror of the
+    // server's transformComponentContext). A strategy pack can swap ctx.signal
+    // for a state-restoring variant here — core stays strategy-agnostic.
+    for (const plugin of getClientPlugins()) {
+        const next = plugin.client?.transformComponentContext?.(vnode, componentCtx);
+        if (next) componentCtx = next;
+    }
+
+    // For ROOT component only (no parent), provide the AppContext. Run this AFTER
+    // the transform hooks so a plugin that returns a replacement context still
+    // receives the AppContext (the hook contract allows swapping the whole ctx).
     if (!parentInstance && getCurrentAppContext()) {
         provideAppContext(componentCtx, getCurrentAppContext()!);
     }
@@ -180,13 +173,32 @@ export function hydrateComponent(vnode: VNode, dom: Node | null, parent: Node, s
     let renderFn: (() => any) | undefined;
 
     try {
-        renderFn = setup(componentCtx);
+        // Untracked for the same reason as runtime-core's mountComponent
+        // (#111): hydration mounts descendants inside an ancestor's render
+        // effect — setup reads must not become ancestor dependencies.
+        renderFn = untrack(() => setup(componentCtx));
     } catch (err) {
         if (process.env.NODE_ENV !== 'production') {
             console.error(`Error hydrating component ${componentName}:`, err);
         }
     } finally {
         setCurrentInstance(prev);
+    }
+
+    // Streamed async components (and Suspense boundaries) render inside a
+    // <div data-async-placeholder> wrapper that is NOT part of the vnode
+    // tree. Hydrate against the wrapper's children — matching the wrapper
+    // itself against the component's first element would mismatch and mount
+    // a duplicate copy of the content.
+    let hydrateDom: Node | null = dom;
+    let hydrateParent: Node = parent;
+    if (
+        dom &&
+        dom.nodeType === Node.ELEMENT_NODE &&
+        (dom as Element).hasAttribute('data-async-placeholder')
+    ) {
+        hydrateParent = dom;
+        hydrateDom = dom.firstChild;
     }
 
     // Track where the component's DOM starts
@@ -201,6 +213,15 @@ export function hydrateComponent(vnode: VNode, dom: Node | null, parent: Node, s
         // the effect closure and all aliased VNodes share the same subtree reference.
         const subTreeRef: { current: VNode | null } = { current: null };
         internalVNode._subTreeRef = subTreeRef;
+
+        // Route re-renders through the shared render queue (same policy
+        // as runtime-core's mountComponent): deduped per component,
+        // parents flush before children. First render stays inline.
+        let scheduledRun: (() => void) | undefined;
+        const renderJob: SchedulerJob = Object.assign(
+            () => { if (scheduledRun) scheduledRun(); },
+            { id: nextJobId() }
+        );
 
         // Create reactive effect - on first run, hydrate; on subsequent, use render()
         const componentEffect = effect(() => {
@@ -218,7 +239,7 @@ export function hydrateComponent(vnode: VNode, dom: Node | null, parent: Node, s
                         // In that case, keep isFirstRender=true so the next render (after the
                         // lazy component resolves) will hydrate against the existing SSR DOM
                         // instead of mounting a duplicate.
-                        const hasSSRContent = dom != null && anchor != null && dom !== anchor;
+                        const hasSSRContent = hydrateDom != null && anchor != null && hydrateDom !== anchor;
                         if (!hasSSRContent) {
                             // Truly null first render — SSR also rendered nothing
                             isFirstRender = false;
@@ -246,10 +267,51 @@ export function hydrateComponent(vnode: VNode, dom: Node | null, parent: Node, s
                     // SSR rendered nothing (e.g., lazy() returned null on the server).
                     // In that case, mount fresh instead of trying to hydrate
                     // against non-existent DOM.
-                    const hasSSRContent = dom != null && dom !== anchor;
-                    if (hasSSRContent) {
-                        // Hydrate against existing SSR DOM
-                        endDom = hydrateNode(subTree, dom, parent);
+                    const hasSSRContent = hydrateDom != null && hydrateDom !== anchor;
+                    // The component's SSR content is bounded by its trailing
+                    // marker (anchor) when its content lives directly in the
+                    // parent. Inside an async-placeholder wrapper the content is
+                    // the wrapper's children (bounded by the end of the wrapper,
+                    // i.e. null) and the marker lives outside the wrapper.
+                    const inWrapper = hydrateParent !== parent;
+                    const rangeEnd: Node | null = inWrapper ? null : anchor;
+                    // The mismatch cleanup is only safe when the removable SSR
+                    // range is bounded: inside a wrapper (its children ARE the
+                    // range) or when the trailing marker exists (it terminates
+                    // the range within the shared parent). Without a marker and
+                    // outside a wrapper, rangeEnd is null and removing
+                    // [hydrateDom, null) would wipe following siblings owned by
+                    // other components — so fall through to in-place hydration.
+                    const rangeIsBounded = inWrapper || anchor != null;
+                    if (hasSSRContent && rangeIsBounded && !subtreeMatchesSSRDom(subTree, hydrateDom, rangeEnd)) {
+                        // Structural mismatch at the top of this component's
+                        // subtree (e.g. SSR rendered an empty-state, the client
+                        // renders a populated list — common with client/server
+                        // data differences and lazy() components that hydrate
+                        // late). Hydrating in place would abandon the SSR nodes
+                        // as visible orphans (#115). Bail to a clean client
+                        // render: discard the component's SSR DOM range
+                        // [hydrateDom, rangeEnd) and mount the subtree fresh in
+                        // its place. The range is bounded by the component's
+                        // trailing marker (or wrapper), so this removes exactly
+                        // this component's content and nothing a sibling owns.
+                        if (process.env.NODE_ENV !== 'production') {
+                            console.warn(
+                                `[Hydrate] Structural mismatch hydrating <${componentName}>; ` +
+                                'discarding server-rendered subtree and re-rendering on the client. ' +
+                                'SSR output did not match the client render for this component.'
+                            );
+                        }
+                        removeSSRRange(hydrateDom, rangeEnd, hydrateParent);
+                        mount(subTree, hydrateParent as Element, rangeEnd);
+                        endDom = rangeEnd;
+                    } else if (hasSSRContent) {
+                        // Hydrate against existing SSR DOM (inside the
+                        // placeholder wrapper when one exists)
+                        endDom = hydrateNode(subTree, hydrateDom, hydrateParent);
+                    } else if (hydrateParent !== parent) {
+                        // Empty placeholder wrapper — mount inside it
+                        mount(subTree, hydrateParent as Element, null);
                     } else {
                         // No SSR content — mount fresh before the anchor
                         mount(subTree, parent as Element, anchor || null);
@@ -261,6 +323,9 @@ export function hydrateComponent(vnode: VNode, dom: Node | null, parent: Node, s
                     if (prevSubTree) {
                         const patchContainer = prevSubTree.dom?.parentNode as Element || parent;
                         patch(prevSubTree, subTree, patchContainer);
+                    } else if (hydrateParent !== parent) {
+                        // No previous subtree — mount inside the placeholder wrapper
+                        mount(subTree, hydrateParent as Element, null);
                     } else {
                         // No previous subtree - mount fresh using the component's anchor
                         mount(subTree, parent as Element, anchor || null);
@@ -271,6 +336,11 @@ export function hydrateComponent(vnode: VNode, dom: Node | null, parent: Node, s
             } finally {
                 setCurrentInstance(prevInstance);
             }
+        }, {
+            scheduler: (run) => {
+                scheduledRun = run;
+                queueJob(renderJob);
+            },
         });
 
         internalVNode._effect = componentEffect;
@@ -280,10 +350,15 @@ export function hydrateComponent(vnode: VNode, dom: Node | null, parent: Node, s
     // Use trailing anchor comment as the component's dom reference
     vnode.dom = anchor || endDom;
 
-    // Run mount hooks
+    // Run created + mount hooks — untracked, mirroring runtime-core's
+    // mount path (#111): during hydration these run inside an ancestor's
+    // render effect, so reactive reads in a hook must not become
+    // ancestor dependencies.
     const mountCtx = { el: parent as Element };
-    createdHooks.forEach(hook => hook());
-    mountHooks.forEach(hook => hook(mountCtx));
+    untrack(() => {
+        createdHooks.forEach(hook => hook());
+        mountHooks.forEach(hook => hook(mountCtx));
+    });
 
     // Store cleanup
     vnode.cleanup = () => {
@@ -292,4 +367,76 @@ export function hydrateComponent(vnode: VNode, dom: Node | null, parent: Node, s
 
     // With trailing markers, the anchor IS the end - return next sibling
     return anchor ? anchor.nextSibling : endDom;
+}
+
+/**
+ * Decide whether a component's render subtree structurally matches the SSR DOM
+ * it would hydrate against (#115).
+ *
+ * Returns false only when we can prove a top-of-subtree structural mismatch:
+ * the subtree's leading element has a tag that differs from the first element
+ * node SSR produced for this component. In that case the caller bails to a
+ * fresh client mount for the whole subtree (React/Vue "bail to client render"
+ * semantics) instead of hydrating in place and leaving orphaned SSR nodes.
+ *
+ * Conservative by design: returns true (hydrate normally) for anything it
+ * does not classify as an element-root mismatch — Text/Comment/Fragment and
+ * component roots, and cases where SSR produced no element to compare against.
+ * This is a scoping decision, not a safety guarantee for those shapes: a
+ * Text/Comment subtree whose SSR DOM was an element (or vice versa) can still
+ * leave orphans, since hydrateNode's Text/Comment mismatch paths insert a
+ * fresh node without removing the mismatched SSR node and the component
+ * boundary means it is never revisited. Those residual cases are out of scope
+ * for this targeted fix (see the CHANGELOG note for #115); only the
+ * element-root tag mismatch — the reported empty-state-vs-list symptom — is
+ * cleaned up here.
+ *
+ * @param subTree     The normalized render result.
+ * @param startDom    First SSR node of the component's content.
+ * @param anchor      The component's trailing marker (exclusive range end), or null.
+ */
+function subtreeMatchesSSRDom(subTree: VNode, startDom: Node | null, anchor: Node | null): boolean {
+    // Only element-rooted subtrees are classified here. A leading element with
+    // the wrong tag is the unambiguous, anchor-bounded mismatch case.
+    if (typeof subTree.type !== 'string') {
+        return true;
+    }
+
+    // Find the first element node in the SSR range [startDom, anchor), skipping
+    // comment artifacts (e.g. <!--t--> separators, nested $c: markers).
+    let node: Node | null = startDom;
+    while (node && node !== anchor) {
+        if (node.nodeType === Node.ELEMENT_NODE) {
+            return (node as Element).tagName.toLowerCase() === subTree.type.toLowerCase();
+        }
+        if (node.nodeType === Node.TEXT_NODE) {
+            // SSR produced leading text where the client wants an element.
+            // hydrateNode's element branch would scan past this text looking
+            // for a matching element and abandon it — treat as a mismatch so
+            // the range is cleaned up and remounted.
+            return false;
+        }
+        node = node.nextSibling;
+    }
+
+    // No element found in the range to compare against — let normal hydration
+    // (and its existing empty/null handling) deal with it.
+    return true;
+}
+
+/**
+ * Remove the SSR DOM nodes spanning a component's abandoned subtree —
+ * everything in [startDom, anchor) — so a fresh client mount leaves no
+ * orphaned/duplicate content (#115). The anchor itself is preserved as the
+ * mount insertion point.
+ */
+function removeSSRRange(startDom: Node | null, anchor: Node | null, parent: Node): void {
+    let node: Node | null = startDom;
+    while (node && node !== anchor) {
+        const next: Node | null = node.nextSibling;
+        if (node.parentNode === parent) {
+            parent.removeChild(node);
+        }
+        node = next;
+    }
 }

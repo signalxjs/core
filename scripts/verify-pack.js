@@ -36,6 +36,7 @@ const PACKAGES = [
     'packages/runtime-dom',
     'packages/sigx',
     'packages/server-renderer',
+    'packages/ssr-islands',
     'packages/vite',
 ];
 
@@ -143,8 +144,13 @@ function main() {
             '',
             'const Counter = component(() => {',
             '  const count = signal(0);',
+            '  const form = signal({ name: \'\' });',
             '  return () => (',
-            '    <button onClick={() => count.value++}>count: {count.value}</button>',
+            '    <div>',
+            '      <button onClick={() => count.value++}>count: {count.value}</button>',
+            '      <input model={[form, \'name\']} />',
+            '      <p use:show={count.value > 0}>visible after first click</p>',
+            '    </div>',
             '  );',
             '});',
             '',
@@ -169,6 +175,47 @@ function main() {
 
     step('Build scratch app');
     run('npm run build', { cwd: appDir });
+
+    step('Assert production build resolved the production dist (devtools/dev-warnings stripped)');
+    const assetsDir = join(appDir, 'dist', 'assets');
+    const bundles = readdirSync(assetsDir).filter((f) => f.endsWith('.js'));
+    if (bundles.length === 0) {
+        throw new Error('Scratch app build produced no JS assets to inspect.');
+    }
+    const FORBIDDEN = ['__SIGX_DEVTOOLS_HOOK__', 'process.env.NODE_ENV', 'called outside of component setup'];
+    // Platform side effects must SURVIVE tree-shaking: the scratch app uses
+    // model={...} and use:show, both served by @sigx/runtime-dom's platform
+    // side-effect chunk (model processor + built-in directive registration
+    // live in the SAME chunk by construction). The show directive's Symbol
+    // description is the marker because it is unique to that chunk —
+    // protocol strings like 'checkbox'/'radio'/'onUpdate:modelValue' also
+    // appear in patchProp and would mask a dropped chunk.
+    const REQUIRED = [
+        {
+            marker: 'sigx.show.originalDisplay',
+            what: 'the @sigx/runtime-dom platform side-effect chunk (model processor + built-in directives)'
+        }
+    ];
+    const allContent = bundles.map((f) => readFileSync(join(assetsDir, f), 'utf-8'));
+    for (let i = 0; i < bundles.length; i++) {
+        for (const marker of FORBIDDEN) {
+            if (allContent[i].includes(marker)) {
+                throw new Error(
+                    `Production bundle ${bundles[i]} contains "${marker}" — the production export condition ` +
+                    'did not resolve to the .prod.js dist, or the prod dist is not fully stripped.'
+                );
+            }
+        }
+    }
+    for (const { marker, what } of REQUIRED) {
+        if (!allContent.some((c) => c.includes(marker))) {
+            throw new Error(
+                `No production bundle contains "${marker}" — ${what} was tree-shaken away; ` +
+                'the sideEffects-listed platform entry/chunk chain is broken.'
+            );
+        }
+    }
+    console.log(`   ✔ ${bundles.length} bundle(s) clean and platform side effects retained`);
 
     step('✅ Pack smoke test passed');
 }

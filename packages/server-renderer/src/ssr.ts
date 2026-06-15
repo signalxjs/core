@@ -19,10 +19,18 @@ import type { JSXElement } from 'sigx';
 import type { App, AppContext } from 'sigx';
 import { Readable } from 'node:stream';
 import { SSRContext, createSSRContext, SSRContextOptions, CorePendingAsync } from './server/context';
-import { renderToChunks, renderToStringSync } from './server/render-core';
-import { generateStreamingScript, generateReplacementScript } from './server/streaming';
-import { enableSSRHead, collectSSRHead, renderHeadToString } from './head';
+import { renderToChunks, renderVNodeToString } from './server/render-core';
+import { generateStreamingScript, generateReplacementScript, generateAppendBootstrap } from './server/streaming';
+import { renderHeadToString } from './head';
 import type { StreamCallbacks } from './server/types';
+import { stateSerializationPlugin } from './server/state-plugin';
+import {
+    renderDocumentImpl,
+    renderDocumentToNodeStreamImpl,
+    renderDocumentToWebStreamImpl,
+    type DocumentOptions,
+    type DocumentEngine
+} from './server/document';
 
 /**
  * Check if the input is an App instance (created via defineApp)
@@ -56,7 +64,11 @@ async function* streamAllAsyncChunks(
 ): AsyncGenerator<string> {
     type TaggedResult = { index: number; script: string };
 
-    const hasCoreAsync = ctx._pendingAsync.length > 0;
+    // Pump slots live at PUMP_BASE and above. Core slots can GROW while
+    // streaming — deferred renders (Suspense children, nested useAsync
+    // components) push new entries onto ctx._pendingAsync mid-stream — so
+    // they get the open-ended range below PUMP_BASE.
+    const PUMP_BASE = 1 << 30;
 
     // Collect plugin streaming generators
     const pluginGenerators: AsyncGenerator<string>[] = [];
@@ -65,58 +77,89 @@ async function* streamAllAsyncChunks(
         if (chunks) pluginGenerators.push(chunks);
     }
 
-    const hasPluginStreaming = pluginGenerators.length > 0;
-
     // Nothing to stream
-    if (!hasCoreAsync && !hasPluginStreaming) return;
+    if (ctx._pendingAsync.length === 0 && pluginGenerators.length === 0 && ctx._pendingStreams.length === 0) return;
 
-    // Emit the $SIGX_REPLACE bootstrap script (needed by core replacements)
-    if (hasCoreAsync) {
+    // Emit the $SIGX_REPLACE bootstrap script (needed by core replacements).
+    // If core async only appears mid-stream (deferred renders), the loop
+    // below emits it just-in-time before the first core replacement.
+    let bootstrapEmitted = false;
+    if (ctx._pendingAsync.length > 0) {
         yield generateStreamingScript();
+        bootstrapEmitted = true;
     }
 
-    // Build tagged promises for core-managed async components
-    const corePromises: Promise<TaggedResult>[] = ctx._pendingAsync.map(
-        (pending, index) =>
-            pending.promise.then(html => {
-                // Let plugins augment the resolved HTML
-                let finalHtml = html;
-                let extraScript = '';
-                for (const plugin of plugins) {
-                    const result = plugin.server?.onAsyncComponentResolved?.(pending.id, finalHtml, ctx);
-                    if (result) {
-                        if (result.html !== undefined) finalHtml = result.html;
-                        if (result.script) extraScript += result.script;
-                    }
-                }
-                return {
-                    index,
-                    script: generateReplacementScript(pending.id, finalHtml, extraScript || undefined)
-                };
-            }).catch(error => {
-                if (process.env.NODE_ENV !== 'production') {
-                    console.error(`Error streaming async component ${pending.id}:`, error);
-                }
-                return {
-                    index,
-                    script: generateReplacementScript(
-                        pending.id,
-                        `<div style="color:red;">Error loading component</div>`
-                    )
-                };
-            })
-    );
+    // $SIGX_APPEND bootstrap for progressive text streams (useStream) —
+    // upfront when streams registered during the shell render; just-in-time
+    // for streams that appear mid-stream (inside deferred renders).
+    let appendBootstrapEmitted = false;
+    if (ctx._pendingStreams.length > 0) {
+        yield generateAppendBootstrap();
+        appendBootstrapEmitted = true;
+    }
 
-    const totalCore = corePromises.length;
+    // Tagged promises for core-managed async components, keyed by their
+    // ctx._pendingAsync index; entries are removed once yielded.
+    const corePromises = new Map<number, Promise<TaggedResult>>();
+    let coreCount = 0;
 
-    // Set up pump pattern for plugin generators so they can be raced alongside core
+    function makeCorePromise(index: number): Promise<TaggedResult> {
+        const pending = ctx._pendingAsync[index];
+        return pending.promise.then(html => {
+            // Let plugins augment the resolved HTML
+            let finalHtml = html;
+            let extraScript = '';
+            let preScript = '';
+            for (const plugin of plugins) {
+                const result = plugin.server?.onAsyncComponentResolved?.(pending.id, finalHtml, ctx);
+                if (result) {
+                    if (result.html !== undefined) finalHtml = result.html;
+                    if (result.script) extraScript += result.script;
+                    if (result.preScript) preScript += result.preScript;
+                }
+            }
+            return {
+                index,
+                script: generateReplacementScript(pending.id, finalHtml, extraScript || undefined, preScript || undefined)
+            };
+        }).catch(error => {
+            if (process.env.NODE_ENV !== 'production') {
+                console.error(`Error streaming async component ${pending.id}:`, error);
+            }
+            return {
+                index,
+                script: generateReplacementScript(
+                    pending.id,
+                    `<div style="color:red;">Error loading component</div>`
+                )
+            };
+        });
+    }
+
+    /**
+     * Pick up pending async components added since the last check — deferred
+     * renders that are themselves being awaited can push new entries onto
+     * ctx._pendingAsync while the race loop runs.
+     */
+    function syncCorePromises(): void {
+        while (coreCount < ctx._pendingAsync.length) {
+            const index = coreCount++;
+            corePromises.set(index, makeCorePromise(index));
+        }
+    }
+
+    // Set up pump pattern for plugin generators and useStream() token
+    // streams so they can be raced alongside core
     interface PumpState {
         generator: AsyncGenerator<string>;
         done: boolean;
+        /** Progressive useStream() pump — its chunks need $SIGX_APPEND */
+        isStream: boolean;
     }
-    const pumps: PumpState[] = pluginGenerators.map(g => ({ generator: g, done: false }));
+    const pumps: PumpState[] = pluginGenerators.map(g => ({ generator: g, done: false, isStream: false }));
+    let streamCount = 0;
 
-    // Active pump promises, keyed by their slot index (totalCore + i)
+    // Active pump promises, keyed by their slot index (PUMP_BASE + i)
     const activePumps = new Map<number, Promise<TaggedResult>>();
 
     // pumpNext pulls ONE value from a generator. It does NOT pre-queue the
@@ -134,7 +177,7 @@ async function* streamAllAsyncChunks(
     // even though most of the chunks were never observed. See
     // signalxjs/core#17.
     function pumpNext(pumpIdx: number): Promise<TaggedResult> {
-        const slotIndex = totalCore + pumpIdx;
+        const slotIndex = PUMP_BASE + pumpIdx;
         return pumps[pumpIdx].generator.next().then(({ value, done }) => {
             if (done) {
                 pumps[pumpIdx].done = true;
@@ -147,18 +190,23 @@ async function* streamAllAsyncChunks(
 
     // Start initial pumps
     for (let i = 0; i < pumps.length; i++) {
-        const slotIndex = totalCore + i;
-        activePumps.set(slotIndex, pumpNext(i));
+        activePumps.set(PUMP_BASE + i, pumpNext(i));
     }
 
-    // Race loop: core promises + pump promises
-    const resolvedCore = new Set<number>();
+    /** Pick up useStream() pumps registered since the last check. */
+    function syncStreamPumps(): void {
+        while (streamCount < ctx._pendingStreams.length) {
+            const generator = ctx._pendingStreams[streamCount++];
+            const pumpIdx = pumps.length;
+            pumps.push({ generator, done: false, isStream: true });
+            activePumps.set(PUMP_BASE + pumpIdx, pumpNext(pumpIdx));
+        }
+    }
 
     function getRaceablePromises(): Promise<TaggedResult>[] {
-        const promises: Promise<TaggedResult>[] = [];
-        for (let i = 0; i < totalCore; i++) {
-            if (!resolvedCore.has(i)) promises.push(corePromises[i]);
-        }
+        syncCorePromises();
+        syncStreamPumps();
+        const promises: Promise<TaggedResult>[] = [...corePromises.values()];
         for (const [, p] of activePumps) {
             promises.push(p);
         }
@@ -172,17 +220,26 @@ async function* streamAllAsyncChunks(
         const winner = await Promise.race(raceable);
 
         if (winner.script) {
+            // Just-in-time bootstraps for work that only appeared mid-stream
+            if (!bootstrapEmitted && winner.index < PUMP_BASE) {
+                yield generateStreamingScript();
+                bootstrapEmitted = true;
+            }
+            if (!appendBootstrapEmitted && winner.index >= PUMP_BASE && pumps[winner.index - PUMP_BASE].isStream) {
+                yield generateAppendBootstrap();
+                appendBootstrapEmitted = true;
+            }
             yield winner.script;
         }
 
-        if (winner.index < totalCore) {
-            resolvedCore.add(winner.index);
+        if (winner.index < PUMP_BASE) {
+            corePromises.delete(winner.index);
         } else {
             // Pump slot — re-queue the next pull now that the consumer has
             // yielded the current value. If the generator hit `done: true`
             // (in which case `pumps[pumpIdx].done` was set inside pumpNext
             // and the slot was removed from `activePumps`), skip re-queue.
-            const pumpIdx = winner.index - totalCore;
+            const pumpIdx = winner.index - PUMP_BASE;
             if (!pumps[pumpIdx].done) {
                 activePumps.set(winner.index, pumpNext(pumpIdx));
             }
@@ -209,6 +266,28 @@ export interface SSRInstance {
         callbacks: StreamCallbacks,
         options?: SSRContextOptions | SSRContext
     ): Promise<void>;
+
+    /**
+     * Render a COMPLETE HTML document from a template (head auto-injection,
+     * state blob, async content). Default mode: 'blocking' — full content
+     * inline, no placeholders or replacement scripts (crawler/AI-agent
+     * friendly); the `sigx:ready` completion script is still emitted so
+     * gated hydration runs.
+     */
+    renderDocument(input: JSXElement | App, options: DocumentOptions): Promise<string>;
+
+    /**
+     * Stream a complete HTML document as a Node.js Readable. The `shell`
+     * promise settles before any byte is produced — await it to pick the
+     * HTTP status code, then pipe. Default mode: 'stream'.
+     */
+    renderDocumentToNodeStream(
+        input: JSXElement | App,
+        options: DocumentOptions
+    ): { stream: import('node:stream').Readable; shell: Promise<void> };
+
+    /** Stream a complete HTML document as UTF-8 bytes (edge-friendly). Default mode: 'stream'. */
+    renderDocumentToWebStream(input: JSXElement | App, options: DocumentOptions): ReadableStream<Uint8Array>;
 
     /** Create a raw SSRContext with plugins pre-configured */
     createContext(options?: SSRContextOptions): SSRContext;
@@ -242,30 +321,10 @@ export function createSSR(): SSRInstance {
         async render(input, options?) {
             const { element, appContext } = extractInput(input);
 
-            // Enable head collection during SSR rendering
-            enableSSRHead();
-
-            let result = '';
-            let ctx: SSRContext;
-
-            // Try fast synchronous render path first (works with or without plugins).
-            // All plugin hooks called during the tree walk are synchronous.
-            const syncCtx = makeContext(options);
-            const buf: string[] = [];
-            const syncOk = renderToStringSync(element, syncCtx, null, appContext, buf);
-
-            if (syncOk) {
-                result = buf.join('');
-                ctx = syncCtx;
-            } else {
-                // Tree has async operations — fall back to async generator path.
-                // We need a fresh context since the sync attempt may have partially
-                // modified plugin state.
-                ctx = makeContext(options);
-                for await (const chunk of renderToChunks(element, ctx, null, appContext)) {
-                    result += chunk;
-                }
-            }
+            // Single walk: fully-sync trees complete without suspending, async
+            // trees suspend at their awaits — no sync-attempt/re-render fallback.
+            const ctx = makeContext(options);
+            let result = await renderVNodeToString(element, ctx, appContext);
 
             // Collect injected HTML from all plugins
             for (const plugin of plugins) {
@@ -286,7 +345,7 @@ export function createSSR(): SSRInstance {
             }
 
             // Collect head elements from useHead() calls during rendering
-            const headConfigs = collectSSRHead();
+            const headConfigs = ctx._headConfigs;
             if (headConfigs.length > 0) {
                 ctx.addHead(renderHeadToString(headConfigs));
             }
@@ -300,12 +359,10 @@ export function createSSR(): SSRInstance {
             const { element, appContext } = extractInput(input);
 
             // Use pull-based ReadableStream backed by an async generator.
-            // This avoids the push-based "React Flight pattern" (worst-case for
-            // WebStreams — see Vercel fast-webstreams research) and provides
+            // Push-based enqueueing is the worst case for WebStreams
+            // throughput; pulling from a generator avoids it and provides
             // natural backpressure.
             async function* generateAll() {
-                enableSSRHead();
-
                 // Phase 1: Render main page with chunk batching (4KB threshold).
                 // Batched enqueues are ~24x faster than individual ones.
                 let buffer = '';
@@ -321,7 +378,7 @@ export function createSSR(): SSRInstance {
                 if (buffer) { yield buffer; buffer = ''; }
 
                 // Collect head from useHead() calls
-                const headConfigs = collectSSRHead();
+                const headConfigs = ctx._headConfigs;
                 if (headConfigs.length > 0) {
                     ctx.addHead(renderHeadToString(headConfigs));
                 }
@@ -369,8 +426,6 @@ export function createSSR(): SSRInstance {
 
             async function* generate(): AsyncGenerator<string> {
                 // Enable head collection
-                enableSSRHead();
-
                 // Phase 1: Render the main page (placeholders for async components)
                 let buffer = '';
                 const FLUSH_THRESHOLD = 4096;
@@ -384,7 +439,7 @@ export function createSSR(): SSRInstance {
                 if (buffer) { yield buffer; buffer = ''; }
 
                 // Collect head from useHead() calls
-                const headConfigs = collectSSRHead();
+                const headConfigs = ctx._headConfigs;
                 if (headConfigs.length > 0) {
                     ctx.addHead(renderHeadToString(headConfigs));
                 }
@@ -417,8 +472,6 @@ export function createSSR(): SSRInstance {
 
             try {
                 // Enable head collection
-                enableSSRHead();
-
                 // Phase 1: Render the shell
                 let shellHtml = '';
                 for await (const chunk of renderToChunks(element, ctx, null, appContext)) {
@@ -426,7 +479,7 @@ export function createSSR(): SSRInstance {
                 }
 
                 // Collect head from useHead() calls
-                const headConfigs = collectSSRHead();
+                const headConfigs = ctx._headConfigs;
                 if (headConfigs.length > 0) {
                     ctx.addHead(renderHeadToString(headConfigs));
                 }
@@ -454,8 +507,43 @@ export function createSSR(): SSRInstance {
             }
         },
 
+        renderDocument(input, options) {
+            const { element, appContext } = extractInput(input);
+            const engine = makeDocumentEngine(options);
+            return renderDocumentImpl(engine, { element, appContext }, options);
+        },
+
+        renderDocumentToNodeStream(input, options) {
+            const { element, appContext } = extractInput(input);
+            const engine = makeDocumentEngine(options);
+            return renderDocumentToNodeStreamImpl(engine, { element, appContext }, options);
+        },
+
+        renderDocumentToWebStream(input, options) {
+            const { element, appContext } = extractInput(input);
+            const engine = makeDocumentEngine(options);
+            return renderDocumentToWebStreamImpl(engine, { element, appContext }, options);
+        },
+
         createContext(options?) {
             return makeContext(options);
         }
     };
+
+    /**
+     * Document engine: instance plugins, with stateSerializationPlugin
+     * appended by default (serializeState: false opts out; an instance that
+     * already registered it is left as-is).
+     */
+    function makeDocumentEngine(options: DocumentOptions): DocumentEngine {
+        const wantsState = options.serializeState !== false;
+        const hasState = plugins.some(p => p.name === 'sigx:state');
+        const effective = wantsState && !hasState
+            ? [...plugins, stateSerializationPlugin()]
+            : plugins;
+        return {
+            plugins: effective,
+            streamAsyncChunks: (ctx) => streamAllAsyncChunks(ctx, effective)
+        };
+    }
 }

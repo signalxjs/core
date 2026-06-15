@@ -2,8 +2,8 @@
 // Signal - Reactive state primitives
 // ============================================================================
 
-import type { Subscriber, Signal, PrimitiveSignal, Primitive } from './types';
-import { currentSubscriber, batch, track, trigger } from './effect';
+import type { Dep, Signal, PrimitiveSignal, Primitive } from './types';
+import { currentSubscriber, batch, createDep, track, trigger } from './effect';
 import { getDevtoolsHook, registerReactiveProxy, notifySignalUpdated } from './devtools-hook';
 import {
     isReactive,
@@ -199,31 +199,33 @@ export function signal<T>(target: T): PrimitiveSignal<T> | Signal<T & object> {
     // Defer depsMap allocation for non-collections (most signals).
     // Collections need the Map upfront for their write method instrumentations.
     const isCollectionTarget = isCollection(objectTarget);
-    let depsMap: Map<string | symbol, Set<Subscriber>> | null = isCollectionTarget ? new Map() : null;
+    let depsMap: Map<string | symbol, Dep> | null = isCollectionTarget ? new Map() : null;
     const reactiveCache = new WeakMap<object, any>();
 
     // DevTools id — only minted when a hook is currently installed.
     // The id stays on the proxy for the rest of its life via
     // `signalIds` so the `set` trap can include it in updates without
     // a per-write hook lookup.
-    const hookAtCreate = getDevtoolsHook();
     let signalId: number | null = null;
-    if (hookAtCreate) {
-        signalId = hookAtCreate.nextId();
-        hookAtCreate.emit({
-            type: 'signal:created',
-            id: signalId,
-            kind: isCollectionTarget ? 'collection' : 'object',
-            ownerComponentId: hookAtCreate.currentOwner,
-        });
+    if (process.env.NODE_ENV !== 'production') {
+        const hookAtCreate = getDevtoolsHook();
+        if (hookAtCreate) {
+            signalId = hookAtCreate.nextId();
+            hookAtCreate.emit({
+                type: 'signal:created',
+                id: signalId,
+                kind: isCollectionTarget ? 'collection' : 'object',
+                ownerComponentId: hookAtCreate.currentOwner,
+            });
+        }
     }
 
-    // Helper to get or create a dependency set for a key
-    const getOrCreateDep = (key: string | symbol): Set<Subscriber> => {
+    // Helper to get or create the dependency slot for a key
+    const getOrCreateDep = (key: string | symbol): Dep => {
         if (!depsMap) depsMap = new Map();
         let dep = depsMap.get(key);
         if (!dep) {
-            dep = new Set<Subscriber>();
+            dep = createDep();
             depsMap.set(key, dep);
         }
         return dep;
@@ -321,26 +323,39 @@ export function signal<T>(target: T): PrimitiveSignal<T> | Signal<T & object> {
             // Only trigger if value actually changed
             if (!Object.is(oldValue, newValue)) {
                 if (depsMap) {
-                    const dep = depsMap.get(prop);
-                    if (dep) {
-                        trigger(dep);
-                    }
+                    // Array writes can hit several deps at once (an index
+                    // plus `length`, or `length` plus truncated indices).
+                    // Batch those so a subscriber of more than one runs
+                    // once; the common single-dep write stays un-batched.
+                    const isArray = Array.isArray(obj);
+                    const lengthChanged = isArray && prop !== 'length' && obj.length !== oldLength;
+                    const lengthShrunk = isArray && prop === 'length' &&
+                        typeof newValue === 'number' && newValue < oldLength;
 
-                    // Special handling for Arrays
-                    if (Array.isArray(obj)) {
-                        // If we set an index and length changed, trigger length dependency
-                        if (prop !== 'length' && obj.length !== oldLength) {
-                            const lengthDep = depsMap.get('length');
-                            if (lengthDep) {
-                                trigger(lengthDep);
+                    if (lengthChanged || lengthShrunk) {
+                        batch(() => {
+                            const dep = depsMap!.get(prop);
+                            if (dep) {
+                                trigger(dep);
                             }
-                        }
-                        // If we set length, trigger indices that are now out of bounds
-                        if (prop === 'length' && typeof newValue === 'number' && newValue < oldLength) {
-                            for (let i = newValue; i < oldLength; i++) {
-                                const idxDep = depsMap.get(String(i));
-                                if (idxDep) trigger(idxDep);
+                            if (lengthChanged) {
+                                const lengthDep = depsMap!.get('length');
+                                if (lengthDep) {
+                                    trigger(lengthDep);
+                                }
                             }
+                            if (lengthShrunk) {
+                                // Trigger indices that are now out of bounds
+                                for (let i = newValue as number; i < oldLength; i++) {
+                                    const idxDep = depsMap!.get(String(i));
+                                    if (idxDep) trigger(idxDep);
+                                }
+                            }
+                        });
+                    } else {
+                        const dep = depsMap.get(prop);
+                        if (dep) {
+                            trigger(dep);
                         }
                     }
                 }

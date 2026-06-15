@@ -29,18 +29,12 @@ import type {
     App
 } from './app-types.js';
 
-import { getAppContextToken, type InjectableFunction } from './di/injectable.js';
+import { getAppContextToken, setActiveAppContext, type Providable } from './di/injectable.js';
 import { isDirective } from './directives.js';
 import type { JSXElement } from './jsx-runtime.js';
 import { noMountFunctionError, provideInvalidInjectableError } from './errors.js';
 import { getDevtoolsHook } from './devtools-hook.js';
 import { getInstanceId, getParentInstanceId } from './component-lifecycle.js';
-
-// ============================================================================
-// Dev mode flag - must be at top before any usage
-// ============================================================================
-
-const isDev = typeof process !== 'undefined' && process.env?.NODE_ENV !== 'production' || true;
 
 // ============================================================================
 // Constants
@@ -108,6 +102,7 @@ export function defineApp<TContainer = any>(rootComponent: JSXElement): App<TCon
     const context: AppContext = {
         app: null!, // Will be set below
         provides: new Map(),
+        disposables: new Set(),
         config: {},
         hooks: [],
         directives: new Map()
@@ -123,7 +118,7 @@ export function defineApp<TContainer = any>(rootComponent: JSXElement): App<TCon
         use(plugin, options) {
             if (installedPlugins.has(plugin)) {
                 // Plugin already installed, skip
-                if (isDev) {
+                if (process.env.NODE_ENV !== 'production') {
                     console.warn(`Plugin ${(plugin as Plugin).name || 'anonymous'} is already installed.`);
                 }
                 return app;
@@ -137,14 +132,14 @@ export function defineApp<TContainer = any>(rootComponent: JSXElement): App<TCon
             } else if (plugin && typeof plugin.install === 'function') {
                 // Object-style plugin
                 plugin.install(app, options);
-            } else if (isDev) {
+            } else if (process.env.NODE_ENV !== 'production') {
                 console.warn('Invalid plugin: must be a function or have an install() method.');
             }
 
             return app;
         },
 
-        defineProvide<T>(useFn: InjectableFunction<T>, factory?: () => T): T {
+        defineProvide<T>(useFn: Providable<T>, factory?: () => T): T {
             const actualFactory = factory ?? useFn._factory;
             const token = useFn._token;
 
@@ -154,7 +149,36 @@ export function defineApp<TContainer = any>(rootComponent: JSXElement): App<TCon
 
             const instance = actualFactory();
             context.provides.set(token, instance);
+            // App-provided instances are app-owned: dispose them on unmount —
+            // unless the factory setup took over disposal via overrideDispose.
+            // Factory-generated disposes are stored RAW so the factory's
+            // dispose/recreate logic can delete the stale entry; user-supplied
+            // method-style disposes get a bound wrapper so `this` survives.
+            const dispose = (instance as { dispose?: unknown } | null)?.dispose;
+            if (typeof dispose === 'function'
+                && (dispose as { __sigxCustomManaged?: boolean }).__sigxCustomManaged !== true) {
+                const isFactoryDispose = '__sigxDisposed' in (dispose as object);
+                context.disposables.add(
+                    isFactoryDispose
+                        ? dispose as () => void
+                        : () => (dispose as () => void).call(instance)
+                );
+            }
             return instance;
+        },
+
+        runWithContext<T>(fn: () => T): T {
+            // Make this app's context the active fallback for DI resolution
+            // outside components (router guards, socket handlers, entry-scope
+            // code). Synchronous only: restored in finally, so the context
+            // never leaks past the first await of an async fn. Nested calls
+            // restore the previous context.
+            const prev = setActiveAppContext(context);
+            try {
+                return fn();
+            } finally {
+                setActiveAppContext(prev);
+            }
         },
 
         hook(hooks) {
@@ -164,7 +188,7 @@ export function defineApp<TContainer = any>(rootComponent: JSXElement): App<TCon
 
         directive(name: string, definition?: any): any {
             if (definition !== undefined) {
-                if (isDev && !isDirective(definition)) {
+                if (process.env.NODE_ENV !== 'production' && !isDirective(definition)) {
                     console.warn(
                         `[sigx] app.directive('${name}', ...) received a value that is not a valid directive definition. ` +
                         `Use defineDirective() to create directive definitions.`
@@ -178,7 +202,7 @@ export function defineApp<TContainer = any>(rootComponent: JSXElement): App<TCon
 
         mount(target, renderFn?) {
             if (isMounted) {
-                if (isDev) {
+                if (process.env.NODE_ENV !== 'production') {
                     console.warn('App is already mounted. Call app.unmount() first.');
                 }
                 return app;
@@ -194,10 +218,12 @@ export function defineApp<TContainer = any>(rootComponent: JSXElement): App<TCon
             container = target;
             isMounted = true;
 
-            const devtools = getDevtoolsHook();
-            if (devtools) {
-                devtools.apps.add(context);
-                devtools.emit({ type: 'app:init', app: context });
+            if (process.env.NODE_ENV !== 'production') {
+                const devtools = getDevtoolsHook();
+                if (devtools) {
+                    devtools.apps.add(context);
+                    devtools.emit({ type: 'app:init', app: context });
+                }
             }
 
             // Call the platform-specific render function with our app context
@@ -212,7 +238,7 @@ export function defineApp<TContainer = any>(rootComponent: JSXElement): App<TCon
 
         unmount() {
             if (!isMounted) {
-                if (isDev) {
+                if (process.env.NODE_ENV !== 'production') {
                     console.warn('App is not mounted.');
                 }
                 return;
@@ -222,11 +248,25 @@ export function defineApp<TContainer = any>(rootComponent: JSXElement): App<TCon
                 unmountFn();
             }
 
-            const devtools = getDevtoolsHook();
-            if (devtools) {
-                devtools.emit({ type: 'app:unmount', app: context });
-                devtools.apps.delete(context);
+            if (process.env.NODE_ENV !== 'production') {
+                const devtools = getDevtoolsHook();
+                if (devtools) {
+                    devtools.emit({ type: 'app:unmount', app: context });
+                    devtools.apps.delete(context);
+                }
             }
+
+            // Dispose app-owned instances (singletons, app-level provides).
+            // Each disposable is isolated so one failing dispose cannot
+            // prevent the rest of the teardown.
+            for (const dispose of context.disposables) {
+                try {
+                    dispose();
+                } catch (err) {
+                    console.error('Error disposing app-owned instance:', err);
+                }
+            }
+            context.disposables.clear();
 
             // Clear provides to help GC
             context.provides.clear();
@@ -279,14 +319,16 @@ export function notifyComponentCreated(context: AppContext | null, instance: Com
             handleHookError(context, err as Error, instance, 'onComponentCreated');
         }
     }
-    const devtools = getDevtoolsHook();
-    if (devtools) devtools.emit({
-        type: 'component:created',
-        app: context,
-        instance,
-        instanceId: getInstanceId(instance.ctx),
-        parentInstanceId: getParentInstanceId(instance.ctx),
-    });
+    if (process.env.NODE_ENV !== 'production') {
+        const devtools = getDevtoolsHook();
+        if (devtools) devtools.emit({
+            type: 'component:created',
+            app: context,
+            instance,
+            instanceId: getInstanceId(instance.ctx),
+            parentInstanceId: getParentInstanceId(instance.ctx),
+        });
+    }
 }
 
 /**
@@ -302,8 +344,10 @@ export function notifyComponentMounted(context: AppContext | null, instance: Com
             handleHookError(context, err as Error, instance, 'onComponentMounted');
         }
     }
-    const devtools = getDevtoolsHook();
-    if (devtools) devtools.emit({ type: 'component:mounted', app: context, instance, instanceId: getInstanceId(instance.ctx) });
+    if (process.env.NODE_ENV !== 'production') {
+        const devtools = getDevtoolsHook();
+        if (devtools) devtools.emit({ type: 'component:mounted', app: context, instance, instanceId: getInstanceId(instance.ctx) });
+    }
 }
 
 /**
@@ -319,8 +363,10 @@ export function notifyComponentUnmounted(context: AppContext | null, instance: C
             handleHookError(context, err as Error, instance, 'onComponentUnmounted');
         }
     }
-    const devtools = getDevtoolsHook();
-    if (devtools) devtools.emit({ type: 'component:unmounted', app: context, instance, instanceId: getInstanceId(instance.ctx) });
+    if (process.env.NODE_ENV !== 'production') {
+        const devtools = getDevtoolsHook();
+        if (devtools) devtools.emit({ type: 'component:unmounted', app: context, instance, instanceId: getInstanceId(instance.ctx) });
+    }
 }
 
 /**
@@ -336,8 +382,10 @@ export function notifyComponentUpdated(context: AppContext | null, instance: Com
             handleHookError(context, err as Error, instance, 'onComponentUpdated');
         }
     }
-    const devtools = getDevtoolsHook();
-    if (devtools) devtools.emit({ type: 'component:updated', app: context, instance, instanceId: getInstanceId(instance.ctx) });
+    if (process.env.NODE_ENV !== 'production') {
+        const devtools = getDevtoolsHook();
+        if (devtools) devtools.emit({ type: 'component:updated', app: context, instance, instanceId: getInstanceId(instance.ctx) });
+    }
 }
 
 /**
@@ -352,8 +400,10 @@ export function handleComponentError(
 ): boolean {
     if (!context) return false;
 
-    const devtools = getDevtoolsHook();
-    if (devtools) devtools.emit({ type: 'component:error', app: context, instance, instanceId: getInstanceId(instance?.ctx ?? null), error: err, info });
+    if (process.env.NODE_ENV !== 'production') {
+        const devtools = getDevtoolsHook();
+        if (devtools) devtools.emit({ type: 'component:error', app: context, instance, instanceId: getInstanceId(instance?.ctx ?? null), error: err, info });
+    }
 
     // First, try plugin hooks
     for (const hooks of context.hooks) {

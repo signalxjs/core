@@ -31,6 +31,12 @@ export interface InternalVNode extends VNode {
     _slots?: InternalSlotsObject;
     /** Reactive props signal for the component */
     _componentProps?: Record<string, any>;
+    /**
+     * The value the component exposed via `ctx.expose(...)` (null if not called).
+     * Captured at mount time so that ref updates during same-type patches can
+     * invoke a newly-supplied ref with the same value the original ref received.
+     */
+    _exposed?: any;
 }
 
 export interface RendererOptions<HostNode = any, HostElement = any> {

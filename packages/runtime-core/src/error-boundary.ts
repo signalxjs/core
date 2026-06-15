@@ -58,7 +58,7 @@ export const ErrorBoundary = component<ErrorBoundaryProps>((ctx) => {
         }
 
         try {
-            return slots.default();
+            return slots.default?.() ?? [];
         } catch (e) {
             const error = e instanceof Error ? e : new Error(String(e));
             state.hasError = true;

@@ -7,7 +7,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { render } from '../src/index';
 import { show } from '../src/directives/show';
-import { jsx, signal } from 'sigx';
+import { jsx } from 'sigx';
 
 describe('show directive', () => {
     let container: HTMLElement;

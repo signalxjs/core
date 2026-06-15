@@ -6,7 +6,7 @@ import './types';
 import './directives/show-jsx-types';
 
 // Platform setup (side effects)
-import './model-processor.js';
+import './platform.js';
 
 // Re-export public API from focused modules
 export { render, patch, mount, unmount, mountComponent } from './render.js';
@@ -18,10 +18,13 @@ export { nodeOps } from './nodeOps.js';
 // Export Portal component and moveBefore utilities
 export { Portal, supportsMoveBefore, moveNode } from './Portal.js';
 
-// Export built-in directives
+// Built-in directives. Standard built-ins (`show`) register automatically
+// with the platform (see ./platform.ts) — their JSX types are globally
+// visible, so the runtime must always resolve them. Custom directives
+// register per app via `app.directive(name, def)` (client + SSR) or
+// globally via `registerBuiltInDirective(name, def)`.
 export { show } from './directives/show.js';
 
-// Register built-in directives so use:show={value} works without importing
-import { show as _showDirective } from './directives/show.js';
-import { registerBuiltInDirective as _register } from './directives.js';
-_register('show', _showDirective);
+// Head management (browser-standalone; server collection via instance seam)
+export { useHead } from './use-head.js';
+export type { HeadConfig, HeadMeta, HeadLink, HeadScript } from './use-head.js';

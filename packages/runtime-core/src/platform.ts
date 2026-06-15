@@ -23,15 +23,29 @@ export type ModelProcessor = (
     originalProps: Record<string, any>
 ) => boolean;
 
-// Private holder - no TDZ issues since this module has no circular deps
+// Private holders - no TDZ issues since this module has no circular deps.
+// Two tiers: extension processors (registered by packs/userland, tried first,
+// FIFO among themselves) and the platform processor (registered by the
+// platform package — DOM, Lynx, Terminal — as part of platform identity,
+// tried last as the fallback). First processor returning true wins.
 let platformModelProcessor: ModelProcessor | null = null;
+const extensionModelProcessors: ModelProcessor[] = [];
+let orderedProcessors: readonly ModelProcessor[] = [];
+
+function rebuildOrdered(): void {
+    orderedProcessors = platformModelProcessor
+        ? [...extensionModelProcessors, platformModelProcessor]
+        : [...extensionModelProcessors];
+}
 
 /**
  * Set the platform-specific model processor for intrinsic elements.
- * Called by runtime-dom to handle checkbox/radio/select model bindings.
+ * Called by the platform package (e.g. runtime-dom for checkbox/radio/select
+ * model bindings) — one per platform, always the last processor tried.
  */
 export function setPlatformModelProcessor(fn: ModelProcessor): void {
     platformModelProcessor = fn;
+    rebuildOrdered();
 }
 
 /**
@@ -41,57 +55,24 @@ export function getPlatformModelProcessor(): ModelProcessor | null {
     return platformModelProcessor;
 }
 
-// User-registered model processors. These run BEFORE the platform processor,
-// in registration order; the first one returning `true` wins. This is the
-// public extension point for custom elements / web components. The platform
-// processor (set above by runtime-dom / lynx-runtime) remains the last-resort
-// base layer, so registering a user processor never clobbers native form binding.
-const userModelProcessors: ModelProcessor[] = [];
-
 /**
- * Register a model processor for custom elements (public API).
+ * Register an extension model processor for intrinsic elements.
  *
- * Processors run in registration order before the platform's built-in
- * processor; the first returning `true` handles the binding and stops the
- * chain. Return `false` to defer to the next processor (and ultimately the
- * platform/generic fallback).
- *
- * @param fn - The processor: `(type, props, [obj, key], originalProps) => boolean`
- * @returns An unregister function that removes this processor.
- *
- * @example
- * ```tsx
- * registerModelProcessor((type, props, [obj, key], originalProps) => {
- *     if (type !== 'my-toggle') return false;
- *     props.checked = obj[key];
- *     props.onToggle = (e) => { obj[key] = e.detail.value; };
- *     return true;
- * });
- * ```
+ * Extension processors run BEFORE the platform processor, in registration
+ * order, until one returns true — so packs (custom elements, widget
+ * libraries) can add model handling without replacing the platform's.
+ * Registering the same function twice is a no-op.
  */
-export function registerModelProcessor(fn: ModelProcessor): () => void {
-    userModelProcessors.push(fn);
-    return () => {
-        const i = userModelProcessors.indexOf(fn);
-        if (i >= 0) userModelProcessors.splice(i, 1);
-    };
+export function registerModelProcessor(fn: ModelProcessor): void {
+    if (extensionModelProcessors.includes(fn)) return;
+    extensionModelProcessors.push(fn);
+    rebuildOrdered();
 }
 
 /**
- * Run the full model-processor chain for an intrinsic element: user-registered
- * processors first (registration order, first `true` wins), then the platform
- * processor. Returns `true` if any processor handled the binding.
+ * All model processors in invocation order: extensions first (FIFO), then
+ * the platform processor. For internal use by the JSX runtime.
  */
-export function runModelProcessors(
-    type: string,
-    props: Record<string, any>,
-    modelBinding: [Record<string, any>, string],
-    originalProps: Record<string, any>
-): boolean {
-    for (const processor of userModelProcessors) {
-        if (processor(type, props, modelBinding, originalProps)) return true;
-    }
-    return platformModelProcessor
-        ? platformModelProcessor(type, props, modelBinding, originalProps)
-        : false;
+export function getModelProcessors(): readonly ModelProcessor[] {
+    return orderedProcessors;
 }

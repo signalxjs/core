@@ -17,15 +17,19 @@
       "@sigx/runtime-core/jsx-runtime": ["./packages/runtime-core/src/index.ts"],
       "@sigx/runtime-core/jsx-dev-runtime": ["./packages/runtime-core/src/index.ts"],
       "@sigx/runtime-dom": ["./packages/runtime-dom/src/index.ts"],
+      "@sigx/runtime-dom/platform": ["./packages/runtime-dom/src/platform.ts"],
       "@sigx/runtime-dom/internals": ["./packages/runtime-dom/src/internals.ts"],
       "@sigx/server-renderer": ["./packages/server-renderer/src/index.ts"],
       "@sigx/server-renderer/server": ["./packages/server-renderer/src/server/index.ts"],
       "@sigx/server-renderer/client": ["./packages/server-renderer/src/client/index.ts"],
+      "@sigx/ssr-islands": ["./packages/ssr-islands/src/index.ts"],
+      "@sigx/ssr-islands/server": ["./packages/ssr-islands/src/server/index.ts"],
+      "@sigx/ssr-islands/client": ["./packages/ssr-islands/src/client/index.ts"],
+      "@sigx/ssr-islands/jsx": ["./packages/ssr-islands/src/jsx.d.ts"],
       "sigx": ["./packages/sigx/src/index.ts"],
       "sigx/internals": ["./packages/sigx/src/internals.ts"],
       "sigx/jsx-runtime": ["./packages/sigx/src/index.ts"],
-      "sigx/jsx-dev-runtime": ["./packages/sigx/src/index.ts"],
-      "sigx/hydration": ["./packages/sigx/src/hydration.ts"]
+      "sigx/jsx-dev-runtime": ["./packages/sigx/src/index.ts"]
     }
   },
   "include": [
