@@ -190,17 +190,32 @@ export function scheduleComponentHydration(
 }
 
 function findComponentBoundaries(dom: Node | null): { contentStart: Node | null; trailingMarker: Comment | null } {
-    let contentStart = dom;
+    const contentStart = dom;
     let trailingMarker: Comment | null = null;
 
+    // Mirror @sigx/server-renderer/client hydrateComponent's marker selection:
+    // when components are nested, SSR emits multiple contiguous <!--$c:N-->
+    // markers with child IDs appearing BEFORE the parent's. Picking the first
+    // marker would anchor on a child and return the wrong nextSibling, causing
+    // the walk to skip/rehydrate the wrong DOM range. Choose the lowest-ID
+    // marker in the contiguous run so we anchor on this (outermost) component.
     let current: Node | null = dom;
+    let bestId = Infinity;
+    let foundAnyMarker = false;
     while (current) {
         if (current.nodeType === Node.COMMENT_NODE) {
             const text = (current as Comment).data;
             if (text.startsWith('$c:')) {
-                trailingMarker = current as Comment;
-                break;
+                const id = parseInt(text.slice(3), 10);
+                if (id < bestId) {
+                    bestId = id;
+                    trailingMarker = current as Comment;
+                }
+                foundAnyMarker = true;
             }
+        } else if (foundAnyMarker) {
+            // Passed this component's marker run into a sibling's content.
+            break;
         }
         current = current.nextSibling;
     }

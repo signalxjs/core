@@ -41,7 +41,7 @@ const lazyRegistry = new Map<string, LazyComponentLoader>();
 /**
  * In-flight resolution promises to deduplicate concurrent resolveComponent() calls
  */
-const pendingResolutions = new Map<string, Promise<ComponentFactory>>();
+const pendingResolutions = new Map<string, Promise<ComponentFactory | undefined>>();
 
 /**
  * Register a component for island hydration (eager — component is already loaded).
@@ -125,13 +125,13 @@ export async function resolveComponent(name: string): Promise<ComponentFactory |
             componentRegistry.set(name, component); // Cache for instant future access
         }
         pendingResolutions.delete(name);
-        return component!;
+        return component;
     }).catch(err => {
         pendingResolutions.delete(name);
         if (process.env.NODE_ENV !== 'production') {
             console.error(`[Islands] Failed to load island chunk for "${name}":`, err);
         }
-        return undefined as any;
+        return undefined;
     });
 
     pendingResolutions.set(name, resolution);

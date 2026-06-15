@@ -33,7 +33,11 @@ export function hydrateLeftoverAsyncComponents(container: Element): void {
         if (!id) continue;
 
         const info = islandData[id];
-        if (info && info.state) {
+        // Hydrate every streamed-in async island, not only those that captured
+        // signal state — an async component with no tracked state must still
+        // become interactive. (Matches the sigx:async-ready listener path,
+        // which gates on `info` alone.)
+        if (info) {
             hydrateAsyncComponent(placeholder as Element, info);
         }
     }

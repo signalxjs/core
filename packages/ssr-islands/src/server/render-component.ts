@@ -48,11 +48,19 @@ export function createTrackingSignal(signalMap: Map<string, any>): SSRSignalFn {
         // Dev warning: positional keys are fragile in islands
         if (process.env.NODE_ENV !== 'production' && !name && !hasWarnedPositional) {
             hasWarnedPositional = true;
+            // Guard the hint: `initial` may hold circular references, and an
+            // unguarded JSON.stringify here would throw and break SSR in dev.
+            let initialHint: string;
+            try {
+                initialHint = JSON.stringify(initial);
+            } catch {
+                initialHint = String(initial);
+            }
             console.warn(
                 `[SSR Islands] Signal created without a name in an island component. ` +
                 `Positional keys ("${key}") are fragile — if signal declaration order differs ` +
                 `between server and client, state restoration will silently restore wrong values. ` +
-                `Consider using named signals: signal(${JSON.stringify(initial)}, "mySignalName")`
+                `Consider using named signals: signal(${initialHint}, "mySignalName")`
             );
         }
 
