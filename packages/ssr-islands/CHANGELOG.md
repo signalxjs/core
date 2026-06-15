@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Full-tree (walk-path) hydration no longer leaks `client:*` directive props into
+  the hydrated component. The walk path now strips directives before delegating to
+  core `hydrateComponent`/`render`, matching the data-driven `hydrateIsland()` path.
+  (signalxjs/core#126)
+
 ### Added
 
 - `client:only` now genuinely skips SSR. The component is no longer rendered or

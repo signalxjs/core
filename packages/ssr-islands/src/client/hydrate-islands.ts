@@ -18,6 +18,7 @@ import {
 import { registerComponent, type ComponentFactory } from './registry';
 import { loadIslandComponent } from './chunk-loader';
 import { getIslandServerState } from './island-context';
+import { filterClientDirectives } from '../client-directives';
 import type { IslandInfo } from './types';
 
 // Import from server-renderer core. The app-context accessors propagate DI across
@@ -106,6 +107,13 @@ export function scheduleComponentHydration(
     const componentFactory = vnode.type as unknown as ComponentFactory;
     const componentName = componentFactory.__islandId || componentFactory.__name || 'Anonymous';
 
+    // Core has no directive knowledge (splitComponentProps keeps unknown keys),
+    // so strip client:* here — mirrors the data-driven hydrateIsland() path, where
+    // props are already directive-free via the server's filterClientDirectives.
+    const cleanVnode: VNode = vnode.props
+        ? { ...vnode, props: filterClientDirectives(vnode.props) }
+        : vnode;
+
     // Skip async placeholders during hydration walk.
     if (contentStart && (contentStart as Element).hasAttribute?.('data-async-placeholder')) {
         if (componentName !== 'Anonymous') {
@@ -128,7 +136,7 @@ export function scheduleComponentHydration(
         setCurrentAppContext(capturedAppContext);
         if (componentId !== null) seedPendingServerState(getIslandServerState(componentId));
         try {
-            hydrateComponent(vnode, contentStart, parent, trailingMarker);
+            hydrateComponent(cleanVnode, contentStart, parent, trailingMarker);
         } finally {
             setCurrentAppContext(prevAppContext);
             // Defensively clear: if hydrateComponent threw before the plugin
@@ -212,7 +220,7 @@ export function scheduleComponentHydration(
                 const prevAppContext = getCurrentAppContext();
                 setCurrentAppContext(capturedAppContext);
                 try {
-                    render(vnode, container);
+                    render(cleanVnode, container);
                 } finally {
                     setCurrentAppContext(prevAppContext);
                 }
@@ -574,3 +582,4 @@ function mountClientOnly(marker: Comment, component: ComponentFactory, info: Isl
 
     render(vnode, container);
 }
+

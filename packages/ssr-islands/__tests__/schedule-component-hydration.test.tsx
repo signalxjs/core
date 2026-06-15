@@ -165,6 +165,32 @@ describe('scheduleComponentHydration (full-tree path)', () => {
         expect(setup).toBe(false);
         expect(next).not.toBeUndefined();
     });
+
+    it('does not leak client:* directive props into the hydrated component', () => {
+        // The walk path must strip directives before delegating to core (which has
+        // no directive knowledge), matching the data-driven hydrateIsland() path —
+        // see signalxjs/core#126.
+        let seen: Record<string, any> = {};
+        const Comp = component((ctx) => {
+            seen = { ...ctx.props };
+            return () => <span class="sth">x</span>;
+        }, { name: uniqueName('NoLeak') });
+
+        container = createSSRContainer('<span class="sth">x</span><!--$c:1-->');
+        const vnode = {
+            type: Comp as any,
+            props: { 'client:load': true, title: 'hello' },
+            key: null,
+            children: [],
+            dom: null
+        };
+
+        scheduleComponentHydration(vnode as any, container.firstChild, container, { strategy: 'load' });
+
+        // Real prop survives; directive does not (neither as value nor as a spread key).
+        expect(seen.title).toBe('hello');
+        expect('client:load' in seen).toBe(false);
+    });
 });
 
 describe('scheduleComponentHydration — server-state restoration (#120)', () => {
