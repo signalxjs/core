@@ -392,7 +392,7 @@ describe('hydration strategies', () => {
             }, { name: 'ClientOnlyComponent' });
 
             // client:only renders an empty placeholder on server
-            const ssrHtml = `<div data-island="1"></div><!--$c:1-->`;
+            const ssrHtml = `<div data-island="1" style="display:contents;"></div><!--$c:1-->`;
             container = createSSRContainer(ssrHtml);
 
             const vnode = {
@@ -414,7 +414,7 @@ describe('hydration strategies', () => {
                 return () => <div class="co-content">Fresh mount</div>;
             }, { name: 'ClientOnlyContent' });
 
-            const ssrHtml = `<div data-island="1"></div><!--$c:1-->`;
+            const ssrHtml = `<div data-island="1" style="display:contents;"></div><!--$c:1-->`;
             container = createSSRContainer(ssrHtml);
 
             const vnode = {

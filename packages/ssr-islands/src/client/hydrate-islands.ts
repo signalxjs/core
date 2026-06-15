@@ -184,13 +184,14 @@ export function scheduleComponentHydration(
             // hydrating. Fall back to in-place hydration when there is no
             // placeholder (back-compat with content that was SSR'd in place).
             // Bound the search by trailingMarker so we never drift into a sibling's
-            // DOM when this component produced no leading element. Match the
-            // placeholder's data-island id against this component's marker id so we
-            // don't mistake user markup that happens to carry data-island.
+            // DOM when this component produced no leading element. Identify the
+            // placeholder by matching this component's marker id AND the
+            // display:contents sentinel, so user markup carrying a coincidental
+            // data-island isn't mistaken for it.
             const wantId = markerIslandId(trailingMarker);
             let ph: Node | null = contentStart;
             while (ph && ph !== trailingMarker && ph.nodeType !== Node.ELEMENT_NODE) ph = ph.nextSibling;
-            if (ph && ph !== trailingMarker && wantId != null && (ph as Element).getAttribute?.('data-island') === wantId) {
+            if (ph && ph !== trailingMarker && isSkipSsrPlaceholder(ph as Element, wantId)) {
                 const container = ph as Element;
                 container.innerHTML = '';
                 // Mount under the captured app context, mirroring doHydrate().
@@ -216,6 +217,18 @@ function markerIslandId(marker: Comment | null): string | null {
     if (!marker) return null;
     const data = marker.data;
     return data.startsWith('$c:') ? data.slice(3) : null;
+}
+
+/**
+ * Is this element the skip-SSR placeholder emitted by the islands server hook for
+ * component `wantId`? Matches both the `data-island` id AND the `display:contents`
+ * sentinel that `suppressComponentRender` always sets, so user markup that merely
+ * carries a coincidental `data-island="<id>"` is not mistaken for the placeholder.
+ */
+function isSkipSsrPlaceholder(el: Element | null, wantId: string | null): boolean {
+    return !!el && wantId != null
+        && el.getAttribute?.('data-island') === wantId
+        && (el as HTMLElement).style?.display === 'contents';
 }
 
 function findComponentBoundaries(dom: Node | null): { contentStart: Node | null; trailingMarker: Comment | null } {
@@ -520,12 +533,12 @@ function mountClientOnly(marker: Comment, component: ComponentFactory, info: Isl
         placeholder = placeholder.previousSibling;
     }
 
-    // The placeholder's data-island id must match this island's marker id —
-    // otherwise it's not our skip-SSR placeholder (e.g. user markup carrying
-    // data-island, or content SSR'd in place predating skip-SSR). In that case
-    // hydrate in place instead of mounting into the wrong element.
+    // Only treat this as a skip-SSR mount when the previous element is genuinely
+    // our placeholder (matching marker id + display:contents sentinel). Otherwise
+    // it's content SSR'd in place (older output) or unrelated user markup — hydrate
+    // in place instead of clearing/mounting into the wrong element.
     const wantId = markerIslandId(marker);
-    if (!placeholder || wantId == null || (placeholder as Element).getAttribute?.('data-island') !== wantId) {
+    if (!isSkipSsrPlaceholder(placeholder as Element | null, wantId)) {
         hydrateIsland(marker, component, info);
         return;
     }
