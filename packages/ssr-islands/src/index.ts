@@ -42,7 +42,6 @@ export type { IslandsPluginOptions } from './plugin';
 export {
     hydrateIslands,
     scheduleComponentHydration,
-    initIslandHydration,
     cleanupPendingHydrations,
     invalidateMarkerIndex
 } from './client/hydrate-islands';
