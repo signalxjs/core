@@ -76,6 +76,33 @@ describe('hydrateIslands() — server-state restoration', () => {
         expect(container.querySelector('.count')!.textContent).toBe('11');
     });
 
+    it('does not bleed one island\'s state into another in the same pass', async () => {
+        const withState = 'BleedA';
+        const noState = 'BleedB';
+        registerComponent(withState, makeCounter(withState) as any);
+        registerComponent(noState, makeCounter(noState) as any);
+
+        container = createSSRContainer(
+            '<div class="a"><span class="count">10</span><button>+</button></div><!--$c:1-->' +
+            '<div class="b"><span class="count">0</span><button>+</button></div><!--$c:2-->'
+        );
+        createIslandDataScript({
+            '1': { strategy: 'load', componentId: withState, props: {}, state: { count: 10 } },
+            '2': { strategy: 'load', componentId: noState, props: {} }
+        });
+
+        hydrateIslands();
+        await nextTick();
+
+        (container.querySelector('.a button') as HTMLElement).click();
+        (container.querySelector('.b button') as HTMLElement).click();
+        await nextTick();
+
+        // A restored 10 → 11; B had no state and must NOT inherit A's → 0 → 1.
+        expect(container.querySelector('.a .count')!.textContent).toBe('11');
+        expect(container.querySelector('.b .count')!.textContent).toBe('1');
+    });
+
     it('hydrates a state-less island from its literal initial', async () => {
         const name = 'PlainCounter';
         registerComponent(name, makeCounter(name) as any);

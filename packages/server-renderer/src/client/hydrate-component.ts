@@ -154,17 +154,19 @@ export function hydrateComponent(vnode: VNode, dom: Node | null, parent: Node, t
         ssr: ssrHelper
     };
 
-    // For ROOT component only (no parent), provide the AppContext
-    if (!parentInstance && getCurrentAppContext()) {
-        provideAppContext(componentCtx, getCurrentAppContext()!);
-    }
-
     // Let plugins transform the context before setup runs (mirror of the
     // server's transformComponentContext). A strategy pack can swap ctx.signal
     // for a state-restoring variant here — core stays strategy-agnostic.
     for (const plugin of getClientPlugins()) {
         const next = plugin.client?.transformComponentContext?.(vnode, componentCtx);
         if (next) componentCtx = next;
+    }
+
+    // For ROOT component only (no parent), provide the AppContext. Run this AFTER
+    // the transform hooks so a plugin that returns a replacement context still
+    // receives the AppContext (the hook contract allows swapping the whole ctx).
+    if (!parentInstance && getCurrentAppContext()) {
+        provideAppContext(componentCtx, getCurrentAppContext()!);
     }
 
     const prev = setCurrentInstance(componentCtx);

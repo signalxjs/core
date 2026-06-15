@@ -131,6 +131,10 @@ export function scheduleComponentHydration(
             hydrateComponent(vnode, contentStart, parent, trailingMarker);
         } finally {
             setCurrentAppContext(prevAppContext);
+            // Defensively clear: if hydrateComponent threw before the plugin
+            // consumed it (or no islands plugin is registered), stale state must
+            // not leak into the next hydration.
+            seedPendingServerState(null);
         }
     };
 
@@ -493,7 +497,12 @@ function hydrateIsland(marker: Comment, component: ComponentFactory, info: Islan
     };
 
     const parent = container.parentNode!;
-    hydrateComponent(vnode, container, parent, marker);
+    try {
+        hydrateComponent(vnode, container, parent, marker);
+    } finally {
+        // Clear even on throw so stale state can't seed the next hydration.
+        seedPendingServerState(null);
+    }
 }
 
 function mountClientOnly(marker: Comment, component: ComponentFactory, info: IslandInfo): void {
