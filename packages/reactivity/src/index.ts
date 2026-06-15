@@ -44,7 +44,8 @@ export {
 // Signal
 export {
     signal,
-    detectAccess
+    detectAccess,
+    detectAccessDev
 } from './signal';
 
 // Per-property signal views

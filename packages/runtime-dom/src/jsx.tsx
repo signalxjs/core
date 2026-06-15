@@ -747,10 +747,26 @@ declare global {
             [key: `prop:${string}`]: any;
         }
 
+        /**
+         * Modifiers for the `model` directive on native form elements.
+         * - `trim` — strip leading/trailing whitespace before writing back
+         * - `number` — coerce the value to a number (no-op if not numeric)
+         * - `lazy` — sync on `change` (blur/enter) instead of every keystroke
+         * - `debounce` — delay write-back by N ms (`true` ⇒ 300ms)
+         */
+        interface ModelModifiers {
+            trim?: boolean;
+            number?: boolean;
+            lazy?: boolean;
+            debounce?: number | boolean;
+        }
+
         interface FormElementAttributes<T = HTMLElement, V = any> extends HTMLAttributes<T> {
             // Model directive (two-way binding)
             model?: [object, string] | (() => V) | Model<any>;
             [key: `model:${string}`]: [object, string] | (() => any);
+            // Model directive modifiers (trim/lazy/number/debounce)
+            modelModifiers?: ModelModifiers;
 
             // Explicit update event support
             "onUpdate:modelValue"?: (value: V) => void;
@@ -777,6 +793,7 @@ declare global {
             // The update event for checkbox/radio is always the checked state (boolean)
             "onUpdate:modelValue"?: (checked: boolean) => void;
             [key: `model:${string}`]: [object, string] | (() => any);
+            modelModifiers?: ModelModifiers;
         }
 
         interface TextInputAttributes<T = HTMLInputElement> extends FormElementAttributes<T, string> {
