@@ -16,6 +16,7 @@ npm install @sigx/ssr-islands sigx vite
 <Counter client:load />     {/* hydrate immediately */}
 <Counter client:idle />     {/* hydrate when the browser is idle */}
 <Counter client:visible />  {/* hydrate when it scrolls into view */}
+<Counter client:only />     {/* skip SSR — mount fresh on the client only */}
 ```
 
 See the [docs](https://sigx.dev/server/) for the Vite plugin setup and the full list of hydration strategies.

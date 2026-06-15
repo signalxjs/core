@@ -92,18 +92,26 @@ describe('island rendering (renderToString)', () => {
             expect(html).toContain('5');
         });
 
-        it('renders client:only in place (no stray placeholder div) and marks it strategy "only"', async () => {
+        it('skips SSR for client:only — emits an empty placeholder, no component content (#122)', async () => {
             const ssr = createSSR().use(islandsPlugin());
-            const html = await ssr.render(<IslandCounter client:only />);
-            // client:only currently renders + hydrates in place (true skip-SSR
-            // needs a core seam — see #122). It must NOT append a stray
-            // <div data-island> — that was the old afterRenderComponent trick,
-            // which under 0.6.x's append-only hook left a duplicate empty div.
-            expect(html).toContain('island-counter');
-            expect(html).not.toContain('data-island=');
+            const html = await ssr.render(<IslandCounter client:only initial={5} />);
+            // True skip-SSR: the component never runs server-side, so its content
+            // is absent and a <div data-island> placeholder stands in its place.
+            expect(html).toContain('data-island=');
+            expect(html).not.toContain('island-counter');
+            expect(html).not.toContain('>5<');
             const islands = parseIslandData(html);
             const island = Object.values(islands)[0] as any;
             expect(island.strategy).toBe('only');
+            // No render ran, so no signal state was captured.
+            expect(island.state).toBeUndefined();
+        });
+
+        it('skips SSR for client:only in streaming mode too (#122)', async () => {
+            const ssr = createSSR().use(islandsPlugin());
+            const html = await collectStream(ssr.renderStream(<IslandCounter client:only initial={5} />));
+            expect(html).toContain('data-island=');
+            expect(html).not.toContain('island-counter');
         });
 
         it('should include __SIGX_ISLANDS__ JSON for islands', async () => {

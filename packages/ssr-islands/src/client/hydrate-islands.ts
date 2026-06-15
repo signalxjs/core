@@ -178,9 +178,22 @@ export function scheduleComponentHydration(
             }
             break;
 
-        case 'only':
-            doHydrate();
+        case 'only': {
+            // Skip-SSR: the server emitted an empty <div data-island> placeholder
+            // (no component content). Mount the component fresh into it instead of
+            // hydrating. Fall back to in-place hydration when there is no
+            // placeholder (back-compat with content that was SSR'd in place).
+            let ph: Node | null = contentStart;
+            while (ph && ph.nodeType !== Node.ELEMENT_NODE) ph = ph.nextSibling;
+            if (ph && (ph as Element).hasAttribute?.('data-island')) {
+                const container = ph as Element;
+                container.innerHTML = '';
+                render(vnode, container);
+            } else {
+                doHydrate();
+            }
             break;
+        }
     }
 
     return trailingMarker ? trailingMarker.nextSibling : dom;
@@ -489,9 +502,9 @@ function mountClientOnly(marker: Comment, component: ComponentFactory, info: Isl
     }
 
     if (!placeholder || !(placeholder as Element).hasAttribute?.('data-island')) {
-        // No skip-SSR placeholder. Under the current 0.6.x render path client:only
-        // is rendered in place (true skip-SSR needs core support — #122), so hydrate
-        // it like any eager island instead of silently doing nothing.
+        // No skip-SSR placeholder — the content was SSR'd in place (e.g. older
+        // output predating skip-SSR). Hydrate it like any eager island instead of
+        // silently doing nothing.
         hydrateIsland(marker, component, info);
         return;
     }

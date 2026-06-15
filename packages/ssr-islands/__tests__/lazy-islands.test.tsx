@@ -326,6 +326,34 @@ describe('hydrateIslands with lazy components', () => {
         expect(hydrated).toBe(true);
     });
 
+    it('mounts a client:only island fresh into its data-island placeholder (#122)', async () => {
+        let setupCalled = false;
+        const name = uniqueName('ClientOnlyFresh');
+
+        const ClientOnlyComp = component(() => {
+            setupCalled = true;
+            return () => <span class="co-fresh">Fresh</span>;
+        }, { name });
+
+        registerComponent(name, ClientOnlyComp);
+
+        // Skip-SSR output: an empty <div data-island> placeholder, no content.
+        container = createSSRContainer(`<div data-island="1" style="display:contents;"></div><!--$c:1-->`);
+        createIslandDataScript({
+            '1': { strategy: 'only', componentId: name, props: {} }
+        });
+
+        hydrateIslands();
+        await vi.advanceTimersByTimeAsync(50);
+        await nextTick();
+
+        expect(setupCalled).toBe(true);
+        // Component mounted INSIDE the placeholder.
+        const placeholder = container.querySelector('[data-island]');
+        expect(placeholder).toBeTruthy();
+        expect(placeholder!.querySelector('.co-fresh')?.textContent).toBe('Fresh');
+    });
+
     it('should hydrate client:idle island with lazily registered component', async () => {
         let hydrated = false;
         const name = uniqueName('LazyIdleIsland');

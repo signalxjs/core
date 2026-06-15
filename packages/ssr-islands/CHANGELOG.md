@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `client:only` now genuinely skips SSR. The component is no longer rendered or
+  hydrated in place (it previously behaved like `client:load`); instead the
+  server emits an empty `<div data-island>` placeholder — the island still
+  appears in `__SIGX_ISLANDS__`, with no captured signal state — and the client
+  mounts the component fresh into it. This rides a new
+  `suppressComponentRender` plugin hook in `@sigx/server-renderer`. The dev
+  warning about `client:only` behaving like `client:load` is removed.
+  (signalxjs/core#122)
+
 ### Changed
 
 - Now developed in the `signalxjs/core` monorepo and released in lockstep with
@@ -26,9 +37,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Client-side restoration of server-captured island *signal* state is inert
   pending a client hydration plugin seam in core (signalxjs/core#120). Selective
   hydration and `useAsync`/`useStream` state transfer are unaffected.
-- `client:only` currently renders + hydrates in place like `client:load`; true
-  skip-SSR (never running the component server-side) needs a core
-  render-suppression seam (signalxjs/core#122).
 
 ## [0.4.2] - 2026-05-10
 

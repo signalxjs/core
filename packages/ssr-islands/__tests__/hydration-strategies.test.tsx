@@ -409,7 +409,7 @@ describe('hydration strategies', () => {
             expect(setupCalled).toBe(true);
         });
 
-        it('should render component content into the placeholder', async () => {
+        it('should render component content fresh into the data-island placeholder', async () => {
             const ClientOnlyContent = component(() => {
                 return () => <div class="co-content">Fresh mount</div>;
             }, { name: 'ClientOnlyContent' });
@@ -428,8 +428,12 @@ describe('hydration strategies', () => {
             hydrate(vnode, container);
             await vi.advanceTimersByTimeAsync(0);
 
-            // Component should have rendered its content
-            expect(container.querySelector('.co-content') || container.textContent).toBeTruthy();
+            // Fresh-mounted content lives INSIDE the data-island placeholder.
+            const placeholder = container.querySelector('[data-island]');
+            expect(placeholder).toBeTruthy();
+            const content = placeholder!.querySelector('.co-content');
+            expect(content).toBeTruthy();
+            expect(content!.textContent).toBe('Fresh mount');
         });
     });
 

@@ -851,6 +851,30 @@ function* renderNode(
         const setup = vnode.type.__setup;
         const { componentName, id, ssrLoads, componentCtx } = createComponentState(vnode, ctx, parentCtx, appContext);
 
+        // Plugin hook: suppressComponentRender — lets a plugin skip running this
+        // component's setup/render and emit a placeholder string instead (e.g.
+        // islands `client:only` true skip-SSR). createComponentState already ran
+        // transformComponentContext (so plugins have registered the component) and
+        // pushed the id, so on suppression we emit the placeholder + the standard
+        // trailing marker, pop the component, and bail before setup/render.
+        if (ctx._plugins) {
+            for (const plugin of ctx._plugins) {
+                const suppressed = plugin.server?.suppressComponentRender?.(id, vnode, ctx);
+                if (suppressed) {
+                    if (suppressed.placeholder) {
+                        buf.push(suppressed.placeholder);
+                        state.len += suppressed.placeholder.length;
+                    }
+                    const marker = `<!--$c:${id}-->`;
+                    buf.push(marker);
+                    state.len += marker.length;
+                    ctx.popComponent();
+                    if (state.len >= state.threshold) yield FLUSH;
+                    return;
+                }
+            }
+        }
+
         const prev = setCurrentInstance(componentCtx);
         try {
             // Run setup synchronously — it registers useAsync/useStream work
