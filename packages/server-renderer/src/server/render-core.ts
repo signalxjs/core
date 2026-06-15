@@ -861,7 +861,7 @@ function* renderNode(
             for (const plugin of ctx._plugins) {
                 const suppressed = plugin.server?.suppressComponentRender?.(id, vnode, ctx);
                 if (suppressed) {
-                    if (suppressed.placeholder) {
+                    if (suppressed.placeholder != null) {
                         buf.push(suppressed.placeholder);
                         state.len += suppressed.placeholder.length;
                     }

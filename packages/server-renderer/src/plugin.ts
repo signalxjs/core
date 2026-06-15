@@ -51,10 +51,11 @@ export interface SSRPlugin {
          * has run, the component id is assigned and pushed) but BEFORE `setup()`
          * and render. Lets a plugin skip running the component entirely and emit a
          * placeholder string in its place — e.g. islands `client:only` true
-         * skip-SSR. Return `{ placeholder }` to suppress the render (the component's
-         * `setup`/render and `afterRenderComponent` are skipped; core still emits
-         * the trailing `<!--$c:id-->` marker for hydration). Return void to render
-         * normally. First plugin to return an object wins.
+         * skip-SSR. Returning **any object** suppresses the render: the component's
+         * `setup`/render and `afterRenderComponent` are skipped, and core emits the
+         * (optional) `placeholder` string — when present, including an empty string
+         * — followed by the standard trailing `<!--$c:id-->` marker for hydration.
+         * Return void to render normally. First plugin to return an object wins.
          *
          * @example Islands plugin emits `<div data-island>` for `client:only`
          */

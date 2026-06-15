@@ -183,12 +183,21 @@ export function scheduleComponentHydration(
             // (no component content). Mount the component fresh into it instead of
             // hydrating. Fall back to in-place hydration when there is no
             // placeholder (back-compat with content that was SSR'd in place).
+            // Bound the search by trailingMarker so we never drift into a sibling's
+            // DOM when this component produced no leading element.
             let ph: Node | null = contentStart;
-            while (ph && ph.nodeType !== Node.ELEMENT_NODE) ph = ph.nextSibling;
-            if (ph && (ph as Element).hasAttribute?.('data-island')) {
+            while (ph && ph !== trailingMarker && ph.nodeType !== Node.ELEMENT_NODE) ph = ph.nextSibling;
+            if (ph && ph !== trailingMarker && (ph as Element).hasAttribute?.('data-island')) {
                 const container = ph as Element;
                 container.innerHTML = '';
-                render(vnode, container);
+                // Mount under the captured app context, mirroring doHydrate().
+                const prevAppContext = _getCurrentAppContext?.();
+                _setCurrentAppContext?.(capturedAppContext);
+                try {
+                    render(vnode, container);
+                } finally {
+                    _setCurrentAppContext?.(prevAppContext);
+                }
             } else {
                 doHydrate();
             }
