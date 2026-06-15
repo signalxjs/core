@@ -233,6 +233,37 @@ describe('createSlots', () => {
         expect((slots as any).maybe()).toEqual([]);
     });
 
+    it('does not treat inherited Object.prototype names as present slots', () => {
+        const slots = createSlots([{ type: 'span', props: {}, key: null, children: [], dom: null }]);
+        // `toString`/`constructor` are inherited members, not provided slots.
+        expect((slots as any).toString).toBeUndefined();
+        expect((slots as any).constructor).toBeUndefined();
+        expect((slots as any).toString?.() ?? 'fb').toBe('fb');
+    });
+
+    it('ignores inherited members of the slots prop object when resolving presence', () => {
+        // A plain `{}` inherits Object.prototype.toString (a function); it must
+        // not be mistaken for a provided `toString` slot.
+        const slots = createSlots([], {});
+        expect((slots as any).toString).toBeUndefined();
+    });
+
+    it('supports a slot literally named like an Object.prototype member', () => {
+        const child = { type: 'div', props: { slot: 'toString' }, key: null, children: [], dom: null };
+        const slots = createSlots([child]);
+        expect(typeof (slots as any).toString).toBe('function');
+        expect((slots as any).toString()).toEqual([child]);
+    });
+
+    it('classifies a slot="default" child as named, leaving the default slot absent', () => {
+        // A child with an explicit `slot="default"` is a named slot like any
+        // other; the default accessor reads only un-slotted children, so with
+        // no un-slotted children the default slot is absent.
+        const child = { type: 'p', props: { slot: 'default' }, key: null, children: [], dom: null };
+        const slots = createSlots([child]);
+        expect(slots.default).toBeUndefined();
+    });
+
     it('returns a stable accessor function per named slot', () => {
         const slots = createSlots([{ type: 'div', props: { slot: 'header' }, key: null, children: [], dom: null }]);
         expect((slots as any).header).toBe((slots as any).header);

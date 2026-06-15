@@ -259,6 +259,19 @@ describe('renderToString — slot presence parity', () => {
         expect(html).not.toContain('class="ffb"');  // footer did not
     });
 
+    it('drops a slot="default" child from the default slot, matching the client', async () => {
+        const Card = component((ctx) => {
+            return () => <div class="card">{ctx.slots.default?.() ?? <span class="dfb">no body</span>}</div>;
+        }, { name: 'Card' });
+
+        // An explicit slot="default" child is a named slot the client default
+        // accessor never reads — so for parity the server must not render it as
+        // default content (which would mismatch on hydration).
+        const html = await renderToString(<Card><p slot="default" class="explicit">X</p></Card>);
+        expect(html).toContain('class="dfb"');        // default fell back
+        expect(html).not.toContain('class="explicit"');
+    });
+
     it('treats a slot named __proto__ as a plain key without prototype pollution', async () => {
         const Card = component((ctx) => {
             return () => <div class="card">{(ctx.slots as any)['__proto__']?.()}</div>;

@@ -104,6 +104,11 @@ export function createSlots(children: any, slotsFromProps?: Record<string, any>)
         _isPatching: false,  // Flag to prevent infinite loops during patching
     };
 
+    // Only OWN keys count — both for the internal-property passthrough and
+    // for `slots` prop lookups — so inherited `Object.prototype` members
+    // (`toString`, `constructor`, …) never masquerade as a present slot.
+    const hasOwn = Object.prototype.hasOwnProperty;
+
     // Slot accessor functions are minted once per name and reused across
     // renders (they read live state on every call). `default` shares this
     // path so it gets the same presence semantics as named slots.
@@ -119,7 +124,7 @@ export function createSlots(children: any, slotsFromProps?: Record<string, any>)
 
                 // First check for slots from the `slots` prop
                 const fromProps = slotsObj._slotsFromProps;
-                if (fromProps && typeof fromProps[name] === 'function') {
+                if (fromProps && hasOwn.call(fromProps, name) && typeof fromProps[name] === 'function') {
                     const result = fromProps[name](scopedProps);
                     if (result == null) return [];
                     return Array.isArray(result) ? result : [result];
@@ -147,7 +152,7 @@ export function createSlots(children: any, slotsFromProps?: Record<string, any>)
     function hasContent(name: string): boolean {
         const version = slotsObj._version.v;
         const fromProps = slotsObj._slotsFromProps;
-        if (fromProps && typeof fromProps[name] === 'function') return true;
+        if (fromProps && hasOwn.call(fromProps, name) && typeof fromProps[name] === 'function') return true;
         extract(slotsObj, version);
         if (name === 'default') return cachedDefault.length > 0;
         const list = cachedNamed[name];
@@ -157,11 +162,14 @@ export function createSlots(children: any, slotsFromProps?: Record<string, any>)
     // Create a proxy to handle slot access dynamically
     return new Proxy(slotsObj, {
         get(target, prop) {
-            // `in` sees inherited Object.prototype keys, which would make
-            // a slot literally named "__proto__" unreachable (the check
-            // matches the inherited accessor, never an own key here).
-            // Exclude it so it falls through to the slot path.
-            if (prop !== '__proto__' && prop in target) {
+            // Pass through only OWN tracking properties (`_children`,
+            // `_version`, …). Using `in` here would match inherited
+            // `Object.prototype` keys (`toString`, `constructor`,
+            // `__proto__`, …), making those slot names unreachable and
+            // always-truthy — breaking the `slots.x?.() ?? fallback`
+            // presence semantics for them. Own-key check lets every such
+            // name fall through to the slot path instead.
+            if (hasOwn.call(target, prop)) {
                 return (target as any)[prop];
             }
 

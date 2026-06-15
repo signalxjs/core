@@ -246,6 +246,13 @@ function createComponentState(
         slots.default = () => defaultChildren.slice();
     }
     for (const name in elementNamed) {
+        // A child with `slot="default"` is a named slot on the client too,
+        // but the client's `default` accessor only reads un-slotted children,
+        // so such content is unreachable there. Skip it here for parity —
+        // installing it at `slots.default` would render on the server but not
+        // the client, causing a hydration mismatch. `slots.default` is driven
+        // solely by the un-slotted children above (and the `slots` prop below).
+        if (name === 'default') continue;
         const list = elementNamed[name];
         slots[name] = () => list.slice();
     }
