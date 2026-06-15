@@ -114,7 +114,9 @@ export function detectAccessDev(
     let looksTransformed = false;
     if (access && typeof access[1] === 'string') {
         const [obj, key] = access;
-        looksTransformed = (obj as Record<string, any>)[key] !== returnValue;
+        // Object.is (not !==) so a getter that legitimately returns NaN — where
+        // the bound property is also NaN — isn't flagged as transformed.
+        looksTransformed = !Object.is((obj as Record<string, any>)[key], returnValue);
     }
 
     return { access, looksTransformed };

@@ -151,6 +151,17 @@ describe("model binding dev guard", () => {
         warn.mockRestore();
     });
 
+    it("does not warn when both the property and getter result are NaN", () => {
+        const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+        const state = signal({ amount: NaN });
+
+        // NaN !== NaN would be a false positive; Object.is(NaN, NaN) is true.
+        jsx("input", { model: () => state.amount });
+
+        expect(warn).not.toHaveBeenCalled();
+        warn.mockRestore();
+    });
+
     it("does not warn for a writable computed", () => {
         const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
         const state = signal({ count: 5 });

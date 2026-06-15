@@ -76,6 +76,9 @@ export function patchProp(dom: Element, key: string, prevValue: any, nextValue: 
             if (oldValue) {
                 const wrapper = (oldValue as any).__sigx_model_handler;
                 if (wrapper) {
+                    // Cancel any pending debounced write so it can't fire after the
+                    // handler is replaced (e.g. on re-render).
+                    (wrapper as any).__sigx_cancel?.();
                     el.removeEventListener('input', wrapper);
                     el.removeEventListener('change', wrapper);
                 }
@@ -91,9 +94,11 @@ export function patchProp(dom: Element, key: string, prevValue: any, nextValue: 
                 // Trailing-edge debounce wraps the value push; created once per
                 // handler instance so the timer persists across events.
                 let invoke = (v: any) => (newValue as Function)(v);
+                let cancel: (() => void) | undefined;
                 if (mods?.debounce) {
                     const ms = typeof mods.debounce === 'number' ? mods.debounce : 300;
                     let timer: ReturnType<typeof setTimeout> | undefined;
+                    cancel = () => { if (timer) clearTimeout(timer); };
                     invoke = (v: any) => {
                         if (timer) clearTimeout(timer);
                         timer = setTimeout(() => (newValue as Function)(v), ms);
@@ -126,6 +131,8 @@ export function patchProp(dom: Element, key: string, prevValue: any, nextValue: 
                     invoke(val);
                 };
                 (newValue as any).__sigx_model_handler = handler;
+                // Expose the debounce canceller so handler replacement can clear it.
+                if (cancel) (handler as any).__sigx_cancel = cancel;
 
                 const inputType = (dom as HTMLInputElement).type;
                 const isToggle = tagName === 'input' && (inputType === 'checkbox' || inputType === 'radio');

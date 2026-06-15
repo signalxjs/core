@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render } from '../src/index';
+import { render, patchProp } from '../src/index';
 import { component, jsx, signal } from 'sigx';
 
 describe('model modifiers', () => {
@@ -79,6 +79,38 @@ describe('model modifiers', () => {
 
         input.dispatchEvent(new Event('change', { bubbles: true }));
         expect(state.name).toBe('typing');
+    });
+
+    it('debounce cancels a pending write when the handler is replaced', () => {
+        vi.useFakeTimers();
+        try {
+            const input = document.createElement('input');
+            input.type = 'text';
+            container.appendChild(input);
+
+            const writes: string[] = [];
+            const makeHandler = () => {
+                const fn = (v: string) => { writes.push(v); };
+                (fn as any).__sigx_modelModifiers = { debounce: 200 };
+                return fn;
+            };
+
+            // Attach a debounced model handler and schedule a write.
+            const first = makeHandler();
+            patchProp(input, 'onUpdate:modelValue', undefined, first);
+            input.value = 'stale';
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+
+            // Replace the handler (simulates a re-render) before the timer fires.
+            const second = makeHandler();
+            patchProp(input, 'onUpdate:modelValue', first, second);
+
+            vi.advanceTimersByTime(200);
+            // The pending write from the replaced handler must not fire.
+            expect(writes).toEqual([]);
+        } finally {
+            vi.useRealTimers();
+        }
     });
 
     it('debounce delays write-back by the configured time', () => {
