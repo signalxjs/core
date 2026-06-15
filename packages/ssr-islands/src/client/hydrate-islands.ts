@@ -309,12 +309,13 @@ function scheduleHydration(id: number, info: IslandInfo): void {
 
     // visible needs the marker for IntersectionObserver — handle it here
     if (info.strategy === 'visible') {
+        let cleanupVis: (() => void) | undefined;
         const observer = observeVisibility(marker, () => {
-            _pendingCleanups.delete(cleanupVis);
+            if (cleanupVis) _pendingCleanups.delete(cleanupVis);
             doHydrate();
         });
         if (observer) {
-            var cleanupVis = () => observer.disconnect();
+            cleanupVis = () => observer.disconnect();
             _pendingCleanups.add(cleanupVis);
         }
         return;
@@ -335,22 +336,18 @@ function scheduleByStrategy(info: IslandInfo, callback: () => void): void {
 
         case 'idle': {
             let cancelled = false;
+            let cleanup: (() => void) | undefined;
+            const run = () => {
+                if (cancelled) return;
+                if (cleanup) _pendingCleanups.delete(cleanup);
+                callback();
+            };
             if ('requestIdleCallback' in window) {
-                const handle = requestIdleCallback(() => {
-                    if (!cancelled) {
-                        _pendingCleanups.delete(cleanup);
-                        callback();
-                    }
-                });
-                var cleanup = () => { cancelled = true; cancelIdleCallback(handle); };
+                const handle = requestIdleCallback(run);
+                cleanup = () => { cancelled = true; cancelIdleCallback(handle); };
             } else {
-                const handle = setTimeout(() => {
-                    if (!cancelled) {
-                        _pendingCleanups.delete(cleanup);
-                        callback();
-                    }
-                }, 200);
-                var cleanup = () => { cancelled = true; clearTimeout(handle); };
+                const handle = setTimeout(run, 200);
+                cleanup = () => { cancelled = true; clearTimeout(handle); };
             }
             _pendingCleanups.add(cleanup);
             break;
@@ -362,15 +359,16 @@ function scheduleByStrategy(info: IslandInfo, callback: () => void): void {
                 if (mql.matches) {
                     callback();
                 } else {
+                    let cleanupMedia: (() => void) | undefined;
                     const handler = (e: MediaQueryListEvent) => {
                         if (e.matches) {
                             mql.removeEventListener('change', handler);
-                            _pendingCleanups.delete(cleanupMedia);
+                            if (cleanupMedia) _pendingCleanups.delete(cleanupMedia);
                             callback();
                         }
                     };
                     mql.addEventListener('change', handler);
-                    var cleanupMedia = () => mql.removeEventListener('change', handler);
+                    cleanupMedia = () => mql.removeEventListener('change', handler);
                     _pendingCleanups.add(cleanupMedia);
                 }
             }

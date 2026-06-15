@@ -18,6 +18,11 @@ import {
  * but was removed when the SSR layer moved to the `useAsync`/`useStream` +
  * `__SIGX_ASYNC__` state model. Islands keeps its own copy.
  */
+// The tracking signal deliberately normalizes to a uniform `{ value: T }`
+// interface (its Proxy intercepts `.value` for primitives AND objects), unlike
+// raw `signal()` whose object form exposes no `.value`. This shape is what island
+// component code reads, so it is the correct type here — do not "narrow" it to
+// `ReturnType<typeof signal>`.
 export type SSRSignalFn = <T>(initial: T, name?: string) => { value: T };
 
 /**

@@ -22,8 +22,11 @@
  * ```
  *
  * ## JSX Types
+ * The client:* JSX types load automatically when you import anything from
+ * `@sigx/ssr-islands`. For a types-only setup, reference them directly (this is a
+ * type-only entry — do not `import` it at runtime):
  * ```ts
- * import '@sigx/ssr-islands/jsx';
+ * /// <reference types="@sigx/ssr-islands/jsx" />
  * <Counter client:visible />
  * <Widget client:idle />
  * ```
