@@ -330,8 +330,9 @@ export const Suspense = component<SuspenseProps>(
                 // Try to render children
                 const children = slots.default?.() ?? [];
 
-                // If we have pending promises (registered during slots.default() call), show fallback
+                // If we have pending promises (registered during the slots.default?.() call), show fallback
                 // Check AFTER rendering children because that's when lazy components register
+                // (an absent default slot is undefined, so the call is skipped and nothing registers)
                 if (boundary.pending.size > 0) {
                     const fallback = props.fallback;
                     if (typeof fallback === 'function') {
