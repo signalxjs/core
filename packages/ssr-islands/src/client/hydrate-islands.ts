@@ -15,14 +15,9 @@ import {
     VNode,
     render,
 } from 'sigx';
-import { getHydrationDirective } from '../client-directives';
-import { getComponent, registerComponent, registerComponents, type ComponentFactory } from './registry';
+import { registerComponent, type ComponentFactory } from './registry';
 import { loadIslandComponent } from './chunk-loader';
 import type { IslandInfo } from './types';
-import {
-    invalidateIslandCache,
-    getIslandData
-} from './island-context';
 
 // Import from server-renderer core (these stay there)
 import { hydrateComponent } from '@sigx/server-renderer/client';

@@ -37,13 +37,8 @@ import {
 } from './server/render-islands';
 import type { IslandInfo, HydrationStrategy } from './types';
 
-import {
-    scheduleComponentHydration,
-    hydrateIslands,
-    initIslandHydration
-} from './client/hydrate-islands';
+import { scheduleComponentHydration } from './client/hydrate-islands';
 import { hydrateLeftoverAsyncComponents } from './client/hydrate-async';
-import { getIslandServerState } from './client/island-context';
 
 // ─── Plugin Data Types ──────────────────────────────────────────
 
@@ -196,7 +191,7 @@ export function islandsPlugin(options?: IslandsPluginOptions): SSRPlugin {
                 id: number,
                 html: string,
                 ctx: SSRContext
-            ): { html?: string; script?: string } | void {
+            ): { html?: string; preScript?: string } | void {
                 const data = ctx.getPluginData<IslandsPluginData>(PLUGIN_NAME);
                 if (!data) return;
 
@@ -212,14 +207,18 @@ export function islandsPlugin(options?: IslandsPluginOptions): SSRPlugin {
                     }
                 }
 
-                // Inject script that updates __SIGX_ISLANDS__ data for this component
+                // Patch __SIGX_ISLANDS__ for this component as a preScript so the
+                // updated data is in place BEFORE $SIGX_REPLACE dispatches
+                // sigx:async-ready — otherwise the hydration listener (which
+                // invalidates the cache and re-reads getIslandData) would observe
+                // stale island info and miss the freshly captured state.
                 const islandJson = escapeJsonForScript(JSON.stringify(islandInfo));
-                const script = `
+                const preScript = `
                     var ds=document.getElementById('__SIGX_ISLANDS__');
                     if(ds){try{var d=JSON.parse(ds.textContent||'{}');d[${id}]=${islandJson};ds.textContent=JSON.stringify(d);}catch(e){}}
                 `;
 
-                return { script };
+                return { preScript };
             },
 
             getInjectedHTML(ctx: SSRContext): string {
