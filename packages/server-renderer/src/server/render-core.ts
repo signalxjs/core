@@ -215,15 +215,44 @@ function createComponentState(
     const id = ctx.nextId();
     ctx.pushComponent(id);
 
-    // Create slots from children
+    // Create slots from children, mirroring the client slot extractor so
+    // server and client agree on slot presence (otherwise hydration could
+    // mismatch). Un-slotted children form the default slot; children with a
+    // `slot` prop group into named slots. A slot accessor exists only when
+    // content was provided for it — an absent slot reads as `undefined`, so
+    // `slots.x?.()` / `?? fallback` behave the same as on the client.
     // Only null/undefined/boolean mean "no children" — falsy render output
     // like the number 0 or '' is valid slot content.
-    const defaultSlot = () => children == null || typeof children === 'boolean'
-        ? []
-        : (Array.isArray(children) ? children : [children]);
-    const slots: SlotsObject<any> = slotsFromProps
-        ? { default: defaultSlot, ...slotsFromProps }
-        : { default: defaultSlot };
+    const defaultChildren: any[] = [];
+    const elementNamed: Record<string, any[]> = Object.create(null);
+    if (children != null && typeof children !== 'boolean') {
+        const items = Array.isArray(children) ? children : [children];
+        for (const child of items) {
+            if (child && typeof child === 'object' && child.props && child.props.slot) {
+                const name = child.props.slot;
+                (elementNamed[name] ?? (elementNamed[name] = [])).push(child);
+            } else if (child != null && child !== false && child !== true) {
+                defaultChildren.push(child);
+            }
+        }
+    }
+    const slots: SlotsObject<any> = {};
+    if (defaultChildren.length > 0) {
+        slots.default = () => defaultChildren.slice();
+    }
+    for (const name in elementNamed) {
+        const list = elementNamed[name];
+        slots[name] = () => list.slice();
+    }
+    // Slots provided via the `slots` prop take precedence over element-based
+    // ones of the same name, matching the client extractor.
+    if (slotsFromProps) {
+        for (const name of Object.keys(slotsFromProps)) {
+            if (typeof slotsFromProps[name] === 'function') {
+                slots[name] = slotsFromProps[name];
+            }
+        }
+    }
 
     // Pending async work for this component (useAsync/useStream register
     // here; block mode awaits these inline, streaming mode defers behind a

@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+Slot-presence semantics fix: a slot is now a callable accessor only when the parent actually provided content for it — `default` included — and reads as `undefined` otherwise. This makes presence a plain truthiness / optional-call check and resurrects the documented `slots.x?.() ?? fallback` pattern, which previously could never render its fallback.
+
+### Changed
+
+- **`@sigx/runtime-core` (breaking)**: slot accessors now reflect presence. Previously the slots object returned a callable for *every* key and empty slots returned `[]`, so `slots.header` was never `undefined`, optional chaining never short-circuited, and `slots.header?.() ?? fallback` was dead code — the fallback could not render. Now a slot — `default` and named slots alike — is a function only when content was provided for it and is `undefined` when it was not, so presence is a normal `slots.x` truthiness / `slots.x?.()` / `slots.x?.() ?? fallback` check. Presence stays reactive: a slot appearing or disappearing across a re-render flips the accessor between a function and `undefined` and re-renders the consumer; a slot supplied via the `slots` prop counts as present regardless of what it returns. Type-level, `default` and declared slots are now optional on the slots object, surfacing the few call sites that assumed presence as type errors. **Migration:** call slots optionally — `slots.default?.()` instead of `slots.default()` — since an unprovided slot (including `default` on a childless component) is now `undefined` and calling it directly throws. (#42)
+
+### Fixed
+
+- **`@sigx/server-renderer`**: server-side slot construction now mirrors the client slot extractor, so server and client agree on which slots are present (previously the server exposed `default` unconditionally and never separated `slot`-prop children into named slots). Un-slotted children form the `default` slot, `slot`-prop children group into their named slots, and a slot is present only when it has content — keeping `slots.x?.() ?? fallback` consistent across SSR and client and avoiding hydration mismatches. (#42)
+
 ## [0.6.3] — 2026-06-13
 
 Hydration-robustness patch: a structural mismatch between the server-rendered DOM and a component's first client render is now self-healing — sigx discards the abandoned SSR subtree and re-renders it on the client instead of leaving duplicate/orphaned content visible.

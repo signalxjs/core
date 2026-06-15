@@ -139,7 +139,7 @@ describe('component tree scenarios (happy-dom)', () => {
 
     const staticSlotSignal = signal({ v: 0 });
     const Card = component((ctx) => () =>
-        jsx('div', { children: ctx.slots.default() })
+        jsx('div', { children: ctx.slots.default?.() })
     );
     const SlotTree = component(() => () =>
         jsx('div', {
