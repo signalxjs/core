@@ -37,6 +37,18 @@ export { normalizeSubTree } from './utils/normalize.js';
 
 // Platform bridge
 export { setPlatformModelProcessor, getPlatformModelProcessor, registerModelProcessor, getModelProcessors } from './platform.js';
+
+// Model modifier internals (for platform renderers — DOM, Lynx)
+export {
+    registerModelModifier,
+    getModelModifier,
+    applyModelTransforms,
+    resolveTiming,
+    wrapModelWriteBack,
+    getHandlerModifiers,
+    createDebounceScheduler,
+} from './model-modifiers.js';
+export type { ResolvedTiming, DebounceScheduler } from './model-modifiers.js';
 export { setDefaultMount, getDefaultMount } from './app.js';
 
 // Plugin system internals

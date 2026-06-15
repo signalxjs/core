@@ -5,7 +5,8 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, patchProp } from '../src/index';
-import { component, jsx, signal } from 'sigx';
+import { component, jsx, signal, registerModelProcessor } from 'sigx';
+import type { VNode } from 'sigx';
 
 describe('model modifiers', () => {
     let container: HTMLElement;
@@ -136,6 +137,94 @@ describe('model modifiers', () => {
             expect(state.name).toBe('ab');
         } finally {
             vi.useRealTimers();
+        }
+    });
+});
+
+describe('modifier coverage across binding paths', () => {
+    // The write-back wrapper lives in runtime-core on `onUpdate:modelValue`, so it
+    // applies regardless of which path produced the handler. These exercise the
+    // paths the DOM-only implementation missed.
+
+    it('applies value-transforms on a named model (model:name)', () => {
+        const state = signal({ title: '' });
+        const vnode = jsx('input', {
+            'model:value': () => state.title,
+            modelModifiers: { trim: true },
+        }) as VNode;
+        // Named binding writes back via onUpdate:<name>.
+        const handler = vnode.props['onUpdate:value'] as (v: any) => void;
+        expect(handler).toBeTypeOf('function');
+        handler('  spaced  ');
+        expect(state.title).toBe('spaced');
+    });
+
+    it('applies value-transforms through a custom registerModelProcessor element', () => {
+        const state = signal({ val: '' });
+        // Custom processor only matches its own element type, so leaving it
+        // registered for the rest of the file is harmless.
+        registerModelProcessor((type, props, [obj, key]) => {
+            if (type !== 'my-input') return false;
+            props.value = (obj as any)[key];
+            props['onUpdate:modelValue'] = (v: any) => { (obj as any)[key] = v; };
+            return true;
+        });
+        const vnode = jsx('my-input', {
+            model: () => state.val,
+            modelModifiers: { trim: true, number: true },
+        }) as VNode;
+        const handler = vnode.props['onUpdate:modelValue'] as (v: any) => void;
+        expect(handler).toBeTypeOf('function');
+        handler('  42  ');
+        // trim → number applied on top of the custom processor's write.
+        expect(state.val).toBe(42);
+    });
+});
+
+describe('per-element modifier typing (compile-time)', () => {
+    it('scopes trim/number off checkbox/radio but allows timing modifiers', () => {
+        const state = signal({ name: '', agreed: false });
+
+        // Value transforms are valid on a text input.
+        <input type="text" model={() => state.name} modelModifiers={{ trim: true, number: true }} />;
+
+        // @ts-expect-error trim is not a valid modifier on a checkbox (no-op on boolean)
+        <input type="checkbox" model={() => state.agreed} modelModifiers={{ trim: true }} />;
+
+        // Timing modifiers remain valid on a checkbox.
+        <input type="checkbox" model={() => state.agreed} modelModifiers={{ debounce: 200 }} />;
+        <input type="checkbox" model={() => state.agreed} modelModifiers={{ lazy: true }} />;
+
+        expect(true).toBe(true);
+    });
+});
+
+describe('dev no-op modifier warning', () => {
+    it('warns when a value transform is used on a checkbox', () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        try {
+            const state = signal({ agreed: false });
+            jsx('input', {
+                type: 'checkbox',
+                model: () => state.agreed,
+                // trim is a no-op on a boolean checkbox value.
+                modelModifiers: { trim: true } as any,
+            });
+            expect(warn).toHaveBeenCalledTimes(1);
+            expect(String(warn.mock.calls[0][0])).toContain('no-ops');
+        } finally {
+            warn.mockRestore();
+        }
+    });
+
+    it('does not warn for trim on an initially-empty string field', () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        try {
+            const state = signal({ name: '' });
+            jsx('input', { type: 'text', model: () => state.name, modelModifiers: { trim: true } });
+            expect(warn).not.toHaveBeenCalled();
+        } finally {
+            warn.mockRestore();
         }
     });
 });

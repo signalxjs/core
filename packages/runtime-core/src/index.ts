@@ -6,6 +6,18 @@
 export type { ModelProcessor } from './platform.js';
 export { registerModelProcessor } from './platform.js';
 
+// Model modifiers (pluggable, cross-platform value-transform / timing primitive)
+export { registerModelModifier } from './model-modifiers.js';
+export type {
+    ModelModifierDef,
+    ModelModifierContext,
+    ModelModifierTiming,
+    ModelModifiers,
+    ToggleModelModifiers,
+    ValueModelModifiers,
+    TimingModelModifiers,
+} from './model-modifiers.js';
+
 // Plugin types (public type only)
 export type { ComponentPlugin } from './plugins.js';
 

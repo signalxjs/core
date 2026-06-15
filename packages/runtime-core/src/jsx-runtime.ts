@@ -3,6 +3,7 @@
 import { detectAccess, detectAccessDev, isComputed } from '@sigx/reactivity';
 import { createModel, isModel, type Model } from './model.js';
 import { getModelProcessors } from './platform.js';
+import { getModelModifier, wrapModelWriteBack } from './model-modifiers.js';
 import { isComponent } from './utils/is-component.js';
 
 // Re-export platform types and functions
@@ -123,6 +124,55 @@ function detectModelBinding(selector: () => any): [any, string | symbol] | null 
 }
 
 /**
+ * Dev-only warning when a value-transform modifier (`trim`/`number`/custom) is a
+ * structural no-op for the bound value: on a checkbox/radio (boolean/array value),
+ * or where the initial bound value is a non-string, non-numeric type. Conservative
+ * to avoid false positives — an initially-empty (`''`/`null`/`undefined`) string
+ * field never warns. Mirrors the {@link detectModelBinding} dev-warning style.
+ */
+function warnNoOpModifiers(
+    type: string,
+    originalProps: Record<string, any>,
+    stateObj: object,
+    stateKey: string,
+    modifiers: Record<string, any>,
+): void {
+    let hasTransform = false;
+    for (const name in modifiers) {
+        const opt = modifiers[name];
+        if (opt === false || opt == null) continue;
+        if (getModelModifier(name)?.transform) { hasTransform = true; break; }
+    }
+    if (!hasTransform) return;
+
+    // Class 1: value transform on a toggle — value is boolean/array, never a string.
+    if (type === 'input' && (originalProps.type === 'checkbox' || originalProps.type === 'radio')) {
+        console.warn(
+            "[sigx] `modelModifiers` value transforms (e.g. `trim`/`number`) are no-ops on " +
+            `<input type="${originalProps.type}">: the bound value is a boolean/array, not a ` +
+            "string. Remove them, or bind the modifier to a text/number input."
+        );
+        return;
+    }
+
+    // Class 2: built-in trim/number where the initial value clearly isn't a string.
+    // Skip null/undefined/'' (legitimate empty string targets) and numbers under `number`.
+    if (modifiers.trim || modifiers.number) {
+        const initial = (stateObj as Record<string, any>)[stateKey];
+        if (
+            initial != null && initial !== '' &&
+            typeof initial !== 'string' &&
+            !(modifiers.number && typeof initial === 'number')
+        ) {
+            console.warn(
+                "[sigx] `modelModifiers` `trim`/`number` expect a string value, but the bound " +
+                `value is of type \`${typeof initial}\`; the modifier is skipped at write-back.`
+            );
+        }
+    }
+}
+
+/**
  * Create a JSX element - this is the core function called by TSX transpilation
  */
 export function jsx(
@@ -237,23 +287,37 @@ export function jsx(
                                 break;
                             }
                         }
-                        // Surface model modifiers (trim/lazy/number/debounce) to the
-                        // platform by tagging the handler the processor produced.
-                        if (handled && props.modelModifiers) {
-                            const h = processedProps["onUpdate:modelValue"];
-                            if (typeof h === "function") (h as any).__sigx_modelModifiers = props.modelModifiers;
+                        if (process.env.NODE_ENV !== 'production' && props.modelModifiers) {
+                            warnNoOpModifiers(type, props, stateObj, stateKey, props.modelModifiers);
                         }
                     }
 
                     // For components: create Model<T> object
                     if (isComponentType) {
-                        models.model = createModel(tuple, updateHandler);
+                        // Wrap once so the Model setter and the onUpdate handler apply
+                        // value-transforms consistently (timing is inert for components).
+                        const handler = props.modelModifiers
+                            ? wrapModelWriteBack(updateHandler, props.modelModifiers)
+                            : updateHandler;
+                        models.model = createModel(tuple, handler);
                         // Keep onUpdate handler for backward compatibility
-                        processedProps["onUpdate:modelValue"] = updateHandler;
-                    } else if (!handled) {
-                        // Generic fallback for intrinsic elements
-                        processedProps.modelValue = (stateObj as Record<string, any>)[stateKey];
-                        processedProps["onUpdate:modelValue"] = updateHandler;
+                        processedProps["onUpdate:modelValue"] = handler;
+                    } else {
+                        if (!handled) {
+                            // Generic fallback for intrinsic elements
+                            processedProps.modelValue = (stateObj as Record<string, any>)[stateKey];
+                            processedProps["onUpdate:modelValue"] = updateHandler;
+                        }
+                        // Apply modifiers uniformly: wrap whatever write-back handler
+                        // settled on onUpdate:modelValue — the processor's (handled),
+                        // or the generic fallback's — so value-transforms run in core
+                        // and timing hints reach the platform, on every path.
+                        if (props.modelModifiers) {
+                            const h = processedProps["onUpdate:modelValue"];
+                            if (typeof h === "function") {
+                                processedProps["onUpdate:modelValue"] = wrapModelWriteBack(h, props.modelModifiers);
+                            }
+                        }
                     }
                     delete processedProps.model;
                 }
@@ -299,15 +363,26 @@ export function jsx(
                         };
                     }
 
+                    if (process.env.NODE_ENV !== 'production' && typeof type === "string" && props.modelModifiers) {
+                        warnNoOpModifiers(type, props, stateObj, stateKey, props.modelModifiers);
+                    }
+
+                    // Apply modifiers uniformly on the named path too (closes the
+                    // model:name coverage gap): wrap the write-back handler so
+                    // value-transforms run in core for components and intrinsics alike.
+                    const handler = props.modelModifiers
+                        ? wrapModelWriteBack(updateHandler, props.modelModifiers)
+                        : updateHandler;
+
                     // For components: create Model<T> object with the prop name
                     if (isComponentType) {
-                        models[name] = createModel(tuple, updateHandler);
+                        models[name] = createModel(tuple, handler);
                         // Keep onUpdate handler for backward compatibility
-                        processedProps[eventName] = updateHandler;
+                        processedProps[eventName] = handler;
                     } else {
                         // For intrinsic elements: put value directly on props
                         processedProps[name] = (stateObj as Record<string, any>)[stateKey];
-                        processedProps[eventName] = updateHandler;
+                        processedProps[eventName] = handler;
                     }
                     delete processedProps[propKey];
                 }
