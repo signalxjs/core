@@ -38,12 +38,8 @@ export {
 export type {
     ComponentAttributeExtensions,
     Define,
-    DefineProp,
     ModelBinding,
-    DefineModel,
     EventDefinition,
-    DefineEvent,
-    DefineSlot,
     SlotsObject,
     EmitFn,
     PlatformTypes,
@@ -58,7 +54,6 @@ export type {
     ComponentFactory,
     AnyComponentFactory,
     ComponentOptions,
-    DefineExpose,
     Ref,
     Exposed,
     ComponentRef
