@@ -41,19 +41,19 @@ export function createRestoringSignal(state: Record<string, any>): SSRSignalFn {
         const sig = signal(seed as any);
 
         return new Proxy(sig as any, {
-            get(target: any, prop: string | symbol) {
+            get(target: any, prop: string | symbol, receiver: any) {
                 if (prop === 'value') {
                     return target.value;
                 }
-                return target[prop];
+                // Preserve receiver semantics for getters / signal methods.
+                return Reflect.get(target, prop, receiver);
             },
-            set(target: any, prop: string | symbol, newValue: any) {
+            set(target: any, prop: string | symbol, newValue: any, receiver: any) {
                 if (prop === 'value') {
                     target.value = newValue;
                     return true;
                 }
-                target[prop] = newValue;
-                return true;
+                return Reflect.set(target, prop, newValue, receiver);
             }
         });
     } as SSRSignalFn;
