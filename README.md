@@ -141,7 +141,34 @@ const Rating = component<RatingProps>(({ props }) => {
 
 Inside the component, `props.model` is a `Model<T>` object — read or write through `props.model.value`, or pass `props.model` to a child to forward the binding without unwrapping. For multiple bindings, use `Define.Model<"name", T>` and the caller writes `model:name={() => state.x}`.
 
-> Runnable: [`examples/spa/src/pages/Forms.tsx`](./examples/spa/src/pages/Forms.tsx) — native `model` on `<input>`, `<select>`, `<textarea>`, plus a custom `Rating` component declared with `Define.Model<number>`.
+### Modifiers
+
+`modelModifiers` tunes how native inputs write back:
+
+```tsx
+<input model={() => form.name} modelModifiers={{ trim: true }} />
+<input model={() => form.qty} modelModifiers={{ number: true }} />
+<input model={() => form.note} modelModifiers={{ lazy: true }} />      {/* sync on change, not every keystroke */}
+<input model={() => form.search} modelModifiers={{ debounce: 300 }} /> {/* delay write-back 300ms */}
+```
+
+### Custom elements
+
+Teach the `model` directive about a custom element or web component with `registerModelProcessor`. Registered processors run before the built-in DOM handling, in registration order; the first to return `true` wins, and anything unhandled falls through to the native behavior:
+
+```tsx
+import { registerModelProcessor } from "sigx";
+
+const off = registerModelProcessor((type, props, [obj, key], originalProps) => {
+  if (type !== "my-toggle") return false;
+  props.checked = obj[key];
+  props.onToggle = (e) => { obj[key] = e.detail.value; };
+  return true;
+});
+// `off()` unregisters it.
+```
+
+> Runnable: [`examples/spa/src/pages/Forms.tsx`](./examples/spa/src/pages/Forms.tsx) — native `model` on `<input>`, `<select>`, `<textarea>`, modifiers, plus a custom `Rating` component declared with `Define.Model<number>`.
 
 ## Quick start
 

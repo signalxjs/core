@@ -1,12 +1,12 @@
 // JSX runtime for @sigx/runtime-core
 
-import { detectAccess, isComputed } from '@sigx/reactivity';
+import { detectAccess, detectAccessDev, isComputed } from '@sigx/reactivity';
 import { createModel, isModel, type Model } from './model.js';
-import { getPlatformModelProcessor } from './platform.js';
+import { runModelProcessors } from './platform.js';
 import { isComponent } from './utils/is-component.js';
 
 // Re-export platform types and functions
-export { setPlatformModelProcessor, getPlatformModelProcessor } from './platform.js';
+export { setPlatformModelProcessor, getPlatformModelProcessor, registerModelProcessor } from './platform.js';
 export type { ModelProcessor } from './platform.js';
 export { createModel, isModel, type Model } from './model.js';
 
@@ -100,6 +100,29 @@ function normalizeChild(c: JSXChild): VNode {
 // isComponent is imported from ./utils/is-component.js
 
 /**
+ * Detect the `[stateObj, key]` tuple a model getter reads. In development,
+ * warns when the getter is a transformed expression (e.g. `() => state.x * 2`)
+ * that would silently mis-bind, since two-way binding writes back to the last
+ * property read. Production uses the lean {@link detectAccess} path.
+ */
+function detectModelBinding(selector: () => any): [any, string | symbol] | null {
+    if (process.env.NODE_ENV !== 'production') {
+        const { access, looksTransformed } = detectAccessDev(selector);
+        if (access && looksTransformed) {
+            console.warn(
+                "[sigx] A `model` getter should read a signal property directly, " +
+                "e.g. model={() => state.field}. The getter returned a value different " +
+                "from the property it read (`" + String(access[1]) + "`), so writes will " +
+                "go back to that property and won't match what the input shows. " +
+                "Bind to a signal property or a writable computed instead."
+            );
+        }
+        return access;
+    }
+    return detectAccess(selector);
+}
+
+/**
  * Create a JSX element - this is the core function called by TSX transpilation
  */
 export function jsx(
@@ -167,7 +190,7 @@ export function jsx(
                 }
                 // Convert getter function to tuple using detectAccess
                 else if (typeof modelBinding === "function") {
-                    const detected = detectAccess(modelBinding);
+                    const detected = detectModelBinding(modelBinding);
                     if (detected && typeof detected[1] === 'string') {
                         tuple = detected as [object, string];
                     }
@@ -195,10 +218,16 @@ export function jsx(
                         };
                     }
 
-                    // Let platform handle intrinsic element model (e.g., DOM checkbox/radio)
-                    const platformProcessor = getPlatformModelProcessor();
-                    if (typeof type === "string" && platformProcessor) {
-                        handled = platformProcessor(type, processedProps, tuple, props);
+                    // Let user/platform processors handle intrinsic element model
+                    // (e.g., custom elements, then DOM checkbox/radio/select)
+                    if (typeof type === "string") {
+                        handled = runModelProcessors(type, processedProps, tuple, props);
+                        // Surface model modifiers (trim/lazy/number/debounce) to the
+                        // platform by tagging the handler the processor produced.
+                        if (handled && props.modelModifiers) {
+                            const h = processedProps["onUpdate:modelValue"];
+                            if (typeof h === "function") (h as any).__sigx_modelModifiers = props.modelModifiers;
+                        }
                     }
 
                     // For components: create Model<T> object
@@ -227,7 +256,7 @@ export function jsx(
                 }
                 // Handle function form: model:propName={() => state.prop}
                 else if (typeof modelBinding === "function") {
-                    const detected = detectAccess(modelBinding);
+                    const detected = detectModelBinding(modelBinding);
                     if (detected && typeof detected[1] === 'string') {
                         tuple = detected as [object, string];
                     }
@@ -261,9 +290,16 @@ export function jsx(
                         // Keep onUpdate handler for backward compatibility
                         processedProps[eventName] = updateHandler;
                     } else {
-                        // For intrinsic elements: put value directly on props
-                        processedProps[name] = (stateObj as Record<string, any>)[stateKey];
-                        processedProps[eventName] = updateHandler;
+                        // For intrinsic elements: let user/platform processors
+                        // handle the binding (e.g. native checkbox/select) just
+                        // like the default `model`; fall back to a direct prop write.
+                        const handled =
+                            typeof type === "string" &&
+                            runModelProcessors(type, processedProps, tuple, props);
+                        if (!handled) {
+                            processedProps[name] = (stateObj as Record<string, any>)[stateKey];
+                            processedProps[eventName] = updateHandler;
+                        }
                     }
                     delete processedProps[propKey];
                 }

@@ -40,3 +40,65 @@ export function setPlatformModelProcessor(fn: ModelProcessor): void {
 export function getPlatformModelProcessor(): ModelProcessor | null {
     return platformModelProcessor;
 }
+
+// User-registered model processors. These run BEFORE the platform processor,
+// in registration order; the first one returning `true` wins. This is the
+// public extension point for custom elements / web components. The platform
+// processor (set above by runtime-dom / lynx-runtime) remains the last-resort
+// base layer, so registering a user processor never clobbers native form binding.
+const userModelProcessors: ModelProcessor[] = [];
+
+/**
+ * Register a model processor for custom elements (public API).
+ *
+ * Processors run in registration order before the platform's built-in
+ * processor; the first returning `true` handles the binding and stops the
+ * chain. Return `false` to defer to the next processor (and ultimately the
+ * platform/generic fallback).
+ *
+ * @param fn - The processor: `(type, props, [obj, key], originalProps) => boolean`
+ * @returns An unregister function that removes this processor.
+ *
+ * @example
+ * ```tsx
+ * registerModelProcessor((type, props, [obj, key], originalProps) => {
+ *     if (type !== 'my-toggle') return false;
+ *     props.checked = obj[key];
+ *     props.onToggle = (e) => { obj[key] = e.detail.value; };
+ *     return true;
+ * });
+ * ```
+ */
+export function registerModelProcessor(fn: ModelProcessor): () => void {
+    userModelProcessors.push(fn);
+    return () => {
+        const i = userModelProcessors.indexOf(fn);
+        if (i >= 0) userModelProcessors.splice(i, 1);
+    };
+}
+
+/**
+ * Get the registered user model processors (for internal use by the JSX runtime).
+ */
+export function getUserModelProcessors(): ModelProcessor[] {
+    return userModelProcessors;
+}
+
+/**
+ * Run the full model-processor chain for an intrinsic element: user-registered
+ * processors first (registration order, first `true` wins), then the platform
+ * processor. Returns `true` if any processor handled the binding.
+ */
+export function runModelProcessors(
+    type: string,
+    props: Record<string, any>,
+    modelBinding: [Record<string, any>, string],
+    originalProps: Record<string, any>
+): boolean {
+    for (const processor of userModelProcessors) {
+        if (processor(type, props, modelBinding, originalProps)) return true;
+    }
+    return platformModelProcessor
+        ? platformModelProcessor(type, props, modelBinding, originalProps)
+        : false;
+}

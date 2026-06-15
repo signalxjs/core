@@ -28,6 +28,11 @@ export function patchProp(dom: Element, key: string, prevValue: any, nextValue: 
 
     if (key === 'children' || key === 'key' || key === 'ref') return;
 
+    // `modelModifiers` configures the model directive (trim/lazy/number/debounce);
+    // it is read off the model handler in the onUpdate:modelValue branch below and
+    // is never rendered to the DOM.
+    if (key === 'modelModifiers') return;
+
     if (key === 'style') {
         const el = dom as HTMLElement;
         if (typeof newValue === 'object' && newValue !== null) {
@@ -77,6 +82,24 @@ export function patchProp(dom: Element, key: string, prevValue: any, nextValue: 
             }
 
             if (newValue) {
+                // Modifiers travel on the model handler (attached by the DOM model
+                // processor) so they're available regardless of prop patch order.
+                const mods = (newValue as any).__sigx_modelModifiers as
+                    | { trim?: boolean; number?: boolean; lazy?: boolean; debounce?: number | boolean }
+                    | undefined;
+
+                // Trailing-edge debounce wraps the value push; created once per
+                // handler instance so the timer persists across events.
+                let invoke = (v: any) => (newValue as Function)(v);
+                if (mods?.debounce) {
+                    const ms = typeof mods.debounce === 'number' ? mods.debounce : 300;
+                    let timer: ReturnType<typeof setTimeout> | undefined;
+                    invoke = (v: any) => {
+                        if (timer) clearTimeout(timer);
+                        timer = setTimeout(() => (newValue as Function)(v), ms);
+                    };
+                }
+
                 const handler = (e: Event) => {
                     const target = e.target as HTMLInputElement;
                     let val: any;
@@ -91,12 +114,23 @@ export function patchProp(dom: Element, key: string, prevValue: any, nextValue: 
                         val = target.value;
                     }
 
-                    (newValue as Function)(val);
+                    // String-only modifiers: trim whitespace, coerce to number.
+                    if (mods && typeof val === 'string') {
+                        if (mods.trim) val = val.trim();
+                        if (mods.number) {
+                            const n = parseFloat(val);
+                            if (!Number.isNaN(n)) val = n;
+                        }
+                    }
+
+                    invoke(val);
                 };
                 (newValue as any).__sigx_model_handler = handler;
 
                 const inputType = (dom as HTMLInputElement).type;
-                if (tagName === 'select' || (tagName === 'input' && (inputType === 'checkbox' || inputType === 'radio'))) {
+                const isToggle = tagName === 'input' && (inputType === 'checkbox' || inputType === 'radio');
+                // `.lazy` syncs text inputs on `change` (blur/enter) instead of `input`.
+                if (tagName === 'select' || isToggle || mods?.lazy) {
                     el.addEventListener('change', handler);
                 } else {
                     el.addEventListener('input', handler);

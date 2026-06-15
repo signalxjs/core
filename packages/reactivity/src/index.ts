@@ -40,9 +40,10 @@ export {
 } from './collections';
 
 // Signal
-export { 
-    signal, 
-    detectAccess 
+export {
+    signal,
+    detectAccess,
+    detectAccessDev
 } from './signal';
 
 // Watch

@@ -5,6 +5,9 @@
 // Platform types (public type only)
 export type { ModelProcessor } from './platform.js';
 
+// Model processor registry (public extension point for custom elements)
+export { registerModelProcessor } from './platform.js';
+
 // Plugin types (public type only)
 export type { ComponentPlugin } from './plugins.js';
 
