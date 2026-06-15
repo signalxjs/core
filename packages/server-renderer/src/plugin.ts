@@ -47,6 +47,25 @@ export interface SSRPlugin {
         ): ComponentSetupContext | void;
 
         /**
+         * Called after the component context is built (`transformComponentContext`
+         * has run, the component id is assigned and pushed) but BEFORE `setup()`
+         * and render. Lets a plugin skip running the component entirely and emit a
+         * placeholder string in its place — e.g. islands `client:only` true
+         * skip-SSR. Returning **any object** suppresses the render: the component's
+         * `setup`/render and `afterRenderComponent` are skipped, and core emits the
+         * (optional) `placeholder` string — when present, including an empty string
+         * — followed by the standard trailing `<!--$c:id-->` marker for hydration.
+         * Return void to render normally. First plugin to return an object wins.
+         *
+         * @example Islands plugin emits `<div data-island>` for `client:only`
+         */
+        suppressComponentRender?(
+            id: number,
+            vnode: VNode,
+            ctx: SSRContext
+        ): { placeholder?: string } | void;
+
+        /**
          * Called after a component renders. Receives the accumulated HTML string.
          * Can transform it (e.g., wrap with markers, inject attributes).
          * Return a string to replace, or void to pass through.
