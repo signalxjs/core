@@ -9,7 +9,7 @@ Redesign sigx's async loading / lazy / error UX around a **value-first** model
 that fits the fine-grained signal system: `useAsync` returns a reactive value
 that carries its own `pending` / `error` / `ready` states, rendered with a
 co-located `match` / `when` combinator. Multiple async values coordinate by
-composition (`all([...])`), not by nesting wrapper components. The only
+composition (`all(a, b, c)`), not by nesting wrapper components. The only
 tree-positional primitive is a thin `<Stream>` for code-splitting and SSR flush
 order.
 
@@ -30,8 +30,9 @@ The client-composition layer has concrete gaps:
    fetch can't re-run when a signal (route param, id) changes.
 4. **No transitions** — every boundary flashes its fallback; no way to keep stale
    content visible while the next view loads.
-5. **`__SIGX_ASYNC__` is a hydration blob, not a cache** — no staleTime, gc,
-   revalidation, or mutations.
+5. **`__SIGX_ASYNC__` is a cache without policy** — it already acts as a
+   page-lifetime data cache (restores keyed `useAsync` across mounts/remounts),
+   but has no staleTime, gc, revalidation, or mutation controls.
 
 **Core idea:** in a fine-grained signal system, async state *is* reactive state.
 So loading/error/transition handling can be plain reactive derivations over the
