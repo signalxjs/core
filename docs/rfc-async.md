@@ -89,7 +89,7 @@ interface AsyncState<T> {
   readonly state: 'idle' | 'pending' | 'ready' | 'refreshing' | 'errored';
   readonly value: T | null;          // SWR last-good; null until first success, kept across refresh
   readonly error: Error | null;      // normalized; mutually exclusive with a fresh value
-  readonly loading: boolean;         // derived sugar: state === 'pending' || 'refreshing'
+  readonly loading: boolean;         // derived sugar: state === 'pending' || state === 'refreshing'
 
   // sugar over the state checks above — not load-bearing
   match<R>(arms: {
@@ -106,7 +106,7 @@ interface AsyncState<T> {
 
 | `state` | `value` | `match` renders |
 |---|---|---|
-| `idle` / `pending` | null | `pending` |
+| `idle` / `pending` | null | the `pending` arm, or nothing if it's omitted |
 | `ready` / `refreshing` | present | `ready(value)` — live, stale-while-revalidating |
 | `errored` | null | `error(e, retry)`, or `null` + bubble to `onError` if no `error` arm |
 
@@ -177,9 +177,12 @@ return () => page.match({
   the arm renders `null` and **bubbles the error** to the nearest `errorScope` /
   app `onError` (never silently swallowed); a dev-mode warning fires the first
   time so the bubble is discoverable rather than a blank slot.
-- **App-level handler** → surface the existing `app.config.errorHandler` (already
-  routes setup + render-effect errors) as app `onError`. A rename/surfacing, not
-  a new capability. Catches event-handler throws and anything unhandled below.
+- **App-level handler** → surface the existing `app.config.errorHandler` (which
+  already routes setup + render-effect errors via `handleComponentError`) as app
+  `onError` — the catch-all for anything unhandled below. Surfacing it is not a new
+  capability, but **Phase 1 additionally wires DOM event-handler throws through it**:
+  today `runtime-dom` invokes event handlers directly with no `try/catch`, so a
+  throw inside an `onClick` bypasses `handleComponentError` entirely.
 - **`errorScope` — scoped, recoverable, wrapper-free (ships Phase 1).** A
   **setup-time call inside a component that scopes that component's own subtree**
   (it provides a handler via DI — `handleComponentError` walks the instance parent
