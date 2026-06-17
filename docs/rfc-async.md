@@ -50,19 +50,19 @@ it returns.
 ```ts
 useAsync<T>(fetcher, options?): AsyncState<T>                 // unkeyed, client-only
 useAsync<T>(key, fetcher, options?): AsyncState<T>            // keyed, SSR-transferable
-useAsync<T>(() => `user:${id.value}`, fetcher, options?)     // GETTER key => reactive refetch
+useAsync<T>(() => `user:${id.value}`, fetcher, options?): AsyncState<T>  // GETTER key => reactive refetch
 
 interface AsyncState<T> {
   readonly value: T | undefined;     // current; reading subscribes
   readonly latest: T | undefined;    // last resolved, kept across refresh (SWR)
   readonly loading: boolean;
-  readonly error: unknown;
+  readonly error: Error | null;      // normalized to Error; null when absent (matches use-async.ts)
   readonly state: 'unresolved' | 'pending' | 'ready' | 'refreshing' | 'errored';
 
   // the boundary IS the value — loading/error/success co-locate here
   match<R>(arms: {
     pending?: () => R;
-    error?:   (e: unknown, retry: () => void) => R;
+    error?:   (e: Error, retry: () => void) => R;
     ready:    (v: T) => R;
   }): R;
   when<R>(ready: (v: T) => R): R | undefined;
@@ -89,7 +89,7 @@ through `onCleanup`. No throwing, no tree-positional boundary, no module global.
 ### 2. Coordinating several — value combinators (not nesting)
 
 ```tsx
-const page = all([user, posts, prefs]);   // AsyncState<[U, P[], Prefs]>
+const page = all(user, posts, prefs);   // rest args => tuple: AsyncState<[U, P[], Prefs]>
 return () => page.match({
   pending: () => <Skeleton/>,
   error:   (e, retry) => <Err e={e} onRetry={retry}/>,   // first error wins
@@ -97,8 +97,10 @@ return () => page.match({
 });
 ```
 
-`all()` returns a derived `AsyncState` (pending until all settle, errored on the
-first failure, ready with the tuple). Room for `race`/`any` later.
+`all()` takes its sources as **rest arguments** (`all(a, b, c)`) so TypeScript
+infers a tuple rather than widening an array literal to a union; it returns a
+derived `AsyncState` (pending until all settle, errored on the first failure,
+ready with the tuple). Room for `race`/`any` later.
 
 ### 3. Errors — at the value; thin app-level catch-all for the rest
 
