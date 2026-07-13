@@ -341,7 +341,7 @@ export function createRenderer<HostNode = any, HostElement = any>(
 
         // Check for component (function with __setup)
         if (isComponent(vnode.type)) {
-            mountComponent(vnode, container, before, vnode.type.__setup as SetupFn);
+            mountComponent(vnode, container, before, vnode.type.__setup as SetupFn, parentIsSVG);
             return;
         }
 
@@ -470,7 +470,12 @@ export function createRenderer<HostNode = any, HostElement = any>(
             // so hostNextSibling gives us the correct insertion point
             const nextSibling = oldVNode.dom ? hostNextSibling(oldVNode.dom) : null;
             unmount(oldVNode, parent as HostElement);
-            mount(newVNode, parent as HostElement, nextSibling);
+            // Thread the SVG context so a replacement inside an <svg> keeps
+            // the namespace. Fallback: if the old vnode was itself in the SVG
+            // namespace (and wasn't the <svg> root, whose container is HTML),
+            // its container must be SVG.
+            mount(newVNode, parent as HostElement, nextSibling,
+                parentIsSVG || ((oldVNode as InternalVNode)._svg === true && oldVNode.type !== 'svg'));
             return;
         }
 
@@ -644,7 +649,7 @@ export function createRenderer<HostNode = any, HostElement = any>(
         // Guard: if old element has no DOM (can happen with hydrated slot content),
         // recover by mounting fresh instead of crashing
         if (!element) {
-            mount(newVNode, container);
+            mount(newVNode, container, null, parentIsSVG);
             return;
         }
         
@@ -810,7 +815,7 @@ export function createRenderer<HostNode = any, HostElement = any>(
         }
     }
 
-    function mountComponent(vnode: VNode, container: HostElement, before: HostNode | null, setup: SetupFn<any, any, any, any>) {
+    function mountComponent(vnode: VNode, container: HostElement, before: HostNode | null, setup: SetupFn<any, any, any, any>, parentIsSVG: boolean = false) {
         // No wrapper element - we render directly into the container
         // Use an anchor comment to track the component's position
         const anchor = hostCreateComment('');
@@ -977,7 +982,7 @@ export function createRenderer<HostNode = any, HostElement = any>(
                     if (prevSubTree) {
                         // Preserve focused element across the entire patch cycle
                         const prevFocus = hostGetActiveElement ? hostGetActiveElement() : null;
-                        patch(prevSubTree, subTree, container);
+                        patch(prevSubTree, subTree, container, parentIsSVG);
                         if (prevFocus && hostRestoreFocus && hostGetActiveElement!() !== prevFocus) {
                             hostRestoreFocus(prevFocus);
                         }
@@ -989,7 +994,7 @@ export function createRenderer<HostNode = any, HostElement = any>(
                             for (let i = 0, len = hooks.length; i < len; i++) hooks[i]();
                         }
                     } else {
-                        mount(subTree, container, anchor);
+                        mount(subTree, container, anchor, parentIsSVG);
                     }
                     subTreeRef.current = subTree;
                     internalVNode._subTree = subTree;

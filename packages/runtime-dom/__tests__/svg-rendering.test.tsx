@@ -129,6 +129,36 @@ describe('SVG namespace handling', () => {
         expect(rect.namespaceURI).toBe(SVG_NS);
     });
 
+    it('should mount a type-replacement inside svg with the SVG namespace', () => {
+        // A child component swapping its ROOT element type re-renders via
+        // patch(oldSubTree, newSubTree) with no threaded SVG context and hits
+        // patch()'s replacement branch. The old vnode's cached namespace flag
+        // must carry the context so the replacement stays SVG.
+        const useRect = signal(false);
+        const Shape = component(() => {
+            return () =>
+                useRect.value
+                    ? <rect x="0" y="0" width="4" height="4" />
+                    : <circle cx="10" cy="10" r="5" />;
+        });
+        const App = component(() => {
+            return () => (
+                <svg>
+                    <Shape />
+                </svg>
+            );
+        });
+
+        render(<App />, container);
+        expect(container.querySelector('circle')!.namespaceURI).toBe(SVG_NS);
+
+        useRect.value = true;
+
+        const rect = container.querySelector('rect')!;
+        expect(rect).toBeTruthy();
+        expect(rect.namespaceURI).toBe(SVG_NS);
+    });
+
     it('should keep patching an svg child down the SVG path after re-renders', () => {
         const cls = signal('a');
         const Iconish = component(() => {
