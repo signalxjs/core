@@ -94,6 +94,13 @@ export function shouldNotProxy(value: unknown): boolean {
     const proto = Object.getPrototypeOf(value);
     if (proto === Object.prototype || proto === null) return false;
 
+    // An own Symbol.toStringTag can spoof the brand per instance; genuine
+    // built-ins never carry one. Bypass the cache for such values so one
+    // spoofed instance can't poison the verdict for its whole prototype.
+    if (Object.prototype.hasOwnProperty.call(value, Symbol.toStringTag)) {
+        return NON_PROXYABLE_BRANDS.has(Object.prototype.toString.call(value));
+    }
+
     let verdict = protoVerdicts.get(proto);
     if (verdict === undefined) {
         verdict = NON_PROXYABLE_BRANDS.has(Object.prototype.toString.call(value));
