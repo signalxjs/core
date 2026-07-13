@@ -442,13 +442,13 @@ describe('Reconciler - Key-based Diffing', () => {
 
             // Reorder: with working keys the elements are moved/reused, not
             // recreated.
-            const list2b = jsx(Fragment, {
+            const list2 = jsx(Fragment, {
                 children: [
                     jsx('li', { key: 1, children: 'One' }),
                     jsx('li', { key: 0, children: 'Zero' })
                 ]
             });
-            renderer.render(list2b as any, container);
+            renderer.render(list2 as any, container);
 
             const createOps = mockOps.operations.filter(op => op.startsWith('createElement:li'));
             expect(createOps.length).toBe(0);

@@ -161,7 +161,7 @@ function findIndexInOld(children: VNode[], newChild: VNode, beginIdx: number, en
  */
 function checkDuplicateKeys(children: VNode[]): void {
     if (process.env.NODE_ENV === 'production') return;
-    
+
     const seenKeys = new Set<string>();
     for (const child of children) {
         if (child?.key != null) {
