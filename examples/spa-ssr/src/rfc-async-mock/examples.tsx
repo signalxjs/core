@@ -162,13 +162,23 @@ export const ProfileForm = component(() => {
 // ───────────────────────────────────────────────────────────────────────
 // 5. Write with a typed input — retry in the error arm re-runs the LAST
 //    input (captured — the stale-draft nuance the RFC documents). The
-//    options slot is where the cache pack attaches per-action policy.
+//    options slot is where a pack attaches per-action policy: the open-
+//    interface contract (§7) means the `cache` key below exists ONLY
+//    because of the augmentation right here — remove the declare block and
+//    the option becomes a compile error, exactly as a bare install should.
 // ───────────────────────────────────────────────────────────────────────
+
+declare module './use-data' {
+    // what a cache pack's .d.ts would ship:
+    interface ActionOptions {
+        cache?: { invalidates?: readonly string[] };
+    }
+}
 
 export const DeleteButton = component(() => {
     const remove = useAction(
         (postId: string, { signal }) => getJson<void>(`/api/posts/${postId}?delete`, signal),
-        { cache: undefined /* reserved: pack types invalidation targets here */ }
+        { cache: { invalidates: ['posts'] } }   // typed by the augmentation above
     );
 
     return () => (

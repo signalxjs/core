@@ -3,6 +3,24 @@
 Status: **proposed / under review — rev 6**. Tracking: signalxjs/core#135.
 Pre-1.0, no-compat (same stance as `docs/rfc-use-async.md`): one way to do it.
 
+> **rev-7 changes** (from the rev-6 follow-up review): the **reserved `cache`
+> options key is dropped** — core pre-declaring a property it never reads was
+> dead surface, at odds with sigx's own extension identity ("if it's in the
+> types, it resolves"). Replaced by the mechanism §7 already implied: **open
+> options interfaces** (the pack's own `.d.ts` augments `AsyncOptions`/
+> `ActionOptions`, so the name exists exactly when the pack is in the
+> project), **opaque options pass-through** (core hands the whole bag through
+> the provider seam untouched — the real runtime contract), and a
+> **default-engine unknown-option dev warning** (which subsumes most of the
+> dev-stub requirement). Tuple-key hardening: non-finite numbers rejected in
+> dev (`JSON.stringify(NaN)` → `"null"` would collide with actual `null`;
+> `-0` canonicalizes to `0`); an **empty tuple is skipped + dev-warned**
+> (like `''`); the **static-tuple form is rejected** — a tuple exists to
+> carry parameters, and parameters that change belong in a getter (a static
+> `['user', id.value]` invites exactly the stale-capture bug tuples were
+> designed to eliminate; a constant tuple has no advantage over a constant
+> string).
+
 > **rev-6 changes** (from the rev-5 DX review on signalxjs/core#136): structured
 > **tuple keys** (key/fetcher desync is the bug class string keys invite);
 > `loading` narrowed to `state === 'pending'` only (the old definition
@@ -189,12 +207,21 @@ const posts = useData(
 Core canonicalizes a tuple to its JSON string for identity (dedupe map,
 `__SIGX_ASYNC__` blob key) — element order is meaningful and elements are
 restricted to JSON primitives, so canonicalization is trivial and stable.
-Plain strings stay for the simple case. Two load-bearing rules, stated
-explicitly: **the fetcher runs untracked** — only the key getter is reactive;
-a signal read inside the fetcher does *not* re-run anything. And **skip
-values:** the getter skips (state `'idle'`, fetcher not run) on any falsy
-result — `null`, `undefined`, `false`, `''` (dev-warned: an empty string
-usually means an interpolation bug), and a dev warning on an empty tuple.
+Dev-mode guards keep the canonical form honest (rev 7): **non-finite numbers
+are rejected** (`JSON.stringify(NaN)` → `"null"`, silently colliding with an
+actual `null` element; same for `±Infinity`; `-0` canonicalizes to `0`).
+Plain strings stay for the simple case; **the static-tuple form
+(`useData(['user', id], fetcher)`) is deliberately rejected** — a tuple
+exists to carry parameters, and parameters that can change belong in a
+getter; a static tuple invites the stale-capture bug tuples were designed to
+eliminate, while a constant tuple has no advantage over a constant string.
+Two load-bearing rules, stated explicitly: **the fetcher runs untracked** —
+only the key getter is reactive; a signal read inside the fetcher does *not*
+re-run anything. And **skip values:** the getter skips (state `'idle'`,
+fetcher not run) on any falsy result — `null`, `undefined`, `false`, `''`
+(dev-warned: an empty string usually means an interpolation bug) — **and on
+an empty tuple** (skipped + dev-warned, rev 7: `[]` is truthy but is almost
+always a bug; treating it like `''` keeps "no parameters yet ⇒ no fetch").
 
 `AsyncState` — `state` is the canonical truth:
 
@@ -292,9 +319,10 @@ returns a distinct type:
 type RunResult<T> = { ok: true; value: T } | { ok: false; error: Error };
 class SupersededError extends Error {}          // exported; identifies discarded runs
 
-interface ActionOptions {
-  cache?: unknown;   // reserved namespace, typed by the cache pack (§7): per-action
-}                    // invalidation targets, optimistic updater, rollback policy
+interface ActionOptions {}  // OPEN interface — deliberately empty in core (rev 7).
+// A pack augments it (declare module …) so its options exist in the editor
+// exactly when the pack is in the project; core passes the whole bag through
+// the provider seam untouched (§7). Same for AsyncOptions on reads.
 
 interface AsyncAction<T, In> {
   readonly state: 'idle' | 'pending' | 'ready' | 'errored';   // no 'refreshing'
@@ -350,7 +378,7 @@ onClick={async () => { if ((await save.run()).ok) user.refresh(); }}
   the cache **pack** (§7). No implicit graph.
 - **No optimistic apply/rollback in core** — optimistic writes are a cache
   write-through and ship with the pack (§7); the per-action policy attaches
-  through `ActionOptions.cache`.
+  through the pack's augmentation of `ActionOptions`.
 - **Why `useAction` is in core at all**: it is ~50 policy-free lines — but it
   is the *interface a cache pack needs*. Without a blessed write shape, a
   pack cannot retrofit invalidation and optimistic semantics onto N
@@ -500,17 +528,27 @@ obligations are the seams that make the pack possible:
 1. **The provider seam.** The pack swaps/wraps the async engine per app the
    same way the server renderer already swaps `_useAsync` per request. This
    seam exists and is validated (`rfc-use-async.md` "Layering").
-2. **The reserved options namespace — on both primitives.** `AsyncOptions.cache`
-   (reads: `staleTime`, revalidation, `keepPreviousData`, …) and
-   `ActionOptions.cache` (writes: invalidation targets, optimistic updater,
-   rollback policy) are keys core never interprets; the pack claims them via
-   module augmentation. The beginner signature stays `useData(key, fetcher)`;
-   installing the pack changes one line (`app.use(cachePlugin())`), not the
-   call sites:
+2. **Open options interfaces + opaque pass-through — on both primitives
+   (rev 7; replaces the reserved-key mechanism).** `AsyncOptions`/
+   `ActionOptions` contain only options core actually reads. The pack's own
+   `.d.ts` augments them —
+   `declare module '@sigx/runtime-core' { interface AsyncOptions { cache?: CacheOptions } }` —
+   so `cache` exists in the editor exactly when the pack is in the project,
+   and it is the *pack's* name, not core's (the same pattern as JSX attribute
+   augmentation: if it's in the types, it resolves). The runtime obligation
+   is **pass-through**: core hands the *whole* options bag through the
+   provider seam untouched — never validates, strips, or copies
+   known-keys-only. Inter-pack collisions are a **compile error** under
+   declaration merging; by convention a pack nests all its options under a
+   single key named for its domain. (The reservation's one selling point —
+   a beginner seeing `cache?` in autocomplete on a bare install — was an
+   anti-feature: autocomplete advertising a no-op.) The beginner signature
+   stays `useData(key, fetcher)`; installing the pack changes one line
+   (`app.use(cachePlugin())`), not the call sites:
 
 ```ts
 const user = useData('user', fetchUser, {
-  cache: { staleTime: 60_000, revalidateOnFocus: true },   // typed by the pack
+  cache: { staleTime: 60_000, revalidateOnFocus: true },   // typed by the pack's augmentation
 });
 user.invalidate();                  // pack-provided: drop entry + refetch
 user.mutate(u => ({ ...u, name })); // pack-provided: optimistic write-through
@@ -521,14 +559,17 @@ user.mutate(u => ({ ...u, name })); // pack-provided: optimistic write-through
    shipping a second one. (The SSR platform RFC #171 makes the serializer
    pluggable for the same reason.)
 4. **The write interface.** `AsyncAction` (§2) is the shape the pack extends
-   with optimistic apply + rollback, attached per-action via
-   `ActionOptions.cache`.
-5. **Dev-mode stubs (rev 6).** Pack-provided methods (`invalidate`, `mutate`)
-   get types via module augmentation (node_modules presence) but runtime via
-   `app.use(...)` — a gap that yields "`user.invalidate` is not a function"
-   with green types. Core ships dev-mode stub properties under the reserved
-   names that throw *"requires a cache pack — did you forget
-   `app.use(cachePlugin())`?"*; production builds omit the stubs.
+   with optimistic apply + rollback, attached per-action via its augmented
+   options (e.g. `cache`).
+5. **Unknown-option dev warning (rev 7; shrinks the rev-6 stub
+   requirement).** The default engine runs only when no pack replaced it, so
+   any option key it doesn't own is unhandled *by definition*. In dev it
+   warns: *"[useData] option 'cache' was passed but no installed plugin
+   handles it — did you forget `app.use(cachePlugin())`?"* This is generic
+   over every pack's options, and it covers the types-without-runtime gap at
+   the option site (packs own the diagnostics for their augmented *methods*;
+   in TS, unaugmented options are already a compile error thanks to
+   excess-property checks on the open interfaces).
 
 One primitive family, one vocabulary, unchanged call sites — but core carries
 mechanism only, exactly like islands (`SSRPlugin`) and the store SSR adapter.
@@ -606,7 +647,8 @@ does not run there.
   `all({...})` + `.errors` + derived-state rules; rebuild `lazy()` + thin
   `<Defer>` (SSR: observes data + chunks; client: chunks only); surface app
   `onError` (+ event-handler wiring) and the `errorScope` parent-chain walk;
-  reserve the `cache` namespaces + dev stubs. Delete throw protocol,
+  options flow through the provider seam whole + default-engine
+  unknown-option dev warning. Delete throw protocol,
   register-during-render boundary, old `Suspense`/`ErrorBoundary`, `latest`.
 - **Phase 2 — The cache pack:** built against the §7 contract as its own
   program (recommended `@sigx/cache`, in-tree; final call when Phase 2
@@ -654,7 +696,13 @@ Each phase = its own issue → worktree → PR → Copilot review → merge.
 - Concurrency: two clauses (§1) — supersede observation; abort only unshared
   read fetches; the in-flight dedupe map is kept.
 - Optimistic apply/rollback: pack, not core; per-action policy attaches via
-  `ActionOptions.cache`; core ships dev-mode stubs for pack method names.
+  the pack's augmentation of `ActionOptions`.
+- Pack options mechanism (rev 7): **open interfaces + opaque pass-through +
+  default-engine unknown-option dev warning** — no reserved keys, no core
+  stubs; core's options interfaces contain only what core reads.
+- Tuple-key hardening (rev 7): non-finite numbers dev-rejected; empty tuple
+  skipped + dev-warned (like `''`); static-tuple form rejected (stale-capture
+  bug; a constant tuple has no advantage over a constant string).
 - `createAsyncCell`: stays internal — one public surface to stabilize pre-1.0.
 - Unkeyed SSR behavior: documented client-only semantics + one-time dev note.
 - **Writes ship in Phase 1 core** (was open question 1): ~50 policy-free

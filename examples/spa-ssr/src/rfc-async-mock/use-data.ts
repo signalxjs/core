@@ -37,20 +37,21 @@ export interface AsyncFetcherContext {
 /** One fetcher shape everywhere: (trigger's argument, ctx). */
 export type Fetcher<T, Arg> = (arg: Arg, ctx: AsyncFetcherContext) => Promise<T>;
 
+/**
+ * OPEN interface (rev 7) — contains only options core actually reads.
+ * A pack augments it (`declare module …`) so its options exist in the editor
+ * exactly when the pack is installed; core passes the whole bag through the
+ * provider seam untouched, and the default engine dev-warns on options no
+ * installed plugin handles. See ./examples.tsx for the augmentation pattern.
+ */
 export interface AsyncOptions {
     /** Keyed form only. Run the fetcher on the server. Default: true. */
     server?: boolean;
-    /** Reserved for the cache pack (§7) — core never interprets it. */
-    cache?: unknown;
 }
 
-export interface ActionOptions {
-    /**
-     * Reserved for the cache pack (§7): per-action invalidation targets,
-     * optimistic updater, rollback policy. Core never interprets it.
-     */
-    cache?: unknown;
-}
+/** OPEN interface (rev 7) — deliberately empty in core; packs augment it. */
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
+export interface ActionOptions {}
 
 export interface MatchArms<T, R> {
     /** Conditional fetch not started ("Type to search…"). Defaults to `pending`. */
