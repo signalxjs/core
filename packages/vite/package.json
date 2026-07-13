@@ -23,7 +23,8 @@
         "sigx-types": "./dist/cli.js"
     },
     "files": [
-        "dist"
+        "dist",
+        "src"
     ],
     "sideEffects": false,
     "scripts": {
