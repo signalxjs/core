@@ -201,7 +201,23 @@ export function cleanup(effect: Subscriber): void {
     if (!effect.deps) return;
     for (const link of effect.deps) {
         link.dep.subs.delete(effect);
-        if (link.dep.active === link) link.dep.active = link.prevActive;
+        // Splice this link out of the dep's active-link stack wherever it
+        // sits — not just at the top. A subscriber disposed while nested
+        // runs are stacked above it would otherwise be restored as a stale
+        // dep.active tombstone by the inner runs' endTracking (retaining
+        // the stopped subscriber). The stack is at most nesting-deep.
+        let cur = link.dep.active;
+        if (cur === link) {
+            link.dep.active = link.prevActive;
+        } else {
+            while (cur !== undefined) {
+                if (cur.prevActive === link) {
+                    cur.prevActive = link.prevActive;
+                    break;
+                }
+                cur = cur.prevActive;
+            }
+        }
         link.prevActive = undefined;
     }
     effect.deps.length = 0;
