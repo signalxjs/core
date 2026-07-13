@@ -1,16 +1,20 @@
-# RFC: value-first async — loading, lazy, errors, transitions
+# RFC: value-first async — loading, lazy, errors; mechanism in core, policy in packs
 
-Status: **proposed / under review — rev 3** (revised after the rev-2 DX follow-up
-on signalxjs/core#136). Tracking: signalxjs/core#135. Pre-1.0, no-compat (same
-stance as `docs/rfc-use-async.md`): one way to do it.
+Status: **proposed / under review — rev 4** (scope revision after the
+architectural step-back on signalxjs/core#136). Tracking: signalxjs/core#135.
+Pre-1.0, no-compat (same stance as `docs/rfc-use-async.md`): one way to do it.
 
-> **rev-3 changes:** reads and writes are both `useAsync`, distinguished by
-> *trigger mode* — a read is auto-triggered, a write is manual (`{ manual: true }`
-> + `.run(input)`) with its own lifecycle; this replaces `mutate`/`invalidate` as
-> read-state methods (those move to Phase 3 cache ops). `errorScope` is pinned to
-> a setup-time, wrapper-free contract and ships in Phase 1. `match` is framed as
-> sugar over plain `state` checks. Added the honesty note on the hybrid
-> render model (P1 conceded). All five rev-2 open questions resolved.
+> **rev-4 changes (the scope cut):** core ships only what **only the framework
+> can do** — the cache/revalidation/optimistic layer (rev-3 Phase 3) moves out
+> of core entirely and becomes a **pack contract** over the existing provider
+> seam (§7). Transitions (rev-3 Phase 2) are demoted from a committed phase to
+> evidence-driven future work (§8). The TanStack alternative is addressed
+> head-on (§9). DX decisions folded in: `.run` returns a settled result (never
+> rejects); one fetcher shape everywhere (`(arg, ctx)`); writes get a distinct
+> `AsyncAction` type; `match` reframed as "sugar at runtime, load-bearing for
+> types"; write-retry and re-run concurrency pinned; `all().errors` specified;
+> the scoped-isolation migration pattern shown. `createAsyncCell` stays
+> internal (resolved).
 
 ## Summary
 
@@ -21,11 +25,21 @@ fine-grained signal system. One primitive, two trigger modes:
 - **A write is a manually-triggered async value** — `useAsync(fn, { manual: true })`,
   fired with `.run(input)`, with its *own* pending/error lifecycle.
 
-Both return the same `AsyncState` shape, rendered with a co-located `match`
-combinator (sugar over plain `state` checks). Multiple values coordinate by
-composition (`all({ ... })`), not by nesting wrapper components. The only
-tree-positional primitive is a thin `<Defer>` for code-splitting and SSR flush
-order.
+Both are rendered with a co-located `match` combinator; multiple values
+coordinate by composition (`all({ ... })`), not by nesting wrapper components.
+The only tree-positional primitive is a thin `<Defer>` for code-splitting and
+SSR flush order.
+
+**The scope principle (rev 4):** core ships *mechanism* — the things only the
+framework can do (SSR transfer, the renderer-coupled `lazy`/`<Defer>`, error
+propagation, the reactive async cell). Cache *policy* (`staleTime`,
+revalidation, invalidation, optimistic mutations) is an application-layer
+concern and ships as a **pack** over the same provider seam the server
+renderer already uses. No framework core ships a query client — Vue, React,
+Solid, and Svelte all draw this line (Solid's `createResource` stops exactly
+where this RFC's core phase stops) — and sigx's own architecture (islands,
+the store SSR adapter) already draws it too: mechanism in core, policy in
+packs.
 
 ## Motivation
 
@@ -51,10 +65,14 @@ The client-composition layer has concrete gaps — stated against the current co
    (form submits, mutations) have a different lifecycle (own pending/error,
    trigger on demand, invalidate other reads) and today fall back to hand-rolled
    `signal(false)` button state.
-5. **No transition stale-hold across a key change.**
-6. **`__SIGX_ASYNC__` is a cache without policy** — already a page-lifetime data
+5. **`__SIGX_ASYNC__` is a cache without policy** — already a page-lifetime data
    cache (restores keyed `useAsync` across mounts), but no `staleTime`, `gcTime`,
-   revalidation, or mutation controls.
+   revalidation, or mutation controls. *(rev 4: giving it policy is a pack's
+   job — core's job is to make the pack possible, §7.)*
+
+Every item on this list except the last requires renderer or SSR-seam
+cooperation — that is the test for core membership, and the last item fails
+it.
 
 **Core idea:** in a fine-grained signal system, async state *is* reactive state —
 read or write. The substrate exists: `signal`, `watch` (with `onCleanup`),
@@ -65,24 +83,34 @@ read or write. The substrate exists: `signal`, `watch` (with `onCleanup`),
 ### 1. Reads — auto-triggered `useAsync`
 
 An internal reactive async engine powers `useAsync` (no public `resource()` /
-`query()`). **One signature fuses the reactive key, the fetcher's key, and
-conditional fetching:**
+`query()`; the engine stays internal — resolved, previously open). **One
+signature fuses the reactive key, the fetcher's argument, and conditional
+fetching:**
 
 ```ts
-useAsync<T>(key, fetcher, options?): AsyncState<T>   // keyed, SSR-transferable
-useAsync<T>(fetcher, options?): AsyncState<T>         // unkeyed, client-only
+type Key = string | null | undefined | false;               // falsy ⇒ 'idle', don't fetch
+type Fetcher<T, Arg> = (arg: Arg, ctx: { signal: AbortSignal }) => Promise<T>;
 
-// `key` is `string` OR a getter. A getter is tracked: a signal read inside it
-// re-runs the fetch on change. Returning null/undefined/false ⇒ state 'idle',
-// the fetcher does NOT run (conditional fetch). The resolved key is passed to
-// the fetcher, so you never read the signal twice:
+useAsync<T>(key: string,    fetcher: Fetcher<T, string>, opts?): AsyncState<T>;  // keyed, SSR
+useAsync<T>(key: () => Key, fetcher: Fetcher<T, string>, opts?): AsyncState<T>;  // reactive key
+useAsync<T>(fetcher: Fetcher<T, undefined>,              opts?): AsyncState<T>;  // unkeyed, client-only
+useAsync<T, In = void>(fetcher: Fetcher<T, In>, opts: { manual: true }): AsyncAction<T, In>;  // write, §2
+```
+
+**One fetcher shape everywhere.** The fetcher's first argument is always *the
+trigger's argument*: the resolved key for auto reads, the `.run(input)` value
+for writes, `undefined` for unkeyed reads. One mental model — and it makes
+overload disambiguation mechanical (two functions ⇒ the first is a key
+getter; one function ⇒ it is the fetcher).
+
+```tsx
 const post = useAsync(
-  () => user.value ? `post:${postId.value}` : null,   // null ⇒ idle/skip
-  (key, { signal }) => fetchPost(key, signal),
+  () => user.value ? `post:${postId.value}` : null,   // getter key: tracked; null ⇒ idle/skip
+  (key, { signal }) => fetchPost(key, { signal }),    // resolved key passed in — no double read
 );
 ```
 
-`AsyncState` — `state` is the canonical truth; `match` and `loading` are sugar:
+`AsyncState` — `state` is the canonical truth:
 
 ```ts
 interface AsyncState<T> {
@@ -91,16 +119,22 @@ interface AsyncState<T> {
   readonly error: Error | null;      // normalized; mutually exclusive with a fresh value
   readonly loading: boolean;         // derived sugar: state === 'pending' || state === 'refreshing'
 
-  // sugar over the state checks above — not load-bearing
   match<R>(arms: {
     pending?: () => R;                              // omitted ⇒ renders nothing while pending
     error?:   (e: Error, retry: () => void) => R;   // omitted ⇒ renders null + bubbles to onError
     ready:    (v: T) => R;                          // required: the happy path
-  }): R;
+  }): R | undefined;
 
   refresh(): Promise<void>;          // re-run the fetcher in place (this is `retry`)
 }
 ```
+
+**`match` is sugar at runtime, load-bearing for types.** Plain `state` checks
+work (`if (x.loading) …`), but TypeScript cannot narrow `value: T | null`
+across reactive getter reads — `ready: (v: T) => R` is the only *type-safe*
+path to a non-null `T`. `match` also carries the error-bubbling guarantee
+(an omitted `error` arm is never silently swallowed). Both are contract, not
+convenience.
 
 **State → arm mapping** (`match` is exactly this table):
 
@@ -118,37 +152,66 @@ previous one** (`renderer.ts` `componentEffect` → `patch`) — no remount, no 
 This is sigx's hybrid model: fine-grained *signals* drive coarse-grained
 render-fn re-execution + a real vdom diff. It's cheap, but it is *not* Solid-style
 targeted node update — the whole returned subtree is re-evaluated and re-diffed on
-each change. (Conceded from rev-2's P1: props are snapshots, not live accessors;
-diff-in-place, not an accessor, is what removes the flash.)
+each change.
 
-The engine rides `watch` (which has `onCleanup`) + an `AbortController` to cancel
-the previous run on key change or unmount.
+The engine rides `watch` (which has `onCleanup`) + an `AbortController`.
+**Concurrency rule — one for the whole primitive:** a newer run supersedes and
+aborts an in-flight one; on key change, on `refresh()`, and on a write's
+repeated `.run()` (§2).
 
 ### 2. Writes — manual-triggered `useAsync`
 
-A write is the same primitive with `{ manual: true }`: it does **not** auto-run,
-and exposes `.run(input)`. It is a first-class async value with its *own*
-lifecycle — its own `loading` (the submit spinner), its own `error` (a 409/
-validation distinct from any read's fetch error):
+A write is the same primitive with `{ manual: true }`: it does **not**
+auto-run, and exposes `.run(input)`. It returns a **distinct type**, so the
+option is visible in the types at every call site:
+
+```ts
+type RunResult<T> = { ok: true; value: T } | { ok: false; error: Error };
+
+interface AsyncAction<T, In> {
+  readonly state: 'idle' | 'pending' | 'ready' | 'errored';   // no 'refreshing'
+  readonly value: T | null;          // last successful result
+  readonly error: Error | null;
+  readonly loading: boolean;         // state === 'pending'
+  match<R>(arms: { /* same arms; retry = re-run last input */ }): R | undefined;
+  run(input: In): Promise<RunResult<T>>;
+}                                    // no refresh() on a write
+```
+
+**`.run` never rejects — errors are values here too.** A rejecting promise
+would make the most common usage (fire-and-forget `onClick` with the UI
+reading `save.error`) emit an unhandled-rejection warning on every failure;
+TanStack's answer is two methods (`mutate`/`mutateAsync`), which is exactly
+the fragmentation this design rejects. One method, both usages safe:
 
 ```tsx
 const save = useAsync(saveUser, { manual: true });
-//    save.loading / save.error / save.state / save.match  ← the write's own lifecycle
 
-<button disabled={save.loading}
-        onClick={() => save.run(draft).then(() => user.refresh())}>
-  Save
-</button>
+// fire-and-forget — safe; the UI reads save.loading / save.error
+<button disabled={save.loading} onClick={() => save.run(draft)}>Save</button>
+
+// chaining — explicit, no try/catch
+onClick={async () => { if ((await save.run(draft)).ok) user.refresh(); }}
 ```
 
-- `.run(input): Promise<T>` triggers the fetcher with the input, updates the
-  write's own state, and resolves/rejects so the caller can chain.
-- **Cross-read invalidation is explicit and obvious:** the write's success path
-  calls the dependent read's `user.refresh()` (Phase 1) — and, once cache policy
-  exists, `user.invalidate()` (Phase 3, cache-aware). No implicit graph.
-- This keeps **one primitive**, value-first, no datastore vocabulary, and gives
-  writes a real lifecycle — instead of hanging `mutate`/`invalidate` off a read's
-  state (which would give a write none of its own pending/error/rollback).
+- **Write-retry, pinned:** `match`'s `error` arm on a write hands out `retry`
+  = re-run with the **last input**. The arm is unreachable before the first
+  run (state is `idle`), so "no last input" cannot occur.
+- **Repeated `.run` while in flight:** abort-and-supersede (§1's one rule).
+- **Writes keep `value` and `match`** deliberately: a search box is a
+  manual-trigger async value whose `ready` arm renders results — writes and
+  "deferred reads" blur, which is an argument *for* the unified primitive.
+- **Cross-read invalidation is explicit:** the write's success path calls the
+  dependent read's `user.refresh()`. Cache-aware `invalidate()` arrives with
+  the cache **pack** (§7). No implicit graph.
+- **No optimistic apply/rollback in core** — optimistic writes are a cache
+  write-through and ship with the pack (§7); shipping them first would invent
+  semantics the pack must redefine.
+- **Why writes are in core at all** (the honest borderline): the write mode is
+  ~50 policy-free lines — but it is the *interface a cache pack needs*.
+  Without a blessed write shape, a pack cannot retrofit invalidation and
+  optimistic semantics onto N hand-rolled `signal(false)` idioms. Mechanism
+  in core so policy can attach. (Confirmation is open question 1.)
 
 ### 3. Coordinating several — `all({ ... })`
 
@@ -164,8 +227,11 @@ return () => page.match({
 - Object form is primary (named destructure scales); a rest-arg tuple `all(a, b, c)`
   stays for quick cases (rest args ⇒ TS infers a tuple).
 - Returns a derived `AsyncState`: pending until all settle, `ready` with the
-  combined value, `error` on first failure; exposes **`.errors`** (all failures)
-  so collect-all needs no second API.
+  combined value, `error` on first failure.
+- **`.errors`, specified:** object form ⇒ `Record<key, Error | null>` (same
+  keys as the input); tuple form ⇒ a tuple of `Error | null` aligned with the
+  inputs. First-error-wins on `.error`; `.errors` is the collect-all — no
+  second API.
 - **`all()` is only for all-or-nothing gating.** Partial loading ("show the user
   now, spinner while posts load") needs no `all` and no new API — the caller still
   holds each value, so compose `user.match(...)` and `posts.match(...)`
@@ -173,10 +239,11 @@ return () => page.match({
 
 ### 4. Errors — at the value; one app handler; one scoped boundary
 
-- **Data/async errors** → `match`'s `error` arm; `retry` is `refresh()`. Omitting
-  the arm renders `null` and **bubbles the error** to the nearest `errorScope` /
-  app `onError` (never silently swallowed); a dev-mode warning fires the first
-  time so the bubble is discoverable rather than a blank slot.
+- **Data/async errors** → `match`'s `error` arm; `retry` is `refresh()` (reads)
+  or re-run-last-input (writes). Omitting the arm renders `null` and **bubbles
+  the error** to the nearest `errorScope` / app `onError` (never silently
+  swallowed); a dev-mode warning fires the first time so the bubble is
+  discoverable rather than a blank slot.
 - **App-level handler** → surface the existing `app.config.errorHandler` (which
   already routes setup + render-effect errors via `handleComponentError`) as app
   `onError` — the catch-all for anything unhandled below. Surfacing it is not a new
@@ -195,6 +262,19 @@ return () => page.match({
 const App = component(() => {
   errorScope({ fallback: (e, retry) => <Err e={e} onRetry={retry}/>, onError: report });
   return () => <Dashboard/>;   // a throw anywhere under here renders the fallback; retry remounts
+});
+```
+
+  **Isolating one widget — the migration pattern, shown honestly.** Because
+  `errorScope` scopes the *calling component's* subtree, isolating a single
+  widget means wrapping it in a component. This is the one place migration
+  from nested `<ErrorBoundary>` gains a line of ceremony (components are
+  cheap in sigx; there is still no magic wrapper):
+
+```tsx
+const SafeWidget = component(() => {
+  errorScope({ fallback: (e, retry) => <WidgetErr e={e} onRetry={retry}/> });
+  return () => <Widget/>;
 });
 ```
 
@@ -220,94 +300,147 @@ const Chart = lazy(() => import('./Chart'));
 `<Defer>` reads the lazy value's pending state reactively — no throw, no
 register-during-render ordering — and is the boundary the streaming machinery
 keys off (`__suspense` marker → flush fallback now, stream real markup later). It
-is the only wrapper component in the design.
+is the only wrapper component in the design. (Its *hydration* axis is being
+designed in the SSR platform RFC, signalxjs/core#171 — out of scope here.)
 
-### 6. Transitions / concurrent (Phase 2)
-
-```ts
-const [isPending, startTransition] = useTransition();
-startTransition(() => { route.value = next });   // hold previous content, no flash
-```
-
-No accessor mechanism needed (see §1). A reactive-key change under a transition
-keeps the previous `value` (`keepPreviousData`) so `match` keeps rendering `ready`
-(state `refreshing`) with `isPending` true, swapping when the run settles; the
-renderer diff-patches the swap in place. `deferred(() => expensive())` covers
-low-priority derived values.
-
-### 7. Cache, revalidation, optimistic mutations (Phase 3)
-
-`__SIGX_ASYNC__` grows policy metadata; knobs are grouped so the beginner
-signature stays `useAsync(key, fetcher)`:
-
-```ts
-const user = useAsync('user', fetchUser, {
-  cache: { staleTime, gcTime, revalidateOnFocus, revalidateInterval, keepPreviousData },
-});
-user.invalidate();                 // drop the cache entry + refetch live (cache-aware)
-user.mutate(u => ({ ...u, name })); // optimistic local cache write (write-through)
-```
-
-`invalidate` and `mutate` are **cache operations** and arrive with the cache —
-not in Phase 1, where (with no policy) `invalidate` would be indistinguishable
-from `refresh`.
-
-### 8. SSR integration (preserve)
+### 6. SSR integration (preserve)
 
 - Keyed `useAsync` already serializes/streams via the `_useAsync`/`_useStream`
   seams; `match` renders the `ready` arm server-side once the keyed value
-  resolves. **Unkeyed** `useAsync` renders the `pending` arm server-side — flag
-  the potential hydration flash. Manual writes don't run during SSR.
+  resolves.
+- **Unkeyed `useAsync` is client-only by definition:** it renders the `pending`
+  arm server-side and fetches after hydration — a visible pending→ready swap.
+  This is documented behavior, not a bug; the fix is "add a key". A one-time
+  dev-mode note fires when an unkeyed read renders during SSR (same
+  discoverability convention as the missing-`error`-arm warning).
+- Manual writes don't run during SSR.
 - `<Defer>` is the only thing the streaming path keys off (`render-core.ts`
   `__suspense` → `handleAsyncSetup` / `onAsyncComponentResolved` / `_pendingAsync`).
 - Streaming, islands, keyed transfer, `blocking`/`stream` modes unchanged.
 
+### 7. The cache pack contract (NOT core — the rev-4 scope cut)
+
+Cache policy — `staleTime`, `gcTime`, revalidate-on-focus/interval,
+`keepPreviousData`, cache-aware `invalidate()`, optimistic `mutate()` — is an
+application-layer concern whose surface never stops growing (retry/backoff,
+offline, persistence, devtools…). It does **not** ship in core. It ships as a
+pack (name TBD — not "query", per `rfc-use-async.md`'s vocabulary decision;
+open question 2). Core's only obligations are the seams that make the pack
+possible:
+
+1. **The provider seam.** The pack swaps/wraps the async engine per app the
+   same way the server renderer already swaps `_useAsync` per request. This
+   seam exists and is validated (`rfc-use-async.md` "Layering").
+2. **The reserved options namespace.** Core's `AsyncOptions` reserves a
+   `cache` key it never interprets; the pack claims it via module
+   augmentation. The beginner signature stays `useAsync(key, fetcher)`;
+   installing the pack changes one line (`app.use(cachePlugin())`), not the
+   call sites:
+
+```ts
+const user = useAsync('user', fetchUser, {
+  cache: { staleTime: 60_000, revalidateOnFocus: true },   // typed by the pack
+});
+user.invalidate();                  // pack-provided: drop entry + refetch
+user.mutate(u => ({ ...u, name })); // pack-provided: optimistic write-through
+```
+
+3. **The blob-as-seed rule.** `__SIGX_ASYNC__` is the page's hydration data
+   cache; the pack **adopts it as its initial cache state** rather than
+   shipping a second one. (The SSR platform RFC #171 makes the serializer
+   pluggable for the same reason.)
+4. **The write interface.** `AsyncAction` (§2) is the shape the pack extends
+   with optimistic apply + rollback.
+
+One primitive, one vocabulary, unchanged call sites — but core carries
+mechanism only, exactly like islands (`SSRPlugin`) and the store SSR adapter.
+This is the line every peer draws: Solid's `createResource` stops where our
+core phase stops; nobody ships `revalidateOnFocus` in a framework core.
+
+### 8. Transitions — future work, evidence-driven (demoted from a phase)
+
+Stale-hold already falls out of the model: `value` survives a refetch and
+`match` keeps rendering `ready` during `refreshing`, which covers the common
+no-flash case. A full `useTransition`/`startTransition`/`deferred` scheduler
+is the least-validated idea in this document and is no longer a committed
+phase — it returns as its own RFC if real apps demonstrate a need the
+stale-hold doesn't cover.
+
+### 9. Why not just TanStack Query?
+
+The strongest form of the scope question: keep only the core phase and declare
+the serious-app data story to be a TanStack Query adapter (its core is
+framework-agnostic; an adapter + `dehydrate` for SSR is a modest pack).
+Considered, and rejected as *the* answer:
+
+- Its wrapper/hook vocabulary and snapshot-per-render model duplicate exactly
+  what value-first replaces; two idioms for one job is the fragmentation this
+  RFC exists to end.
+- Keyed SSR streaming transfer with per-boundary flush needs framework
+  cooperation either way — an adapter wouldn't remove the core work, only
+  relocate the pack.
+- But the *option* stays real: because the cache is a pack over a public seam
+  (§7), a community TanStack adapter is just a different pack. Core doesn't
+  have to pick the winner — that is the point of the seam.
+
 ## Removed vs renamed
 
-- **Removed:** the throw-a-promise protocol, register-during-render ordering, the
-  `<Suspense>` wrapper, `<ErrorBoundary>` as a flag-flip, the redundant `latest`,
-  the standalone `when()` (covered by `match`), and `mutate`/`invalidate` as
-  read-state methods in Phase 1 (return as Phase-3 cache ops).
+- **Removed from core:** the throw-a-promise protocol, register-during-render
+  ordering, the `<Suspense>` wrapper, `<ErrorBoundary>` as a flag-flip, the
+  redundant `latest`, the standalone `when()` (covered by `match`), and —
+  rev 4 — the entire cache/revalidation/optimistic layer (now the §7 pack
+  contract) and transitions as a committed phase (§8).
 - **Renamed / surfaced:** `app.config.errorHandler` → app `onError`; `<Stream>` →
   `<Defer>`.
 
 ## Phasing
 
 - **Phase 0:** this document.
-- **Phase 1 — Foundation:** internal async-cell engine (rides `watch`);
-  `useAsync` reads (fused conditional key) + `match` + `refresh`; `useAsync`
-  writes (`{ manual: true }` + `.run`); `all({...})` + `.errors`; rebuild `lazy()`
-  + thin `<Defer>`; surface app `onError`; `errorScope` (pinned contract). Delete
-  throw protocol, register-during-render boundary, old `Suspense`/`ErrorBoundary`,
-  `latest`.
-- **Phase 2 — Transitions:** `useTransition`/`startTransition`/`deferred`;
-  `keepPreviousData` stale-hold.
-- **Phase 3 — Cache:** `cache: { staleTime, gcTime, … }`, revalidation,
-  `invalidate`, optimistic `mutate`.
+- **Phase 1 — Core foundation (the only core phase):** internal async-cell
+  engine (rides `watch`); `useAsync` reads (fused conditional key, one fetcher
+  shape) + `match` + `refresh`; `useAsync` writes (`{ manual: true }` +
+  settled-result `.run`, `AsyncAction`); `all({...})` + `.errors`; rebuild
+  `lazy()` + thin `<Defer>`; surface app `onError` (+ event-handler wiring);
+  `errorScope` (pinned contract). Reserve the `cache` options namespace.
+  Delete throw protocol, register-during-render boundary, old
+  `Suspense`/`ErrorBoundary`, `latest`.
+- **Phase 2 — The cache pack:** built against the §7 contract as its own
+  program (home decided then — open question 2). Not a core deliverable;
+  Phase 1 is complete without it.
+- **Transitions:** no phase — future RFC if evidence demands (§8).
 
 Each phase = its own issue → worktree → PR → Copilot review → merge.
 
 ## Resolved decisions
 
-- **P1** conceded — snapshot arm + diff-in-place, no live accessor (honesty note
-  in §1).
-- Arm names `pending`/`error`/`ready`; `match` is sugar over `state`.
+- Snapshot arm + diff-in-place, no live accessor (honesty note in §1).
+- Arm names `pending`/`error`/`ready`; `match` is sugar at runtime,
+  **load-bearing for types** (§1).
 - Missing `error` arm ⇒ `null` + bubble to `onError` + first-time dev warning.
-- `errorScope` ships Phase 1 with the §4 contract (effect-throw capture + real
-  `retry`); scopes the calling component's own subtree, wrapper-free.
-- Keep both `state` and `loading` (`loading` is derived sugar). No `isReady`/`isError`.
+- `errorScope` ships Phase 1 with the §4 contract; the `SafeWidget` pattern is
+  the nested-boundary migration.
+- Keep both `state` and `loading`; no `isReady`/`isError`.
 - `idle` via a null/false **getter** key only — no `enabled`/`skip` option.
-- `all()` errors: first-error-wins + `.errors`; partial loading uses independent
-  `match`, not `all`.
-- `<Defer>` (over `Stream`/`Await`).
-- Writes = manual-trigger `useAsync` (`{ manual: true }` + `.run`), not
-  `mutate`/`invalidate` on a read; those become Phase-3 cache ops.
+- `all()` errors: first-error-wins + `.errors` (shapes pinned in §3).
+- `<Defer>` (over `Stream`/`Await`); its hydration axis belongs to #171.
+- Writes = manual-trigger `useAsync` with a distinct `AsyncAction` type;
+  `.run` returns a settled `RunResult` (never rejects); retry = re-run last
+  input; abort-and-supersede as the one concurrency rule.
+- Optimistic apply/rollback: pack, not core (arrives with the cache).
+- `createAsyncCell`: stays internal — one public surface to stabilize pre-1.0.
+- Unkeyed SSR behavior: documented client-only semantics + one-time dev note.
+- **The rev-4 line: mechanism in core, policy in packs.** The cache layer is a
+  pack contract (§7); transitions demoted (§8); the TanStack alternative
+  dispatched (§9).
 
 ## Open questions
 
-1. **Manual-write API surface** — `{ manual: true }` + `.run(input)` (proposed) vs
-   a distinct factory; and whether `.run` should support optimistic apply +
-   rollback in Phase 1 or wait for the cache (Phase 3).
-2. **`createAsyncCell` escape hatch** — keep the async engine internal for now, and
-   expose it (with `useAsync` as thin sugar) only if a power-user/library need
-   appears? Split by *layer*, not feature.
+1. **Writes in Phase 1 core — confirm.** The §2 rationale (the write shape is
+   the interface the cache pack needs) argues for core; the alternative is
+   shipping reads-only and letting the pack own writes too. Cost of inclusion:
+   ~50 policy-free lines. Cost of exclusion: N hand-rolled idioms the pack
+   can't retrofit.
+2. **Cache pack name and home** — not "query" (vocabulary rejected in
+   `rfc-use-async.md`); candidates: `@sigx/cache`, `@sigx/data`. Own repo vs
+   `packages/` in core (islands precedent: in-tree). Decided when Phase 2
+   starts.
