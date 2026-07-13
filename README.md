@@ -25,7 +25,7 @@ The name says it: **Signal** for the reactivity model, **X** for TSX.
 ## A taste
 
 ```tsx
-import { component, signal, render } from "sigx";
+import { component, render } from "sigx";
 
 export const Counter = component(({ signal }) => {
   const state = signal({ count: 0 });   // object  → reactive proxy, mutate directly
