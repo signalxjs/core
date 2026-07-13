@@ -165,6 +165,32 @@ describe('Edge Cases', () => {
     });
 
     describe('effect edge cases', () => {
+        it('a throwing effect does not strand later effects in the same wave', () => {
+            // Regression: the flush loop dropped the rest of the wave's
+            // snapshot when an effect threw, leaving those effects flagged
+            // QUEUED but no longer in the queue — they could never run again.
+            const state = signal({ v: 0 });
+            let shouldThrow = false;
+            const runsB: number[] = [];
+
+            effect(() => {
+                void state.v;
+                if (shouldThrow) throw new Error('boom');
+            });
+            effect(() => {
+                runsB.push(state.v);
+            });
+            expect(runsB).toEqual([0]);
+
+            shouldThrow = true;
+            expect(() => { state.v = 1; }).toThrow('boom');
+            // B was abandoned mid-wave; it must still be runnable afterwards.
+
+            shouldThrow = false;
+            state.v = 2;
+            expect(runsB).toContain(2);
+        });
+
         it('stop() prevents further tracking and re-runs', () => {
             const state = signal({ count: 0 });
             const fn = vi.fn();
