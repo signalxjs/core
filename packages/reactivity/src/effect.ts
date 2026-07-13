@@ -97,6 +97,12 @@ export function startBatch(): void {
 /** @internal see {@link startBatch} */
 export function endBatch(): void {
     batchDepth--;
+    if (process.env.NODE_ENV !== 'production' && batchDepth < 0) {
+        // Mis-paired start/end would leave a negative depth and silently
+        // prevent every future flush — fail fast instead.
+        batchDepth = 0;
+        throw new Error('[SignalX] endBatch() without a matching startBatch()');
+    }
     if (batchDepth === 0) {
         flushPendingEffects();
     }
