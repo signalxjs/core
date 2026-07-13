@@ -134,7 +134,7 @@ export const TestText = component<{ text: string }>((ctx) => {
 export const TestWrapper = component((ctx) => {
     return () => (
         <div class="wrapper">
-            {ctx.slots.default()}
+            {ctx.slots.default?.()}
         </div>
     );
 }, { name: 'TestWrapper' });

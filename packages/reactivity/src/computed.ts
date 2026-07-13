@@ -66,14 +66,17 @@ export function computed<T>(
 
     // Devtools id minted at create time. `null` skips emissions
     // entirely on every recompute.
-    const hookAtCreate = getDevtoolsHook();
-    const computedId: number | null = hookAtCreate ? hookAtCreate.nextId() : null;
-    if (hookAtCreate && computedId !== null) {
-        hookAtCreate.emit({
-            type: 'computed:created',
-            id: computedId,
-            ownerComponentId: hookAtCreate.currentOwner,
-        });
+    let computedId: number | null = null;
+    if (process.env.NODE_ENV !== 'production') {
+        const hookAtCreate = getDevtoolsHook();
+        if (hookAtCreate) {
+            computedId = hookAtCreate.nextId();
+            hookAtCreate.emit({
+                type: 'computed:created',
+                id: computedId,
+                ownerComponentId: hookAtCreate.currentOwner,
+            });
+        }
     }
 
     // Internal subscriber node. Its function body is never invoked: the
@@ -116,7 +119,7 @@ export function computed<T>(
             firstRun = false;
             computedEffect.flags = CLEAN;
             if (changed) ownDep.version++;
-            if (computedId !== null) {
+            if (process.env.NODE_ENV !== 'production' && computedId !== null) {
                 const hook = getDevtoolsHook();
                 if (hook) hook.emit({ type: 'computed:recomputed', id: computedId });
             }

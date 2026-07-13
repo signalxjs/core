@@ -37,13 +37,6 @@
  * @module
  */
 
-// SSR directive type augmentation — adds getSSRProps to DirectiveDefinition
-import './directive-ssr-types.js';
-
-// Patch getSSRProps onto built-in directives (show, etc.)
-import { initDirectivesForSSR } from './builtin-ssr-directives.js';
-initDirectivesForSSR();
-
 // Plugin system
 export { createSSR } from './ssr.js';
 export type { SSRInstance } from './ssr.js';

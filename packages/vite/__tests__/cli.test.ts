@@ -22,7 +22,7 @@ describe('extractComponents', () => {
     it('handles multi-line generics in the regex', () => {
         const code = `
 export const Card = component<
-    DefineProp<"title", string>
+    Define.Prop<"title", string>
 >(
     'sigx-card',
     (ctx) => () => null

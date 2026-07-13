@@ -19,7 +19,7 @@
 import { defineDirective } from '@sigx/runtime-core';
 
 /** Symbol key for storing the original display value on elements. */
-const ORIGINAL_DISPLAY = Symbol('sigx.show.originalDisplay');
+const ORIGINAL_DISPLAY = /* @__PURE__ */ Symbol('sigx.show.originalDisplay');
 
 /** HTMLElement with the show directive's original display property. */
 interface ShowElement extends HTMLElement {
@@ -48,6 +48,14 @@ export const show = defineDirective<boolean, HTMLElement>({
         const original = showEl[ORIGINAL_DISPLAY];
         if (original !== undefined) {
             showEl.style.display = original;
+        }
+    },
+
+    // Server rendering: a hidden element ships with display:none inline so
+    // there is no flash of visible content before hydration.
+    getSSRProps({ value }) {
+        if (!value) {
+            return { style: { display: 'none' } };
         }
     }
 });

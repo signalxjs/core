@@ -270,7 +270,9 @@ export interface SSRInstance {
     /**
      * Render a COMPLETE HTML document from a template (head auto-injection,
      * state blob, async content). Default mode: 'blocking' — full content
-     * inline, no placeholders or scripts (crawler/AI-agent friendly).
+     * inline, no placeholders or replacement scripts (crawler/AI-agent
+     * friendly); the `sigx:ready` completion script is still emitted so
+     * gated hydration runs.
      */
     renderDocument(input: JSXElement | App, options: DocumentOptions): Promise<string>;
 

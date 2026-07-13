@@ -402,7 +402,7 @@ describe('lazy() timing and navigation', () => {
 
     it('should forward children to inner component', async () => {
         const Wrapper = component(({ slots }) => {
-            return () => <div class="wrapper">{slots.default()}</div>;
+            return () => <div class="wrapper">{slots.default?.()}</div>;
         }, { name: 'Wrapper' });
 
         const LazyWrapper = lazy(

@@ -47,6 +47,25 @@ export interface SSRPlugin {
         ): ComponentSetupContext | void;
 
         /**
+         * Called after the component context is built (`transformComponentContext`
+         * has run, the component id is assigned and pushed) but BEFORE `setup()`
+         * and render. Lets a plugin skip running the component entirely and emit a
+         * placeholder string in its place — e.g. islands `client:only` true
+         * skip-SSR. Returning **any object** suppresses the render: the component's
+         * `setup`/render and `afterRenderComponent` are skipped, and core emits the
+         * (optional) `placeholder` string — when present, including an empty string
+         * — followed by the standard trailing `<!--$c:id-->` marker for hydration.
+         * Return void to render normally. First plugin to return an object wins.
+         *
+         * @example Islands plugin emits `<div data-island>` for `client:only`
+         */
+        suppressComponentRender?(
+            id: number,
+            vnode: VNode,
+            ctx: SSRContext
+        ): { placeholder?: string } | void;
+
+        /**
          * Called after a component renders. Receives the accumulated HTML string.
          * Can transform it (e.g., wrap with markers, inject attributes).
          * Return a string to replace, or void to pass through.
@@ -134,6 +153,27 @@ export interface SSRPlugin {
          * @example Islands plugin returns void (allows default walk)
          */
         beforeHydrate?(container: Element): boolean | void;
+
+        /**
+         * Called after the ComponentSetupContext is constructed but BEFORE setup()
+         * runs during hydration. Client-side mirror of
+         * `server.transformComponentContext` — restores server/client symmetry so
+         * hydration is as pluggable as render. The plugin can mutate or replace the
+         * context: swap `ctx.signal` with a state-restoring variant, modify the ssr
+         * helper, etc.
+         *
+         * Return a new context to replace the default, or void to accept as-is.
+         *
+         * Unlike the server hook there is no `SSRContext` during hydration, so only
+         * the vnode and the built context are passed.
+         *
+         * @example Islands plugin swaps `ctx.signal` with a variant that seeds each
+         *          signal from the server-captured island state.
+         */
+        transformComponentContext?(
+            vnode: VNode,
+            componentCtx: ComponentSetupContext
+        ): ComponentSetupContext | void;
 
         /**
          * Called for each component encountered during the hydration walk.

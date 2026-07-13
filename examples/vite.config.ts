@@ -23,6 +23,7 @@ export default defineConfig({
             '@sigx/reactivity': resolve(__dirname, '../packages/reactivity/src/index.ts'),
             '@sigx/runtime-core/internals': resolve(__dirname, '../packages/runtime-core/src/internals.ts'),
             '@sigx/runtime-core': resolve(__dirname, '../packages/runtime-core/src/index.ts'),
+            '@sigx/runtime-dom/platform': resolve(__dirname, '../packages/runtime-dom/src/platform.ts'),
             '@sigx/runtime-dom/internals': resolve(__dirname, '../packages/runtime-dom/src/internals.ts'),
             '@sigx/runtime-dom': resolve(__dirname, '../packages/runtime-dom/src/index.ts'),
             '@sigx/server-renderer': resolve(__dirname, '../packages/server-renderer/src/index.ts')

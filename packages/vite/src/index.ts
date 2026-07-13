@@ -1,6 +1,8 @@
 // Vite plugin for sigx with HMR support
 import type { Plugin, ViteDevServer, ResolvedConfig, UserConfig } from 'vite';
 import { createRequire } from 'module';
+import * as fs from 'fs';
+import * as net from 'net';
 import path from 'path';
 
 // ============================================================================
@@ -13,6 +15,21 @@ interface SigxPluginOptions {
      * @default true
      */
     hmr?: boolean;
+
+    /**
+     * Port for Vite's HMR websocket.
+     *
+     * Only relevant when the dev server cannot piggyback the websocket on the
+     * HTTP server itself (middleware mode — the standard sigx SSR setup).
+     * There Vite defaults to port 24678, which collides as soon as two dev
+     * servers run on one machine: the browser connects to the *other*
+     * server's websocket, gets a 400 token mismatch, and HMR breaks.
+     *
+     * When unset and the server runs in middleware mode, the plugin picks a
+     * free port automatically. Explicit `server.hmr` settings in the Vite
+     * config always take precedence over this option.
+     */
+    hmrPort?: number;
 }
 
 // ============================================================================
@@ -31,12 +48,108 @@ function resolvePackageSrc(packageName: string, entry = 'index.ts'): string | nu
 }
 
 // ============================================================================
+// Single-module-instance configuration
+// ============================================================================
+
+/**
+ * The core runtime tier. These are always kept out of optimizeDeps
+ * pre-bundling (and unified on the SSR side), whether or not the consumer's
+ * package.json declares them directly.
+ */
+const SIGX_CORE_PACKAGES = [
+    'sigx',
+    '@sigx/reactivity',
+    '@sigx/runtime-core',
+    '@sigx/runtime-dom',
+    '@sigx/server-renderer',
+];
+
+/**
+ * SSR externalization: keep the WHOLE @sigx family in the SSR module graph.
+ * If only some packages run through Vite's module runner while others load
+ * via Node's resolver, each graph holds its own `@sigx/reactivity` instance
+ * and signals created on one side never trigger effects tracked on the other.
+ */
+const SIGX_SSR_NO_EXTERNAL: (string | RegExp)[] = ['sigx', /^@sigx\//];
+
+/**
+ * Compute the optimizeDeps.exclude list: the core packages (floor) plus every
+ * `@sigx/*` package the consumer project declares (store, router, daisyui, …).
+ *
+ * `optimizeDeps.exclude` takes exact package names — no patterns — so the
+ * companion packages have to be enumerated from the project's package.json.
+ * Without this, esbuild pre-bundles them into `.vite/deps` chunks that carry
+ * their own copy of `@sigx/reactivity`, splitting the module graph in two:
+ * signals written by store/router code become invisible to the renderer's
+ * effects (silently dead UI).
+ */
+function collectSigxOptimizeDepsExcludes(root: string): string[] {
+    const excludes = new Set<string>(SIGX_CORE_PACKAGES);
+    try {
+        const pkgJson = JSON.parse(
+            fs.readFileSync(path.join(root, 'package.json'), 'utf-8')
+        ) as { dependencies?: Record<string, string>; devDependencies?: Record<string, string> };
+        for (const deps of [pkgJson.dependencies, pkgJson.devDependencies]) {
+            if (!deps) continue;
+            for (const name of Object.keys(deps)) {
+                if (name === 'sigx' || name.startsWith('@sigx/')) {
+                    excludes.add(name);
+                }
+            }
+        }
+    } catch {
+        // No readable package.json at the project root — fall back to the core floor.
+    }
+    return [...excludes];
+}
+
+/** Ask the OS for a currently-free TCP port. */
+function getFreePort(): Promise<number> {
+    return new Promise((resolve, reject) => {
+        const server = net.createServer();
+        server.unref();
+        server.on('error', reject);
+        server.listen(0, () => {
+            const { port } = server.address() as net.AddressInfo;
+            server.close(() => resolve(port));
+        });
+    });
+}
+
+/**
+ * Decide whether to override Vite's HMR websocket port (see
+ * `SigxPluginOptions.hmrPort`). Returns a partial `server` config to merge,
+ * or undefined to leave the user's config alone.
+ */
+async function resolveHmrPortOverride(
+    userConfig: UserConfig,
+    hmrPort: number | undefined
+): Promise<UserConfig['server'] | undefined> {
+    const userHmr = userConfig.server?.hmr;
+    // HMR disabled, or the user already pinned a port / supplied a server —
+    // their config wins.
+    if (userHmr === false) return undefined;
+    if (typeof userHmr === 'object' && (userHmr.port != null || userHmr.server)) {
+        return undefined;
+    }
+    if (hmrPort != null) {
+        return { hmr: { port: hmrPort } };
+    }
+    // Without middleware mode the websocket shares the HTTP server's port —
+    // nothing to fix. In middleware mode Vite would default to 24678, which
+    // collides across concurrent dev servers; pick a free port instead.
+    if (!userConfig.server?.middlewareMode) return undefined;
+    return { hmr: { port: await getFreePort() } };
+}
+
+// ============================================================================
 // Vite Plugin
 // ============================================================================
 
 export function sigxPlugin(options: SigxPluginOptions = {}): Plugin {
     const {
         hmr = true,
+        hmrPort,
     } = options;
 
     let config: ResolvedConfig;
@@ -45,7 +158,7 @@ export function sigxPlugin(options: SigxPluginOptions = {}): Plugin {
         name: 'sigx',
         enforce: 'pre',
 
-        config(userConfig, { command }) {
+        async config(userConfig, { command }) {
             // In dev mode, alias @sigx/* packages to their source files
             // This ensures a single reactivity instance across all packages
             if (command === 'serve') {
@@ -76,14 +189,28 @@ export function sigxPlugin(options: SigxPluginOptions = {}): Plugin {
                 }
                 if (serverRendererSrc) alias['@sigx/server-renderer'] = serverRendererSrc;
 
+                const root = userConfig.root
+                    ? path.resolve(userConfig.root)
+                    : process.cwd();
+                const serverOverride = await resolveHmrPortOverride(userConfig, hmrPort);
+
                 return {
                     resolve: {
                         alias
                     },
                     optimizeDeps: {
-                        // Exclude sigx packages from pre-bundling - they're ESM and aliased to source
-                        exclude: ['sigx', '@sigx/reactivity', '@sigx/runtime-core', '@sigx/runtime-dom', '@sigx/server-renderer']
-                    }
+                        // Exclude ALL @sigx packages from pre-bundling — the
+                        // core tier plus every @sigx/* dependency the project
+                        // declares — so the whole family resolves through the
+                        // source module graph and shares one reactivity
+                        // instance. Vite merges this with (not over) any
+                        // user-specified excludes.
+                        exclude: collectSigxOptimizeDepsExcludes(root)
+                    },
+                    ssr: {
+                        noExternal: SIGX_SSR_NO_EXTERNAL
+                    },
+                    ...(serverOverride && { server: serverOverride })
                 };
             }
 
@@ -100,13 +227,10 @@ export function sigxPlugin(options: SigxPluginOptions = {}): Plugin {
             if (command === 'build') {
                 return {
                     resolve: {
-                        dedupe: [
-                            'sigx',
-                            '@sigx/reactivity',
-                            '@sigx/runtime-core',
-                            '@sigx/runtime-dom',
-                            '@sigx/server-renderer',
-                        ],
+                        dedupe: [...SIGX_CORE_PACKAGES],
+                    },
+                    ssr: {
+                        noExternal: SIGX_SSR_NO_EXTERNAL
                     },
                     build: {
                         rollupOptions: {

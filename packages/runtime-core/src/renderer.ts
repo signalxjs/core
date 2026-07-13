@@ -7,7 +7,7 @@ import { createSlots } from './utils/slots.js';
 import { normalizeSubTree } from './utils/normalize.js';
 import { applyContextExtensions } from './plugins.js';
 import { isComponent } from './utils/is-component.js';
-import { createEmit } from './hydration/index.js';
+import { createEmit, splitComponentProps } from './utils/component-props.js';
 import { provideAppContext } from './di/injectable.js';
 import { isModel } from './model.js';
 import { asyncSetupClientError } from './errors.js';
@@ -802,8 +802,6 @@ export function createRenderer<HostNode = any, HostElement = any>(
         }
     }
 
-    // createPropsAccessor is now imported from component-helpers.ts
-
     function mountComponent(vnode: VNode, container: HostElement, before: HostNode | null, setup: SetupFn<any, any, any, any>) {
         // No wrapper element - we render directly into the container
         // Use an anchor comment to track the component's position
@@ -816,19 +814,7 @@ export function createRenderer<HostNode = any, HostElement = any>(
         let exposeCalled = false;
 
         const initialProps = vnode.props || {};
-        // Create reactive props - exclude children, slots, and $models to avoid deep recursion on VNodes
-        const { children, slots: slotsFromProps, $models: modelsData, ...propsData } = initialProps;
-        
-        // Merge Model<T> objects directly into props for unified access: props.model.value
-        const propsWithModels = { ...propsData };
-        if (modelsData) {
-            for (const modelKey in modelsData) {
-                const modelValue = modelsData[modelKey];
-                if (isModel(modelValue)) {
-                    propsWithModels[modelKey] = modelValue;
-                }
-            }
-        }
+        const { children, slotsFromProps, propsWithModels } = splitComponentProps(initialProps);
         
         // Wrap renderer-internal reactives so the devtools owner
         // attribution isn't polluted by the parent's render effect.
@@ -902,7 +888,13 @@ export function createRenderer<HostNode = any, HostElement = any>(
         const prev = setCurrentInstance(ctx);
         let renderFn: ViewFn | undefined;
         try {
-            const setupResult = setup(ctx);
+            // Untracked: mounting happens inside the parent's render effect,
+            // so without this every reactive read in a descendant's setup
+            // would register as a PARENT dependency — a later write to any
+            // such signal re-renders the parent, remounts descendants, and
+            // the flush can re-queue itself forever (#111). Reactivity in
+            // setup belongs to explicit watch/computed/render scopes only.
+            const setupResult = untrack(() => setup(ctx));
             // Async setup is only supported on server - check for promise
             if (setupResult && typeof (setupResult as any).then === 'function') {
                 throw asyncSetupClientError(componentName ?? 'anonymous');
@@ -910,12 +902,16 @@ export function createRenderer<HostNode = any, HostElement = any>(
             renderFn = setupResult as ViewFn;
             // Notify plugins that component was created (setup completed)
             notifyComponentCreated(currentAppContext, componentInstance);
-            // Run component-level created hooks
+            // Run component-level created hooks (untracked like setup and
+            // the mount hooks below: they execute inside the parent's
+            // render effect, so reads must not become parent deps, #111)
             if (createdHooks) {
                 // Snapshot the length: hooks registered while running must
                 // not run in this phase (historical forEach semantics).
                 const hooks: (() => void)[] = createdHooks;
-                for (let i = 0, len = hooks.length; i < len; i++) hooks[i]();
+                untrack(() => {
+                    for (let i = 0, len = hooks.length; i < len; i++) hooks[i]();
+                });
             }
         } catch (err) {
             // Handle setup errors

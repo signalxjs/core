@@ -364,6 +364,143 @@ describe("lifetime: 'scoped'", () => {
     });
 });
 
+// ─── app.runWithContext ─────────────────────────────────────────────────────
+
+describe('resolution within app.runWithContext', () => {
+    it('scoped factory resolves to the same instance components get (component first)', () => {
+        const useStore = defineFactory(() => ({ id: {} }), 'scoped');
+        const app = defineApp({} as any);
+
+        setCurrentInstance(nodeInApp(app) as ComponentSetupContext);
+        const inComponent = useStore();
+        setCurrentInstance(null);
+
+        const inGuard = app.runWithContext(() => useStore());
+
+        expect(inGuard).toBe(inComponent);
+    });
+
+    it('scoped factory resolves to the same instance components get (guard first)', () => {
+        const useStore = defineFactory(() => ({ id: {} }), 'scoped');
+        const app = defineApp({} as any);
+
+        const inGuard = app.runWithContext(() => useStore());
+
+        setCurrentInstance(nodeInApp(app) as ComponentSetupContext);
+        const inComponent = useStore();
+
+        expect(inComponent).toBe(inGuard);
+    });
+
+    it('singleton factory resolves to the app-context instance', () => {
+        const useStore = defineFactory(() => ({ id: {} }), 'singleton');
+        const app = defineApp({} as any);
+
+        setCurrentInstance(nodeInApp(app) as ComponentSetupContext);
+        const inComponent = useStore();
+        setCurrentInstance(null);
+
+        expect(app.runWithContext(() => useStore())).toBe(inComponent);
+    });
+
+    it('outside runWithContext the realm fallback still applies (unchanged)', () => {
+        const useStore = defineFactory(() => ({ id: {} }), 'scoped');
+        const app = defineApp({} as any);
+
+        const appInstance = app.runWithContext(() => useStore());
+        const realmA = useStore();
+        const realmB = useStore();
+
+        expect(realmA).toBe(realmB);
+        expect(realmA).not.toBe(appInstance);
+    });
+
+    it('nested runWithContext calls resolve per app and restore the outer context', () => {
+        const useStore = defineFactory(() => ({ id: {} }), 'scoped');
+        const app1 = defineApp({} as any);
+        const app2 = defineApp({} as any);
+
+        const seen: unknown[] = [];
+        const outer = app1.runWithContext(() => {
+            const before = useStore();
+            seen.push(app2.runWithContext(() => useStore()));
+            const after = useStore();
+            expect(after).toBe(before);
+            return before;
+        });
+
+        expect(seen[0]).not.toBe(outer);
+        expect(app1.runWithContext(() => useStore())).toBe(outer);
+        expect(app2.runWithContext(() => useStore())).toBe(seen[0]);
+        // Fully unwound: bare resolution is back on the realm fallback.
+        expect(useStore()).not.toBe(outer);
+        expect(useStore()).not.toBe(seen[0]);
+    });
+
+    it('restores the previous context when fn throws', () => {
+        const useStore = defineFactory(() => ({ id: {} }), 'scoped');
+        const app = defineApp({} as any);
+
+        expect(() => app.runWithContext(() => { throw new Error('boom'); })).toThrow('boom');
+
+        // Context unwound: bare resolution hits the realm fallback again.
+        const appInstance = app.runWithContext(() => useStore());
+        expect(useStore()).not.toBe(appInstance);
+    });
+
+    it('component-tree provides take precedence over the active context', () => {
+        const useStore = defineFactory(() => ({ id: {} }), 'scoped');
+        const app1 = defineApp({} as any);
+        const app2 = defineApp({} as any);
+
+        app1.runWithContext(() => {
+            // A component of app2 is being set up while app1's context is
+            // active — the component tree must win.
+            setCurrentInstance(nodeInApp(app2) as ComponentSetupContext);
+            const inComponent = useStore();
+            setCurrentInstance(null);
+
+            expect(inComponent).toBe(app2.runWithContext(() => useStore()));
+            expect(inComponent).not.toBe(useStore());
+        });
+    });
+
+    it('async caveat: the context applies only until the first await', async () => {
+        const useStore = defineFactory(() => ({ id: {} }), 'scoped');
+        const app = defineApp({} as any);
+
+        const appInstance = app.runWithContext(() => useStore());
+
+        let sync: unknown;
+        let afterAwait: unknown;
+        await app.runWithContext(async () => {
+            sync = useStore();
+            await Promise.resolve();
+            afterAwait = useStore();
+        });
+
+        expect(sync).toBe(appInstance);
+        expect(afterAwait).not.toBe(appInstance); // realm fallback — re-enter after awaiting
+    });
+
+    it('plugins can capture the app in install() and wrap external callbacks', () => {
+        const useStore = defineFactory(() => ({ id: {} }), 'scoped');
+        const app = defineApp({} as any);
+
+        let guard: (() => unknown) | null = null;
+        app.use((pluginApp) => {
+            // e.g. a router registering a navigation guard
+            guard = () => pluginApp.runWithContext(() => useStore());
+        });
+
+        setCurrentInstance(nodeInApp(app) as ComponentSetupContext);
+        const inComponent = useStore();
+        setCurrentInstance(null);
+
+        expect(guard!()).toBe(inComponent);
+    });
+});
+
 // ─── disposed-instance recovery ─────────────────────────────────────────────
 
 describe('disposed singleton recovery', () => {

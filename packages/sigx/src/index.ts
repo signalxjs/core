@@ -1,5 +1,9 @@
-// Import for side effects (sets default mount function and registers JSX globals)
-import '@sigx/runtime-dom';
+// Platform identity side effects, imported by the precise subpath that is
+// named in runtime-dom's `sideEffects` — every bundler must keep it even
+// when tree-shaking re-export chains. Carries the form model processor,
+// the default mount registration, and the standard built-in directives
+// (`show`).
+import '@sigx/runtime-dom/platform';
 
 // Re-export public APIs only (internals available via 'sigx/internals')
 export * from '@sigx/reactivity';

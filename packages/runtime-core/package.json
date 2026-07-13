@@ -1,41 +1,51 @@
 {
     "name": "@sigx/runtime-core",
-    "version": "0.6.0",
+    "version": "0.7.0",
     "description": "Runtime core for SignalX",
     "type": "module",
     "main": "./dist/index.js",
     "types": "./dist/index.d.ts",
     "exports": {
         ".": {
-            "import": "./dist/index.js",
-            "types": "./dist/index.d.ts"
+            "types": "./dist/index.d.ts",
+            "development": "./dist/index.js",
+            "production": "./dist/index.prod.js",
+            "import": "./dist/index.js"
         },
         "./internals": {
-            "import": "./dist/internals.js",
-            "types": "./dist/internals.d.ts"
+            "types": "./dist/internals.d.ts",
+            "development": "./dist/internals.js",
+            "production": "./dist/internals.prod.js",
+            "import": "./dist/internals.js"
         },
         "./inspect": {
-            "import": "./dist/inspect.js",
-            "types": "./dist/inspect.d.ts"
+            "types": "./dist/inspect.d.ts",
+            "development": "./dist/inspect.js",
+            "production": "./dist/inspect.prod.js",
+            "import": "./dist/inspect.js"
         },
         "./jsx-runtime": {
-            "import": "./dist/index.js",
-            "types": "./dist/index.d.ts"
+            "types": "./dist/index.d.ts",
+            "development": "./dist/index.js",
+            "production": "./dist/index.prod.js",
+            "import": "./dist/index.js"
         },
         "./jsx-dev-runtime": {
-            "import": "./dist/index.js",
-            "types": "./dist/index.d.ts"
+            "types": "./dist/index.d.ts",
+            "development": "./dist/index.js",
+            "production": "./dist/index.prod.js",
+            "import": "./dist/index.js"
         }
     },
     "files": [
         "dist"
     ],
     "scripts": {
-        "build": "vite build && tsgo --emitDeclarationOnly",
+        "build": "vite build && vite build --mode prod-dist && tsc --emitDeclarationOnly",
         "dev": "vite build --watch",
-        "test": "tsgo --noEmit -p tsconfig.test.json && vitest run",
+        "test": "tsc --noEmit -p tsconfig.test.json && vitest run",
         "test:watch": "vitest",
-        "test:types": "tsgo --noEmit -p tsconfig.test.json",
+        "test:types": "tsc --noEmit -p tsconfig.test.json",
         "prepublishOnly": "pnpm run build"
     },
     "keywords": [
@@ -66,7 +76,7 @@
     "devDependencies": {
         "@sigx/vite": "workspace:^",
         "@types/node": "^25.9.1",
-        "typescript": "^6.0.3",
+        "typescript": "^7.0.2",
         "vite": "^8.0.14",
         "vitest": "^4.1.7"
     }

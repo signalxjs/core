@@ -1,6 +1,6 @@
 {
     "name": "@sigx/vite",
-    "version": "0.6.0",
+    "version": "0.7.0",
     "description": "Vite plugin for SignalX Framework with HMR, library builds, and automatic type generation",
     "type": "module",
     "main": "./dist/index.js",
@@ -24,7 +24,7 @@
     ],
     "sideEffects": false,
     "scripts": {
-        "build": "tsgo",
+        "build": "tsc",
         "dev": "tsc --watch",
         "prepublishOnly": "pnpm run build"
     },
@@ -35,6 +35,7 @@
     "devDependencies": {
         "@types/node": "^25.9.1",
         "sigx": "workspace:^",
+        "typescript": "^7.0.2",
         "vite": "^8.0.14"
     },
     "keywords": [

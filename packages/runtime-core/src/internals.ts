@@ -36,7 +36,19 @@ export type { InternalSlotsObject } from './utils/slots.js';
 export { normalizeSubTree } from './utils/normalize.js';
 
 // Platform bridge
-export { setPlatformModelProcessor, getPlatformModelProcessor } from './platform.js';
+export { setPlatformModelProcessor, getPlatformModelProcessor, registerModelProcessor, getModelProcessors } from './platform.js';
+
+// Model modifier internals (for platform renderers — DOM, Lynx)
+export {
+    registerModelModifier,
+    getModelModifier,
+    applyModelTransforms,
+    resolveTiming,
+    wrapModelWriteBack,
+    getHandlerModifiers,
+    createDebounceScheduler,
+} from './model-modifiers.js';
+export type { ResolvedTiming, DebounceScheduler } from './model-modifiers.js';
 export { setDefaultMount, getDefaultMount } from './app.js';
 
 // Plugin system internals
@@ -62,14 +74,8 @@ export { __DIRECTIVE__ } from './directives.js';
 // Lazy loading internals
 export { registerPendingPromise } from './lazy.js';
 
-// Hydration utilities (for SSR)
-export {
-    filterClientDirectives,
-    getHydrationDirective,
-    hasClientDirective,
-    serializeProps,
-    createEmit
-} from './hydration/index.js';
+// Component-setup helpers shared with the client hydrator
+export { createEmit, splitComponentProps } from './utils/component-props.js';
 
 // Async context (for SSR isolation)
 export { runInRequestScope, hasRequestIsolation } from './async-context.js';

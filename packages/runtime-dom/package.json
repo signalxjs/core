@@ -1,25 +1,35 @@
 {
     "name": "@sigx/runtime-dom",
-    "version": "0.6.0",
+    "version": "0.7.0",
     "description": "DOM runtime for SignalX",
     "type": "module",
     "main": "./dist/index.js",
     "types": "./dist/index.d.ts",
     "exports": {
         ".": {
-            "import": "./dist/index.js",
-            "types": "./dist/index.d.ts"
+            "types": "./dist/index.d.ts",
+            "development": "./dist/index.js",
+            "production": "./dist/index.prod.js",
+            "import": "./dist/index.js"
         },
         "./internals": {
-            "import": "./dist/internals.js",
-            "types": "./dist/internals.d.ts"
+            "types": "./dist/internals.d.ts",
+            "development": "./dist/internals.js",
+            "production": "./dist/internals.prod.js",
+            "import": "./dist/internals.js"
+        },
+        "./platform": {
+            "types": "./dist/platform.d.ts",
+            "development": "./dist/platform.js",
+            "production": "./dist/platform.prod.js",
+            "import": "./dist/platform.js"
         }
     },
     "files": [
         "dist"
     ],
     "scripts": {
-        "build": "vite build && tsgo --emitDeclarationOnly",
+        "build": "vite build && vite build --mode prod-dist && tsc --emitDeclarationOnly",
         "dev": "vite build --watch",
         "prepublishOnly": "pnpm run build"
     },
@@ -38,12 +48,13 @@
         "url": "https://github.com/signalxjs/core/issues"
     },
     "sideEffects": [
-        "./src/index.ts",
+        "./src/platform.ts",
         "./src/model-processor.ts",
         "./src/render.ts",
-        "./dist/index.js",
-        "./dist/model-processor.js",
-        "./dist/render.js"
+        "./dist/platform.js",
+        "./dist/platform.prod.js",
+        "./dist/platform-*.js",
+        "./dist/platform-*.prod.js"
     ],
     "engines": {
         "node": "^20.19.0 || >=22.12.0"
@@ -55,7 +66,7 @@
     "devDependencies": {
         "@sigx/vite": "workspace:^",
         "@types/node": "^25.9.1",
-        "typescript": "^6.0.3",
+        "typescript": "^7.0.2",
         "vite": "^8.0.14"
     }
 }

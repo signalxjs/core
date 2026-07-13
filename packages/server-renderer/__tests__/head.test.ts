@@ -107,7 +107,7 @@ describe('renderHeadToString', () => {
 
     it('escapes HTML in title', () => {
         const result = renderHeadToString([{ title: '<script>alert("xss")</script>' }]);
-        expect(result).toBe('<title>&lt;script&gt;alert("xss")&lt;/script&gt;</title>');
+        expect(result).toBe('<title>&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;</title>');
         expect(result).not.toContain('<script>alert');
     });
 });

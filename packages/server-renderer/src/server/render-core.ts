@@ -85,6 +85,7 @@ const NOOP = () => { };
 /** Void elements that cannot have children — hoisted to module scope as a Set for O(1) lookup */
 const VOID_ELEMENTS = new Set(['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'param', 'source', 'track', 'wbr']);
 
+/** @internal exported for direct unit tests only */
 export function camelToKebab(str: string): string {
     // CSS custom properties (--foo) are already kebab-case
     if (str.startsWith('--')) return str;
@@ -93,14 +94,16 @@ export function camelToKebab(str: string): string {
 
 // ============= Style Parsing =============
 
+const styleCommentRE = /\/\*[^]*?\*\//g;
+
 /**
  * Parse a CSS string into a style object.
  *
  * Handles edge cases: parens in values (e.g., `linear-gradient(...)`),
  * CSS comments, and colons in values.
+ *
+ * @internal exported for direct unit tests only
  */
-const styleCommentRE = /\/\*[^]*?\*\//g;
-
 export function parseStringStyle(cssText: string): Record<string, string> {
     const ret: Record<string, string> = {};
     const stripped = cssText.replace(styleCommentRE, '');
@@ -212,15 +215,56 @@ function createComponentState(
     const id = ctx.nextId();
     ctx.pushComponent(id);
 
-    // Create slots from children
+    // Create slots from children, mirroring the client slot extractor so
+    // server and client agree on slot presence (otherwise hydration could
+    // mismatch). Un-slotted children form the default slot; children with a
+    // `slot` prop group into named slots. A slot accessor exists only when
+    // content was provided for it — an absent slot reads as `undefined`, so
+    // `slots.x?.()` / `?? fallback` behave the same as on the client.
     // Only null/undefined/boolean mean "no children" — falsy render output
     // like the number 0 or '' is valid slot content.
-    const defaultSlot = () => children == null || typeof children === 'boolean'
-        ? []
-        : (Array.isArray(children) ? children : [children]);
-    const slots: SlotsObject<any> = slotsFromProps
-        ? { default: defaultSlot, ...slotsFromProps }
-        : { default: defaultSlot };
+    const defaultChildren: any[] = [];
+    const elementNamed: Record<string, any[]> = Object.create(null);
+    if (children != null && typeof children !== 'boolean') {
+        const items = Array.isArray(children) ? children : [children];
+        for (const child of items) {
+            if (child && typeof child === 'object' && child.props && child.props.slot) {
+                const name = child.props.slot;
+                (elementNamed[name] ?? (elementNamed[name] = [])).push(child);
+            } else if (child != null && child !== false && child !== true) {
+                defaultChildren.push(child);
+            }
+        }
+    }
+    // Null-prototype dictionary: slot names come from user-controlled `slot`
+    // props and the `slots` prop, so a name like "__proto__" must be a plain
+    // key (a normal object would route it through the prototype setter,
+    // polluting the prototype and breaking the client's "__proto__"-named
+    // slot parity).
+    const slots: SlotsObject<any> = Object.create(null);
+    if (defaultChildren.length > 0) {
+        slots.default = () => defaultChildren.slice();
+    }
+    for (const name in elementNamed) {
+        // A child with `slot="default"` is a named slot on the client too,
+        // but the client's `default` accessor only reads un-slotted children,
+        // so such content is unreachable there. Skip it here for parity —
+        // installing it at `slots.default` would render on the server but not
+        // the client, causing a hydration mismatch. `slots.default` is driven
+        // solely by the un-slotted children above (and the `slots` prop below).
+        if (name === 'default') continue;
+        const list = elementNamed[name];
+        slots[name] = () => list.slice();
+    }
+    // Slots provided via the `slots` prop take precedence over element-based
+    // ones of the same name, matching the client extractor.
+    if (slotsFromProps) {
+        for (const name of Object.keys(slotsFromProps)) {
+            if (typeof slotsFromProps[name] === 'function') {
+                slots[name] = slotsFromProps[name];
+            }
+        }
+    }
 
     // Pending async work for this component (useAsync/useStream register
     // here; block mode awaits these inline, streaming mode defers behind a
@@ -543,6 +587,11 @@ function serializeOpenTagProps(vnode: VNode, appContext: AppContext | null): str
         if (key === 'children' || key === 'key' || key === 'ref') continue;
         if (key.startsWith('client:')) continue; // Skip client directives
         if (key.startsWith('use:')) continue; // Skip element directives
+        // Nullish/false values omit the attribute entirely — matching the
+        // client, where patchProp clears the style and removeAttribute-like
+        // semantics apply. Without this, an unset pass-through prop like
+        // style={props.style} stringified to style="undefined" (#98).
+        if (value == null || value === false) continue;
 
         if (key === 'style') {
             const styleString = typeof value === 'object'
@@ -555,7 +604,7 @@ function serializeOpenTagProps(vnode: VNode, appContext: AppContext | null): str
             // Skip event listeners on server
         } else if (value === true) {
             props += ` ${key}`;
-        } else if (value !== false && value != null) {
+        } else {
             props += ` ${key}="${escapeHtml(typeof value === 'string' ? value : String(value))}"`;
         }
     }
@@ -801,6 +850,30 @@ function* renderNode(
 
         const setup = vnode.type.__setup;
         const { componentName, id, ssrLoads, componentCtx } = createComponentState(vnode, ctx, parentCtx, appContext);
+
+        // Plugin hook: suppressComponentRender — lets a plugin skip running this
+        // component's setup/render and emit a placeholder string instead (e.g.
+        // islands `client:only` true skip-SSR). createComponentState already ran
+        // transformComponentContext (so plugins have registered the component) and
+        // pushed the id, so on suppression we emit the placeholder + the standard
+        // trailing marker, pop the component, and bail before setup/render.
+        if (ctx._plugins) {
+            for (const plugin of ctx._plugins) {
+                const suppressed = plugin.server?.suppressComponentRender?.(id, vnode, ctx);
+                if (suppressed) {
+                    if (suppressed.placeholder != null) {
+                        buf.push(suppressed.placeholder);
+                        state.len += suppressed.placeholder.length;
+                    }
+                    const marker = `<!--$c:${id}-->`;
+                    buf.push(marker);
+                    state.len += marker.length;
+                    ctx.popComponent();
+                    if (state.len >= state.threshold) yield FLUSH;
+                    return;
+                }
+            }
+        }
 
         const prev = setCurrentInstance(componentCtx);
         try {

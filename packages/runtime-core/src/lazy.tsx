@@ -135,7 +135,7 @@ export function lazy<T extends AnyComponentFactory>(
         // Helper: forward wrapper's props, children, and named slots to inner component
         function renderInner(Comp: T): JSXElement {
             const fwdProps: any = { ...ctx.props };
-            const defaultContent = ctx.slots.default();
+            const defaultContent = ctx.slots.default?.() ?? [];
             if (defaultContent.length > 0) {
                 fwdProps.children = defaultContent;
             }
@@ -328,10 +328,11 @@ export const Suspense = component<SuspenseProps>(
 
             try {
                 // Try to render children
-                const children = slots.default();
+                const children = slots.default?.() ?? [];
 
-                // If we have pending promises (registered during slots.default() call), show fallback
+                // If we have pending promises (registered during the slots.default?.() call), show fallback
                 // Check AFTER rendering children because that's when lazy components register
+                // (an absent default slot is undefined, so the call is skipped and nothing registers)
                 if (boundary.pending.size > 0) {
                     const fallback = props.fallback;
                     if (typeof fallback === 'function') {

@@ -55,6 +55,9 @@ agents the issue-first flow below is required.)
    gh pr create --base main --title "<title>" \
      --body "Closes #N. <short summary of the change>" --reviewer @copilot
    ```
+   The PR description becomes the squash commit **body** verbatim, and the PR
+   title (with ` (#<pr>)` appended) becomes its subject — see step 6. Write the
+   description as the commit body you want on `main`.
    (On an already-open PR: `gh pr edit <pr> --add-reviewer @copilot`.) The bot
    `copilot-pull-request-reviewer` posts its review within a minute or two. If your
    `gh` is too old to resolve `@copilot` (error: `'@copilot' not found`), request it
@@ -81,23 +84,32 @@ agents the issue-first flow below is required.)
    from the PR (see "Documentation"), merge (squash — repo rules block merge
    commits) and clean up:
    ```sh
-   gh pr checks <pr>                          # must be all green first
-   gh pr merge <pr> --squash --delete-branch
+   pr=123                                     # your PR number (digits only)
+   gh pr checks "$pr"                         # must be all green first
+   gh pr merge "$pr" --squash --delete-branch \
+     --subject "$(gh pr view "$pr" --json title -q .title) (#$pr)" \
+     --body "$(gh pr view "$pr" --json body -q .body)"
    ```
-   If you used a worktree, remove it afterward: `pnpm wt rm <name>`.
+   Pass `--subject`/`--body` explicitly, exactly as above — GitHub appends
+   `Co-authored-by:` trailers to every message it generates itself (in **all**
+   squash-message modes, even PR_TITLE/PR_BODY) whenever a branch-commit author
+   differs from the merging account; an explicit message is used verbatim, so
+   no trailers. If you used a worktree, remove it afterward: `pnpm wt rm <name>`.
 
 ## Build, Test, Lint
 
 ```bash
 pnpm install
 pnpm build       # all packages: core + server-renderer + vite plugin
+                 # each package builds twice: dist/*.js (dev) + dist/*.prod.js
+                 # (NODE_ENV-stripped), selected via export conditions
 pnpm build:core  # reactivity + runtime-core + runtime-dom + sigx
 pnpm test        # vitest run (unit tests across packages)
 pnpm test -- packages/reactivity   # single test file/dir (substring match)
 pnpm test -- -t "name of test"     # single test by name (vitest -t)
 pnpm test:watch
 pnpm test:coverage
-pnpm typecheck   # tsgo (a fast TS compiler), config: tsconfig.json
+pnpm typecheck   # tsc (TypeScript 7 native compiler), config: tsconfig.json
 pnpm lint        # oxlint over the core packages' src
 pnpm lint:fix
 pnpm size        # size-limit bundle-size check (.size-limit.json)
@@ -115,7 +127,12 @@ free port automatically).
 - `packages/runtime-core` → `@sigx/runtime-core` — component model, renderer base.
 - `packages/runtime-dom` → `@sigx/runtime-dom` — DOM renderer.
 - `packages/sigx` → `sigx` — umbrella public package.
-- `packages/server-renderer` → `@sigx/server-renderer` — SSR + hydration.
+- `packages/server-renderer` → `@sigx/server-renderer` — SSR + hydration. A
+  strategy-agnostic plugin platform; hydration strategies are plugins, not core.
+- `packages/ssr-islands` → `@sigx/ssr-islands` — islands architecture (selective
+  hydration via `client:*` directives). The first-party *reference* strategy pack
+  riding `@sigx/server-renderer`'s public plugin API; a drop-in equal of any
+  third-party pack, with no privileged access to core.
 - `packages/vite` → `@sigx/vite` — Vite plugin for dev/build/HMR.
 - `examples/` — runnable apps (`hello`, `spa`, `spa-ssr`).
 

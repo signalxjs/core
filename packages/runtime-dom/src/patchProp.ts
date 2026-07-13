@@ -6,6 +6,8 @@
  * and custom property bindings.
  */
 
+import { resolveTiming, createDebounceScheduler, getHandlerModifiers } from '@sigx/runtime-core/internals';
+
 /**
  * Stable per-event listener wrapper: re-renders swap `invoker.value`
  * instead of removing and re-adding the DOM listener for every fresh
@@ -33,6 +35,11 @@ export function patchProp(dom: Element, key: string, prevValue: any, nextValue: 
     const newValue = nextValue;
 
     if (key === 'children' || key === 'key' || key === 'ref') return;
+
+    // `modelModifiers` configures the model directive (trim/lazy/number/debounce);
+    // it is read off the model handler in the onUpdate:modelValue branch below and
+    // is never rendered to the DOM.
+    if (key === 'modelModifiers') return;
 
     if (key === 'style') {
         const el = dom as HTMLElement;
@@ -78,12 +85,31 @@ export function patchProp(dom: Element, key: string, prevValue: any, nextValue: 
             if (oldValue) {
                 const wrapper = (oldValue as any).__sigx_model_handler;
                 if (wrapper) {
+                    // Cancel any pending debounced write so it can't fire after the
+                    // handler is replaced (e.g. on re-render).
+                    (wrapper as any).__sigx_cancel?.();
                     el.removeEventListener('input', wrapper);
                     el.removeEventListener('change', wrapper);
                 }
             }
 
             if (newValue) {
+                // Value-transforms (trim/number/custom) already run inside the
+                // core write-back wrapper that `newValue` is. The platform only
+                // maps the timing hints (lazy/debounce) the wrapper carries.
+                const { lazy, debounceMs } = resolveTiming(getHandlerModifiers(newValue));
+
+                // Trailing-edge debounce wraps the value push; created once per
+                // handler instance so the timer persists across events. Scheduling
+                // is shared with core; the platform owns the cancel wiring below.
+                let invoke = (v: any) => (newValue as Function)(v);
+                let cancel: (() => void) | undefined;
+                if (debounceMs != null) {
+                    const scheduler = createDebounceScheduler((v) => (newValue as Function)(v), debounceMs);
+                    invoke = scheduler.invoke;
+                    cancel = scheduler.cancel;
+                }
+
                 const handler = (e: Event) => {
                     const target = e.target as HTMLInputElement;
                     let val: any;
@@ -98,12 +124,16 @@ export function patchProp(dom: Element, key: string, prevValue: any, nextValue: 
                         val = target.value;
                     }
 
-                    (newValue as Function)(val);
+                    invoke(val);
                 };
                 (newValue as any).__sigx_model_handler = handler;
+                // Expose the debounce canceller so handler replacement can clear it.
+                if (cancel) (handler as any).__sigx_cancel = cancel;
 
                 const inputType = (dom as HTMLInputElement).type;
-                if (tagName === 'select' || (tagName === 'input' && (inputType === 'checkbox' || inputType === 'radio'))) {
+                const isToggle = tagName === 'input' && (inputType === 'checkbox' || inputType === 'radio');
+                // `.lazy` syncs text inputs on `change` (blur/enter) instead of `input`.
+                if (tagName === 'select' || isToggle || lazy) {
                     el.addEventListener('change', handler);
                 } else {
                     el.addEventListener('input', handler);
@@ -145,8 +175,14 @@ export function patchProp(dom: Element, key: string, prevValue: any, nextValue: 
             handlers.delete(eventName);
         }
     } else if (key === 'className') {
-        // For SVG, use setAttribute to preserve case (class works on both)
-        dom.setAttribute('class', String(newValue));
+        // Nullish/false removes the attribute — keeps mount/hydration output
+        // consistent with SSR, which omits the attribute for these values.
+        if (newValue == null || newValue === false) {
+            dom.removeAttribute('class');
+        } else {
+            // For SVG, use setAttribute to preserve case (class works on both)
+            dom.setAttribute('class', String(newValue));
+        }
     } else if (key.startsWith('.')) {
         const propName = key.slice(1);
         (dom as any)[propName] = newValue;

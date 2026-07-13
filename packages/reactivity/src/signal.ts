@@ -78,6 +78,50 @@ export function detectAccess(selector: () => any): [any, string | symbol] | null
     return result;
 }
 
+/**
+ * Dev-only variant of {@link detectAccess} that also reports whether the
+ * selector returned a value different from the last property it read.
+ *
+ * A valid model getter is a property-access chain whose return value IS the
+ * leaf property (`() => state.a.b` returns `state.a.b`; a writable computed
+ * `() => c.value` returns `c.value`). A transformed expression like
+ * `() => transform(state.x)` or `() => state.count * 2` returns something
+ * other than the property it read, which means a two-way binding would write
+ * the transformed value back into that property — almost never the intent.
+ *
+ * @internal Used by the JSX runtime to warn in development.
+ */
+export function detectAccessDev(
+    selector: () => any
+): { access: [any, string | symbol] | null; looksTransformed: boolean } {
+    let result: [any, string | symbol] | null = null;
+    const prev = accessObserver;
+
+    accessObserver = (target, key) => {
+        result = [target, key];
+    };
+
+    let returnValue: any;
+    try {
+        returnValue = selector();
+    } finally {
+        accessObserver = prev;
+    }
+
+    // `as` resets control-flow narrowing — TS only sees the `= null` init, not
+    // the assignment that happens inside the access-observer callback.
+    const access = result as [any, string | symbol] | null;
+    let looksTransformed = false;
+    if (access && typeof access[1] === 'string') {
+        const [obj, key] = access;
+        // Object.is (not !==) so a getter that legitimately returns NaN — where
+        // the bound property is also NaN — isn't flagged as transformed.
+        looksTransformed = !Object.is((obj as Record<string, any>)[key], returnValue);
+    }
+
+    return { access, looksTransformed };
+}
+
 const arrayInstrumentations: Record<string, Function> = {};
 
 // Mutator methods — wrap in batch to coalesce reactive triggers
@@ -162,16 +206,18 @@ export function signal<T>(target: T): PrimitiveSignal<T> | Signal<T & object> {
     // The id stays on the proxy for the rest of its life via
     // `signalIds` so the `set` trap can include it in updates without
     // a per-write hook lookup.
-    const hookAtCreate = getDevtoolsHook();
     let signalId: number | null = null;
-    if (hookAtCreate) {
-        signalId = hookAtCreate.nextId();
-        hookAtCreate.emit({
-            type: 'signal:created',
-            id: signalId,
-            kind: isCollectionTarget ? 'collection' : 'object',
-            ownerComponentId: hookAtCreate.currentOwner,
-        });
+    if (process.env.NODE_ENV !== 'production') {
+        const hookAtCreate = getDevtoolsHook();
+        if (hookAtCreate) {
+            signalId = hookAtCreate.nextId();
+            hookAtCreate.emit({
+                type: 'signal:created',
+                id: signalId,
+                kind: isCollectionTarget ? 'collection' : 'object',
+                ownerComponentId: hookAtCreate.currentOwner,
+            });
+        }
     }
 
     // Helper to get or create the dependency slot for a key

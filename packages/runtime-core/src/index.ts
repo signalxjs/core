@@ -4,6 +4,19 @@
 
 // Platform types (public type only)
 export type { ModelProcessor } from './platform.js';
+export { registerModelProcessor } from './platform.js';
+
+// Model modifiers (pluggable, cross-platform value-transform / timing primitive)
+export { registerModelModifier } from './model-modifiers.js';
+export type {
+    ModelModifierDef,
+    ModelModifierContext,
+    ModelModifierTiming,
+    ModelModifiers,
+    ToggleModelModifiers,
+    ValueModelModifiers,
+    TimingModelModifiers,
+} from './model-modifiers.js';
 
 // Plugin types (public type only)
 export type { ComponentPlugin } from './plugins.js';
@@ -37,12 +50,8 @@ export {
 export type {
     ComponentAttributeExtensions,
     Define,
-    DefineProp,
     ModelBinding,
-    DefineModel,
     EventDefinition,
-    DefineEvent,
-    DefineSlot,
     SlotsObject,
     EmitFn,
     PlatformTypes,
@@ -57,7 +66,6 @@ export type {
     ComponentFactory,
     AnyComponentFactory,
     ComponentOptions,
-    DefineExpose,
     Ref,
     Exposed,
     ComponentRef
@@ -95,7 +103,7 @@ export {
 } from './errors.js';
 
 // Utilities
-export { Utils } from './utils/index.js';
+export { Utils, isPromise } from './utils/index.js';
 
 // Domain models & messaging
 export * from './models/index.js';
@@ -119,6 +127,3 @@ export { signal } from '@sigx/reactivity';
 // Component type guard
 export { isComponent } from './renderer.js';
 
-// Hydration types (public)
-export { CLIENT_DIRECTIVE_PREFIX, CLIENT_DIRECTIVES } from './hydration/index.js';
-export type { ClientDirective, HydrationStrategy, HydrationDirective } from './hydration/index.js';

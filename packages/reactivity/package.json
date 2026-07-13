@@ -1,25 +1,29 @@
 {
     "name": "@sigx/reactivity",
-    "version": "0.6.0",
+    "version": "0.7.0",
     "description": "Reactivity system for SignalX",
     "type": "module",
     "main": "./dist/index.js",
     "types": "./dist/index.d.ts",
     "exports": {
         ".": {
-            "import": "./dist/index.js",
-            "types": "./dist/index.d.ts"
+            "types": "./dist/index.d.ts",
+            "development": "./dist/index.js",
+            "production": "./dist/index.prod.js",
+            "import": "./dist/index.js"
         },
         "./internals": {
-            "import": "./dist/internals.js",
-            "types": "./dist/internals.d.ts"
+            "types": "./dist/internals.d.ts",
+            "development": "./dist/internals.js",
+            "production": "./dist/internals.prod.js",
+            "import": "./dist/internals.js"
         }
     },
     "files": [
         "dist"
     ],
     "scripts": {
-        "build": "vite build && tsgo --emitDeclarationOnly",
+        "build": "vite build && vite build --mode prod-dist && tsc --emitDeclarationOnly",
         "dev": "vite build --watch",
         "prepublishOnly": "pnpm run build"
     },
@@ -47,7 +51,8 @@
     },
     "devDependencies": {
         "@sigx/vite": "workspace:^",
-        "typescript": "^6.0.3",
+        "@types/node": "^25.9.1",
+        "typescript": "^7.0.2",
         "vite": "^8.0.14"
     }
 }

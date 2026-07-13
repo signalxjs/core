@@ -4,7 +4,8 @@
  * Adds `use:show` to `DirectiveAttributeExtensions` so that typing `use:`
  * in JSX triggers IntelliSense with `use:show` as a suggestion.
  */
-import type { DirectiveDefinition } from '@sigx/runtime-core';
+// Augmentations require module context; this file has no runtime exports.
+export {};
 
 declare global {
     namespace JSX {
@@ -17,7 +18,7 @@ declare global {
              *
              * @example
              * ```tsx
-             * // Shorthand — directive resolved automatically:
+             * // Shorthand — registered with the platform automatically:
              * <div use:show={isVisible}>Content</div>
              *
              * // Explicit tuple form:
@@ -25,7 +26,7 @@ declare global {
              * <div use:show={[show, isVisible]}>Content</div>
              * ```
              */
-            'use:show'?: boolean | DirectiveDefinition<boolean, HTMLElement> | [DirectiveDefinition<boolean, HTMLElement>, boolean];
+            'use:show'?: JSX.DirectiveAttribute<boolean>;
         }
     }
 }

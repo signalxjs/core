@@ -193,7 +193,7 @@ describe('component render counts (DOM)', () => {
 
         const Child = component((ctx) => () => {
             childRenders();
-            return jsx('div', { children: ctx.slots.default() });
+            return jsx('div', { children: ctx.slots.default?.() });
         });
 
         const Parent = component(() => () =>
@@ -220,7 +220,7 @@ describe('component render counts (DOM)', () => {
 
         const Child = component((ctx) => () => {
             childRenders();
-            return jsx('div', { children: ctx.slots.default() });
+            return jsx('div', { children: ctx.slots.default?.() });
         });
 
         const Parent = component(() => () =>
@@ -246,7 +246,7 @@ describe('component render counts (DOM)', () => {
 
         const Child = component((ctx) => () => {
             childRenders();
-            return jsx('div', { children: ctx.slots.default() });
+            return jsx('div', { children: ctx.slots.default?.() });
         });
 
         const Parent = component(() => () =>
@@ -314,7 +314,7 @@ describe('component render counts (DOM)', () => {
 
         const Child = component((ctx) => () => {
             childRenders();
-            return jsx('div', { children: ctx.slots.default() });
+            return jsx('div', { children: ctx.slots.default?.() });
         });
 
         const Parent = component(() => () =>

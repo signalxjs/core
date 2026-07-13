@@ -1,37 +1,41 @@
 {
     "name": "sigx",
-    "version": "0.6.0",
+    "version": "0.7.0",
     "description": "SignalX - Lightweight reactive component framework with signals and TSX support",
     "type": "module",
     "main": "./dist/sigx.js",
     "types": "./dist/index.d.ts",
     "exports": {
         ".": {
-            "import": "./dist/sigx.js",
-            "types": "./dist/index.d.ts"
-        },
-        "./hydration": {
-            "import": "./dist/hydration.js",
-            "types": "./dist/hydration.d.ts"
+            "types": "./dist/index.d.ts",
+            "development": "./dist/sigx.js",
+            "production": "./dist/sigx.prod.js",
+            "import": "./dist/sigx.js"
         },
         "./jsx-runtime": {
-            "import": "./dist/sigx.js",
-            "types": "./dist/index.d.ts"
+            "types": "./dist/index.d.ts",
+            "development": "./dist/sigx.js",
+            "production": "./dist/sigx.prod.js",
+            "import": "./dist/sigx.js"
         },
         "./jsx-dev-runtime": {
-            "import": "./dist/sigx.js",
-            "types": "./dist/index.d.ts"
+            "types": "./dist/index.d.ts",
+            "development": "./dist/sigx.js",
+            "production": "./dist/sigx.prod.js",
+            "import": "./dist/sigx.js"
         },
         "./internals": {
-            "import": "./dist/internals.js",
-            "types": "./dist/internals.d.ts"
+            "types": "./dist/internals.d.ts",
+            "development": "./dist/internals.js",
+            "production": "./dist/internals.prod.js",
+            "import": "./dist/internals.js"
         }
     },
     "files": [
         "dist"
     ],
     "scripts": {
-        "build": "vite build && tsgo --emitDeclarationOnly",
+        "build": "vite build && vite build --mode prod-dist && tsc --emitDeclarationOnly",
         "dev": "vite build --watch",
         "prepublishOnly": "pnpm run build"
     },
@@ -53,7 +57,7 @@
         "./src/index.ts",
         "./src/jsx-runtime.ts",
         "./dist/sigx.js",
-        "./dist/jsx-runtime.js"
+        "./dist/sigx.prod.js"
     ],
     "engines": {
         "node": "^20.19.0 || >=22.12.0"
@@ -65,7 +69,7 @@
     },
     "devDependencies": {
         "@sigx/vite": "workspace:^",
-        "typescript": "^6.0.3",
+        "typescript": "^7.0.2",
         "vite": "^8.0.14",
         "esbuild": "^0.25.0"
     }

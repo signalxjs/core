@@ -30,7 +30,7 @@ const WithSignal = component((ctx) => {
 }, { name: 'WithSignal' });
 
 const WithChildren = component((ctx) => {
-    return () => <div class="wrapper">{ctx.slots.default()}</div>;
+    return () => <div class="wrapper">{ctx.slots.default?.()}</div>;
 }, { name: 'WithChildren' });
 
 const Nested = component(() => {

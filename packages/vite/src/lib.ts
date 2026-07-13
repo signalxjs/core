@@ -4,7 +4,7 @@
  * This module provides a `defineLibConfig` helper that simplifies creating library builds
  * with consistent configuration across all @sigx/* packages.
  */
-import { defineConfig, type UserConfig, type BuildEnvironmentOptions } from 'vite';
+import { defineConfig, type UserConfig, type UserConfigFnObject } from 'vite';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -180,7 +180,7 @@ const SIGX_RUNTIME_EXTERNALS: (string | RegExp)[] = [
     /^@sigx\/server-renderer\//,
 ];
 
-export function defineLibConfig(options: LibBuildOptions): UserConfig {
+export function defineLibConfig(options: LibBuildOptions): UserConfigFnObject {
     const {
         entry,
         outDir = 'dist',
@@ -221,55 +221,71 @@ export function defineLibConfig(options: LibBuildOptions): UserConfig {
         return ext;
     });
 
-    const config: UserConfig = {
-        root: rootDir,
-        
-        resolve: {
-            alias: resolvedAliases
-        },
+    return defineConfig(({ mode }) => {
+        // `vite build --mode prod-dist` emits the production dist next to the
+        // default (development) dist: process.env.NODE_ENV is defined away so
+        // dev warnings and devtools plumbing are stripped, and every output
+        // file gets a `.prod.js` suffix for the package's `production` export
+        // condition. Run it as a second pass after the default build.
+        const prodDist = mode === 'prod-dist';
 
-        build: {
-            outDir,
-            sourcemap,
-            emptyOutDir: true,
-            
-            lib: {
-                entry: entries,
-                formats: ['es'],
-                fileName: (_format, entryName) => `${entryName}.js`
+        const config: UserConfig = {
+            root: rootDir,
+
+            resolve: {
+                alias: resolvedAliases
             },
 
-            // Vite 8 uses rolldownOptions instead of rollupOptions
-            rolldownOptions: {
-                external: externalPatterns,
-                ...(banner && {
-                    output: {
-                        banner
-                    }
-                })
-            },
-
-            // Platform-specific settings
-            ...(platform === 'node' && {
-                target: 'node18'
+            ...(prodDist && {
+                define: {
+                    'process.env.NODE_ENV': JSON.stringify('production')
+                }
             }),
 
-            // Minification handled by Vite 8's Oxc minifier
-            minify: minify ? 'oxc' : false
-        },
+            build: {
+                outDir,
+                sourcemap,
+                // The prod-dist pass writes into the dev dist's outDir.
+                emptyOutDir: !prodDist,
 
-        // JSX configuration for Vite 8 using Oxc
-        ...(jsx && {
-            oxc: {
-                jsx: {
-                    runtime: 'automatic',
-                    importSource: 'sigx'
+                lib: {
+                    entry: entries,
+                    formats: ['es'],
+                    fileName: (_format, entryName) =>
+                        prodDist ? `${entryName}.prod.js` : `${entryName}.js`
+                },
+
+                // Vite 8 uses rolldownOptions instead of rollupOptions
+                rolldownOptions: {
+                    external: externalPatterns,
+                    output: {
+                        ...(banner && { banner }),
+                        ...(prodDist && { chunkFileNames: '[name]-[hash].prod.js' })
+                    }
+                },
+
+                // Platform-specific settings
+                ...(platform === 'node' && {
+                    target: 'node18'
+                }),
+
+                // Minification handled by Vite 8's Oxc minifier
+                minify: minify ? 'oxc' : false
+            },
+
+            // JSX configuration for Vite 8 using Oxc
+            ...(jsx && {
+                oxc: {
+                    jsx: {
+                        runtime: 'automatic',
+                        importSource: 'sigx'
+                    }
                 }
-            }
-        })
-    };
+            })
+        };
 
-    return defineConfig(config);
+        return config;
+    });
 }
 
 /**
