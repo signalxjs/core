@@ -68,8 +68,12 @@ export function errorScope(options: ErrorScopeOptions): void {
     }
 
     const state = signal({ error: null as Error | null, generation: 0 });
+    // Synchronous mirror of `state.error !== null`: handle() must decide
+    // (and dedupe) synchronously, but the reactive write is deferred below.
+    let errored = false;
 
     const retry = () => {
+        errored = false;
         batch(() => {
             // The generation key bump forces the keyed subtree Fragment to
             // remount (different-key patch = unmount + mount): descendant
@@ -83,7 +87,8 @@ export function errorScope(options: ErrorScopeOptions): void {
         handle(err, instance, info) {
             // Already showing the fallback — a throw from the fallback itself
             // (or a sibling error racing in) bubbles to the next scope up.
-            if (state.error !== null) return false;
+            if (errored) return false;
+            errored = true;
             if (options.onError) {
                 try {
                     options.onError(err, instance, info);
@@ -91,7 +96,13 @@ export function errorScope(options: ErrorScopeOptions): void {
                     console.error('[errorScope] onError observer threw:', observerErr);
                 }
             }
-            state.error = err;
+            // Descendant setup/first-render throws surface while THIS
+            // component's render effect is still on the stack, and its
+            // re-entrant notifications are dropped (render-loop guard).
+            // Step out of the effect frame before the reactive write.
+            queueMicrotask(() => {
+                if (errored) state.error = err;
+            });
             return true;
         },
     };

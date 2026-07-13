@@ -18,6 +18,7 @@
  * state survives and the resolved component appears in place.
  */
 
+import { toRaw } from '@sigx/reactivity';
 import { component, type Define } from './component.js';
 import { jsx, Fragment, type JSXElement } from './jsx-runtime.js';
 import { getCurrentInstance } from './component-lifecycle.js';
@@ -63,7 +64,14 @@ export const Defer = component<DeferProps>((ctx) => {
         add(p) {
             if (tracked.has(p)) return;
             tracked.add(p);
-            state.pending++;
+            // add() runs during a child's setup — INSIDE this component's
+            // own render effect, whose re-entrant notifications the
+            // reactivity system drops (render-loop guard). Step out of the
+            // effect frame before writing; the microtask is queued ahead of
+            // any settle reaction of `p`, so the decrement can't overtake.
+            queueMicrotask(() => {
+                state.pending++;
+            });
             void p
                 .finally(() => {
                     tracked.delete(p);
@@ -80,11 +88,15 @@ export const Defer = component<DeferProps>((ctx) => {
     (node.provides ??= new Map()).set(DEFER_TOKEN, collector);
 
     return () => {
+        // toRaw: props reads are reactive-proxied; a vnode must reach the
+        // renderer as its raw object (dom bookkeeping is written onto it).
+        const rawFallback = toRaw(ctx.props.fallback as unknown as object) as
+            | JSXElement
+            | (() => JSXElement)
+            | undefined;
         const fb =
             state.pending > 0
-                ? (typeof ctx.props.fallback === 'function'
-                    ? (ctx.props.fallback as () => JSXElement)()
-                    : ctx.props.fallback) ?? null
+                ? (typeof rawFallback === 'function' ? rawFallback() : rawFallback) ?? null
                 : null;
         // Constant shape: a null slot normalizes to a Comment vnode, so the
         // fallback toggles in place without shifting the children.

@@ -2,15 +2,12 @@ import { describe, it, expect, afterEach } from 'vitest';
 import {
     getCurrentInstanceSafe,
     setCurrentInstanceSafe,
-    getCurrentSuspenseBoundarySafe,
-    setCurrentSuspenseBoundarySafe,
     runInRequestScope,
     hasRequestIsolation
 } from '../src/async-context';
 
 afterEach(() => {
     setCurrentInstanceSafe(null);
-    setCurrentSuspenseBoundarySafe(null);
 });
 
 describe('getCurrentInstanceSafe / setCurrentInstanceSafe', () => {
@@ -45,27 +42,6 @@ describe('getCurrentInstanceSafe / setCurrentInstanceSafe', () => {
     });
 });
 
-describe('getCurrentSuspenseBoundarySafe / setCurrentSuspenseBoundarySafe', () => {
-    it('returns null initially', () => {
-        expect(getCurrentSuspenseBoundarySafe()).toBeNull();
-    });
-
-    it('set and get works', () => {
-        const boundary = { name: 'suspense-1' };
-        setCurrentSuspenseBoundarySafe(boundary);
-        expect(getCurrentSuspenseBoundarySafe()).toBe(boundary);
-    });
-
-    it('set returns previous value', () => {
-        const first = { name: 'a' };
-        const second = { name: 'b' };
-        setCurrentSuspenseBoundarySafe(first);
-        const prev = setCurrentSuspenseBoundarySafe(second);
-        expect(prev).toBe(first);
-        expect(getCurrentSuspenseBoundarySafe()).toBe(second);
-    });
-});
-
 describe('runInRequestScope', () => {
     it('runs function and returns its result', () => {
         const result = runInRequestScope(() => 42);
@@ -88,11 +64,9 @@ describe('runInRequestScope', () => {
 
         runInRequestScope(() => {
             setCurrentInstanceSafe({ id: 'inner' });
-            setCurrentSuspenseBoundarySafe({ name: 'inner-boundary' });
         });
 
         expect(getCurrentInstanceSafe()).toBeNull();
-        expect(getCurrentSuspenseBoundarySafe()).toBeNull();
     });
 
     it('nested scopes are independent', () => {
