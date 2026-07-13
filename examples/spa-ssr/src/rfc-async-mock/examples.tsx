@@ -3,7 +3,7 @@
  *  DESIGN MOCK — usage examples for `useData` / `useAction`
  *  (docs/rfc-async.md). Not wired into the app; open in an editor and
  *  hover the types. Every RFC contract that is type-sensitive is
- *  exercised here: the three useData overloads, tuple-key inference,
+ *  exercised here: the two useData forms (key is mandatory), tuple-key inference,
  *  `match` narrowing (idle arm, stale error param), all() object/tuple
  *  inference + `.errors`, and the settled RunResult.
  * ════════════════════════════════════════════════════════════════════════
@@ -104,14 +104,17 @@ export const PostList = component(() => {
 });
 
 // ───────────────────────────────────────────────────────────────────────
-// 3. Unkeyed read — client-only by definition (SSR renders the pending
-//    arm; the client fetches after hydration). The fetcher's trigger
-//    argument is `undefined`.
+// 3. Client-only read — rev 8: still keyed ({ server: false } opts out of
+//    SSR: the server renders the pending arm; the client fetches after
+//    hydration). There is NO bare-fetcher form — a lone function here is a
+//    compile error, killing the silently-untracked trap.
 // ───────────────────────────────────────────────────────────────────────
 
 export const LocalClock = component(() => {
-    const zone = useData((_, { signal }) =>
-        getJson<{ tz: string }>('/api/timezone', signal)
+    const zone = useData(
+        'timezone',
+        (key, { signal }) => getJson<{ tz: string }>(`/api/${key}`, signal),
+        { server: false }
     );
     return () => zone.match({ ready: (z) => <span>{z.tz}</span> });
 });
@@ -186,7 +189,9 @@ export const DeleteButton = component(() => {
             <button disabled={remove.loading} onClick={() => remove.run('post-1')}>Delete</button>
             {remove.match({
                 error: (e, retry) => <button onClick={retry}>Delete failed — retry</button>,
-                ready: () => <span>Deleted.</span>,
+                // reset() (rev 8): back to idle — the blessed way to dismiss
+                // a success state and make the action reusable.
+                ready: () => <button onClick={() => remove.reset()}>Deleted — dismiss</button>,
                 pending: () => <span>Deleting…</span>,
             })}
         </div>

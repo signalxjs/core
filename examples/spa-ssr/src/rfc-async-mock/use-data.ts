@@ -10,10 +10,11 @@
  *  for the Phase-1 surface (rfc-async.md, "Inspectable mock").
  *
  *  Design rules under test:
- *    useData(key, fn)         → keyed (string): SSR-transferable
- *    useData(() => key, fn)   → reactive key: string OR tuple; falsy ⇒ idle
- *    useData(fn)              → unkeyed: client-only
- *    useAction(fn, opts?)     → write: never auto-runs; .run() never rejects
+ *    useData(key, fn)                  → static key: SSR-transferable
+ *    useData(() => key, fn)            → reactive key: string OR tuple; falsy ⇒ idle
+ *    useData(key, fn, {server:false})  → client-only (still keyed — rev 8:
+ *                                        there is NO bare-fetcher form)
+ *    useAction(fn, opts?)              → write: never auto-runs; .run() never rejects
  * ════════════════════════════════════════════════════════════════════════
  */
 
@@ -45,7 +46,11 @@ export type Fetcher<T, Arg> = (arg: Arg, ctx: AsyncFetcherContext) => Promise<T>
  * installed plugin handles. See ./examples.tsx for the augmentation pattern.
  */
 export interface AsyncOptions {
-    /** Keyed form only. Run the fetcher on the server. Default: true. */
+    /**
+     * Run the fetcher on the server. Default: true. `server: false` makes the
+     * read client-only (SSR renders the pending arm; the client fetches after
+     * hydration) — it keeps its key for dedupe and future cache coverage.
+     */
     server?: boolean;
 }
 
@@ -102,6 +107,12 @@ export interface AsyncAction<T, In> {
      * parameter — see the compile-time proof in ./examples.tsx).
      */
     run(input: In): Promise<RunResult<T>>;
+    /**
+     * Back to 'idle'; clears value/error (dismiss a success message, reuse a
+     * form). Discards observation of an in-flight run (its promise resolves
+     * SupersededError); never aborts the request.
+     */
+    reset(): void;
 }
 
 export interface AllState<T, E> extends AsyncState<T> {
@@ -138,16 +149,18 @@ function inertCell<T>(): AsyncState<T> {
 
 // ─── useData overloads ──────────────────────────────────────────────────
 
+// Rev 8: there is NO bare-fetcher overload — every read has a key. A lone
+// function as the first argument is a compile error by design (it used to
+// compile as an unkeyed, untracked, non-SSR read).
 export function useData<T>(key: string, fetcher: Fetcher<T, string>, opts?: AsyncOptions): AsyncState<T>;
 export function useData<T, const K extends KeyValue>(
     key: () => K | Falsy,
     fetcher: Fetcher<T, K>,
     opts?: AsyncOptions
 ): AsyncState<T>;
-export function useData<T>(fetcher: Fetcher<T, undefined>, opts?: AsyncOptions): AsyncState<T>;
 export function useData(
-    _keyOrFetcher: unknown,
-    _fetcherOrOpts?: unknown,
+    _key: unknown,
+    _fetcher: unknown,
     _opts?: unknown
 ): AsyncState<unknown> {
     return inertCell<unknown>();
@@ -167,6 +180,7 @@ export function useAction<T, In = void>(fn: Fetcher<T, In>, opts?: ActionOptions
         match: base.match.bind(base),
         run: (_input: In) =>
             Promise.resolve<RunResult<T>>({ ok: false, error: new SupersededError('mock') }),
+        reset: () => {},
     };
 }
 

@@ -1,7 +1,26 @@
 # RFC: value-first async — loading, lazy, errors; mechanism in core, policy in packs
 
-Status: **proposed / under review — rev 7**. Tracking: signalxjs/core#135.
+Status: **proposed / under review — rev 8**. Tracking: signalxjs/core#135.
 Pre-1.0, no-compat (same stance as `docs/rfc-use-async.md`): one way to do it.
+
+> **rev-8 changes:** the **key becomes mandatory** — the bare-fetcher
+> (unkeyed) form is removed; client-only reads are keyed with
+> `{ server: false }`. Rationale: by this RFC's own test ("different
+> behavior deserves a different name; different form of the same behavior is
+> an overload"), the unkeyed form was different *behavior* sharing a name —
+> and it carried a silent trap: `useData(async () => fetchPost(id.value))`
+> compiled clean as an unkeyed, **untracked**, non-SSR read (the user thought
+> they wrote something reactive). With the key mandatory the trap is a
+> compile error, the overload set drops to two forms that can never collide
+> (first argument always a key, second always the fetcher — crisp inference
+> errors), the tagline sharpens to **"data always has identity"**, and —
+> strategically — the cache pack can cover *every* read, since unkeyed reads
+> would have been permanently invisible to `staleTime`/revalidation. Also:
+> **`AsyncAction.reset()`** (back to `idle`, clears value/error — dismissing
+> a success message had no blessed path), and a **dev-mode guard that warns
+> when a signal is read inside a fetcher** (the fetcher is untracked; the
+> parameter belongs in the key — closes the last door on the desync bug
+> class tuple keys were adopted to kill).
 
 > **rev-7 changes** (from the rev-6 follow-up review): the **reserved `cache`
 > options key is dropped** — core pre-declaring a property it never reads was
@@ -175,18 +194,23 @@ type KeyResult = KeyValue | Falsy;                              // falsy ⇒ 'id
 
 type Fetcher<T, Arg> = (arg: Arg, ctx: { signal: AbortSignal }) => Promise<T>;
 
-useData<T>(key: string, fetcher: Fetcher<T, string>, opts?): AsyncState<T>;    // keyed, SSR
+useData<T>(key: string, fetcher: Fetcher<T, string>, opts?): AsyncState<T>;    // static key
 useData<T, K extends KeyValue>(                                                // reactive key —
   key: () => K | Falsy, fetcher: Fetcher<T, K>, opts?): AsyncState<T>;         //   string or tuple
-useData<T>(fetcher: Fetcher<T, undefined>, opts?): AsyncState<T>;              // unkeyed, client-only
 useAction<T, In = void>(fn: Fetcher<T, In>, opts?: ActionOptions): AsyncAction<T, In>;  // write, §2
+
+// There is NO bare-fetcher form (rev 8): every read has a key — data always
+// has identity. Client-only reads stay keyed and opt out of the server:
+//   useData('geo', fetchGeo, { server: false })
 ```
 
 **One fetcher shape everywhere.** The fetcher's first argument is always *the
 trigger's argument*: the resolved key for reads, the `.run(input)` value for
-actions, `undefined` for unkeyed reads. One mental model — and it makes
-overload disambiguation mechanical (two functions ⇒ the first is a key
-getter; one function ⇒ it is the fetcher).
+actions. One mental model — and with the key mandatory (rev 8) the argument
+positions are fixed: first the key, then the fetcher. A lone function is a
+compile error, which is exactly what makes the silently-untracked trap
+unwritable (`useData(async () => fetchPost(id.value))` previously compiled
+as an unkeyed, untracked, non-SSR read).
 
 **Structured keys (rev 6).** The key does three jobs — reactive trigger,
 cache/SSR identity, and the fetcher's input — and a template string does the
@@ -305,7 +329,10 @@ for shared fetches, and the in-flight dedupe map is **kept** by this design:
   in-flight requests are **never aborted**.
 
 The engine rides `watch` (which has `onCleanup`) + `AbortController` for the
-unshared-abort case.
+unshared-abort case. **Dev-mode guard (rev 8):** reading a signal *inside a
+fetcher* fires a warning — the fetcher runs untracked, so the read is almost
+certainly a key/fetcher desync bug; the parameter belongs in the key. This
+closes the last door on the bug class tuple keys were adopted to eliminate.
 
 ### 2. Writes — `useAction`
 
@@ -331,7 +358,11 @@ interface AsyncAction<T, In> {
   readonly loading: boolean;         // state === 'pending'
   match<R>(arms: { /* same arms as AsyncState; retry = re-run last input */ }): R | undefined;
   run(input: In): Promise<RunResult<T>>;   // In = void ⇒ zero-arg run(): TS permits
-}                                          // omitting a void-typed parameter. No refresh().
+                                           // omitting a void-typed parameter.
+  reset(): void;   // rev 8: back to 'idle', clears value/error — dismiss a success
+}                  // message, reuse a form. Discards observation of an in-flight run
+                   // (its promise resolves SupersededError); never aborts the request.
+                   // No refresh() on a write.
 
 useAction<T, In = void>(fn: Fetcher<T, In>, opts?: ActionOptions): AsyncAction<T, In>;
 ```
@@ -505,11 +536,11 @@ signalxjs/core#171 — out of scope here.)
   internals and unchanged); `match` renders the `ready` arm server-side once
   the keyed value resolves. Tuple keys serialize under their canonical JSON
   string in the same blob.
-- **Unkeyed `useData` is client-only by definition:** it renders the `pending`
-  arm server-side and fetches after hydration — a visible pending→ready swap.
-  This is documented behavior, not a bug; the fix is "add a key". A one-time
-  dev-mode note fires when an unkeyed read renders during SSR (same
-  discoverability convention as the missing-`error`-arm warning).
+- **Client-only reads are explicit and stay keyed (rev 8):**
+  `{ server: false }` renders the `pending` arm server-side and fetches after
+  hydration — a visible pending→ready swap, documented. The read keeps its
+  key (client-side dedupe now, cache-pack coverage later); it just doesn't
+  run or transfer on the server. There is no unkeyed form.
 - Actions (`useAction`) don't run during SSR.
 - **Coexists with `@sigx/store`'s `ssrState()`** (signalxjs/store#27): store
   slices and keyed `useData` entries are different producers in the same
@@ -635,6 +666,9 @@ does not run there.
   redundant `latest`, the standalone `when()` (covered by `match`), and —
   rev 4 — the entire cache/revalidation/optimistic layer (now the §7 pack
   contract) and transitions as a committed phase (§8).
+- **Removed (rev 8):** the unkeyed bare-fetcher form — every read is keyed
+  (identity is mandatory); client-only is `{ server: false }` on a keyed
+  read.
 - **Renamed / surfaced:** `useAsync` → **`useData`** (rev 5 — the largest
   user-visible rename in the proposal); `app.config.errorHandler` → app
   `onError`; `<Stream>` → `<Defer>`.
@@ -649,10 +683,12 @@ does not run there.
   (`examples/spa-ssr/src/rfc-async-mock/`) as the surface's acceptance gate.
 - **Phase 1 — Core foundation (the only core phase):** internal async-cell
   engine (rides `watch`; keeps the shipped in-flight dedupe map); `useData`
-  reads (renamed from `useAsync`; string + tuple keys, fused conditional key,
-  one fetcher shape, pinned key-change/refresh semantics) + `match` (incl.
-  `idle` arm + `stale` error param) + `refresh`; `useAction` writes
-  (settled-result `.run`, `SupersededError`, `ActionOptions`, no-abort rule);
+  reads (renamed from `useAsync`; **key mandatory**, string + tuple keys,
+  fused conditional key, one fetcher shape, `{ server: false }` client-only,
+  pinned key-change/refresh semantics, fetcher signal-read dev guard) +
+  `match` (incl. `idle` arm + `stale` error param) + `refresh`; `useAction`
+  writes (settled-result `.run`, `SupersededError`, `reset()`,
+  `ActionOptions`, no-abort rule);
   `all({...})` + `.errors` + derived-state rules; rebuild `lazy()` + thin
   `<Defer>` (SSR: observes data + chunks; client: chunks only); surface app
   `onError` (+ event-handler wiring) and the `errorScope` parent-chain walk;
@@ -713,7 +749,16 @@ Each phase = its own issue → worktree → PR → Copilot review → merge.
   skipped + dev-warned (like `''`); static-tuple form rejected (stale-capture
   bug; a constant tuple has no advantage over a constant string).
 - `createAsyncCell`: stays internal — one public surface to stabilize pre-1.0.
-- Unkeyed SSR behavior: documented client-only semantics + one-time dev note.
+- **Key mandatory (rev 8):** the unkeyed form is removed — data always has
+  identity; client-only = `{ server: false }` on a keyed read (renders the
+  `pending` arm server-side, fetches after hydration). Kills the
+  silently-untracked bare-fetcher trap and keeps every read visible to the
+  future cache pack.
+- **`AsyncAction.reset()` (rev 8):** back to `idle`, clears value/error;
+  discards observation of an in-flight run (`SupersededError`), never aborts
+  the request.
+- **Fetcher signal-read dev guard (rev 8):** a signal read inside a fetcher
+  warns in dev — the fetcher is untracked; the parameter belongs in the key.
 - **Writes ship in Phase 1 core** (was open question 1): ~50 policy-free
   lines, and `AsyncAction` is the seam the cache pack extends — which is why
   the rev-6 concurrency and options fixes had to land before this contract
