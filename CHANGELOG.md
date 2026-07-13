@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- **All packages**: published tarballs now include `src/`, so the shipped declaration maps (`dist/*.d.ts.map`) resolve and go-to-definition from `node_modules` lands in real TypeScript source instead of a missing file. (#158)
 - **`@sigx/vite`**: the `sigx-types` CLI advertised in the README is now actually installable — the package manifest was missing its `bin` entry, so `npx sigx-types` could not resolve it. Also reordered the package's `exports` conditions to list `types` first, matching every other package. (#150)
 
 ## [0.7.0] — 2026-06-15
