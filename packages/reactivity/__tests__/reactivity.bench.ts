@@ -94,4 +94,52 @@ describe('allocation and tracking churn', () => {
     bench('re-track cost: effect with 50 deps re-running', () => {
         wide.p0 = ++wn;
     });
+
+    const arr = signal([0, 1, 2, 3]);
+    effect(() => { void arr.length; });
+    let an = 0;
+    bench('array push+pop churn with length subscriber', () => {
+        arr.push(++an);
+        arr.pop();
+    });
+
+    const nested = signal({ a: { b: { c: 0 } } });
+    bench('untracked nested object read', () => {
+        void nested.a.b.c; // outside any effect: pure get-trap fixed cost
+    });
+
+    const prim = signal(0);
+    effect(() => { void prim.value; });
+    let pn = 0;
+    bench('primitive .value write with 1 effect', () => {
+        prim.value = ++pn;
+    });
+
+    const replaceTarget = signal(Object.fromEntries(
+        Array.from({ length: 10 }, (_, i) => [`k${i}`, 0])
+    ) as Record<string, number>);
+    effect(() => { void replaceTarget.k0; });
+    let rn = 0;
+    bench('$set replace of 10-key object', () => {
+        ++rn;
+        replaceTarget.$set(Object.fromEntries(
+            Array.from({ length: 10 }, (_, i) => [`k${i}`, rn])
+        ) as Record<string, number>);
+    });
+
+    const fiveDeps = signal({ a: 0, b: 0, c: 0, d: 0, e: 0 });
+    bench('create-and-stop 1k effects over 5 deps', () => {
+        for (let i = 0; i < 1_000; i++) {
+            const runner = effect(() => {
+                void (fiveDeps.a + fiveDeps.b + fiveDeps.c + fiveDeps.d + fiveDeps.e);
+            });
+            runner.stop();
+        }
+    });
+
+    bench('signal() on non-proxyable values (Date, typed array)', () => {
+        for (let i = 0; i < 1_000; i++) {
+            signal({ at: new Date(0), buf: new Uint8Array(4) });
+        }
+    });
 });
