@@ -3,7 +3,7 @@
 // ============================================================================
 
 import type { Dep } from './types';
-import { batch, track, trigger } from './effect';
+import { startBatch, endBatch, track, trigger } from './effect';
 
 /** Symbol for tracking iteration dependencies (forEach, keys, values, entries, size) */
 export const ITERATION_KEY = Symbol('sigx:iterate');
@@ -19,8 +19,12 @@ export const rawToReactive = new WeakMap<object, object>();
  * If the value is not a proxy, returns it as-is.
  */
 export function toRaw<T>(observed: T): T {
-    const raw = reactiveToRaw.get(observed as object);
-    return raw ? toRaw(raw as T) : observed;
+    let raw = reactiveToRaw.get(observed as object);
+    while (raw) {
+        observed = raw as T;
+        raw = reactiveToRaw.get(raw);
+    }
+    return observed;
 }
 
 /**
@@ -121,25 +125,29 @@ export function shouldNotProxy(value: unknown): boolean {
  * `add`/`set`/`delete`, or a synthetic `'clear'` marker for `clear`).
  */
 export function createCollectionInstrumentations(
+    target: any,
     depsMap: Map<string | symbol, Dep>,
     getOrCreateDep: (key: string | symbol) => Dep,
     notify: (key: string | symbol) => void = () => {}
 ) {
+    // The proxy doesn't exist yet when the instrumentations are built; the
+    // caller installs it via setProxy right after constructing it. Methods
+    // close over the raw target and the proxy instead of resolving
+    // toRaw(this) per call and being re-bound per access.
+    let proxy: any = null;
     const instrumentations: Record<string | symbol, any> = {};
 
     // ---- READ METHODS (track dependencies) ----
 
     // has() - works on Set, Map, WeakSet, WeakMap
-    instrumentations.has = function (this: any, key: unknown): boolean {
-        const target = toRaw(this);
+    instrumentations.has = function (key: unknown): boolean {
         const rawKey = toRaw(key);
         track(getOrCreateDep(rawKey as string | symbol));
         return target.has(rawKey);
     };
 
     // get() - works on Map, WeakMap
-    instrumentations.get = function (this: any, key: unknown): any {
-        const target = toRaw(this);
+    instrumentations.get = function (key: unknown): any {
         const rawKey = toRaw(key);
         track(getOrCreateDep(rawKey as string | symbol));
         const value = target.get(rawKey);
@@ -152,56 +160,50 @@ export function createCollectionInstrumentations(
 
     // size - works on Set, Map (not WeakSet, WeakMap)
     Object.defineProperty(instrumentations, 'size', {
-        get(this: any) {
-            const target = toRaw(this);
+        get() {
             track(getOrCreateDep(ITERATION_KEY));
             return target.size;
         }
     });
 
     // forEach() - works on Set, Map
-    instrumentations.forEach = function (this: any, callback: Function, thisArg?: unknown): void {
-        const target = toRaw(this);
+    instrumentations.forEach = function (callback: Function, thisArg?: unknown): void {
         track(getOrCreateDep(ITERATION_KEY));
         target.forEach((value: any, key: any) => {
             // Make values reactive when iterating
-            const reactiveValue = (value && typeof value === 'object') 
-                ? (rawToReactive.get(value) || value) 
+            const reactiveValue = (value && typeof value === 'object')
+                ? (rawToReactive.get(value) || value)
                 : value;
-            const reactiveKey = (key && typeof key === 'object') 
-                ? (rawToReactive.get(key) || key) 
+            const reactiveKey = (key && typeof key === 'object')
+                ? (rawToReactive.get(key) || key)
                 : key;
-            callback.call(thisArg, reactiveValue, reactiveKey, this);
+            callback.call(thisArg, reactiveValue, reactiveKey, proxy);
         });
     };
 
     // keys() - works on Set, Map
-    instrumentations.keys = function (this: any): IterableIterator<any> {
-        const target = toRaw(this);
+    instrumentations.keys = function (): IterableIterator<any> {
         track(getOrCreateDep(ITERATION_KEY));
         const innerIterator = target.keys();
         return createReactiveIterator(innerIterator, false);
     };
 
     // values() - works on Set, Map
-    instrumentations.values = function (this: any): IterableIterator<any> {
-        const target = toRaw(this);
+    instrumentations.values = function (): IterableIterator<any> {
         track(getOrCreateDep(ITERATION_KEY));
         const innerIterator = target.values();
         return createReactiveIterator(innerIterator, true);
     };
 
     // entries() - works on Set, Map
-    instrumentations.entries = function (this: any): IterableIterator<any> {
-        const target = toRaw(this);
+    instrumentations.entries = function (): IterableIterator<any> {
         track(getOrCreateDep(ITERATION_KEY));
         const innerIterator = target.entries();
         return createReactiveEntriesIterator(innerIterator);
     };
 
     // [Symbol.iterator] - works on Set, Map
-    instrumentations[Symbol.iterator] = function (this: any): IterableIterator<any> {
-        const target = toRaw(this);
+    instrumentations[Symbol.iterator] = function (): IterableIterator<any> {
         track(getOrCreateDep(ITERATION_KEY));
         // Set uses values(), Map uses entries() for default iterator
         if (target instanceof Set) {
@@ -214,28 +216,29 @@ export function createCollectionInstrumentations(
     // ---- WRITE METHODS (trigger updates) ----
 
     // add() - works on Set, WeakSet
-    instrumentations.add = function (this: any, value: unknown): any {
-        const target = toRaw(this);
+    instrumentations.add = function (value: unknown): any {
         const rawValue = toRaw(value);
         const hadKey = target.has(rawValue);
         target.add(rawValue);
         if (!hadKey) {
             // Trigger both the specific key and iteration as one flush so
             // an effect reading both runs once, not twice.
-            batch(() => {
+            startBatch();
+            try {
                 const dep = depsMap.get(rawValue as string | symbol);
                 if (dep) trigger(dep);
                 const iterDep = depsMap.get(ITERATION_KEY);
                 if (iterDep) trigger(iterDep);
-            });
+            } finally {
+                endBatch();
+            }
             notify(rawValue as string | symbol);
         }
-        return this; // Return the proxy, not raw
+        return proxy; // Return the proxy, not raw
     };
 
     // set() - works on Map, WeakMap
-    instrumentations.set = function (this: any, key: unknown, value: unknown): any {
-        const target = toRaw(this);
+    instrumentations.set = function (key: unknown, value: unknown): any {
         const rawKey = toRaw(key);
         const rawValue = toRaw(value);
         const hadKey = target.has(rawKey);
@@ -244,55 +247,65 @@ export function createCollectionInstrumentations(
         if (!hadKey || !Object.is(oldValue, rawValue)) {
             // New key or changed value: trigger iteration (size/forEach)
             // and the key dependency as one flush.
-            batch(() => {
+            startBatch();
+            try {
                 if (!hadKey) {
                     const iterDep = depsMap.get(ITERATION_KEY);
                     if (iterDep) trigger(iterDep);
                 }
                 const dep = depsMap.get(rawKey as string | symbol);
                 if (dep) trigger(dep);
-            });
+            } finally {
+                endBatch();
+            }
             notify(rawKey as string | symbol);
         }
-        return this; // Return the proxy, not raw
+        return proxy; // Return the proxy, not raw
     };
 
     // delete() - works on Set, Map, WeakSet, WeakMap
-    instrumentations.delete = function (this: any, key: unknown): boolean {
-        const target = toRaw(this);
+    instrumentations.delete = function (key: unknown): boolean {
         const rawKey = toRaw(key);
         const hadKey = target.has(rawKey);
         const result = target.delete(rawKey);
         if (hadKey) {
             // Trigger both the specific key and iteration as one flush
-            batch(() => {
+            startBatch();
+            try {
                 const dep = depsMap.get(rawKey as string | symbol);
                 if (dep) trigger(dep);
                 const iterDep = depsMap.get(ITERATION_KEY);
                 if (iterDep) trigger(iterDep);
-            });
+            } finally {
+                endBatch();
+            }
             notify(rawKey as string | symbol);
         }
         return result;
     };
 
     // clear() - works on Set, Map
-    instrumentations.clear = function (this: any): void {
-        const target = toRaw(this);
+    instrumentations.clear = function (): void {
         const hadItems = target.size > 0;
         target.clear();
         if (hadItems) {
             // Trigger all dependencies as one flush
-            batch(() => {
+            startBatch();
+            try {
                 for (const dep of depsMap.values()) {
                     trigger(dep);
                 }
-            });
+            } finally {
+                endBatch();
+            }
             notify('clear');
         }
     };
 
-    return instrumentations;
+    return {
+        instrumentations,
+        setProxy(p: any) { proxy = p; }
+    };
 }
 
 /**
