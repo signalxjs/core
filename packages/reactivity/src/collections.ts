@@ -19,6 +19,11 @@ export const rawToReactive = new WeakMap<object, object>();
  * If the value is not a proxy, returns it as-is.
  */
 export function toRaw<T>(observed: T): T {
+    // Primitives can't be proxies; skip the WeakMap probe. (WeakMap.get
+    // tolerates primitive keys — this is a fast path, not a crash guard.)
+    if (!observed || (typeof observed !== 'object' && typeof observed !== 'function')) {
+        return observed;
+    }
     let raw = reactiveToRaw.get(observed as object);
     while (raw) {
         observed = raw as T;
@@ -135,7 +140,10 @@ export function createCollectionInstrumentations(
     // close over the raw target and the proxy instead of resolving
     // toRaw(this) per call and being re-bound per access.
     let proxy: any = null;
-    const instrumentations: Record<string | symbol, any> = {};
+    // Null prototype: the get trap tests membership with `prop in`, which
+    // walks the prototype chain — a plain object would falsely claim
+    // Object.prototype keys (constructor, toString, ...).
+    const instrumentations: Record<string | symbol, any> = Object.create(null);
 
     // ---- READ METHODS (track dependencies) ----
 
