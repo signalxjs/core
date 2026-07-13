@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-07-13
+
+Performance-and-correctness release from a full review of the reactivity and renderer hot paths: the keyed diff is now LIS-based (Vue-3-style), effect re-runs reuse their dependency links instead of tearing down and re-subscribing, and a batch of real bugs found during the review — SVG namespace inconsistencies, dropped falsy keys, keyed fragment/component reorders losing their content, and a throwing effect wedging its siblings — are fixed.
+
+### Changed
+
+- **`@sigx/reactivity`**: effect and computed re-runs reuse their dependency links (Vue 3.4-style active-link reuse) instead of full teardown plus re-subscription — a stable re-run performs zero allocations and zero Set operations per tracked read, and duplicate reads within a run dedup for free. Re-tracking an effect with 50 stable dependencies is ~1.36x faster; the two-pass mark/flush, queued-effect dedup, and value-change cutoff semantics are unchanged. (#162)
+- **`@sigx/runtime-core`**: keyed reconciliation is Vue-3-style — prefix/suffix sync plus a longest-increasing-subsequence pass that moves only the nodes outside the stable subsequence (a 100-row benchmark shuffle drops from ~99 DOM moves to 76; swaps move exactly the two displaced rows). Elements with a single unchanged-type child skip the reconcile machinery entirely (2–4x faster partial updates in benchmarks). (#163, #184)
+- **`@sigx/reactivity`**: hot-path allocation work throughout — the exotic-builtin check (`shouldNotProxy`) exits plain objects and arrays on two pointer compares with a per-prototype verdict cache (reads of Date/typed-array values ~1.5–2.3x faster), array mutators and multi-dep writes batch without per-call closures, `$set` is one stable closure per proxy (`state.$set === state.$set`), collection methods are no longer re-bound per access (`m.set === m.set`), and the nested-object cache allocates lazily. (#173, #177, #181)
+- **`@sigx/runtime-core`**: `jsx()` clones component props once instead of twice per vnode and the model path avoids an `Object.keys` allocation — component mounting is measurably cheaper. (#152)
+
+### Fixed
+
+- **`@sigx/runtime-core`**: reordering keyed **fragment or component** children now moves their entire rendered content. Previously the reconciler moved only the child's trailing anchor comment (`vnode.dom`), leaving the fragment's nodes / the component's subtree behind in the old position. Keyed reconciliation also now minimizes DOM moves with a longest-increasing-subsequence pass (Vue-3-style): a reorder moves only the nodes outside the stable subsequence instead of nearly every displaced node. (#184)
+- **`@sigx/runtime-core`**: falsy JSX keys are no longer dropped — `key={0}` and `key=""` now actually key their elements instead of silently falling back to positional diffing. Keys are also normalized to strings once at vnode creation, so keyed reconciliation compares them without per-diff coercion (`key={1}` still matches `key="1"`). (#169)
+- **`@sigx/reactivity`**: an effect that throws mid-notification-wave no longer permanently wedges the other effects queued in the same wave. Previously the abandoned effects kept their internal queued flag while being dropped from the queue, so no later write could ever re-run them. (#179)
+- **`@sigx/runtime-core`**: SVG namespace handling is now consistent between mount and patch. Previously patch re-derived SVG-ness from the tag name alone, so HTML elements whose names also exist in SVG (`title`, `text`, `image`, …) were patched down the SVG attribute path, elements inside `<foreignObject>` were misclassified, components mounted inside an `<svg>` rendered their subtree in the HTML namespace, and a child newly mounted during a fragment patch inside an `<svg>` (or a component swapping its root element type) lost the namespace entirely. The namespace is now computed once at mount, cached on the vnode, and threaded through fragment patches, type replacements, and component mounts. (#166)
+- **All packages**: published tarballs now include `src/`, so the shipped declaration maps (`dist/*.d.ts.map`) resolve and go-to-definition from `node_modules` lands in real TypeScript source instead of a missing file. (#158)
+- **`@sigx/vite`**: the `sigx-types` CLI advertised in the README is now actually installable — the package manifest was missing its `bin` entry, so `npx sigx-types` could not resolve it. Also reordered the package's `exports` conditions to list `types` first, matching every other package. (#150)
+
 ## [0.7.0] — 2026-06-15
 
 Slot-presence semantics fix: a slot is now a callable accessor only when the parent actually provided content for it — `default` included — and reads as `undefined` otherwise. This makes presence a plain truthiness / optional-call check and resurrects the documented `slots.x?.() ?? fallback` pattern, which previously could never render its fallback.
@@ -235,7 +255,8 @@ Initial public release of the SignalX (`sigx`) ecosystem on npm. Six packages pu
 - Node `^20.19.0 || >=22.12.0`
 - `@sigx/vite` peer-depends on `vite >=8.0.0`
 
-[Unreleased]: https://github.com/signalxjs/core/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/signalxjs/core/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/signalxjs/core/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/signalxjs/core/compare/v0.6.3...v0.7.0
 [0.6.3]: https://github.com/signalxjs/core/compare/v0.6.2...v0.6.3
 [0.6.2]: https://github.com/signalxjs/core/compare/v0.6.1...v0.6.2

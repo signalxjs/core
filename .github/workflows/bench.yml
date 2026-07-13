@@ -10,7 +10,7 @@ jobs:
   bench-quick:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: pnpm/action-setup@v6
 
@@ -30,7 +30,7 @@ jobs:
         run: pnpm bench:ssr:quick
 
       - name: Upload quick results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: quick-latest
           path: benchmarks/results/quick-latest.json

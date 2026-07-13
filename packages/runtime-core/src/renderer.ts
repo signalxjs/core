@@ -1,5 +1,5 @@
 import { VNode, Fragment, JSXElement, Text, Comment, EMPTY_PROPS } from './jsx-runtime.js';
-import { effect, signal, untrack, EffectRunner } from '@sigx/reactivity';
+import { effect, signal, untrack } from '@sigx/reactivity';
 import { withoutOwnerTracking } from '@sigx/reactivity/internals';
 import { ComponentSetupContext, setCurrentInstance, getCurrentInstance, MountContext, ViewFn, SetupFn } from './component.js';
 import { createPropsAccessor } from './utils/props-accessor.js';
@@ -128,30 +128,53 @@ function sameSlotChildren(a: any, b: any): boolean {
         && sameSlotChildren(a.children, b.children);
 }
 
-function createKeyToKeyIndexMap(children: VNode[], beginIdx: number, endIdx: number) {
-    const map = new Map<string | number, number>();
-    for (let i = beginIdx; i <= endIdx; i++) {
-        const key = children[i]?.key;
-        if (key != null) {
-            const keyStr = String(key);
-            if (process.env.NODE_ENV !== 'production' && map.has(keyStr)) {
-                console.warn(
-                    `[SignalX] Duplicate key "${key}" detected in list. ` +
-                    `Keys should be unique among siblings to ensure correct reconciliation. ` +
-                    `This may cause unexpected behavior when items are reordered, added, or removed.`
-                );
+const EMPTY_SEQUENCE: number[] = [];
+
+/**
+ * Longest increasing subsequence over `newIndexToOldIndexMap` values
+ * (zeros — freshly mounted nodes — are ignored). Returns the INDICES of
+ * the stable elements. O(n log n); the canonical implementation used by
+ * Vue's keyed diff.
+ */
+function getSequence(arr: number[]): number[] {
+    const p = arr.slice();
+    const result = [0];
+    let i: number, j: number, u: number, v: number, c: number;
+    const len = arr.length;
+    for (i = 0; i < len; i++) {
+        const arrI = arr[i];
+        if (arrI !== 0) {
+            j = result[result.length - 1];
+            if (arr[j] < arrI) {
+                p[i] = j;
+                result.push(i);
+                continue;
             }
-            map.set(keyStr, i);
+            u = 0;
+            v = result.length - 1;
+            while (u < v) {
+                c = (u + v) >> 1;
+                if (arr[result[c]] < arrI) {
+                    u = c + 1;
+                } else {
+                    v = c;
+                }
+            }
+            if (arrI < arr[result[u]]) {
+                if (u > 0) {
+                    p[i] = result[u - 1];
+                }
+                result[u] = i;
+            }
         }
     }
-    return map;
-}
-
-function findIndexInOld(children: VNode[], newChild: VNode, beginIdx: number, endIdx: number): number | null {
-    for (let i = beginIdx; i <= endIdx; i++) {
-        if (children[i] && isSameVNode(children[i], newChild)) return i;
+    u = result.length;
+    v = result[u - 1];
+    while (u-- > 0) {
+        result[u] = v;
+        v = p[v];
     }
-    return null;
+    return result;
 }
 
 /**
@@ -159,11 +182,12 @@ function findIndexInOld(children: VNode[], newChild: VNode, beginIdx: number, en
  */
 function checkDuplicateKeys(children: VNode[]): void {
     if (process.env.NODE_ENV === 'production') return;
-    
+
     const seenKeys = new Set<string>();
     for (const child of children) {
         if (child?.key != null) {
-            const keyStr = String(child.key);
+            const key = child.key;
+            const keyStr = typeof key === 'string' ? key : String(key);
             if (seenKeys.has(keyStr)) {
                 console.warn(
                     `[SignalX] Duplicate key "${child.key}" detected in list. ` +
@@ -341,13 +365,14 @@ export function createRenderer<HostNode = any, HostElement = any>(
 
         // Check for component (function with __setup)
         if (isComponent(vnode.type)) {
-            mountComponent(vnode, container, before, vnode.type.__setup as SetupFn);
+            mountComponent(vnode, container, before, vnode.type.__setup as SetupFn, parentIsSVG);
             return;
         }
 
         // Determine if this element should be created as SVG
         const tag = vnode.type as string;
         const isSVG = tag === 'svg' || (parentIsSVG && tag !== 'foreignObject');
+        (vnode as InternalVNode)._svg = isSVG;
 
         const element = hostCreateElement(tag, isSVG);
         vnode.dom = element;
@@ -459,7 +484,7 @@ export function createRenderer<HostNode = any, HostElement = any>(
         }
     }
 
-    function patch(oldVNode: VNode, newVNode: VNode, container: HostElement): void {
+    function patch(oldVNode: VNode, newVNode: VNode, container: HostElement, parentIsSVG: boolean = false): void {
         if (oldVNode === newVNode) return;
 
         // If types are different, replace completely
@@ -469,7 +494,12 @@ export function createRenderer<HostNode = any, HostElement = any>(
             // so hostNextSibling gives us the correct insertion point
             const nextSibling = oldVNode.dom ? hostNextSibling(oldVNode.dom) : null;
             unmount(oldVNode, parent as HostElement);
-            mount(newVNode, parent as HostElement, nextSibling);
+            // Thread the SVG context so a replacement inside an <svg> keeps
+            // the namespace. Fallback: if the old vnode was itself in the SVG
+            // namespace (and wasn't the <svg> root, whose container is HTML),
+            // its container must be SVG.
+            mount(newVNode, parent as HostElement, nextSibling,
+                parentIsSVG || ((oldVNode as InternalVNode)._svg === true && oldVNode.type !== 'svg'));
             return;
         }
 
@@ -633,7 +663,7 @@ export function createRenderer<HostNode = any, HostElement = any>(
             // use it as a fallback insertion target when appending new
             // children that have no following sibling VNode.
             newVNode.dom = oldVNode.dom;
-            patchChildren(oldVNode, newVNode, container, false, newVNode.dom ?? null);
+            patchChildren(oldVNode, newVNode, container, parentIsSVG, newVNode.dom ?? null);
             return;
         }
 
@@ -643,13 +673,24 @@ export function createRenderer<HostNode = any, HostElement = any>(
         // Guard: if old element has no DOM (can happen with hydrated slot content),
         // recover by mounting fresh instead of crashing
         if (!element) {
-            mount(newVNode, container);
+            mount(newVNode, container, null, parentIsSVG);
             return;
         }
         
-        // Determine if this is an SVG element (for proper attribute handling)
+        // Determine if this is an SVG element (for proper attribute handling).
+        // Prefer the flag cached at mount — it is contextual, so HTML elements
+        // whose names also exist in SVG (title, text, image, …) and elements
+        // inside <foreignObject> patch down the right path. Hydrated vnodes
+        // lack the flag until their first patch; fall back to the historical
+        // tag-based check for them, then cache forward.
         const tag = newVNode.type as string;
-        const isSVG = tag === 'svg' || isSvgTag(tag);
+        // Fallback for vnodes without the cached flag: with a known SVG
+        // context, mirror mount()'s formula exactly (including the
+        // foreignObject reset); with no context (hydrated subtrees patched
+        // from the top), keep the historical tag-based heuristic.
+        const isSVG = (newVNode as InternalVNode)._svg =
+            (oldVNode as InternalVNode)._svg ??
+            (tag === 'svg' || (parentIsSVG ? tag !== 'foreignObject' : isSvgTag(tag)));
 
         // Update props — skipped entirely when both sides share the same
         // props object (prop-less elements share EMPTY_PROPS). Compare the
@@ -702,6 +743,20 @@ export function createRenderer<HostNode = any, HostElement = any>(
         const oldChildren = oldVNode.children;
         const newChildren = newVNode.children;
 
+        // Fast path: exactly one same-vnode child on both sides (the dominant
+        // <li>text</li> shape). patch() handles it directly — including the
+        // Text branch's hostSetText — skipping the reconcile machinery and
+        // the dev-mode duplicate-key scan (vacuous for a single child).
+        if (oldChildren.length === 1 && newChildren.length === 1) {
+            const oldChild = oldChildren[0];
+            const newChild = newChildren[0];
+            if (oldChild != null && newChild != null && isSameVNode(oldChild, newChild)) {
+                newChild.parent = newVNode;
+                patch(oldChild, newChild, container, parentIsSVG);
+                return;
+            }
+        }
+
         for (let i = 0; i < newChildren.length; i++) {
             newChildren[i].parent = newVNode;
         }
@@ -709,100 +764,203 @@ export function createRenderer<HostNode = any, HostElement = any>(
         reconcileChildrenArray(container, oldChildren, newChildren, parentIsSVG, fallbackAnchor);
     }
 
+    /**
+     * First host node a vnode's rendered range occupies. For elements,
+     * text and comments this is `vnode.dom`; for Fragments the first
+     * child's first node (falling back to the trailing anchor when
+     * empty); for components the subtree's first node, falling back to
+     * the component's trailing anchor comment. Used to compute insertion
+     * anchors that don't land inside a fragment/component sibling's span.
+     */
+    function firstHostNode(vnode: VNode | null | undefined): HostNode | null {
+        if (vnode == null) return null;
+        if (vnode.type === Fragment) {
+            const children = vnode.children;
+            for (let i = 0; i < children.length; i++) {
+                const n = firstHostNode(children[i]);
+                if (n) return n;
+            }
+            return (vnode.dom as HostNode) ?? null;
+        }
+        if (isComponent(vnode.type)) {
+            const internal = vnode as InternalVNode;
+            const sub = internal._subTreeRef?.current ?? internal._subTree;
+            return (sub ? firstHostNode(sub) : null) ?? ((vnode.dom as HostNode) ?? null);
+        }
+        return (vnode.dom as HostNode) ?? null;
+    }
+
+    /**
+     * Move a vnode's ENTIRE host range before `anchor`. For fragments and
+     * components `vnode.dom` is the trailing anchor comment — moving only
+     * it (what the old diff did) left the content behind.
+     */
+    function moveVNode(vnode: VNode | null | undefined, parent: HostElement, anchor: HostNode | null): void {
+        if (vnode == null) return;
+        if (vnode.type === Fragment) {
+            const children = vnode.children;
+            for (let i = 0; i < children.length; i++) {
+                moveVNode(children[i], parent, anchor);
+            }
+            if (vnode.dom) hostInsert(vnode.dom as HostNode, parent, anchor);
+            return;
+        }
+        if (isComponent(vnode.type)) {
+            const internal = vnode as InternalVNode;
+            const sub = internal._subTreeRef?.current ?? internal._subTree;
+            if (sub) moveVNode(sub, parent, anchor);
+            if (vnode.dom) hostInsert(vnode.dom as HostNode, parent, anchor);
+            return;
+        }
+        if (vnode.dom) hostInsert(vnode.dom as HostNode, parent, anchor);
+    }
+
+    /**
+     * Keyed children reconciliation (Vue-3-style): prefix/suffix sync,
+     * then a keyed middle pass whose moves are minimized with a longest-
+     * increasing-subsequence — only nodes outside the stable subsequence
+     * are moved, and fragment/component children move their whole host
+     * range (via moveVNode), not just their trailing anchor.
+     */
     function reconcileChildrenArray(parent: HostElement, oldChildren: VNode[], newChildren: VNode[], parentIsSVG: boolean = false, fallbackAnchor: HostNode | null = null) {
         // Check for duplicate keys in development
         if (process.env.NODE_ENV !== 'production') {
             checkDuplicateKeys(newChildren);
         }
 
-        let oldStartIdx = 0;
-        let oldEndIdx = oldChildren.length - 1;
-        let oldStartVNode = oldChildren[0];
-        let oldEndVNode = oldChildren[oldEndIdx];
+        let i = 0;
+        let e1 = oldChildren.length - 1;
+        let e2 = newChildren.length - 1;
 
-        let newStartIdx = 0;
-        let newEndIdx = newChildren.length - 1;
-        let newStartVNode = newChildren[0];
-        let newEndVNode = newChildren[newEndIdx];
-
-        let oldKeyToIdx: Map<string | number, number> | undefined;
-
-        while (oldStartIdx <= oldEndIdx && newStartIdx <= newEndIdx) {
-            if (oldStartVNode == null) {
-                oldStartVNode = oldChildren[++oldStartIdx];
-            } else if (oldEndVNode == null) {
-                oldEndVNode = oldChildren[--oldEndIdx];
-            } else if (isSameVNode(oldStartVNode, newStartVNode)) {
-                patch(oldStartVNode, newStartVNode, parent);
-                oldStartVNode = oldChildren[++oldStartIdx];
-                newStartVNode = newChildren[++newStartIdx];
-            } else if (isSameVNode(oldEndVNode, newEndVNode)) {
-                patch(oldEndVNode, newEndVNode, parent);
-                oldEndVNode = oldChildren[--oldEndIdx];
-                newEndVNode = newChildren[--newEndIdx];
-            } else if (isSameVNode(oldStartVNode, newEndVNode)) {
-                patch(oldStartVNode, newEndVNode, parent);
-                const nodeToMove = oldStartVNode.dom;
-                const anchor = oldEndVNode.dom ? hostNextSibling(oldEndVNode.dom) : null;
-                if (nodeToMove) {
-                    hostInsert(nodeToMove, parent, anchor);
-                }
-                oldStartVNode = oldChildren[++oldStartIdx];
-                newEndVNode = newChildren[--newEndIdx];
-            } else if (isSameVNode(oldEndVNode, newStartVNode)) {
-                patch(oldEndVNode, newStartVNode, parent);
-                const nodeToMove = oldEndVNode.dom;
-                const anchor = oldStartVNode.dom ?? null;
-                if (nodeToMove) {
-                    hostInsert(nodeToMove, parent, anchor);
-                }
-                oldEndVNode = oldChildren[--oldEndIdx];
-                newStartVNode = newChildren[++newStartIdx];
+        // 1. Prefix sync. Old arrays may contain holes; a hole ends the run.
+        while (i <= e1 && i <= e2) {
+            const n1 = oldChildren[i];
+            if (n1 != null && isSameVNode(n1, newChildren[i])) {
+                patch(n1, newChildren[i], parent, parentIsSVG);
+                i++;
             } else {
-                if (!oldKeyToIdx) {
-                    oldKeyToIdx = createKeyToKeyIndexMap(oldChildren, oldStartIdx, oldEndIdx);
-                }
-                const idxInOld = newStartVNode.key != null
-                    ? oldKeyToIdx.get(String(newStartVNode.key))
-                    : findIndexInOld(oldChildren, newStartVNode, oldStartIdx, oldEndIdx);
-
-                if (idxInOld != null) {
-                    const vnodeToMove = oldChildren[idxInOld];
-                    patch(vnodeToMove, newStartVNode, parent);
-                    oldChildren[idxInOld] = undefined!;
-                    if (vnodeToMove.dom && oldStartVNode.dom) {
-                        hostInsert(vnodeToMove.dom, parent, oldStartVNode.dom);
-                    }
-                } else {
-                    mount(newStartVNode, parent, oldStartVNode.dom ?? null, parentIsSVG);
-                }
-                newStartVNode = newChildren[++newStartIdx];
+                break;
             }
         }
 
-        if (oldStartIdx > oldEndIdx) {
-            if (newStartIdx <= newEndIdx) {
-                const nextNewDom = newChildren[newEndIdx + 1]?.dom ?? null;
-                // Fall back to the parent fragment's trailing anchor when no
-                // following sibling VNode has a DOM yet — otherwise `null`
-                // would mean "append to parent", which would push the new
-                // nodes past any siblings that follow the fragment in the
-                // parent DOM.
-                const anchor = nextNewDom ?? fallbackAnchor ?? null;
-                for (let i = newStartIdx; i <= newEndIdx; i++) {
+        // 2. Suffix sync.
+        while (i <= e1 && i <= e2) {
+            const n1 = oldChildren[e1];
+            if (n1 != null && isSameVNode(n1, newChildren[e2])) {
+                patch(n1, newChildren[e2], parent, parentIsSVG);
+                e1--;
+                e2--;
+            } else {
+                break;
+            }
+        }
+
+        // 3. Old range exhausted: mount the remaining new range before the
+        //    already-patched suffix head, falling back to the enclosing
+        //    fragment's trailing anchor (never bare-append past siblings
+        //    that follow the fragment in the parent DOM).
+        if (i > e1) {
+            if (i <= e2) {
+                const next = e2 + 1 < newChildren.length ? firstHostNode(newChildren[e2 + 1]) : null;
+                const anchor = next ?? fallbackAnchor ?? null;
+                for (; i <= e2; i++) {
                     mount(newChildren[i], parent, anchor, parentIsSVG);
                 }
             }
-        } else if (newStartIdx > newEndIdx) {
-            for (let i = oldStartIdx; i <= oldEndIdx; i++) {
-                if (oldChildren[i]) {
-                    unmount(oldChildren[i], parent);
+            return;
+        }
+
+        // 4. New range exhausted: unmount the remaining old range.
+        if (i > e2) {
+            for (; i <= e1; i++) {
+                const n1 = oldChildren[i];
+                if (n1 != null) {
+                    unmount(n1, parent);
+                }
+            }
+            return;
+        }
+
+        // 5. Middle: map new keys, then walk the old range once — patching
+        //    matches, unmounting the rest, and detecting whether anything
+        //    actually moved.
+        const s2 = i;
+        const keyToNewIndexMap = new Map<string, number>();
+        for (let j = s2; j <= e2; j++) {
+            const key = newChildren[j].key;
+            if (key != null) {
+                keyToNewIndexMap.set(typeof key === 'string' ? key : String(key), j);
+            }
+        }
+
+        const toBePatched = e2 - s2 + 1;
+        let patched = 0;
+        let moved = false;
+        let maxNewIndexSoFar = 0;
+        // newIndexToOldIndexMap[newIndex - s2] = oldIndex + 1 (0 = mount fresh)
+        const newIndexToOldIndexMap: number[] = Array.from({ length: toBePatched }, () => 0);
+
+        for (let j = i; j <= e1; j++) {
+            const prevChild = oldChildren[j];
+            if (prevChild == null) continue;
+            if (patched >= toBePatched) {
+                unmount(prevChild, parent);
+                continue;
+            }
+            let newIndex: number | undefined;
+            const prevKey = prevChild.key;
+            if (prevKey != null) {
+                newIndex = keyToNewIndexMap.get(typeof prevKey === 'string' ? prevKey : String(prevKey));
+                // Same key but different type must remount, not patch.
+                if (newIndex !== undefined && !isSameVNode(prevChild, newChildren[newIndex])) {
+                    newIndex = undefined;
+                }
+            } else {
+                // Keyless fallback: first unclaimed same-type keyless new
+                // child (covers mixed keyed/unkeyed siblings and the
+                // Comment placeholders normalizeChild emits).
+                for (let k = s2; k <= e2; k++) {
+                    if (newIndexToOldIndexMap[k - s2] === 0 && isSameVNode(prevChild, newChildren[k])) {
+                        newIndex = k;
+                        break;
+                    }
+                }
+            }
+            if (newIndex === undefined) {
+                unmount(prevChild, parent);
+            } else {
+                newIndexToOldIndexMap[newIndex - s2] = j + 1;
+                if (newIndex >= maxNewIndexSoFar) {
+                    maxNewIndexSoFar = newIndex;
+                } else {
+                    moved = true;
+                }
+                patch(prevChild, newChildren[newIndex], parent, parentIsSVG);
+                patched++;
+            }
+        }
+
+        // 6. Backward walk: mount fresh nodes and move only the nodes
+        //    outside the longest increasing subsequence of old positions.
+        const stable = moved ? getSequence(newIndexToOldIndexMap) : EMPTY_SEQUENCE;
+        let s = stable.length - 1;
+        for (let j = toBePatched - 1; j >= 0; j--) {
+            const newIndex = s2 + j;
+            const next = newIndex + 1 < newChildren.length ? firstHostNode(newChildren[newIndex + 1]) : null;
+            const anchor = next ?? fallbackAnchor ?? null;
+            if (newIndexToOldIndexMap[j] === 0) {
+                mount(newChildren[newIndex], parent, anchor, parentIsSVG);
+            } else if (moved) {
+                if (s < 0 || j !== stable[s]) {
+                    moveVNode(newChildren[newIndex], parent, anchor);
+                } else {
+                    s--;
                 }
             }
         }
     }
 
-    function mountComponent(vnode: VNode, container: HostElement, before: HostNode | null, setup: SetupFn<any, any, any, any>) {
+    function mountComponent(vnode: VNode, container: HostElement, before: HostNode | null, setup: SetupFn<any, any, any, any>, parentIsSVG: boolean = false) {
         // No wrapper element - we render directly into the container
         // Use an anchor comment to track the component's position
         const anchor = hostCreateComment('');
@@ -969,7 +1127,7 @@ export function createRenderer<HostNode = any, HostElement = any>(
                     if (prevSubTree) {
                         // Preserve focused element across the entire patch cycle
                         const prevFocus = hostGetActiveElement ? hostGetActiveElement() : null;
-                        patch(prevSubTree, subTree, container);
+                        patch(prevSubTree, subTree, container, parentIsSVG);
                         if (prevFocus && hostRestoreFocus && hostGetActiveElement!() !== prevFocus) {
                             hostRestoreFocus(prevFocus);
                         }
@@ -981,7 +1139,7 @@ export function createRenderer<HostNode = any, HostElement = any>(
                             for (let i = 0, len = hooks.length; i < len; i++) hooks[i]();
                         }
                     } else {
-                        mount(subTree, container, anchor);
+                        mount(subTree, container, anchor, parentIsSVG);
                     }
                     subTreeRef.current = subTree;
                     internalVNode._subTree = subTree;

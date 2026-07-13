@@ -5,6 +5,7 @@ import { createModel, isModel, type Model } from './model.js';
 import { getModelProcessors } from './platform.js';
 import { getModelModifier, wrapModelWriteBack } from './model-modifiers.js';
 import { isComponent } from './utils/is-component.js';
+import { normalizeKey } from './utils/normalize-key.js';
 
 // Re-export platform types and functions
 export { setPlatformModelProcessor, getPlatformModelProcessor, registerModelProcessor } from './platform.js';
@@ -196,13 +197,17 @@ export function jsx(
     }
 
     if (!needsModelProcessing) {
-        // Fast path — no model bindings, avoid props clone entirely
+        // Fast path — no model bindings, no mutation clone needed
         if (isComponentType) {
-            const { children, ...rest } = (props || {});
+            // Single own-enumerable clone (JSX transforms always pass plain
+            // object literals); `children` must stay an own key even when
+            // absent so `"children" in props` observability is unchanged.
+            const componentProps: Record<string, any> = props ? { ...props } : {};
+            if (!('children' in componentProps)) componentProps.children = undefined;
             return {
                 type: type as Function,
-                props: { ...rest, children },
-                key: key || rest.key || null,
+                props: componentProps,
+                key: normalizeKey(key ?? componentProps.key),
                 children: EMPTY_CHILDREN,
                 dom: null
             };
@@ -225,7 +230,7 @@ export function jsx(
         return {
             type: type as string | typeof Fragment,
             props: hasProps ? rest : EMPTY_PROPS,
-            key: key || rest.key || null,
+            key: normalizeKey(key ?? rest.key),
             children: normalizeChildren(children),
             dom: null
         };
@@ -234,6 +239,7 @@ export function jsx(
     // Slow path: model bindings present, clone props for mutation
     const processedProps = { ...props };
     const models: Record<string, Model<any>> = {};
+    let hasModels = false;
 
     // Handle model props (two-way binding)
     if (props) {
@@ -302,6 +308,7 @@ export function jsx(
                             ? wrapModelWriteBack(updateHandler, props.modelModifiers)
                             : updateHandler;
                         models.model = createModel(tuple, handler);
+                        hasModels = true;
                         // Keep onUpdate handler for backward compatibility
                         processedProps["onUpdate:modelValue"] = handler;
                     } else {
@@ -379,6 +386,7 @@ export function jsx(
                     // For components: create Model<T> object with the prop name
                     if (isComponentType) {
                         models[name] = createModel(tuple, handler);
+                        hasModels = true;
                         // Keep onUpdate handler for backward compatibility
                         processedProps[eventName] = handler;
                     } else {
@@ -393,18 +401,20 @@ export function jsx(
     }
 
     // Attach models to props for component instantiation
-    if (Object.keys(models).length > 0) {
+    if (hasModels) {
         processedProps.$models = models;
     }
 
     // Handle sigx components - create a VNode with the component factory as type
     // The renderer will detect __setup and call mountComponent
     if (isComponent(type)) {
-        const { children, ...rest } = processedProps;
+        // processedProps is already a fresh clone; just ensure `children` stays
+        // an own key even when absent (matches the fast path's observability).
+        if (!('children' in processedProps)) processedProps.children = undefined;
         return {
             type: type as Function,
-            props: { ...rest, children },
-            key: key || rest.key || null,
+            props: processedProps,
+            key: normalizeKey(key ?? processedProps.key),
             children: [], // Children are passed via props for components
             dom: null
         };
@@ -420,7 +430,7 @@ export function jsx(
     const vnode: VNode = {
         type: type as string | typeof Fragment,
         props: rest,
-        key: key || rest.key || null,
+        key: normalizeKey(key ?? rest.key),
         children: normalizeChildren(children),
         dom: null
     };

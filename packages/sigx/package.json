@@ -1,6 +1,6 @@
 {
     "name": "sigx",
-    "version": "0.7.0",
+    "version": "0.8.0",
     "description": "SignalX - Lightweight reactive component framework with signals and TSX support",
     "type": "module",
     "main": "./dist/sigx.js",
@@ -32,10 +32,11 @@
         }
     },
     "files": [
-        "dist"
+        "dist",
+        "src"
     ],
     "scripts": {
-        "build": "vite build && vite build --mode prod-dist && tsgo --emitDeclarationOnly",
+        "build": "vite build && vite build --mode prod-dist && tsc --emitDeclarationOnly",
         "dev": "vite build --watch",
         "prepublishOnly": "pnpm run build"
     },
@@ -69,8 +70,8 @@
     },
     "devDependencies": {
         "@sigx/vite": "workspace:^",
-        "typescript": "^6.0.3",
-        "vite": "^8.0.14",
-        "esbuild": "^0.25.0"
+        "typescript": "^7.0.2",
+        "vite": "^8.1.4",
+        "esbuild": "^0.28.1"
     }
 }

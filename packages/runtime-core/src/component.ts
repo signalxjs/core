@@ -7,6 +7,7 @@
  */
 
 import { getComponentPlugins } from "./plugins.js";
+import { normalizeKey } from "./utils/normalize-key.js";
 import type {
     ComponentSetupContext,
     PlatformElement,
@@ -125,7 +126,7 @@ export function component<
         return {
             type: factory,
             props: props || {},
-            key: props?.key || null,
+            key: normalizeKey(props?.key),
             children: [],
             dom: null
         };

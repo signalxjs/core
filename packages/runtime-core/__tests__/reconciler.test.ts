@@ -424,5 +424,34 @@ describe('Reconciler - Key-based Diffing', () => {
             const createOps = mockOps.operations.filter(op => op.startsWith('createElement:li'));
             expect(createOps.length).toBe(0);
         });
+
+        it('should honor falsy keys (key={0}, key="")', () => {
+            // Regression: `key || props.key || null` silently dropped falsy
+            // keys, so key={0} diffed positionally instead of by key.
+            expect((jsx('li', { key: 0, children: 'zero' }) as VNode).key).toBe('0');
+            expect((jsx('li', { key: '', children: 'empty' }) as VNode).key).toBe('');
+
+            const list1 = jsx(Fragment, {
+                children: [
+                    jsx('li', { key: 0, children: 'Zero' }),
+                    jsx('li', { key: 1, children: 'One' })
+                ]
+            });
+            renderer.render(list1 as any, container);
+            mockOps.reset();
+
+            // Reorder: with working keys the elements are moved/reused, not
+            // recreated.
+            const list2 = jsx(Fragment, {
+                children: [
+                    jsx('li', { key: 1, children: 'One' }),
+                    jsx('li', { key: 0, children: 'Zero' })
+                ]
+            });
+            renderer.render(list2 as any, container);
+
+            const createOps = mockOps.operations.filter(op => op.startsWith('createElement:li'));
+            expect(createOps.length).toBe(0);
+        });
     });
 });
