@@ -28,7 +28,9 @@ import {
     type KeyValue,
     type KeyWarnFlags,
 } from './async/key.js';
-import { createDataCell, INERT_IDLE_CELL } from './async/cell.js';
+import { INERT_IDLE_CELL } from './async/cell.js';
+import { ASYNC_ENGINE_TOKEN, defaultAsyncEngine, type AsyncEngine } from './async/engine.js';
+import { lookupProvided } from './di/injectable.js';
 import {
     warnUnknownOptions,
     type AsyncFetcherContext,
@@ -94,12 +96,20 @@ export function useData<T>(
         ) as AsyncState<T>;
     }
 
-    // ── Default client semantics ──
-    if (process.env.NODE_ENV !== 'production') {
+    // ── Client semantics: an app-provided engine (a cache pack installed
+    // via app.use(...)) or the default engine. Core keeps the key machinery
+    // either way — the engine sees resolved canonical keys. ──
+    const engine = (lookupProvided(ASYNC_ENGINE_TOKEN) as AsyncEngine | undefined) ?? defaultAsyncEngine;
+
+    if (process.env.NODE_ENV !== 'production' && engine === defaultAsyncEngine) {
         warnUnknownOptions('useData', options, handledReadOptionKeys);
     }
 
-    const handle = createDataCell<T>(fetcher as (arg: unknown, ctx: AsyncFetcherContext) => Promise<T>, instance);
+    const handle = engine.read<T>(
+        fetcher as (arg: unknown, ctx: AsyncFetcherContext) => Promise<T>,
+        options ?? {},
+        instance
+    );
 
     if (shape === 'static') {
         handle.setKey(resolveKeyResult(keyArg as string, warns), keyArg);
@@ -125,5 +135,5 @@ export function useData<T>(
         });
     }
 
-    return handle.cell;
+    return handle.state;
 }
