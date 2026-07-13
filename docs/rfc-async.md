@@ -511,6 +511,15 @@ signalxjs/core#171 — out of scope here.)
   dev-mode note fires when an unkeyed read renders during SSR (same
   discoverability convention as the missing-`error`-arm warning).
 - Actions (`useAction`) don't run during SSR.
+- **Coexists with `@sigx/store`'s `ssrState()`** (signalxjs/store#27): store
+  slices and keyed `useData` entries are different producers in the same
+  `__SIGX_ASYNC__` blob via the same `stateSerializationPlugin`, hydrating
+  independently; key namespaces are disjoint by convention (and tuple keys
+  canonicalize to JSON starting with `[`, which cannot collide with a store
+  slice key). Layer rule: `useData`/`useAction` are *component* composables
+  (instance resolved synchronously at setup); inside a store, fetch with
+  plain async code and transfer via `ssrState` — two mechanisms, one per
+  layer, one wire.
 - `<Defer>` is the only thing the streaming path keys off (`render-core.ts`
   `__suspense` → `handleAsyncSetup` / `onAsyncComponentResolved` / `_pendingAsync`),
   now observing pending data as well as chunks (§5).
