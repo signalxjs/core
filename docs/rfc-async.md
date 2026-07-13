@@ -1,6 +1,6 @@
 # RFC: value-first async — loading, lazy, errors; mechanism in core, policy in packs
 
-Status: **proposed / under review — rev 6**. Tracking: signalxjs/core#135.
+Status: **proposed / under review — rev 7**. Tracking: signalxjs/core#135.
 Pre-1.0, no-compat (same stance as `docs/rfc-use-async.md`): one way to do it.
 
 > **rev-7 changes** (from the rev-6 follow-up review): the **reserved `cache`

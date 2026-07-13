@@ -153,7 +153,7 @@ export const ProfileForm = component(() => {
             <input value={draft.name} onInput={(e: Event) => {
                 draft.name = (e.target as HTMLInputElement).value;
             }} />
-            <button disabled={save.loading} onClick={onSave}>Save</button>
+            <button type="button" disabled={save.loading} onClick={onSave}>Save</button>
             {save.error && <p class="error">{save.error.message}</p>}
         </form>
     );
