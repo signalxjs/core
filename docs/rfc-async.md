@@ -659,6 +659,18 @@ The most common confusion, answered directly: `useAction` is the most
 browser-only primitive in the design — its *only* SSR involvement is that it
 does not run there.
 
+**Renderer-agnostic by construction.** The primitives' core semantics touch
+no web API: core never calls `fetch` (the fetcher is user code — HTTP on the
+web, a native bridge call on Lynx, a file read in a terminal renderer), and
+the engine is signals + `watch` + `AbortController` + promises. Everything
+web-specific is an *attachment*: SSR transfer/hydration (server-renderer),
+`<Defer>`'s flush axis (#171), DOM event `onError` wiring (runtime-dom),
+focus-revalidation policies (cache pack, per-platform). Two Phase-1
+obligations keep this true: feature-detect `AbortController` (embedded
+runtimes may lack it), and keep the core `__SIGX_ASYNC__` pickup guarded
+behind `typeof window` — enforced by a test that runtime-core references no
+web global unguarded.
+
 ## Removed vs renamed
 
 - **Removed from core:** the throw-a-promise protocol, register-during-render
