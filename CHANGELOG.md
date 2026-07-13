@@ -255,7 +255,8 @@ Initial public release of the SignalX (`sigx`) ecosystem on npm. Six packages pu
 - Node `^20.19.0 || >=22.12.0`
 - `@sigx/vite` peer-depends on `vite >=8.0.0`
 
-[Unreleased]: https://github.com/signalxjs/core/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/signalxjs/core/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/signalxjs/core/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/signalxjs/core/compare/v0.6.3...v0.7.0
 [0.6.3]: https://github.com/signalxjs/core/compare/v0.6.2...v0.6.3
 [0.6.2]: https://github.com/signalxjs/core/compare/v0.6.1...v0.6.2
