@@ -1,9 +1,33 @@
 # RFC: value-first async — loading, lazy, errors; mechanism in core, policy in packs
 
-Status: **proposed / under review — rev 4** (scope revision after the
-architectural step-back on signalxjs/core#136). Tracking: signalxjs/core#135.
+Status: **proposed / under review — rev 5**. Tracking: signalxjs/core#135.
 Pre-1.0, no-compat (same stance as `docs/rfc-use-async.md`): one way to do it.
 
+> **rev-5 changes:** the primitive becomes a named read/write pair —
+> **`useData`** (reads, renamed from `useAsync`) and **`useAction`** (writes,
+> replacing `useAsync(fn, { manual: true })`).
+>
+> *Why the write split (safety, not taste):* in a signals framework the
+> natural write is a **zero-arg closure** over reactive state
+> (`() => saveUser(draft.value)`), and a zero-arg function is assignable to
+> every fetcher overload — so *forgetting the option compiles clean, resolves
+> to the unkeyed-read overload, and auto-fires the mutation on mount*
+> (`useAsync(logout)` logs the user out on render). No type or runtime check
+> can catch intent; a named primitive makes the mistake unwritable.
+>
+> *Why the read rename:* once writes split out, "async" stops carving
+> anything — an action is exactly as async as a read. The read is named for
+> its purpose: components declare the **data** they need; *give your data a
+> key and it transfers.* Naming history: `useQuery` re-rejected
+> (TanStack/datastore vocabulary — it promises a data client core
+> deliberately doesn't ship, §7); `useResource` re-rejected (borrowed Solid
+> vocabulary, no purpose gain); `useAsyncData`/`useAsyncAction` rejected (the
+> prefix adds no information — there is no sync `useData` to disambiguate
+> from — and `useAsyncData` collides head-on with Nuxt's composable of the
+> same name and signature). The shipped `useAsync` composable is renamed in
+> place — pre-1.0, no-compat. One *concept*, one engine, a read/write pair —
+> like `signal`/`computed`.
+>
 > **rev-4 changes (the scope cut):** core ships only what **only the framework
 > can do** — the cache/revalidation/optimistic layer (rev-3 Phase 3) moves out
 > of core entirely and becomes a **pack contract** over the existing provider
@@ -19,10 +43,12 @@ Pre-1.0, no-compat (same stance as `docs/rfc-use-async.md`): one way to do it.
 ## Summary
 
 Redesign sigx's async UX around a **value-first** model that fits the
-fine-grained signal system. One primitive, two trigger modes:
+fine-grained signal system. One concept — a reactive async cell — as a
+read/write pair:
 
-- **A read is an auto-triggered async value** — `useAsync(key, fetcher)`.
-- **A write is a manually-triggered async value** — `useAsync(fn, { manual: true })`,
+- **A read is an auto-triggered async value** — `useData(key, fetcher)`
+  (renamed from the shipped `useAsync`; see the rev-5 note).
+- **A write is a manually-triggered async value** — `useAction(fn)`,
   fired with `.run(input)`, with its *own* pending/error lifecycle.
 
 Both are rendered with a co-located `match` combinator; multiple values
@@ -43,7 +69,7 @@ packs.
 
 ## Motivation
 
-The SSR/data layer is strong and stays: keyed `useAsync` transfer (dedupe,
+The SSR/data layer is strong and stays: keyed data transfer (dedupe,
 serialize, restore), streaming SSR, `useStream`, islands selective hydration.
 The client-composition layer has concrete gaps — stated against the current code:
 
@@ -80,9 +106,9 @@ read or write. The substrate exists: `signal`, `watch` (with `onCleanup`),
 
 ## The design
 
-### 1. Reads — auto-triggered `useAsync`
+### 1. Reads — `useData`
 
-An internal reactive async engine powers `useAsync` (no public `resource()` /
+An internal reactive async engine powers `useData` (no public `resource()` /
 `query()`; the engine stays internal — resolved, previously open). **One
 signature fuses the reactive key, the fetcher's argument, and conditional
 fetching:**
@@ -91,20 +117,20 @@ fetching:**
 type Key = string | null | undefined | false;               // skip values: see below
 type Fetcher<T, Arg> = (arg: Arg, ctx: { signal: AbortSignal }) => Promise<T>;
 
-useAsync<T>(key: string,    fetcher: Fetcher<T, string>, opts?): AsyncState<T>;  // keyed, SSR
-useAsync<T>(key: () => Key, fetcher: Fetcher<T, string>, opts?): AsyncState<T>;  // reactive key
-useAsync<T>(fetcher: Fetcher<T, undefined>,              opts?): AsyncState<T>;  // unkeyed, client-only
-useAsync<T, In = void>(fetcher: Fetcher<T, In>, opts: { manual: true }): AsyncAction<T, In>;  // write, §2
+useData<T>(key: string,    fetcher: Fetcher<T, string>, opts?): AsyncState<T>;   // keyed, SSR
+useData<T>(key: () => Key, fetcher: Fetcher<T, string>, opts?): AsyncState<T>;   // reactive key
+useData<T>(fetcher: Fetcher<T, undefined>,              opts?): AsyncState<T>;   // unkeyed, client-only
+useAction<T, In = void>(fn: Fetcher<T, In>): AsyncAction<T, In>;                 // write, §2
 ```
 
 **One fetcher shape everywhere.** The fetcher's first argument is always *the
 trigger's argument*: the resolved key for auto reads, the `.run(input)` value
-for writes, `undefined` for unkeyed reads. One mental model — and it makes
+for actions, `undefined` for unkeyed reads. One mental model — and it makes
 overload disambiguation mechanical (two functions ⇒ the first is a key
 getter; one function ⇒ it is the fetcher).
 
 ```tsx
-const post = useAsync(
+const post = useData(
   () => user.value ? `post:${postId.value}` : null,   // getter key: tracked; null ⇒ idle/skip
   (key, { signal }) => fetchPost(key, { signal }),    // resolved key passed in — no double read
 );
@@ -167,11 +193,13 @@ The engine rides `watch` (which has `onCleanup`) + an `AbortController`.
 aborts an in-flight one; on key change, on `refresh()`, and on a write's
 repeated `.run()` (§2).
 
-### 2. Writes — manual-triggered `useAsync`
+### 2. Writes — `useAction`
 
-A write is the same primitive with `{ manual: true }`: it does **not**
-auto-run, and exposes `.run(input)`. It returns a **distinct type**, so the
-option is visible in the types at every call site:
+A write is the same reactive async cell with a manual trigger: it never
+auto-runs, and exposes `.run(input)`. It is a **named primitive** (not a
+`useAsync` option — see the rev-5 note in the header: a zero-arg write
+closure would make a forgotten option compile clean and auto-fire the
+mutation on mount) and returns a distinct type:
 
 ```ts
 type RunResult<T> = { ok: true; value: T } | { ok: false; error: Error };
@@ -193,33 +221,33 @@ TanStack's answer is two methods (`mutate`/`mutateAsync`), which is exactly
 the fragmentation this design rejects. One method, both usages safe:
 
 ```tsx
-const save = useAsync(saveUser, { manual: true });
+const save = useAction(() => saveUser(draft.value));   // zero-arg closure — the natural sigx write
 
 // fire-and-forget — safe; the UI reads save.loading / save.error
-<button disabled={save.loading} onClick={() => save.run(draft)}>Save</button>
+<button disabled={save.loading} onClick={() => save.run()}>Save</button>
 
 // chaining — explicit, no try/catch
-onClick={async () => { if ((await save.run(draft)).ok) user.refresh(); }}
+onClick={async () => { if ((await save.run()).ok) user.refresh(); }}
 ```
 
 - **Write-retry, pinned:** `match`'s `error` arm on a write hands out `retry`
   = re-run with the **last input**. The arm is unreachable before the first
   run (state is `idle`), so "no last input" cannot occur.
 - **Repeated `.run` while in flight:** abort-and-supersede (§1's one rule).
-- **Writes keep `value` and `match`** deliberately: a search box is a
+- **Actions keep `value` and `match`** deliberately: a search box is a
   manual-trigger async value whose `ready` arm renders results — writes and
-  "deferred reads" blur, which is an argument *for* the unified primitive.
+  "deferred reads" blur, which is why both sides of the pair share one shape.
 - **Cross-read invalidation is explicit:** the write's success path calls the
   dependent read's `user.refresh()`. Cache-aware `invalidate()` arrives with
   the cache **pack** (§7). No implicit graph.
 - **No optimistic apply/rollback in core** — optimistic writes are a cache
   write-through and ship with the pack (§7); shipping them first would invent
   semantics the pack must redefine.
-- **Why writes are in core at all** (the honest borderline): the write mode is
-  ~50 policy-free lines — but it is the *interface a cache pack needs*.
-  Without a blessed write shape, a pack cannot retrofit invalidation and
-  optimistic semantics onto N hand-rolled `signal(false)` idioms. Mechanism
-  in core so policy can attach. (Confirmation is open question 1.)
+- **Why `useAction` is in core at all** (the honest borderline): it is ~50
+  policy-free lines — but it is the *interface a cache pack needs*. Without a
+  blessed write shape, a pack cannot retrofit invalidation and optimistic
+  semantics onto N hand-rolled `signal(false)` idioms. Mechanism in core so
+  policy can attach. (Confirmation is open question 1.)
 
 ### 3. Coordinating several — `all({ ... })`
 
@@ -313,15 +341,16 @@ designed in the SSR platform RFC, signalxjs/core#171 — out of scope here.)
 
 ### 6. SSR integration (preserve)
 
-- Keyed `useAsync` already serializes/streams via the `_useAsync`/`_useStream`
-  seams; `match` renders the `ready` arm server-side once the keyed value
-  resolves.
-- **Unkeyed `useAsync` is client-only by definition:** it renders the `pending`
+- Keyed `useData` (the shipped keyed `useAsync`) already serializes/streams
+  via the `_useAsync`/`_useStream` seams (seam property names are existing
+  internals and unchanged); `match` renders the `ready` arm server-side once
+  the keyed value resolves.
+- **Unkeyed `useData` is client-only by definition:** it renders the `pending`
   arm server-side and fetches after hydration — a visible pending→ready swap.
   This is documented behavior, not a bug; the fix is "add a key". A one-time
   dev-mode note fires when an unkeyed read renders during SSR (same
   discoverability convention as the missing-`error`-arm warning).
-- Manual writes don't run during SSR.
+- Actions (`useAction`) don't run during SSR.
 - `<Defer>` is the only thing the streaming path keys off (`render-core.ts`
   `__suspense` → `handleAsyncSetup` / `onAsyncComponentResolved` / `_pendingAsync`).
 - Streaming, islands, keyed transfer, `blocking`/`stream` modes unchanged.
@@ -341,12 +370,12 @@ possible:
    seam exists and is validated (`rfc-use-async.md` "Layering").
 2. **The reserved options namespace.** Core's `AsyncOptions` reserves a
    `cache` key it never interprets; the pack claims it via module
-   augmentation. The beginner signature stays `useAsync(key, fetcher)`;
+   augmentation. The beginner signature stays `useData(key, fetcher)`;
    installing the pack changes one line (`app.use(cachePlugin())`), not the
    call sites:
 
 ```ts
-const user = useAsync('user', fetchUser, {
+const user = useData('user', fetchUser, {
   cache: { staleTime: 60_000, revalidateOnFocus: true },   // typed by the pack
 });
 user.invalidate();                  // pack-provided: drop entry + refetch
@@ -391,6 +420,23 @@ Considered, and rejected as *the* answer:
   (§7), a community TanStack adapter is just a different pack. Core doesn't
   have to pick the winner — that is the point of the seam.
 
+## Layering — core vs SSR vs pack
+
+Both primitives live in **core** (`sigx`), and neither is server-side.
+The `rfc-use-async.md` rule decides it — *"runs standalone in a browser →
+`sigx`; needs a server → `@sigx/server-renderer`"* — and both pass the
+browser test (enforced by the client-bundle test):
+
+| Layer | Package | Contributes |
+|---|---|---|
+| **Core** | `sigx` (runtime-core) | `useData` + `useAction` with their complete browser behavior (fetch on mount, reactive states, abort, `refresh`/`.run`); `match`/`all`; `lazy` + `<Defer>`; `errorScope` / app `onError`. A pure SPA uses all of it with zero server packages. |
+| **SSR** | `@sigx/server-renderer` | *Attaches to* keyed `useData` via the provider seam (the `_useAsync` property check, per request): fetch on the server, dedupe, stream, serialize to `__SIGX_ASYNC__`, restore on hydration. Contributes **nothing** to `useAction` — actions never run during SSR. Core never imports server code. |
+| **Cache pack** (future) | TBD (§7) | Policy: `staleTime`, revalidation, `invalidate`, optimistic `mutate` — extends both primitives through the §7 contract. Not part of core *or* the SSR package. |
+
+The most common confusion, answered directly: `useAction` is the most
+browser-only primitive in the design — its *only* SSR involvement is that it
+does not run there.
+
 ## Removed vs renamed
 
 - **Removed from core:** the throw-a-promise protocol, register-during-render
@@ -405,9 +451,9 @@ Considered, and rejected as *the* answer:
 
 - **Phase 0:** this document.
 - **Phase 1 — Core foundation (the only core phase):** internal async-cell
-  engine (rides `watch`); `useAsync` reads (fused conditional key, one fetcher
-  shape) + `match` + `refresh`; `useAsync` writes (`{ manual: true }` +
-  settled-result `.run`, `AsyncAction`); `all({...})` + `.errors`; rebuild
+  engine (rides `watch`); `useData` reads (renamed from `useAsync`; fused
+  conditional key, one fetcher shape) + `match` + `refresh`; `useAction`
+  writes (settled-result `.run`, `AsyncAction`); `all({...})` + `.errors`; rebuild
   `lazy()` + thin `<Defer>`; surface app `onError` (+ event-handler wiring);
   `errorScope` (pinned contract). Reserve the `cache` options namespace.
   Delete throw protocol, register-during-render boundary, old
@@ -432,9 +478,16 @@ Each phase = its own issue → worktree → PR → Copilot review → merge.
   with a dev warning on `''`) — no `enabled`/`skip` option.
 - `all()` errors: first-error-wins + `.errors` (shapes pinned in §3).
 - `<Defer>` (over `Stream`/`Await`); its hydration axis belongs to #171.
-- Writes = manual-trigger `useAsync` with a distinct `AsyncAction` type;
-  `.run` returns a settled `RunResult` (never rejects); retry = re-run last
-  input; abort-and-supersede as the one concurrency rule.
+- Reads = `useData`, renamed from the shipped `useAsync` (rev 5 — post-split,
+  "async" no longer carves read vs write; `useQuery`/`useResource`/
+  `useAsyncData` rejected, see the header note).
+- Writes = named `useAction` primitive (rev 5 — replaced `{ manual: true }`
+  after the zero-arg-closure auto-fire footgun) with a distinct `AsyncAction`
+  type; `.run` returns a settled `RunResult` (never rejects); retry = re-run
+  last input; abort-and-supersede as the one concurrency rule.
+- Layering: both primitives in core with full browser behavior; SSR attaches
+  to keyed `useData` via the provider seam; `useAction` has no server
+  behavior at all (see "Layering").
 - Optimistic apply/rollback: pack, not core (arrives with the cache).
 - `createAsyncCell`: stays internal — one public surface to stabilize pre-1.0.
 - Unkeyed SSR behavior: documented client-only semantics + one-time dev note.
