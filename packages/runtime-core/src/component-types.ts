@@ -162,11 +162,6 @@ type ExternalModelProps<T> = {
 export type EventDefinition<T> = { __eventDetail: T };
 
 /**
- * Extract slot definitions from a combined type
- */
-type ExtractSlots<T> = T extends { __slots?: infer S } ? S : {};
-
-/**
  * Default slot function type
  */
 type DefaultSlot = () => JSXElement[];
@@ -346,10 +341,6 @@ export type SetupFn<
     TRef = any,
     TSlots = {}
 > = (ctx: ComponentSetupContext<PlatformElement, TProps, TEvents, TRef, TSlots>) => ViewFn | Promise<ViewFn>;
-
-type ExtractExposed<T> = "__exposed" extends keyof T
-    ? (NonNullable<T["__exposed"]> extends { __type: infer E } ? E : void)
-    : void;
 
 export type Ref<T> = { current: T | null } | ((instance: T | null) => void);
 

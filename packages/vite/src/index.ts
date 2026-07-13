@@ -1,5 +1,5 @@
 // Vite plugin for sigx with HMR support
-import type { Plugin, ViteDevServer, ResolvedConfig, UserConfig } from 'vite';
+import type { Plugin, ResolvedConfig, UserConfig } from 'vite';
 import { createRequire } from 'module';
 import * as fs from 'fs';
 import * as net from 'net';
@@ -253,7 +253,7 @@ export function sigxPlugin(options: SigxPluginOptions = {}): Plugin {
 
         transform(code, id) {
             // Only process TypeScript/TSX source files (not pre-built JS)
-            if (!/\.tsx?$/.test(id) && !/\.jsx$/.test(id)) {
+            if (!/\.tsx?$/.test(id) && !id.endsWith('.jsx')) {
                 return null;
             }
 

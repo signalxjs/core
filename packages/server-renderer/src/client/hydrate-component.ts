@@ -13,7 +13,7 @@ import {
     effect,
     untrack
 } from 'sigx';
-import type { ComponentSetupContext, SlotsObject } from 'sigx';
+import type { ComponentSetupContext } from 'sigx';
 import {
     setCurrentInstance,
     createPropsAccessor,
@@ -21,7 +21,6 @@ import {
     normalizeSubTree,
     patch,
     mount,
-    patchProp,
     createEmit,
     splitComponentProps,
     provideAppContext,
@@ -65,7 +64,6 @@ export function hydrateComponent(vnode: VNode, dom: Node | null, parent: Node, t
 
     // With trailing markers, find the marker if not provided
     let anchor: Comment | null = trailingMarker || null;
-    let componentId: number | null = null;
 
     if (!anchor) {
         // Find this component's trailing marker by traversing forward.
@@ -99,13 +97,6 @@ export function hydrateComponent(vnode: VNode, dom: Node | null, parent: Node, t
 
         if (bestAnchor) {
             anchor = bestAnchor;
-            componentId = bestId;
-        }
-    } else {
-        // Extract component ID from provided marker
-        const text = anchor.data;
-        if (text.startsWith('$c:')) {
-            componentId = parseInt(text.slice(3), 10);
         }
     }
 
