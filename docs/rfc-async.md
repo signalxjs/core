@@ -79,9 +79,13 @@ The client-composition layer has concrete gaps — stated against the current co
    module-global boundary is only the browser fallback. The fragility is the
    ordering (register *during* the children render, check `pending.size` *after*)
    and the `try/catch` on a thrown promise — not "a global".
-2. **`ErrorBoundary` is a flag-flip, not recovery.** It catches only the
-   synchronous render pass (`error-boundary.ts`), and `retry()` flips `hasError`
-   without re-running the failed work. The **app-level** `app.config.errorHandler`
+2. **`ErrorBoundary` catches too little and recovers too shallowly.** Its
+   `try/catch` wraps only the synchronous slot render (`error-boundary.ts`) —
+   a throw from a child's reactive re-render or effect never reaches it. And
+   while `retry()` does re-render the slot (resetting the reactive flag
+   re-runs the render fn), it performs no scoped teardown/remount — partially
+   initialized child state and effects survive into the retry. The
+   **app-level** `app.config.errorHandler`
    *does* already catch setup + render-effect errors (`app.ts`
    `handleComponentError`) — so the missing piece is a *scoped, recoverable*
    boundary, not app-level catching.
