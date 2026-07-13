@@ -52,6 +52,13 @@ describe('signal', () => {
             expect(state[1]).toBe(5);
             expect(state.length).toBe(2);
         });
+
+        it('should have a stable $set identity per proxy', () => {
+            // Locks the one-closure-per-proxy behavior: repeated reads must
+            // not allocate a fresh function.
+            const state = signal({ a: 1 });
+            expect(state.$set).toBe(state.$set);
+        });
     });
 
     describe('arrays', () => {

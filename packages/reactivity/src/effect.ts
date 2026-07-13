@@ -75,14 +75,36 @@ export function getCurrentSubscriber(): Subscriber | null {
  * ```
  */
 export function batch(fn: () => void) {
-    batchDepth++;
+    startBatch();
     try {
         fn();
     } finally {
-        batchDepth--;
-        if (batchDepth === 0) {
-            flushPendingEffects();
-        }
+        endBatch();
+    }
+}
+
+/**
+ * Imperative batch bounds for hot paths that cannot afford a closure per
+ * call (array mutator instrumentations, multi-dep writes). Callers MUST
+ * pair them in try/finally — an unbalanced startBatch leaves batchDepth
+ * stuck and effects never flush again.
+ * @internal
+ */
+export function startBatch(): void {
+    batchDepth++;
+}
+
+/** @internal see {@link startBatch} */
+export function endBatch(): void {
+    batchDepth--;
+    if (process.env.NODE_ENV !== 'production' && batchDepth < 0) {
+        // Mis-paired start/end would leave a negative depth and silently
+        // prevent every future flush — fail fast instead.
+        batchDepth = 0;
+        throw new Error('[SignalX] endBatch() without a matching startBatch()');
+    }
+    if (batchDepth === 0) {
+        flushPendingEffects();
     }
 }
 
@@ -199,14 +221,11 @@ export function trigger(dep: Dep): void {
     // Every trigger is a definite value change (callers already gate on
     // Object.is), so the version always advances.
     dep.version++;
-    batchDepth++;
+    startBatch();
     try {
         mark(dep, DIRTY);
     } finally {
-        batchDepth--;
-        if (batchDepth === 0) {
-            flushPendingEffects();
-        }
+        endBatch();
     }
 }
 
