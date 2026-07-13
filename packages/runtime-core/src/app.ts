@@ -429,6 +429,46 @@ export function handleComponentError(
 }
 
 /**
+ * Bubble hook for the async layer: a cell is `'errored'`, `match()` was
+ * given no `error` arm, so the error escalates — nearest `errorScope`, then
+ * the app `onError` handler (both via {@link handleComponentError}). Never
+ * throws: `match()` runs during render, and an unhandled data error must
+ * not take the component down with it.
+ *
+ * `ctx` is the setup-time instance captured by the cell (matching where the
+ * `useData`/`useAction` call lives, regardless of which render reads it).
+ *
+ * @internal
+ */
+export function reportUnhandledAsyncError(
+    err: Error,
+    ctx: { provides?: Map<symbol, unknown>; parent?: unknown } | null
+): boolean {
+    // Resolve the owning app context by walking the provides chain from the
+    // captured instance (the root component carries the AppContext token).
+    const token = getAppContextToken();
+    let appContext: AppContext | null = null;
+    let node = ctx;
+    while (node) {
+        const found = node.provides?.get(token);
+        if (found) {
+            appContext = found as AppContext;
+            break;
+        }
+        node = node.parent as typeof ctx;
+    }
+
+    const instance: ComponentInstance | null = ctx
+        ? { name: (ctx as { __name?: string }).__name ?? 'Component', ctx: ctx as ComponentInstance['ctx'], vnode: null as unknown as ComponentInstance['vnode'] }
+        : null;
+    const handled = handleComponentError(appContext, err, instance, 'async');
+    if (!handled) {
+        console.error('[sigx] Unhandled async error:', err);
+    }
+    return handled;
+}
+
+/**
  * Handle errors that occur in hooks themselves
  */
 function handleHookError(context: AppContext, err: Error, instance: ComponentInstance, hookName: string): void {

@@ -80,9 +80,14 @@ export type { VNode, JSXChild, JSXChildren, JSXElement } from './jsx-runtime.js'
 export { lazy, Suspense, isLazyComponent } from './lazy.js';
 export type { LazyComponentFactory, SuspenseProps } from './lazy.js';
 
-// Async composable
-export { useAsync, useStream } from './use-async.js';
-export type { AsyncState, AsyncOptions, AsyncFetcherContext } from './use-async.js';
+// Value-first async — reads, writes, composition (docs/rfc-async.md)
+export { useData } from './use-data.js';
+export type { AsyncState, AsyncOptions, AsyncFetcherContext, Fetcher, MatchArms, KeyValue, KeyTuple, Falsy } from './use-data.js';
+export { useAction, SupersededError } from './use-action.js';
+export type { AsyncAction, ActionOptions, RunResult } from './use-action.js';
+export { all } from './all.js';
+export type { AllState } from './all.js';
+export { useStream } from './use-stream.js';
 
 // Model (two-way binding)
 export { createModel, createModelFromBinding, isModel } from './model.js';

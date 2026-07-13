@@ -65,6 +65,10 @@ export { getComponentPlugins, applyContextExtensions, registerComponentPlugin, r
 // DI internals
 export { getAppContextToken, provideAppContext } from './di/injectable.js';
 
+// Async engine internals (for server renderers and cache packs)
+export { matchAsyncState, registerHandledAsyncOptionKeys } from './async/shared.js';
+export { reportUnhandledAsyncError } from './app.js';
+
 // Model internals
 export { getModelSymbol } from './model.js';
 
