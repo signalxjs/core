@@ -134,7 +134,10 @@ export const ProfileForm = component(() => {
     );
 
     const onSave = async () => {
-        const r = await save.run(); // In = void ⇒ zero-arg call
+        // Compile-time proof of the zero-arg contract: TypeScript permits
+        // omitting a void-typed parameter, so In = void ⇒ run(). This line
+        // IS the test — it fails to typecheck if the contract regresses.
+        const r = await save.run();
         if (r.ok) {
             expectType<UserProfile>(r.value);
             void user.refresh(); // refresh() never rejects either
@@ -195,6 +198,7 @@ export const Dashboard = component(() => {
 
     const pair = all(user, posts);
     expectType<[UserProfile, Post[]] | null>(pair.value);
+    expectType<[Error | null, Error | null]>(pair.errors);
 
     return () =>
         page.match({

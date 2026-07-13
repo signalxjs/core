@@ -302,8 +302,8 @@ interface AsyncAction<T, In> {
   readonly error: Error | null;
   readonly loading: boolean;         // state === 'pending'
   match<R>(arms: { /* same arms as AsyncState; retry = re-run last input */ }): R | undefined;
-  run(input: In): Promise<RunResult<T>>;
-}                                    // no refresh() on a write
+  run(input: In): Promise<RunResult<T>>;   // In = void ⇒ zero-arg run(): TS permits
+}                                          // omitting a void-typed parameter. No refresh().
 
 useAction<T, In = void>(fn: Fetcher<T, In>, opts?: ActionOptions): AsyncAction<T, In>;
 ```

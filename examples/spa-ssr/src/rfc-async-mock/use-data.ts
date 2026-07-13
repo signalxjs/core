@@ -95,7 +95,11 @@ export interface AsyncAction<T, In> {
     /** state === 'pending' — the blessed double-submit guard: disabled={a.loading}. */
     readonly loading: boolean;
     match<R>(arms: MatchArms<T, R>): R | undefined;
-    /** Trigger. Never rejects; in-flight runs are never aborted. */
+    /**
+     * Trigger. Never rejects; in-flight runs are never aborted.
+     * `In = void` ⇒ callable as `run()` (TS permits omitting a void-typed
+     * parameter — see the compile-time proof in ./examples.tsx).
+     */
     run(input: In): Promise<RunResult<T>>;
 }
 
