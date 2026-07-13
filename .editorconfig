@@ -1,0 +1,21 @@
+# De facto repo style — audited before writing; matches committed content.
+# Index is uniformly LF; TS/JS are 4-space; YAML is 2-space; JSON indent is
+# intentionally not specified (existing files mix 2/4/8).
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.{ts,tsx,js,mjs,cjs}]
+indent_style = space
+indent_size = 4
+
+[*.{yml,yaml}]
+indent_style = space
+indent_size = 2
+
+[*.md]
+trim_trailing_whitespace = false
