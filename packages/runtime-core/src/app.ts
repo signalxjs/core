@@ -21,7 +21,6 @@ export type {
 // Import types for internal use
 import type {
     ComponentInstance,
-    AppConfig,
     AppContext,
     Plugin,
     PluginInstallFn,
