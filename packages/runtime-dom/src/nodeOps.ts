@@ -13,28 +13,6 @@ import { patchDirective, onElementMounted, onElementUnmounted } from './directiv
 // SVG namespace for createElementNS
 const svgNS = 'http://www.w3.org/2000/svg';
 
-// SVG elements that should be created with createElementNS
-// Based on https://developer.mozilla.org/en-US/docs/Web/SVG/Element
-const svgElements = new Set([
-    'svg', 'animate', 'animateMotion', 'animateTransform', 'circle', 'clipPath',
-    'defs', 'desc', 'ellipse', 'feBlend', 'feColorMatrix', 'feComponentTransfer',
-    'feComposite', 'feConvolveMatrix', 'feDiffuseLighting', 'feDisplacementMap',
-    'feDistantLight', 'feDropShadow', 'feFlood', 'feFuncA', 'feFuncB', 'feFuncG',
-    'feFuncR', 'feGaussianBlur', 'feImage', 'feMerge', 'feMergeNode', 'feMorphology',
-    'feOffset', 'fePointLight', 'feSpecularLighting', 'feSpotLight', 'feTile',
-    'feTurbulence', 'filter', 'foreignObject', 'g', 'image', 'line', 'linearGradient',
-    'marker', 'mask', 'metadata', 'mpath', 'path', 'pattern', 'polygon', 'polyline',
-    'radialGradient', 'rect', 'set', 'stop', 'switch', 'symbol', 'text', 'textPath',
-    'title', 'tspan', 'use', 'view'
-]);
-
-/**
- * Check if a tag is an SVG element
- */
-function _isSvgTag(tag: string): boolean {
-    return svgElements.has(tag);
-}
-
 export const nodeOps: RendererOptions<Node, Element> = {
     insert: (child, parent, anchor) => {
         if (anchor && anchor.parentNode !== parent) anchor = null;
