@@ -1,5 +1,5 @@
 import { VNode, Fragment, JSXElement, Text, Comment, EMPTY_PROPS } from './jsx-runtime.js';
-import { effect, signal, untrack, EffectRunner } from '@sigx/reactivity';
+import { effect, signal, untrack } from '@sigx/reactivity';
 import { withoutOwnerTracking } from '@sigx/reactivity/internals';
 import { ComponentSetupContext, setCurrentInstance, getCurrentInstance, MountContext, ViewFn, SetupFn } from './component.js';
 import { createPropsAccessor } from './utils/props-accessor.js';
@@ -718,6 +718,20 @@ export function createRenderer<HostNode = any, HostElement = any>(
     function patchChildren(oldVNode: VNode, newVNode: VNode, container: HostElement, parentIsSVG: boolean = false, fallbackAnchor: HostNode | null = null) {
         const oldChildren = oldVNode.children;
         const newChildren = newVNode.children;
+
+        // Fast path: exactly one same-vnode child on both sides (the dominant
+        // <li>text</li> shape). patch() handles it directly — including the
+        // Text branch's hostSetText — skipping the reconcile machinery and
+        // the dev-mode duplicate-key scan (vacuous for a single child).
+        if (oldChildren.length === 1 && newChildren.length === 1) {
+            const oldChild = oldChildren[0];
+            const newChild = newChildren[0];
+            if (oldChild != null && newChild != null && isSameVNode(oldChild, newChild)) {
+                newChild.parent = newVNode;
+                patch(oldChild, newChild, container);
+                return;
+            }
+        }
 
         for (let i = 0; i < newChildren.length; i++) {
             newChildren[i].parent = newVNode;

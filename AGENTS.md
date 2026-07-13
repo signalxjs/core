@@ -110,7 +110,7 @@ pnpm test -- -t "name of test"     # single test by name (vitest -t)
 pnpm test:watch
 pnpm test:coverage
 pnpm typecheck   # tsc (TypeScript 7 native compiler), config: tsconfig.json
-pnpm lint        # oxlint over the core packages' src
+pnpm lint        # oxlint over all packages' src (warnings fail: --deny-warnings)
 pnpm lint:fix
 pnpm size        # size-limit bundle-size check (.size-limit.json)
 pnpm verify:pack # verify npm pack output is sane

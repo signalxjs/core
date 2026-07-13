@@ -1,0 +1,13 @@
+{
+    // oxlint runs with default categories; this file exists so editors and
+    // contributors have an explicit config anchor. Keep rule changes minimal
+    // and documented.
+    "$schema": "./node_modules/oxlint/configuration_schema.json",
+    "rules": {
+        // The renderer's internal unmount(vnode, container) signature is part
+        // of the cross-package renderer API (exported via internals and used
+        // by server-renderer hydration); the parameter is threaded through
+        // recursion by design.
+        "oxc/only-used-in-recursion": "off"
+    }
+}
