@@ -165,7 +165,8 @@ function checkDuplicateKeys(children: VNode[]): void {
     const seenKeys = new Set<string>();
     for (const child of children) {
         if (child?.key != null) {
-            const keyStr = String(child.key);
+            const key = child.key;
+            const keyStr = typeof key === 'string' ? key : String(key);
             if (seenKeys.has(keyStr)) {
                 console.warn(
                     `[SignalX] Duplicate key "${child.key}" detected in list. ` +
