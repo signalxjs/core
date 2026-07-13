@@ -14,7 +14,7 @@
     },
     "devDependencies": {
         "@sigx/server-renderer": "workspace:*",
-        "@types/node": "^25.9.1",
+        "@types/node": "^26.1.1",
         "@vue/server-renderer": "^3.5.39",
         "mitata": "^1.0.0",
         "preact": "^10.29.7",
