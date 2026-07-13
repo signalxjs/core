@@ -2,7 +2,7 @@
 // Effect System - Core reactivity primitives
 // ============================================================================
 
-import type { Dep, EffectFn, EffectOptions, EffectRunner, EffectScheduler, Subscriber } from './types';
+import type { Dep, EffectFn, EffectOptions, EffectRunner, EffectScheduler, Link, Subscriber } from './types';
 import { getDevtoolsHook } from './devtools-hook';
 
 /** Create a dependency slot (see {@link Dep}). */
@@ -192,18 +192,94 @@ export function setFlushHandler(fn: (() => void) | null): void {
     flushHandler = fn;
 }
 
+/**
+ * Full teardown — used on disposal (runner.stop, scope stop), NOT on
+ * re-runs (those use startTracking/endTracking link reuse). Also repairs
+ * dep.active pointers in case the subscriber is stopped mid-own-run.
+ */
 export function cleanup(effect: Subscriber): void {
     if (!effect.deps) return;
     for (const link of effect.deps) {
         link.dep.subs.delete(effect);
+        // Splice this link out of the dep's active-link stack wherever it
+        // sits — not just at the top. A subscriber disposed while nested
+        // runs are stacked above it would otherwise be restored as a stale
+        // dep.active tombstone by the inner runs' endTracking (retaining
+        // the stopped subscriber). The stack is at most nesting-deep.
+        let cur = link.dep.active;
+        if (cur === link) {
+            link.dep.active = link.prevActive;
+        } else {
+            while (cur !== undefined) {
+                if (cur.prevActive === link) {
+                    cur.prevActive = link.prevActive;
+                    break;
+                }
+                cur = cur.prevActive;
+            }
+        }
+        link.prevActive = undefined;
     }
     effect.deps.length = 0;
 }
 
+/**
+ * Open a re-run's tracking window: install each existing link as its
+ * dep's `active` link (saving the previous one for LIFO restore) and
+ * clear its `seen` flag. track() then reuses installed links with a
+ * single identity compare — no allocation, no Set operations — and
+ * endTracking() sweeps whatever wasn't re-read.
+ */
+export function startTracking(sub: Subscriber): void {
+    const deps = sub.deps;
+    for (let i = 0; i < deps.length; i++) {
+        const link = deps[i];
+        link.seen = false;
+        link.prevActive = link.dep.active;
+        link.dep.active = link;
+    }
+}
+
+/**
+ * Close a tracking window: restore each dep's previous `active` link
+ * (LIFO — nested runs are strictly stacked), keep re-read links, and
+ * unsubscribe from deps that were not read this run.
+ */
+export function endTracking(sub: Subscriber): void {
+    const deps = sub.deps;
+    let write = 0;
+    for (let i = 0; i < deps.length; i++) {
+        const link = deps[i];
+        link.dep.active = link.prevActive;
+        link.prevActive = undefined;
+        if (link.seen) {
+            deps[write++] = link;
+        } else {
+            link.dep.subs.delete(sub);
+        }
+    }
+    deps.length = write;
+}
+
 export function track(dep: Dep): void {
-    if (!currentSubscriber) return;
-    dep.subs.add(currentSubscriber);
-    currentSubscriber.deps.push({ dep, version: dep.version });
+    const sub = currentSubscriber;
+    if (!sub) return;
+    const link = dep.active;
+    if (link !== undefined && link.sub === sub) {
+        // Reuse the existing subscription — this branch is both the
+        // re-run fast path AND the within-run duplicate-read dedup.
+        if (!link.seen) {
+            link.seen = true;
+            link.version = dep.version;
+        }
+        return;
+    }
+    const newLink: Link = { dep, sub, version: dep.version, seen: true, prevActive: dep.active };
+    // New links join the window so endTracking restores dep.active for
+    // them too (they saved the previous active above).
+    dep.active = newLink;
+    dep.subs.add(sub);
+    sub.deps.push(newLink);
 }
 
 /**
@@ -317,13 +393,14 @@ function runEffect(fn: EffectFn, scheduler?: EffectScheduler): EffectRunner {
             }
         }
         running = true;
-        cleanup(effectFn);
+        startTracking(effectFn);
         const prev = currentSubscriber;
         currentSubscriber = effectFn;
         if (process.env.NODE_ENV === 'production' || effectId === null) {
             try {
                 fn();
             } finally {
+                endTracking(effectFn);
                 currentSubscriber = prev;
                 running = false;
             }
@@ -337,6 +414,7 @@ function runEffect(fn: EffectFn, scheduler?: EffectScheduler): EffectRunner {
         try {
             fn();
         } finally {
+            endTracking(effectFn);
             currentSubscriber = prev;
             running = false;
             const hook = getDevtoolsHook();
