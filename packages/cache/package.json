@@ -1,0 +1,58 @@
+{
+    "name": "@sigx/cache",
+    "version": "0.9.0",
+    "description": "Cache policy for SignalX's value-first async — staleTime, gcTime, revalidation, keepPreviousData, invalidate() and optimistic mutate() on the rfc-async §7 pack contract",
+    "type": "module",
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+        ".": {
+            "types": "./dist/index.d.ts",
+            "development": "./dist/index.js",
+            "production": "./dist/index.prod.js",
+            "import": "./dist/index.js"
+        }
+    },
+    "files": [
+        "dist",
+        "src"
+    ],
+    "sideEffects": false,
+    "scripts": {
+        "build": "vite build && vite build --mode prod-dist && tsc --emitDeclarationOnly",
+        "dev": "vite build --watch",
+        "prepublishOnly": "pnpm run build"
+    },
+    "keywords": [
+        "sigx",
+        "cache",
+        "async",
+        "staleTime",
+        "revalidation",
+        "optimistic-updates",
+        "data-fetching"
+    ],
+    "author": "Andreas Ekdahl",
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/signalxjs/core.git",
+        "directory": "packages/cache"
+    },
+    "homepage": "https://sigx.dev/",
+    "bugs": {
+        "url": "https://github.com/signalxjs/core/issues"
+    },
+    "dependencies": {
+        "sigx": "workspace:^"
+    },
+    "devDependencies": {
+        "@sigx/vite": "workspace:^",
+        "@types/node": "^26.1.1",
+        "typescript": "^7.0.2",
+        "vite": "^8.1.4"
+    },
+    "publishConfig": {
+        "access": "public"
+    }
+}

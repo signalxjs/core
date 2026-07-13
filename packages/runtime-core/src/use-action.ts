@@ -16,6 +16,8 @@
 
 import { signal, batch, untrack } from '@sigx/reactivity';
 import { getCurrentInstance } from './component-lifecycle.js';
+import { ASYNC_ENGINE_TOKEN, type AsyncEngine } from './async/engine.js';
+import { lookupProvided } from './di/injectable.js';
 import {
     matchAsyncState,
     makeUnhandledReporter,
@@ -69,6 +71,11 @@ export function useAction<T, In = void>(fn: Fetcher<T, In>, opts?: ActionOptions
     if (!instance) {
         throw new Error('useAction() must be called synchronously during component setup.');
     }
+
+    // An app-provided engine (§7 pack) may wrap the action — optimistic
+    // apply, cache-aware invalidation. Its declared option keys silence the
+    // unknown-option warning via registerHandledAsyncOptionKeys.
+    const engine = lookupProvided(ASYNC_ENGINE_TOKEN) as AsyncEngine | undefined;
 
     if (process.env.NODE_ENV !== 'production') {
         warnUnknownOptions('useAction', opts, handledActionOptionKeys);
@@ -162,7 +169,7 @@ export function useAction<T, In = void>(fn: Fetcher<T, In>, opts?: ActionOptions
         seq++;
     });
 
-    return {
+    const action: AsyncAction<T, In> = {
         get state() {
             return state.st;
         },
@@ -195,4 +202,6 @@ export function useAction<T, In = void>(fn: Fetcher<T, In>, opts?: ActionOptions
         run,
         reset,
     };
+
+    return engine?.wrapAction ? engine.wrapAction(action, opts ?? {}, instance) : action;
 }

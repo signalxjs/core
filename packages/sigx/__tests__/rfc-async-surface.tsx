@@ -179,12 +179,12 @@ export const ProfileForm = component(() => {
 //    real error elsewhere.)
 // ───────────────────────────────────────────────────────────────────────
 
-declare module 'sigx' {
-    // what a cache pack's .d.ts would ship:
-    interface ActionOptions {
-        cache?: { invalidates?: readonly string[] };
-    }
-}
+// The augmentation below used to be declared inline here as a demo of the
+// pattern; since @sigx/cache landed (rfc-async Phase 2, #195) the REAL pack
+// ships it — importing its types is the proof now (remove the pack and the
+// `cache` option becomes a compile error again, exactly as a bare install
+// should).
+import type {} from '@sigx/cache';
 
 export const DeleteButton = component(() => {
     const remove = useAction(

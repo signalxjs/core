@@ -58,6 +58,16 @@
         ]
     },
     {
+        "name": "@sigx/cache",
+        "path": "packages/cache/dist/index.prod.js",
+        "limit": "3 KB",
+        "ignore": [
+            "sigx",
+            "sigx/*",
+            "@sigx/*"
+        ]
+    },
+    {
         "name": "@sigx/ssr-islands/client (browser entry)",
         "path": "packages/ssr-islands/dist/client/index.prod.js",
         "limit": "3 KB",

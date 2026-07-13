@@ -66,8 +66,11 @@ export { getComponentPlugins, applyContextExtensions, registerComponentPlugin, r
 export { getAppContextToken, provideAppContext } from './di/injectable.js';
 
 // Async engine internals (for server renderers and cache packs)
-export { matchAsyncState, registerHandledAsyncOptionKeys } from './async/shared.js';
+export { matchAsyncState, registerHandledAsyncOptionKeys, makeUnhandledReporter, normalizeError, makeAbortController, inertAbortSignal } from './async/shared.js';
 export { reportUnhandledAsyncError } from './app.js';
+// The §7 pack contract: per-app engine swap + the default engine to delegate to
+export { ASYNC_ENGINE_TOKEN, provideAsyncEngine, defaultAsyncEngine } from './async/engine.js';
+export type { AsyncEngine, AsyncReadHandle } from './async/engine.js';
 
 // Model internals
 export { getModelSymbol } from './model.js';

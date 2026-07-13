@@ -133,6 +133,10 @@ free port automatically).
   hydration via `client:*` directives). The first-party *reference* strategy pack
   riding `@sigx/server-renderer`'s public plugin API; a drop-in equal of any
   third-party pack, with no privileged access to core.
+- `packages/cache` → `@sigx/cache` — cache policy for value-first async
+  (staleTime/gcTime, revalidation, `invalidate()`, optimistic `mutate()`). The
+  first-party pack on the rfc-async §7 engine seam — a drop-in equal of any
+  third-party pack, no privileged access to core.
 - `packages/vite` → `@sigx/vite` — Vite plugin for dev/build/HMR.
 - `examples/` — runnable apps (`hello`, `spa`, `spa-ssr`).
 

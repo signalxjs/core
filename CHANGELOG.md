@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- **`@sigx/cache`** (new package): cache POLICY for value-first async, riding the rfc-async §7 pack contract (#195). `app.use(cachePlugin())` installs a per-app engine; call sites opt in via the `cache` option the pack's module augmentation adds to core's open `AsyncOptions`/`ActionOptions`: `staleTime` (fresh values serve without fetching; stale ones serve immediately and revalidate as `'refreshing'`), `gcTime` retention across unmounts, `revalidateOnFocus`/`revalidateOnInterval`, `keepPreviousData` across key changes, `invalidate()`/`mutate()` write-through on cached reads, and per-action `invalidates` (exact keys or tuple prefixes) + `optimistic` apply with conditional rollback. Adopts `__SIGX_ASYNC__` as its initial cache state (blob-as-seed); reads/actions without `cache` options delegate to core's default engine verbatim.
+- **`@sigx/runtime-core`**: the §7 provider seam is now installable per app — `useData`/`useAction` resolve an app-provided `AsyncEngine` (DI token, `provideAsyncEngine` + the delegable `defaultAsyncEngine` exported via internals) when no SSR per-instance provider is present. Core's key machinery (getters, canonical tuple identity, dev guards) stays in front of any engine; the SSR `_useAsync` seam is unchanged and still takes precedence. (#195)
+
 ### Fixed
 
 - **`@sigx/runtime-core`**: an element vnode passed **as a component prop** (a fallback, an icon, an array of items) now reaches the renderer as its raw object. Previously the reactive props proxy wrapped it — and, transitively, its dom node — corrupting the renderer's bookkeeping when the vnode toggled out of the tree: text children were removed while their element stayed behind, later mounts landed at the container end, and re-showing or unmounting threw inside the DOM (`removeChild ... is not a child of this node`). The props accessor now unwraps vnode-shaped values (the prop read itself stays reactive, so replacing the prop re-renders as usual), and `<Defer>`'s interim `toRaw` workaround is removed. (#191)
