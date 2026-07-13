@@ -48,6 +48,35 @@ export function isIterableCollection(value: unknown): value is Map<any, any> | S
     return ctor === Set || ctor === Map;
 }
 
+// Built-ins with internal slots that should not be proxied (brand strings
+// from Object.prototype.toString). Hoisted: shouldNotProxy runs on every
+// object-valued property get and every signal() call.
+const NON_PROXYABLE_BRANDS = new Set([
+    '[object Date]',
+    '[object RegExp]',
+    '[object Error]',
+    '[object Promise]',
+    '[object ArrayBuffer]',
+    '[object DataView]',
+    '[object Int8Array]',
+    '[object Uint8Array]',
+    '[object Uint8ClampedArray]',
+    '[object Int16Array]',
+    '[object Uint16Array]',
+    '[object Int32Array]',
+    '[object Uint32Array]',
+    '[object Float32Array]',
+    '[object Float64Array]',
+    '[object BigInt64Array]',
+    '[object BigUint64Array]'
+]);
+
+// Per-prototype verdict cache for non-plain objects (Date.prototype -> true,
+// MyClass.prototype -> false, ...). Keyed on the actual prototype object, so
+// it is cross-realm-safe: each realm's built-in prototypes cache their own
+// verdict via the brand check.
+const protoVerdicts = new WeakMap<object, boolean>();
+
 /**
  * Checks if a value is an "exotic" built-in object that should NOT be proxied.
  * These objects have internal slots that cannot be accessed through Proxy.
@@ -55,32 +84,22 @@ export function isIterableCollection(value: unknown): value is Map<any, any> | S
  */
 export function shouldNotProxy(value: unknown): boolean {
     if (!value || typeof value !== 'object') return false;
-    
-    // Check against constructors of built-ins with internal slots
-    const proto = Object.prototype.toString.call(value);
-    
-    // Built-ins that should not be proxied
-    const nonProxyable = [
-        '[object Date]',
-        '[object RegExp]',
-        '[object Error]',
-        '[object Promise]',
-        '[object ArrayBuffer]',
-        '[object DataView]',
-        '[object Int8Array]',
-        '[object Uint8Array]',
-        '[object Uint8ClampedArray]',
-        '[object Int16Array]',
-        '[object Uint16Array]',
-        '[object Int32Array]',
-        '[object Uint32Array]',
-        '[object Float32Array]',
-        '[object Float64Array]',
-        '[object BigInt64Array]',
-        '[object BigUint64Array]'
-    ];
-    
-    return nonProxyable.includes(proto);
+
+    // Fast path for the overwhelmingly common shapes: arrays and plain
+    // objects are always proxyable — two pointer compares, no allocation.
+    // Constructor-identity checks are deliberately NOT used as the primary
+    // test (not cross-realm-safe); everything else resolves through the
+    // brand check, cached per prototype.
+    if (Array.isArray(value)) return false;
+    const proto = Object.getPrototypeOf(value);
+    if (proto === Object.prototype || proto === null) return false;
+
+    let verdict = protoVerdicts.get(proto);
+    if (verdict === undefined) {
+        verdict = NON_PROXYABLE_BRANDS.has(Object.prototype.toString.call(value));
+        protoVerdicts.set(proto, verdict);
+    }
+    return verdict;
 }
 
 /**
