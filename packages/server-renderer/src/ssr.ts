@@ -18,7 +18,7 @@ import type { SSRPlugin } from './plugin';
 import type { JSXElement } from 'sigx';
 import type { App, AppContext } from 'sigx';
 import { Readable } from 'node:stream';
-import { SSRContext, createSSRContext, SSRContextOptions, CorePendingAsync } from './server/context';
+import { SSRContext, createSSRContext, SSRContextOptions } from './server/context';
 import { renderToChunks, renderVNodeToString } from './server/render-core';
 import { generateStreamingScript, generateReplacementScript, generateAppendBootstrap } from './server/streaming';
 import { renderHeadToString } from './head';

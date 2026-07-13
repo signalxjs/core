@@ -20,7 +20,8 @@
         }
     },
     "files": [
-        "dist"
+        "dist",
+        "src"
     ],
     "scripts": {
         "build": "vite build && vite build --mode prod-dist && tsc --emitDeclarationOnly",
@@ -51,7 +52,7 @@
     },
     "devDependencies": {
         "@sigx/vite": "workspace:^",
-        "@types/node": "^25.9.1",
+        "@types/node": "^26.1.1",
         "typescript": "^7.0.2",
         "vite": "^8.1.4"
     }
