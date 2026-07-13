@@ -179,7 +179,7 @@ function warnNoOpModifiers(
  * (`key={0}`, `key=""`) actually key the element; numbers coerce to strings
  * once here so the keyed diff compares with pure `===`.
  */
-function normalizeKey(k: unknown): string | null {
+export function normalizeKey(k: unknown): string | null {
     return k == null ? null : typeof k === 'string' ? k : String(k);
 }
 

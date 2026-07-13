@@ -129,7 +129,7 @@ function sameSlotChildren(a: any, b: any): boolean {
 }
 
 function createKeyToKeyIndexMap(children: VNode[], beginIdx: number, endIdx: number) {
-    const map = new Map<string | number, number>();
+    const map = new Map<string, number>();
     for (let i = beginIdx; i <= endIdx; i++) {
         const key = children[i]?.key;
         if (key != null) {
