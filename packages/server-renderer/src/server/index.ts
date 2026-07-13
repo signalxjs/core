@@ -2,7 +2,7 @@
  * @sigx/server-renderer/server
  * 
  * Server-side rendering with streaming support and hydration markers.
- * Strategy-agnostic — plugins add islands, Suspense, etc.
+ * Strategy-agnostic — plugins add islands, deferred boundaries, etc.
  */
 
 // Load SSR type augmentations (SSRHelper, ComponentSetupContext extensions)

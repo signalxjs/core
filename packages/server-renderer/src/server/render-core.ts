@@ -35,6 +35,7 @@ import {
     createPropsAccessor,
     provideAppContext,
     resolveBuiltInDirective,
+    matchAsyncState,
 } from 'sigx/internals';
 import type { SSRContext } from './context';
 import { generateAppendScript } from './streaming';
@@ -348,39 +349,54 @@ function recordComponentKey(ctx: SSRContext, id: number, key: string): void {
     }
 }
 
-/** Shared inert state for unkeyed / { server: false } calls on the server. */
-const INERT_ASYNC_STATE = {
+/**
+ * Shared inert state for { server: false } calls on the server: the pending
+ * arm renders into the HTML and the client fetches after hydration.
+ */
+const INERT_PENDING_STATE = Object.freeze({
+    state: 'pending' as const,
     value: null,
-    loading: true,
     error: null,
+    loading: true,
+    match: (arms: { pending?: () => unknown }) => arms.pending?.(),
     refresh: () => Promise.resolve()
-};
+});
 
 /**
- * useAsync server provider (shared; invoked as instance._useAsync(...)).
+ * useData server provider (shared; invoked as instance._useAsync(...)).
  *
  * Keyed calls fetch on the server (deduped per request by key), settle
  * through the component's ssrLoads (block: awaited inline; streaming:
  * deferred behind the placeholder), and record their value for the
- * __SIGX_ASYNC__ hydration blob. Unkeyed / { server: false } calls never
- * run here — the loading branch renders into the HTML and the client
- * fetches after hydration.
+ * __SIGX_ASYNC__ hydration blob. `{ server: false }` calls never run here —
+ * the pending arm renders into the HTML and the client fetches after
+ * hydration. Core resolves keys (getter → canonical string) and pre-binds
+ * the fetcher's argument before this seam, so server cells are only ever
+ * 'pending' | 'ready' | 'errored'.
+ *
+ * The options bag arrives whole (open AsyncOptions interface) — this
+ * provider reads `server` and ignores the rest; pack options are the pack
+ * provider's business.
  */
 function serverUseAsync(
     this: any,
     key: string | null,
     fetcher: (fctx: { signal: AbortSignal }) => Promise<unknown>,
-    options: { throwOnError?: boolean; server?: boolean } = {}
+    options: { server?: boolean } & Record<string, unknown> = {}
 ) {
     if (key === null || options.server === false) {
-        return INERT_ASYNC_STATE;
+        return INERT_PENDING_STATE;
     }
 
     const ctx: SSRContext = this.__ssrCtx;
     const id: number = this.__ssrId;
     const ssrLoads: Promise<void>[] = this._ssrLoads;
 
-    const state = { data: null as unknown, pending: true, failure: null as Error | null };
+    const state = {
+        st: 'pending' as 'pending' | 'ready' | 'errored',
+        data: null as unknown,
+        failure: null as Error | null
+    };
 
     // Request-level dedupe: same key → one fetch, shared result
     let promise = ctx._asyncCache.get(key);
@@ -390,29 +406,31 @@ function serverUseAsync(
     }
 
     const settled = (promise as Promise<unknown>).then(value => {
+        state.st = 'ready';
         state.data = value;
-        state.pending = false;
         ctx._asyncResults.set(key, value);
         recordComponentKey(ctx, id, key);
     }, e => {
+        // Soft failure: the component renders its error arm. Nothing is
+        // serialized — the client refetches (fail-safe).
+        state.st = 'errored';
         state.failure = e instanceof Error ? e : new Error(String(e));
-        state.pending = false;
-        if (options.throwOnError) {
-            // Reject the load → component error fallback (block mode) or
-            // error replacement (streaming) — same as a setup throw.
-            throw state.failure;
-        }
-        // Soft failure: the component renders its own error branch.
-        // Nothing is serialized — the client refetches (fail-safe).
     });
     ssrLoads.push(settled);
 
     return {
+        get state() { return state.st; },
         get value() { return state.data; },
-        get loading() { return state.pending; },
-        get error() {
-            if (options.throwOnError && state.failure) throw state.failure;
-            return state.failure;
+        get loading() { return state.st === 'pending'; },
+        get error() { return state.failure; },
+        match(arms: Parameters<typeof matchAsyncState>[1]) {
+            return matchAsyncState({
+                state: state.st,
+                value: state.data,
+                error: state.failure,
+                stale: null,
+                retry: () => { /* no-op on the server */ }
+            }, arms);
         },
         refresh: () => Promise.resolve() // no-op on the server
     };
@@ -625,6 +643,14 @@ interface RenderBufState {
     len: number;
     /** Flush-hint threshold (Infinity in string mode: never hint) */
     threshold: number;
+    /**
+     * True while rendering inside a <Defer> boundary's deferred render:
+     * pending keyed reads are awaited inline (block mode) instead of
+     * spawning their own placeholders, so the boundary replaces ONCE with
+     * everything beneath it resolved. Per-driver — multiple deferred renders
+     * interleave on the shared SSRContext, so this must not live on ctx.
+     */
+    inDefer?: boolean;
 }
 
 /**
@@ -798,13 +824,14 @@ function* renderNode(
             yield { p: factory.preload().catch(() => undefined) };
         }
 
-        // Suspense boundaries in streaming mode: stream the fallback now,
-        // replace with the real children once their lazy deps resolve —
-        // reusing the standard placeholder/$SIGX_REPLACE machinery. In
-        // blocking/string mode Suspense needs no special handling: lazy
-        // children await inline (above), so the boundary never has pending
-        // promises and Suspense renders its children directly.
-        if (factory.__suspense && ctx._streaming) {
+        // <Defer> boundaries in streaming mode: stream the fallback now,
+        // replace with the real children once everything pending beneath
+        // them — lazy chunks AND keyed useData reads — resolves, reusing the
+        // standard placeholder/$SIGX_REPLACE machinery. In blocking/string
+        // mode Defer needs no special handling: lazy children await inline
+        // (above), keyed reads block per component, and the Defer component
+        // renders its children directly.
+        if (factory.__defer && ctx._streaming) {
             const id = ctx.nextId();
             const props = vnode.props || {};
 
@@ -827,11 +854,15 @@ function* renderNode(
             const capturedParentCtx = parentCtx;
 
             const deferredRender = (async () => {
-                let html = '';
+                // Leading comment mirrors the client Defer's constant render
+                // shape ([fallback-or-comment, …children]) so the streamed
+                // replacement hydrates against the client's null-fallback slot.
+                let html = '<!---->';
                 for (const item of items) {
                     // The deferred driver awaits unresolved lazy() preloads
-                    // inline (rule above), so this resolves to real content.
-                    html += await renderVNodeToString(item, ctx, appContext, capturedParentCtx);
+                    // inline (rule above) and — via inDefer — blocks on keyed
+                    // useData reads too, so this resolves to real content.
+                    html += await renderVNodeToString(item, ctx, appContext, capturedParentCtx, { inDefer: true });
                 }
                 return html;
             })();
@@ -889,8 +920,11 @@ function* renderNode(
             if (ssrLoads.length > 0) {
                 // Plugin hook: handleAsyncSetup
                 // Plugins can override the async mode.
-                // Default: 'stream' in streaming mode, 'block' in string mode.
-                let asyncMode: 'block' | 'stream' | 'skip' = ctx._streaming ? 'stream' : 'block';
+                // Default: 'stream' in streaming mode, 'block' in string mode
+                // — and 'block' inside a <Defer> deferred render, so the
+                // boundary's single replacement carries the resolved data
+                // instead of nesting its own placeholders.
+                let asyncMode: 'block' | 'stream' | 'skip' = (ctx._streaming && !state.inDefer) ? 'stream' : 'block';
                 let asyncPlaceholder: string | undefined;
                 let pluginHandled = false;
 
@@ -1165,9 +1199,9 @@ export async function* renderToChunks(
  * @param parentCtx - optional parent component context so deferred renders
  *   keep their provide/inject chain
  */
-export async function renderVNodeToString(element: JSXElement, ctx: SSRContext, appContext: AppContext | null = null, parentCtx: ComponentSetupContext | null = null): Promise<string> {
+export async function renderVNodeToString(element: JSXElement, ctx: SSRContext, appContext: AppContext | null = null, parentCtx: ComponentSetupContext | null = null, opts?: { inDefer?: boolean }): Promise<string> {
     const buf: string[] = [];
-    const state: RenderBufState = { len: 0, threshold: Infinity };
+    const state: RenderBufState = { len: 0, threshold: Infinity, inDefer: opts?.inDefer };
     const gen = renderNode(element, ctx, parentCtx, appContext, buf, state);
 
     let result = gen.next();

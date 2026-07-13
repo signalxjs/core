@@ -1,18 +1,23 @@
 /**
  * ════════════════════════════════════════════════════════════════════════
- *  DESIGN MOCK — usage examples for `useData` / `useAction`
- *  (docs/rfc-async.md). Not wired into the app; open in an editor and
- *  hover the types. Every RFC contract that is type-sensitive is
- *  exercised here: the two useData forms (key is mandatory), tuple-key inference,
- *  `match` narrowing (idle arm, stale error param), all() object/tuple
- *  inference + `.errors`, and the settled RunResult.
+ *  RFC-async surface parity gate (docs/rfc-async.md rev 8, issue #189).
+ *
+ *  Typecheck-only — no `.test` suffix, so vitest never runs it; the root
+ *  `pnpm typecheck` (CI) compiles it against the REAL `sigx` exports.
+ *  This file started life as the RFC's inspectable mock
+ *  (examples/spa-ssr/src/rfc-async-mock/examples.tsx) and was moved here
+ *  verbatim when the implementation landed: every type-sensitive contract
+ *  the RFC pinned is exercised — the two useData forms (key is mandatory),
+ *  tuple-key inference, `match` narrowing (idle arm, stale error param),
+ *  all() object/tuple inference + `.errors`, and the settled RunResult.
+ *  If a refactor regresses the public surface, this file stops compiling.
  * ════════════════════════════════════════════════════════════════════════
  */
 
 /* eslint-disable @typescript-eslint/no-unused-vars */
 
 import { component, signal } from 'sigx';
-import { useData, useAction, all, SupersededError } from './use-data';
+import { useData, useAction, all, SupersededError } from 'sigx';
 
 /** Compile-time assertion helper — fails to typecheck on mismatch. */
 function expectType<T>(_v: T): void {}
@@ -169,9 +174,12 @@ export const ProfileForm = component(() => {
 //    interface contract (§7) means the `cache` key below exists ONLY
 //    because of the augmentation right here — remove the declare block and
 //    the option becomes a compile error, exactly as a bare install should.
+//    (The augmentation is program-wide under the root tsconfig; nothing
+//    else in this program consumes ActionOptions, so it can't mask a
+//    real error elsewhere.)
 // ───────────────────────────────────────────────────────────────────────
 
-declare module './use-data' {
+declare module 'sigx' {
     // what a cache pack's .d.ts would ship:
     interface ActionOptions {
         cache?: { invalidates?: readonly string[] };

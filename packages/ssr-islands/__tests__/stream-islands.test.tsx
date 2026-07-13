@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { component, Fragment, useAsync } from 'sigx';
+import { component, Fragment, useData } from 'sigx';
 import { renderToString, renderToStream, renderToStreamWithCallbacks, type StreamCallbacks } from '../../server-renderer/src/server/index';
 import { createSSR } from '../../server-renderer/src/ssr';
 import { islandsPlugin } from '../src/plugin';
@@ -159,7 +159,7 @@ describe('island streaming (renderToStream)', () => {
     describe('streaming async components', () => {
         it('should render async island placeholder first', async () => {
             const AsyncIsland = component(() => {
-                const data = useAsync('async-island-data', async () => {
+                const data = useData('async-island-data', async () => {
                     await new Promise(r => setTimeout(r, 10));
                     return 'async-loaded';
                 });
@@ -182,7 +182,7 @@ describe('island streaming (renderToStream)', () => {
 
         it('should include streaming script before replacements', async () => {
             const AsyncIsland = component(() => {
-                const data = useAsync('async-island-script', async () => {
+                const data = useData('async-island-script', async () => {
                     await new Promise(r => setTimeout(r, 10));
                     return 'loaded';
                 });
@@ -195,22 +195,21 @@ describe('island streaming (renderToStream)', () => {
             expect(html).toContain('$SIGX_REPLACE');
         });
 
-        it('should handle async component error in stream', async () => {
-            const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => { });
-
+        it('should stream the component error branch on a fetcher rejection (soft error)', async () => {
+            // Server data errors are SOFT: the deferred render resolves with
+            // the component's own error branch — no red error replacement.
             const FailingAsync = component(() => {
-                useAsync('stream-fail-1', async () => {
+                const data = useData('stream-fail-1', async () => {
                     throw new Error('Stream async fail');
-                }, { throwOnError: true });
-                return () => <div>Fallback</div>;
+                });
+                return () => <div>{data.error ? `error: ${data.error.message}` : 'Loading'}</div>;
             }, { name: 'FailingAsync' });
 
             const ssr = createSSR().use(islandsPlugin());
             const html = await collectStream(ssr.renderStream(<FailingAsync client:load />));
-            // Should have error fallback
-            expect(html).toContain('Error loading component');
-
-            consoleSpy.mockRestore();
+            // The replacement carries the error branch, not the red fallback
+            expect(html).toContain('error: Stream async fail');
+            expect(html).not.toContain('Error loading component');
         });
     });
 });
@@ -219,7 +218,7 @@ describe('island streaming (renderToStreamWithCallbacks)', () => {
     describe('async component streaming via callbacks', () => {
         it('should send async chunks for async island components', async () => {
             const AsyncIsland = component(() => {
-                const data = useAsync('cb-streamed-data', async () => {
+                const data = useData('cb-streamed-data', async () => {
                     await new Promise(r => setTimeout(r, 10));
                     return 'streamed-data';
                 });
@@ -250,7 +249,7 @@ describe('island streaming (renderToStreamWithCallbacks)', () => {
 
         it('should call onAsyncChunk with replacement scripts', async () => {
             const AsyncIsland = component(() => {
-                const data = useAsync('cb-replacement-script', async () => {
+                const data = useData('cb-replacement-script', async () => {
                     await new Promise(r => setTimeout(r, 10));
                     return 'loaded';
                 });
@@ -268,30 +267,29 @@ describe('island streaming (renderToStreamWithCallbacks)', () => {
             expect(allAsync).toContain('$SIGX_REPLACE');
         });
 
-        it('should handle async error with onAsyncChunk error fallback', async () => {
-            const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => { });
-
+        it('should send the component error branch via onAsyncChunk on a fetcher rejection (soft error)', async () => {
             const FailingAsync = component(() => {
-                useAsync('cb-fail-1', async () => { throw new Error('fail'); }, { throwOnError: true });
-                return () => <div>Content</div>;
+                const data = useData('cb-fail-1', async () => { throw new Error('fail'); });
+                return () => <div>{data.error ? `error: ${data.error.message}` : 'Content'}</div>;
             }, { name: 'FailingAsync' });
 
             const { calls, callbacks } = createCallbackTracker();
             const ssr = createSSR().use(islandsPlugin());
             await ssr.renderStreamWithCallbacks(<FailingAsync client:load />, callbacks);
 
+            // Soft error: the async chunk replacement carries the component's
+            // own error branch, not the red error fallback.
             const asyncChunks = calls.filter(c => c.type === 'async');
             const allAsync = asyncChunks.map(c => c.data).join('');
-            expect(allAsync).toContain('Error loading component');
-
-            consoleSpy.mockRestore();
+            expect(allAsync).toContain('error: fail');
+            expect(allAsync).not.toContain('Error loading component');
         });
     });
 
     describe('callback ordering with islands', () => {
         it('should call shell before async chunks before complete', async () => {
             const AsyncIsland = component(() => {
-                const v = useAsync('cb-ordering', async () => {
+                const v = useData('cb-ordering', async () => {
                     await new Promise(r => setTimeout(r, 10));
                     return 'done';
                 });
@@ -318,7 +316,7 @@ describe('signal state serialization', () => {
         const StatefulIsland = component((ctx) => {
             const ssrSignal = ctx.signal as SSRSignalFn;
             const count = ssrSignal(0, 'count');
-            useAsync('stateful-count', async () => {
+            useData('stateful-count', async () => {
                 count.value = 42;
                 return count.value;
             });
@@ -340,7 +338,7 @@ describe('signal state serialization', () => {
             const ssrSignal = ctx.signal as SSRSignalFn;
             const name = ssrSignal('', 'name');
             const age = ssrSignal(0, 'age');
-            useAsync('multi-signal', async () => {
+            useData('multi-signal', async () => {
                 name.value = 'Alice';
                 age.value = 30;
                 return null;
@@ -362,7 +360,7 @@ describe('signal state serialization', () => {
         const AutoIndex = component((ctx) => {
             const a = ctx.signal(1);
             const b = ctx.signal(2);
-            useAsync('auto-index', async () => {
+            useData('auto-index', async () => {
                 a.value = 10;
                 b.value = 20;
                 return null;
@@ -387,7 +385,7 @@ describe('signal state serialization', () => {
         const NonSerializable = component((ctx) => {
             const ssrSignal = ctx.signal as SSRSignalFn;
             const state = ssrSignal(null as any, 'state');
-            useAsync('non-serializable', async () => {
+            useData('non-serializable', async () => {
                 // Circular objects are not serializable
                 const circular: any = {};
                 circular.self = circular;

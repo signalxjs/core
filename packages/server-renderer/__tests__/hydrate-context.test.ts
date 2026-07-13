@@ -3,7 +3,7 @@
  *
  * Covers the client plugin registry, app context tracking, normalizeElement,
  * and the client-side `ssr` environment-flags context extension.
- * (Server-state restoration lives in useAsync/useStream — see
+ * (Server-state restoration lives in useData/useStream — see
  * async-state.test.tsx and the runtime-core use-async tests.)
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -95,7 +95,7 @@ describe('Context extension behavior (via component setup)', () => {
         expect(ctx.ssr).toBeDefined();
         expect(ctx.ssr.isServer).toBe(false);
         expect(ctx.ssr.isHydrating).toBe(false);
-        // Data loading moved to useAsync/useStream — ctx.ssr is flags only
+        // Data loading moved to useData/useStream — ctx.ssr is flags only
         expect((ctx.ssr as any).load).toBeUndefined();
         expect((ctx.ssr as any).stream).toBeUndefined();
     });

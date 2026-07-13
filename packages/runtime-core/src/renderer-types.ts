@@ -46,7 +46,7 @@ export interface InternalVNode extends VNode {
 }
 
 export interface RendererOptions<HostNode = any, HostElement = any> {
-    patchProp(el: HostElement, key: string, prevValue: any, nextValue: any, isSVG?: boolean): void;
+    patchProp(el: HostElement, key: string, prevValue: any, nextValue: any, isSVG?: boolean, appContext?: AppContext | null): void;
     insert(child: HostNode, parent: HostElement, anchor?: HostNode | null): void;
     remove(child: HostNode): void;
     createElement(type: string, isSVG?: boolean, isCustomizedBuiltIn?: string): HostElement;

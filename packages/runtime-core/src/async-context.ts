@@ -14,8 +14,6 @@
 interface SSRRequestContext {
     /** Current component context (replaces module-level singleton) */
     currentComponentContext: any | null;
-    /** Current suspense boundary */
-    currentSuspenseBoundary: any | null;
 }
 
 // ============= Implementation =============
@@ -43,8 +41,7 @@ try {
 // ============= Fallback (browser / older Node.js) =============
 
 let _fallbackContext: SSRRequestContext = {
-    currentComponentContext: null,
-    currentSuspenseBoundary: null
+    currentComponentContext: null
 };
 
 // ============= Public API =============
@@ -80,24 +77,6 @@ export function setCurrentInstanceSafe(ctx: any | null): any | null {
 }
 
 /**
- * Get the current suspense boundary (request-safe).
- */
-export function getCurrentSuspenseBoundarySafe(): any | null {
-    return getRequestContext().currentSuspenseBoundary;
-}
-
-/**
- * Set the current suspense boundary (request-safe).
- * Returns the previous value.
- */
-export function setCurrentSuspenseBoundarySafe(boundary: any | null): any | null {
-    const reqCtx = getRequestContext();
-    const prev = reqCtx.currentSuspenseBoundary;
-    reqCtx.currentSuspenseBoundary = boundary;
-    return prev;
-}
-
-/**
  * Run a function within a new isolated request context.
  * On Node.js, uses AsyncLocalStorage.run() to create a new scope.
  * On browsers, simply calls the function (no isolation needed).
@@ -113,8 +92,7 @@ export function setCurrentSuspenseBoundarySafe(boundary: any | null): any | null
 export function runInRequestScope<T>(fn: () => T): T {
     if (asyncLocalStorage) {
         const freshContext: SSRRequestContext = {
-            currentComponentContext: null,
-            currentSuspenseBoundary: null
+            currentComponentContext: null
         };
         return asyncLocalStorage.run(freshContext, fn);
     }

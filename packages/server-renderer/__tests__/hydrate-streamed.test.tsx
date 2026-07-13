@@ -1,5 +1,5 @@
 /**
- * Full streamed-SSR → hydration round trip for async (keyed useAsync)
+ * Full streamed-SSR → hydration round trip for async (keyed useData)
  * components.
  *
  * Streaming mode wraps async components in a <div data-async-placeholder>
@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { component, useAsync } from 'sigx';
+import { component, useData } from 'sigx';
 import { createSSR, stateSerializationPlugin } from '../src/index';
 import { hydrateComponent } from '../src/client/hydrate-component';
 import { createSSRContainer, cleanupContainer, nextTick } from './test-utils';
@@ -48,7 +48,7 @@ function executeStreamScripts(container: HTMLElement, scripts: string): void {
 function makeHomeLike() {
     const clientLoad = vi.fn(async () => ({ stars: 0 }));
     const Page = (load: () => Promise<{ stars: number }>) => component(() => {
-        const stats = useAsync('home-stats', load);
+        const stats = useData('home-stats', load);
         return () => (
             <>
                 <h1>Server-rendered</h1>

@@ -1,4 +1,4 @@
-import { component, Suspense, useHead } from 'sigx';
+import { component, Defer, useHead } from 'sigx';
 
 import { TechDetails } from '../lazy-sections';
 
@@ -8,9 +8,9 @@ export const About = component(() => {
         <>
             <h1>About</h1>
             <p>The reference SSR shape for SignalX: an Express server, <code>renderDocumentToNodeStream</code> on the way out, <code>ssrClientPlugin</code> + <code>hydrate()</code> on the way in.</p>
-            <Suspense fallback={<div class="card"><p>Loading section…</p></div>}>
+            <Defer fallback={<div class="card"><p>Loading section…</p></div>}>
                 <TechDetails />
-            </Suspense>
+            </Defer>
             <div class="card">
                 <h3 style="margin-top: 0;">How it works</h3>
                 <ul>

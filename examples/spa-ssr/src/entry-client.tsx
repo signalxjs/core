@@ -10,7 +10,7 @@ const app = defineApp(<App />);
 app.defineProvide(useRouter, () => createRouter(parseUrl(window.location.pathname)));
 
 async function start() {
-    // Server-resolved Suspense content must hydrate against the REAL
+    // Server-resolved <Defer> content must hydrate against the REAL
     // component, so preload the lazy chunk(s) the current route renders
     // before walking the DOM.
     if (parseUrl(window.location.pathname) === '/about') {

@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { component, signal, useAsync } from 'sigx';
+import { component, signal, useData } from 'sigx';
 import { hydrate } from '../../server-renderer/src/client/hydrate-core';
 // Side-effect import: sets up the sigx:async-ready event listener
 import { hydrateLeftoverAsyncComponents } from '../src/client/hydrate-async';
@@ -174,7 +174,7 @@ describe('async streaming hydration', () => {
             let restoredValue: any;
 
             // New model: server-seeded async state rides window.__SIGX_ASYNC__
-            // keyed by the useAsync key; the client restores it synchronously
+            // keyed by the useData key; the client restores it synchronously
             // during setup without re-running the fetcher.
             (globalThis as any).__SIGX_ASYNC__ = Object.assign(
                 Object.create(null),
@@ -182,7 +182,7 @@ describe('async streaming hydration', () => {
             );
 
             const StreamedComponent = component(() => {
-                const count = useAsync('streamed-count', async () => -1);
+                const count = useData('streamed-count', async () => -1);
                 restoredValue = count.value;
                 return () => <span class="count">{count.value}</span>;
             }, { name: 'StreamedComponent' });
@@ -336,7 +336,7 @@ describe('async streaming hydration', () => {
             invalidateIslandCache();
 
             // New model: server-seeded async state rides window.__SIGX_ASYNC__,
-            // keyed by the useAsync key; restored synchronously on the client.
+            // keyed by the useData key; restored synchronously on the client.
             (globalThis as any).__SIGX_ASYNC__ = Object.assign(
                 Object.create(null),
                 { 'cached-val': 'second' }
@@ -346,7 +346,7 @@ describe('async streaming hydration', () => {
             let restoredVal: any;
 
             const CachedComp = component(() => {
-                const val = useAsync('cached-val', async () => 'stale');
+                const val = useData('cached-val', async () => 'stale');
                 restoredVal = val.value;
                 return () => <span>{val.value}</span>;
             }, { name: 'CachedComp' });

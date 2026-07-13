@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { component, useAsync, defineApp } from 'sigx';
+import { component, useData, defineApp } from 'sigx';
 import { createSSR } from '../src/index';
 import { createSSRContext } from '../src/server/context';
 import type { SSRPlugin } from '../src/plugin';
@@ -104,9 +104,9 @@ describe('createSSR.render — sync-fail → async fallback', () => {
         expect(html).toContain('class="async-rendered"');
     });
 
-    it('falls back when a component registers useAsync work', async () => {
+    it('falls back when a component registers useData work', async () => {
         const Loaded = component(() => {
-            const data = useAsync('internals-fallback', async () => {
+            const data = useData('internals-fallback', async () => {
                 await Promise.resolve();
                 return 'loaded';
             });
@@ -126,9 +126,9 @@ describe('createSSR.render — sync-fail → async fallback', () => {
 });
 
 describe('createSSR.renderNodeStream — async chunk streaming', () => {
-    it('emits placeholders, then replacement scripts when useAsync resolves', async () => {
+    it('emits placeholders, then replacement scripts when useData resolves', async () => {
         const Async = component(() => {
-            const data = useAsync('internals-stream', async () => {
+            const data = useData('internals-stream', async () => {
                 await Promise.resolve();
                 return 'resolved';
             });
@@ -151,7 +151,7 @@ describe('createSSR.renderNodeStream — async chunk streaming', () => {
 
     it('emits plugin onAsyncComponentResolved augmentation in replacement script', async () => {
         const Async = component(() => {
-            const ready = useAsync('internals-aug', async () => {
+            const ready = useData('internals-aug', async () => {
                 await Promise.resolve();
                 return 'resolved';
             });
@@ -203,18 +203,20 @@ describe('createSSR.renderStreamWithCallbacks — error path', () => {
     });
 });
 
-describe('streamAllAsyncChunks — error path inside core promise', () => {
-    it('falls back to a red error replacement when a throwOnError fetcher rejects', async () => {
-        const consoleErr = vi.spyOn(console, 'error').mockImplementation(() => {});
+describe('streamAllAsyncChunks — soft data error inside core promise', () => {
+    it('streams the component error branch in the replacement when a fetcher rejects', async () => {
+        // Server data errors are SOFT: the rejection settles the cell to
+        // state 'errored' and the deferred render resolves with the
+        // component's own error branch — never the red error replacement.
         const Failing = component(() => {
-            useAsync('internals-fail', async () => {
+            const data = useData('internals-fail', async () => {
                 throw new Error('load-fail');
-            }, { throwOnError: true });
+            });
             return () => ({
                 type: 'div',
                 props: { class: 'placeholder-content' },
                 key: null,
-                children: ['loading'],
+                children: [data.error ? `failed: ${data.error.message}` : 'loading'],
                 dom: null
             } as any);
         }, { name: 'Failing' });
@@ -223,10 +225,10 @@ describe('streamAllAsyncChunks — error path inside core promise', () => {
         const stream = ssr.renderNodeStream((Failing as any)({}));
         const html = await collectReadable(stream);
 
-        // The default error replacement HTML
-        expect(html).toContain('Error loading component');
-        expect(consoleErr).toHaveBeenCalled();
-        consoleErr.mockRestore();
+        // The replacement carries the error branch, not the red fallback
+        expect(html).toContain('$SIGX_REPLACE');
+        expect(html).toContain('failed: load-fail');
+        expect(html).not.toContain('Error loading component');
     });
 });
 

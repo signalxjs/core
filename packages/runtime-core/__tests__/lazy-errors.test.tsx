@@ -1,11 +1,13 @@
 /**
- * Error-path and Suspense-fallback coverage for lazy.tsx.
+ * Error-path and Defer-fallback coverage for lazy.tsx.
  *
- * Companion to lazy-timing.test.tsx — focuses on the rejected/error branches,
- * fallback function-vs-JSX, isLazyComponent, preload(), and isLoaded().
+ * Companion to lazy-timing.test.tsx — focuses on the rejected/error branches
+ * (render-throw routing through errorScope / app onError), Defer fallback
+ * function-vs-JSX shapes, isLazyComponent, preload(), and isLoaded().
+ * Full <Defer> behavior is covered by defer.test.tsx.
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { component, signal, jsx, lazy, Suspense } from 'sigx';
+import { component, jsx, lazy, Defer, errorScope, defineApp } from 'sigx';
 import { render } from '@sigx/runtime-dom';
 import { isLazyComponent } from '../src/lazy';
 
@@ -21,38 +23,75 @@ describe('lazy() — loader rejection', () => {
     let container: HTMLDivElement;
     afterEach(() => { container?.remove(); });
 
-    it('logs error path through console but does not crash the render when no Suspense wraps it', async () => {
-        const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-        const Boom = lazy(() => Promise.reject(new Error('chunk-failed')));
+    it('routes the loader error to the nearest errorScope fallback', async () => {
+        let rejectLoader!: (err: Error) => void;
+        const Boom = lazy(() => new Promise<any>((_, rej) => { rejectLoader = rej; }));
+
+        const Host = component(() => {
+            errorScope({
+                fallback: (error) => <div class="err">{error.message}</div>,
+            });
+            return () => jsx(Boom, {});
+        }, { name: 'Host' });
 
         container = document.createElement('div');
         document.body.appendChild(container);
-        render(jsx(Boom, {}), container);
+        render(jsx(Host, {}), container);
+        await tick();
 
+        // Pending: renders nothing, no error yet
+        expect(container.querySelector('.err')).toBeNull();
+
+        rejectLoader(new Error('chunk-failed'));
         await tick();
         await tick();
         await wait(10);
 
-        // The component renders null while pending, and since no Suspense is
-        // wrapping it, the error propagates through the lazy state without
-        // crashing the render. We just verify the test didn't throw.
-        expect(container.parentNode).toBe(document.body);
-        errSpy.mockRestore();
+        // The wrapper's re-render threw the load error; the scope took it
+        expect(container.querySelector('.err')?.textContent).toBe('chunk-failed');
+    });
+
+    it('reaches app onError when no errorScope wraps the lazy component', async () => {
+        const onError = vi.fn().mockReturnValue(true);
+        let rejectLoader!: (err: Error) => void;
+        const Boom = lazy(() => new Promise<any>((_, rej) => { rejectLoader = rej; }));
+
+        container = document.createElement('div');
+        document.body.appendChild(container);
+
+        const app = defineApp(jsx(Boom, {}));
+        app.onError(onError);
+        app.mount(container);
+        await tick();
+
+        expect(onError).not.toHaveBeenCalled();
+
+        rejectLoader(new Error('chunk-failed'));
+        await tick();
+        await tick();
+        await wait(10);
+
+        expect(onError).toHaveBeenCalledTimes(1);
+        const [err, , info] = onError.mock.calls[0];
+        expect(err).toBeInstanceOf(Error);
+        expect((err as Error).message).toBe('chunk-failed');
+        expect(info).toBe('render');
     });
 });
 
-describe('Suspense — fallback shapes', () => {
+describe('Defer — mounting shapes around a lazy chunk', () => {
+    // Smoke coverage of the fallback-prop shapes (JSX / function / absent),
+    // mirroring the old Suspense shape tests. Full <Defer> fallback display
+    // behavior is defer.test.tsx's territory.
     let container: HTMLDivElement;
     afterEach(() => { container?.remove(); });
 
-    it('mounts a Suspense boundary with a JSX fallback without throwing', async () => {
+    it('mounts with a JSX fallback and a pending lazy child without throwing', async () => {
         const Slow = lazy(() => new Promise<any>(() => {}));
         container = document.createElement('div');
         document.body.appendChild(container);
-        // Smoke test for the JSX-fallback branch in Suspense's render fn.
-        // Full pending-state DOM observation is covered by lazy-timing.test.tsx.
         expect(() => render(
-            jsx(Suspense, {
+            jsx(Defer, {
                 fallback: jsx('span', { class: 'fb' }, 'loading...'),
                 children: [jsx(Slow, {})]
             }),
@@ -61,13 +100,13 @@ describe('Suspense — fallback shapes', () => {
         await tick();
     });
 
-    it('mounts a Suspense boundary with a function fallback without throwing', async () => {
+    it('mounts with a function fallback and a pending lazy child without throwing', async () => {
         const Slow = lazy(() => new Promise<any>(() => {}));
         const fallbackFn = vi.fn(() => jsx('span', { class: 'fb-fn' }, 'loading'));
         container = document.createElement('div');
         document.body.appendChild(container);
         expect(() => render(
-            jsx(Suspense, {
+            jsx(Defer, {
                 fallback: fallbackFn,
                 children: [jsx(Slow, {})]
             }),
@@ -76,24 +115,28 @@ describe('Suspense — fallback shapes', () => {
         await tick();
     });
 
-    it('mounts a Suspense boundary with no fallback prop', async () => {
+    it('renders a comment placeholder in the fallback slot with no fallback prop', async () => {
         const Slow = lazy(() => new Promise<any>(() => {}));
         container = document.createElement('div');
         document.body.appendChild(container);
         expect(() => render(
-            jsx(Suspense, { children: [jsx(Slow, {})] }),
+            jsx(Defer, { children: [jsx(Slow, {})] }),
             container
         )).not.toThrow();
         await tick();
+        await tick();
+
+        // Constant shape: a null fallback slot normalizes to a comment node
+        expect(container.innerHTML).toContain('<!---->');
     });
 
-    it('renders the single child VNode when the children array filters down to one entry', async () => {
+    it('mounts children through the default slot including mixed falsy entries', async () => {
         const Cmp = component(() => () => jsx('span', { class: 'ok' }, 'ok'), { name: 'OkCmp' });
         container = document.createElement('div');
         document.body.appendChild(container);
 
         render(
-            jsx(Suspense, {
+            jsx(Defer, {
                 children: [null, false, true, jsx(Cmp, {}), null]
             }),
             container
@@ -101,10 +144,41 @@ describe('Suspense — fallback shapes', () => {
         await tick();
         await tick();
         await wait(20);
-        // Verify Suspense rendered without throwing — the single-element filter
-        // branch must have been taken (else: returning an array of mixed truthy
-        // / falsy entries would crash the renderer).
+        // Nothing pending — children render directly, falsy entries skipped
         expect(container.querySelector('.ok')).not.toBeNull();
+    });
+
+    it('keeps children mounted and swaps the resolved component in place', async () => {
+        const Inner = component(() => () => jsx('div', { class: 'inner', children: 'loaded' }), { name: 'Inner' });
+        let resolveLoader!: (mod: any) => void;
+        const Slow = lazy(() => new Promise<any>(r => { resolveLoader = r; }));
+
+        container = document.createElement('div');
+        document.body.appendChild(container);
+        render(
+            jsx(Defer, {
+                fallback: jsx('span', { class: 'fb' }, 'loading...'),
+                children: [jsx(Slow, {}), jsx('p', { class: 'sibling', children: 'stays' })]
+            }),
+            container
+        );
+        await tick();
+        await tick();
+        // Pending lazy renders null; the sibling child is already mounted
+        expect(container.querySelector('.inner')).toBeNull();
+        expect(container.querySelector('.sibling')?.textContent).toBe('stays');
+
+        resolveLoader({ default: Inner });
+        await tick();
+        await tick();
+        await wait(10);
+
+        // Resolved component appears in place; sibling stayed mounted;
+        // the fallback slot holds a comment node (constant render shape)
+        expect(container.querySelector('.fb')).toBeNull();
+        expect(container.querySelector('.inner')?.textContent).toBe('loaded');
+        expect(container.querySelector('.sibling')?.textContent).toBe('stays');
+        expect(container.innerHTML).toContain('<!---->');
     });
 });
 
@@ -168,8 +242,8 @@ describe('lazy().preload() and isLoaded()', () => {
     });
 });
 
-describe('lazy() — second instance subscribes when promise is still pending', () => {
-    it('second mount of the same lazy component shares the in-flight promise', async () => {
+describe('lazy() — factory-level shared load state', () => {
+    it('every mounted instance re-renders when the shared chunk settles', async () => {
         let resolveLoader!: (mod: any) => void;
         const Cmp = component(() => () => jsx('span', { class: 'shared' }, 'ok'));
         const L = lazy<typeof Cmp>(() => new Promise<any>(r => { resolveLoader = r; }));
@@ -186,6 +260,8 @@ describe('lazy() — second instance subscribes when promise is still pending', 
             expect(c1.querySelector('.shared')).toBeNull();
             expect(c2.querySelector('.shared')).toBeNull();
 
+            // One factory-level signal: resolving the single in-flight promise
+            // must flip BOTH mounted instances, not just the first subscriber.
             resolveLoader({ default: Cmp });
             await tick(); await tick(); await wait(10);
 

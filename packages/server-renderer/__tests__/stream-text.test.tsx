@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { component, useAsync, useStream } from 'sigx';
+import { component, useData, useStream } from 'sigx';
 import { createSSR, stateSerializationPlugin, renderToString } from '../src/index';
 import { hydrateComponent } from '../src/client/hydrate-component';
 import {
@@ -86,10 +86,10 @@ describe('useStream — streaming mode', () => {
         expect(appendChunk).toContain('\\u003c/script\\u003e');
     });
 
-    it('interleaves with normal keyed useAsync components', async () => {
+    it('interleaves with normal keyed useData components', async () => {
         const Answer = makeAnswerComponent(['tok1', 'tok2']);
         const Data = component(() => {
-            const data = useAsync('stream-text-data', async () => {
+            const data = useData('stream-text-data', async () => {
                 await new Promise(r => setTimeout(r, 5));
                 return 'loaded';
             });

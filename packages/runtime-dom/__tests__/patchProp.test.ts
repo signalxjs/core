@@ -310,6 +310,149 @@ describe('patchProp', () => {
         });
     });
 
+    describe('event handler error routing (app onError)', () => {
+        /** Minimal AppContext accepted by handleComponentError. */
+        function makeAppContext(onError?: (err: Error, instance: unknown, info: string) => boolean | void) {
+            return {
+                app: null,
+                provides: new Map(),
+                disposables: new Set(),
+                config: onError ? { onError } : {},
+                hooks: [],
+                directives: new Map(),
+            } as any;
+        }
+
+        it('suppresses the throw when config.onError returns true and passes (Error, null, "event handler")', () => {
+            const onError = vi.fn().mockReturnValue(true);
+            const el = document.createElement('button');
+            const handler = () => { throw new Error('boom'); };
+            patchProp(el, 'onClick', null, handler, undefined, makeAppContext(onError));
+
+            expect(() => el.dispatchEvent(new MouseEvent('click'))).not.toThrow();
+            expect(onError).toHaveBeenCalledTimes(1);
+            const [err, instance, info] = onError.mock.calls[0];
+            expect(err).toBeInstanceOf(Error);
+            expect((err as Error).message).toBe('boom');
+            expect(instance).toBeNull();
+            expect(info).toBe('event handler');
+        });
+
+        it('rethrows synchronously when no appContext was passed', () => {
+            const el = document.createElement('button');
+            const boom = new Error('unrouted');
+            patchProp(el, 'onClick', null, () => { throw boom; });
+
+            let caught: unknown = null;
+            try {
+                el.dispatchEvent(new MouseEvent('click'));
+            } catch (e) {
+                caught = e;
+            }
+            expect(caught).toBe(boom);
+        });
+
+        it('rethrows synchronously when config.onError returns false', () => {
+            const onError = vi.fn().mockReturnValue(false);
+            const el = document.createElement('button');
+            const boom = new Error('declined');
+            patchProp(el, 'onClick', null, () => { throw boom; }, undefined, makeAppContext(onError));
+
+            let caught: unknown = null;
+            try {
+                el.dispatchEvent(new MouseEvent('click'));
+            } catch (e) {
+                caught = e;
+            }
+            expect(onError).toHaveBeenCalledTimes(1);
+            expect(caught).toBe(boom);
+        });
+
+        it('normalizes a non-Error throw to Error for the handler', () => {
+            const onError = vi.fn().mockReturnValue(true);
+            const el = document.createElement('button');
+            patchProp(el, 'onClick', null, () => { throw 'boom-string'; }, undefined, makeAppContext(onError));
+
+            expect(() => el.dispatchEvent(new MouseEvent('click'))).not.toThrow();
+            const [err] = onError.mock.calls[0];
+            expect(err).toBeInstanceOf(Error);
+            expect((err as Error).message).toBe('boom-string');
+        });
+
+        it('rethrows the ORIGINAL non-Error value when unhandled', () => {
+            const onError = vi.fn().mockReturnValue(false);
+            const el = document.createElement('button');
+            patchProp(el, 'onClick', null, () => { throw 'raw-value'; }, undefined, makeAppContext(onError));
+
+            let caught: unknown = null;
+            try {
+                el.dispatchEvent(new MouseEvent('click'));
+            } catch (e) {
+                caught = e;
+            }
+            // The handler saw an Error, but the rethrow preserves the original
+            expect(caught).toBe('raw-value');
+        });
+
+        it('re-patching the same event key swaps both the handler and its appContext', () => {
+            const onErrorA = vi.fn().mockReturnValue(true);
+            const onErrorB = vi.fn().mockReturnValue(true);
+            const el = document.createElement('button');
+
+            const handlerA = vi.fn(() => { throw new Error('from-A'); });
+            patchProp(el, 'onClick', null, handlerA, undefined, makeAppContext(onErrorA));
+            el.dispatchEvent(new MouseEvent('click'));
+            expect(handlerA).toHaveBeenCalledTimes(1);
+            expect(onErrorA).toHaveBeenCalledTimes(1);
+
+            const handlerB = vi.fn(() => { throw new Error('from-B'); });
+            patchProp(el, 'onClick', null, handlerB, undefined, makeAppContext(onErrorB));
+            el.dispatchEvent(new MouseEvent('click'));
+
+            // Old handler and old context untouched; new pair took over
+            expect(handlerA).toHaveBeenCalledTimes(1);
+            expect(onErrorA).toHaveBeenCalledTimes(1);
+            expect(handlerB).toHaveBeenCalledTimes(1);
+            expect(onErrorB).toHaveBeenCalledTimes(1);
+            expect((onErrorB.mock.calls[0][0] as Error).message).toBe('from-B');
+        });
+
+        it('routes model write-back (onUpdate:modelValue) throws identically', () => {
+            const onError = vi.fn().mockReturnValue(true);
+            const el = document.createElement('input');
+            document.body.appendChild(el);
+            const writeBack = (_v: unknown) => { throw new Error('model-boom'); };
+            patchProp(el, 'onUpdate:modelValue', null, writeBack, undefined, makeAppContext(onError));
+
+            el.value = 'typed';
+            expect(() => el.dispatchEvent(new Event('input'))).not.toThrow();
+            expect(onError).toHaveBeenCalledTimes(1);
+            const [err, instance, info] = onError.mock.calls[0];
+            expect(err).toBeInstanceOf(Error);
+            expect((err as Error).message).toBe('model-boom');
+            expect(instance).toBeNull();
+            expect(info).toBe('event handler');
+            el.remove();
+        });
+
+        it('model write-back throw escapes when onError is absent', () => {
+            const el = document.createElement('input');
+            document.body.appendChild(el);
+            const boom = new Error('model-unrouted');
+            patchProp(el, 'onUpdate:modelValue', null, () => { throw boom; });
+
+            let caught: unknown = null;
+            el.value = 'typed';
+            try {
+                el.dispatchEvent(new Event('input'));
+            } catch (e) {
+                caught = e;
+            }
+            expect(caught).toBe(boom);
+            el.remove();
+        });
+    });
+
     describe('direct patchProp edge cases', () => {
         it('ignores a null element', () => {
             expect(() => patchProp(null as any, 'class', null, 'x')).not.toThrow();

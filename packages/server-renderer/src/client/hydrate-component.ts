@@ -176,7 +176,7 @@ export function hydrateComponent(vnode: VNode, dom: Node | null, parent: Node, t
         setCurrentInstance(prev);
     }
 
-    // Streamed async components (and Suspense boundaries) render inside a
+    // Streamed async components (and Defer boundaries) render inside a
     // <div data-async-placeholder> wrapper that is NOT part of the vnode
     // tree. Hydrate against the wrapper's children — matching the wrapper
     // itself against the component's first element would mismatch and mount

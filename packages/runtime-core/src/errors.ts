@@ -57,6 +57,7 @@ export const SigxErrorCode = {
     RENDER_TARGET_NOT_FOUND: 'SIGX100',
     MOUNT_TARGET_NOT_FOUND: 'SIGX101',
     ASYNC_SETUP_CLIENT: 'SIGX102',
+    ERROR_SCOPE_OUTSIDE_SETUP: 'SIGX103',
     // Dependency injection
     PROVIDE_OUTSIDE_SETUP: 'SIGX200',
     PROVIDE_INVALID_INJECTABLE: 'SIGX201',
@@ -109,6 +110,17 @@ export function asyncSetupClientError(componentName: string): SigxError {
             code: SigxErrorCode.ASYNC_SETUP_CLIENT,
             suggestion:
                 'On the client, use pre-loaded data from hydration or fetch in onMounted.',
+        }
+    );
+}
+
+export function errorScopeOutsideSetupError(): SigxError {
+    return new SigxError(
+        'errorScope() must be called synchronously during component setup.',
+        {
+            code: SigxErrorCode.ERROR_SCOPE_OUTSIDE_SETUP,
+            suggestion:
+                'Move the errorScope() call into the component\'s setup function (before returning the render function).',
         }
     );
 }

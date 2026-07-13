@@ -6,7 +6,8 @@
  * and custom property bindings.
  */
 
-import { resolveTiming, createDebounceScheduler, getHandlerModifiers } from '@sigx/runtime-core/internals';
+import { resolveTiming, createDebounceScheduler, getHandlerModifiers, handleComponentError } from '@sigx/runtime-core/internals';
+import type { AppContext } from '@sigx/runtime-core';
 
 /**
  * Stable per-event listener wrapper: re-renders swap `invoker.value`
@@ -16,9 +17,24 @@ import { resolveTiming, createDebounceScheduler, getHandlerModifiers } from '@si
 interface EventInvoker extends EventListener {
     /** Current user handler; receives the Event, or `detail` for CustomEvents. */
     value: (eventOrDetail: unknown) => void;
+    /** App context captured at patch time — routes handler throws to app onError. */
+    appContext?: AppContext | null;
 }
 
-export function patchProp(dom: Element, key: string, prevValue: any, nextValue: any, isSVG?: boolean) {
+/**
+ * Route a user event-handler throw through the app error path. Event
+ * handlers have no owning component at the DOM layer (instance is null), so
+ * only the app-level `onError` sees them — never an errorScope. Unhandled
+ * ⇒ synchronous rethrow, preserving the browser's uncaught-error behavior.
+ */
+function routeEventError(e: unknown, appContext: AppContext | null | undefined): void {
+    const err = e instanceof Error ? e : new Error(String(e));
+    if (handleComponentError(appContext ?? null, err, null, 'event handler') !== true) {
+        throw e;
+    }
+}
+
+export function patchProp(dom: Element, key: string, prevValue: any, nextValue: any, isSVG?: boolean, appContext?: AppContext | null) {
     // Guard: skip if dom is null (shouldn't happen but protects against edge cases)
     if (!dom) return;
 
@@ -124,7 +140,11 @@ export function patchProp(dom: Element, key: string, prevValue: any, nextValue: 
                         val = target.value;
                     }
 
-                    invoke(val);
+                    try {
+                        invoke(val);
+                    } catch (err) {
+                        routeEventError(err, appContext);
+                    }
                 };
                 (newValue as any).__sigx_model_handler = handler;
                 // Expose the debounce canceller so handler replacement can clear it.
@@ -158,15 +178,21 @@ export function patchProp(dom: Element, key: string, prevValue: any, nextValue: 
         if (newValue) {
             if (existing) {
                 existing.value = newValue;
+                existing.appContext = appContext;
             } else {
                 const invoker = function (e: Event) {
-                    if (e instanceof CustomEvent) {
-                        invoker.value(e.detail);
-                    } else {
-                        invoker.value(e);
+                    try {
+                        if (e instanceof CustomEvent) {
+                            invoker.value(e.detail);
+                        } else {
+                            invoker.value(e);
+                        }
+                    } catch (err) {
+                        routeEventError(err, invoker.appContext);
                     }
                 } as EventInvoker;
                 invoker.value = newValue;
+                invoker.appContext = appContext;
                 handlers.set(eventName, invoker);
                 dom.addEventListener(eventName, invoker);
             }
