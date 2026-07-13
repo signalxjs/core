@@ -1,5 +1,5 @@
 import { VNode, Fragment, JSXElement, Text, Comment, EMPTY_PROPS } from './jsx-runtime.js';
-import { effect, signal, untrack, EffectRunner } from '@sigx/reactivity';
+import { effect, signal, untrack } from '@sigx/reactivity';
 import { withoutOwnerTracking } from '@sigx/reactivity/internals';
 import { ComponentSetupContext, setCurrentInstance, getCurrentInstance, MountContext, ViewFn, SetupFn } from './component.js';
 import { createPropsAccessor } from './utils/props-accessor.js';

@@ -196,10 +196,10 @@ export function islandsPlugin(options?: IslandsPluginOptions): SSRPlugin {
             },
 
             handleAsyncSetup(
-                id: number,
-                ssrLoads: Promise<void>[],
-                renderFn: () => any,
-                ctx: SSRContext
+                _id: number,
+                _ssrLoads: Promise<void>[],
+                _renderFn: () => any,
+                _ctx: SSRContext
             ): { mode: 'block' | 'stream' | 'skip'; placeholder?: string } | void {
                 // Islands plugin no longer manages deferred renders.
                 // Core handles async streaming; we just augment via onAsyncComponentResolved.
