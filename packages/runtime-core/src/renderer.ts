@@ -741,7 +741,7 @@ export function createRenderer<HostNode = any, HostElement = any>(
         let newStartVNode = newChildren[0];
         let newEndVNode = newChildren[newEndIdx];
 
-        let oldKeyToIdx: Map<string | number, number> | undefined;
+        let oldKeyToIdx: Map<string, number> | undefined;
 
         while (oldStartIdx <= oldEndIdx && newStartIdx <= newEndIdx) {
             if (oldStartVNode == null) {
