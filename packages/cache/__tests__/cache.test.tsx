@@ -443,9 +443,10 @@ describe('@sigx/cache', () => {
 
         const texts = warn.mock.calls.map(c => String(c[0]));
         expect(texts.some(t => t.includes("'cache'"))).toBe(false);
-        // With an engine installed the default engine never runs, so its
-        // warning doesn't either — bogus keys are the engine's business.
-        expect(texts.some(t => t.includes("'bogus'"))).toBe(false);
+        // Typos keep warning even with the engine installed — the warning
+        // consults the shared handled-keys registry, which only silences
+        // keys a pack actually registered.
+        expect(texts.some(t => t.includes("'bogus'"))).toBe(true);
     });
 
     it('without the plugin, the cache option warns as unhandled (core default engine)', async () => {

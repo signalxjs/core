@@ -101,7 +101,10 @@ export function useData<T>(
     // either way — the engine sees resolved canonical keys. ──
     const engine = (lookupProvided(ASYNC_ENGINE_TOKEN) as AsyncEngine | undefined) ?? defaultAsyncEngine;
 
-    if (process.env.NODE_ENV !== 'production' && engine === defaultAsyncEngine) {
+    // The warning consults the shared handled-keys registry, so an installed
+    // pack's own options stay quiet (it registered them at install) while
+    // typos keep warning even with an engine present.
+    if (process.env.NODE_ENV !== 'production') {
         warnUnknownOptions('useData', options, handledReadOptionKeys);
     }
 

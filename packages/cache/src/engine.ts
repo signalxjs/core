@@ -105,7 +105,11 @@ function createCachedRead<T>(
     function setKey(canon: string | null, raw: unknown): void {
         untrack(() => {
             if (canon === canonKey) {
+                // Same canonical identity — keep the freshest raw object on
+                // both sides so later refetches (focus/interval/invalidate)
+                // use it.
                 rawArg = raw;
+                if (entry) entry.rawArg = raw;
                 return;
             }
             // Leaving the old key: remember its value for keepPreviousData.
