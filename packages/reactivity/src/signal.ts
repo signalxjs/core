@@ -243,12 +243,14 @@ export function signal<T>(target: T): PrimitiveSignal<T> | Signal<T & object> {
 
     // Create collection instrumentations if this is a collection.
     // The notify closure routes Map/Set mutations through the same
-    // devtools emit path as plain object property writes.
-    const collectionInstrumentations = isCollectionTarget
-        ? createCollectionInstrumentations(depsMap!, getOrCreateDep, (key) => {
+    // devtools emit path as plain object property writes. The proxy is
+    // installed via setProxy right after construction below.
+    const collectionSupport = isCollectionTarget
+        ? createCollectionInstrumentations(objectTarget, depsMap!, getOrCreateDep, (key) => {
             notifySignalUpdated(signalId, key);
         })
         : null;
+    const collectionInstrumentations = collectionSupport ? collectionSupport.instrumentations : null;
 
     // One $set closure per proxy, created on first read (was: a fresh
     // closure per $set access).
@@ -289,13 +291,11 @@ export function signal<T>(target: T): PrimitiveSignal<T> | Signal<T & object> {
                     return (obj as Set<any> | Map<any, any>).size;
                 }
                 
-                // Check if this is an instrumented method
+                // Instrumented methods close over the raw target and proxy,
+                // so they are returned as-is — no per-access bind. Method
+                // identity is stable (m.set === m.set).
                 if (prop in collectionInstrumentations) {
-                    const instrumented = collectionInstrumentations[prop];
-                    if (typeof instrumented === 'function') {
-                        return instrumented.bind(receiver);
-                    }
-                    return instrumented;
+                    return collectionInstrumentations[prop];
                 }
             }
 
@@ -410,6 +410,10 @@ export function signal<T>(target: T): PrimitiveSignal<T> | Signal<T & object> {
     // Store the raw ↔ reactive mappings
     reactiveToRaw.set(proxy, objectTarget);
     rawToReactive.set(objectTarget, proxy);
+
+    // Late-bind the proxy into the collection instrumentations (they are
+    // built before the Proxy exists).
+    if (collectionSupport) collectionSupport.setProxy(proxy);
 
     // Associate the proxy with its devtools id so consumers can look
     // it up later (e.g. when the panel asks for a signal's current
