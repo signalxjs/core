@@ -1,4 +1,5 @@
 import { component, useData, useHead } from 'sigx';
+import type { CachedAsyncState } from '@sigx/cache';
 
 /** Fake API with a per-key hit counter so dedupe is visible in the UI. */
 const hits: Record<string, number> = {};
@@ -98,6 +99,42 @@ const BrowserCard = component(() => {
     );
 });
 
+
+// ── @sigx/cache: staleTime + invalidate + optimistic mutate ────────────
+
+let cacheFetches = 0;
+async function fetchStamp(): Promise<{ stamp: string; fetchNo: number }> {
+    await new Promise(r => setTimeout(r, 120));
+    return { stamp: new Date().toLocaleTimeString(), fetchNo: ++cacheFetches };
+}
+
+const CacheCard = component(() => {
+    // staleTime 10s: navigate away and back within the window — served from
+    // the cache, no refetch (the SSR value seeds the cache on hydration).
+    const stamp = useData('cache-stamp', fetchStamp, {
+        cache: { staleTime: 10_000 },
+    }) as CachedAsyncState<{ stamp: string; fetchNo: number }>;
+
+    return () => (
+        <div class="card">
+            <h3 style="margin-top: 0;">@sigx/cache: staleTime + invalidate + mutate</h3>
+            {stamp.match({
+                pending: () => <p>Loading…</p>,
+                ready: (s) => (
+                    <p>
+                        fetched at {s.stamp} (fetch #{s.fetchNo}){' '}
+                        <button onClick={() => stamp.invalidate()}>Invalidate (refetch)</button>{' '}
+                        <button onClick={() => stamp.mutate(c => ({ ...(c ?? s), stamp: 'mutated locally' }))}>
+                            Mutate (write-through)
+                        </button>
+                    </p>
+                ),
+            })}
+            <p style="color: #555; font-size: 0.95em;">Leave and revisit this page within 10s — the card renders instantly from the cache with the same fetch number. <code>invalidate()</code> drops the entry and refetches; <code>mutate()</code> writes through without a request.</p>
+        </div>
+    );
+});
+
 export const Data = component(() => {
     useHead({
         title: 'Data loading',
@@ -112,6 +149,7 @@ export const Data = component(() => {
             <QuoteBadge />
             <FlakyCard />
             <BrowserCard />
+            <CacheCard />
         </>
     );
 });

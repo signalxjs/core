@@ -17,7 +17,8 @@
         "@sigx/reactivity": "workspace:^",
         "@sigx/runtime-core": "workspace:^",
         "@sigx/runtime-dom": "workspace:^",
-        "express": "^5.2.1"
+        "express": "^5.2.1",
+        "@sigx/cache": "workspace:^"
     },
     "devDependencies": {
         "@sigx/vite": "workspace:^",

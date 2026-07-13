@@ -28,6 +28,8 @@ body:
         - "@sigx/runtime-core"
         - "@sigx/runtime-dom"
         - "@sigx/server-renderer"
+        - "@sigx/ssr-islands"
+        - "@sigx/cache"
         - "@sigx/vite"
         - Not sure / multiple
     validations:
