@@ -139,7 +139,7 @@ const EMPTY_SEQUENCE: number[] = [];
 function getSequence(arr: number[]): number[] {
     const p = arr.slice();
     const result = [0];
-    let i, j, u, v, c;
+    let i: number, j: number, u: number, v: number, c: number;
     const len = arr.length;
     for (i = 0; i < len; i++) {
         const arrI = arr[i];
