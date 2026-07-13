@@ -30,7 +30,7 @@ jobs:
         run: pnpm bench:ssr:quick
 
       - name: Upload quick results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: quick-latest
           path: benchmarks/results/quick-latest.json
