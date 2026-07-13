@@ -7,17 +7,20 @@
     "types": "./dist/index.d.ts",
     "exports": {
         ".": {
-            "import": "./dist/index.js",
-            "types": "./dist/index.d.ts"
+            "types": "./dist/index.d.ts",
+            "import": "./dist/index.js"
         },
         "./hmr": {
-            "import": "./dist/hmr.js",
-            "types": "./dist/hmr.d.ts"
+            "types": "./dist/hmr.d.ts",
+            "import": "./dist/hmr.js"
         },
         "./lib": {
-            "import": "./dist/lib.js",
-            "types": "./dist/lib.d.ts"
+            "types": "./dist/lib.d.ts",
+            "import": "./dist/lib.js"
         }
+    },
+    "bin": {
+        "sigx-types": "./dist/cli.js"
     },
     "files": [
         "dist"
