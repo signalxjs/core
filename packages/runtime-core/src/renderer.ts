@@ -660,9 +660,13 @@ export function createRenderer<HostNode = any, HostElement = any>(
         // lack the flag until their first patch; fall back to the historical
         // tag-based check for them, then cache forward.
         const tag = newVNode.type as string;
+        // Fallback for vnodes without the cached flag: with a known SVG
+        // context, mirror mount()'s formula exactly (including the
+        // foreignObject reset); with no context (hydrated subtrees patched
+        // from the top), keep the historical tag-based heuristic.
         const isSVG = (newVNode as InternalVNode)._svg =
             (oldVNode as InternalVNode)._svg ??
-            (tag === 'svg' || parentIsSVG || isSvgTag(tag));
+            (tag === 'svg' || (parentIsSVG ? tag !== 'foreignObject' : isSvgTag(tag)));
 
         // Update props — skipped entirely when both sides share the same
         // props object (prop-less elements share EMPTY_PROPS). Compare the
