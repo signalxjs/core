@@ -7,7 +7,7 @@
  */
 
 import { getComponentPlugins } from "./plugins.js";
-import { normalizeKey } from "./jsx-runtime.js";
+import { normalizeKey } from "./utils/normalize-key.js";
 import type {
     ComponentSetupContext,
     PlatformElement,

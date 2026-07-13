@@ -5,6 +5,7 @@ import { createModel, isModel, type Model } from './model.js';
 import { getModelProcessors } from './platform.js';
 import { getModelModifier, wrapModelWriteBack } from './model-modifiers.js';
 import { isComponent } from './utils/is-component.js';
+import { normalizeKey } from './utils/normalize-key.js';
 
 // Re-export platform types and functions
 export { setPlatformModelProcessor, getPlatformModelProcessor, registerModelProcessor } from './platform.js';
@@ -172,15 +173,6 @@ function warnNoOpModifiers(
             );
         }
     }
-}
-
-/**
- * Normalize a vnode key at creation time. `??` (not `||`) so falsy keys
- * (`key={0}`, `key=""`) actually key the element; numbers coerce to strings
- * once here so the keyed diff compares with pure `===`.
- */
-export function normalizeKey(k: unknown): string | null {
-    return k == null ? null : typeof k === 'string' ? k : String(k);
 }
 
 /**
