@@ -104,6 +104,7 @@ describe('allocation and tracking churn', () => {
     });
 
     const nested = signal({ a: { b: { c: 0 } } });
+    void nested.a.b.c; // warm the nested proxy caches: bench measures steady state
     bench('untracked nested object read', () => {
         void nested.a.b.c; // outside any effect: pure get-trap fixed cost
     });
@@ -115,16 +116,19 @@ describe('allocation and tracking churn', () => {
         prim.value = ++pn;
     });
 
+    const replaceKeys = Array.from({ length: 10 }, (_, i) => `k${i}`);
     const replaceTarget = signal(Object.fromEntries(
-        Array.from({ length: 10 }, (_, i) => [`k${i}`, 0])
+        replaceKeys.map(k => [k, 0])
     ) as Record<string, number>);
     effect(() => { void replaceTarget.k0; });
     let rn = 0;
     bench('$set replace of 10-key object', () => {
+        // Plain-loop build keeps the (required) fresh object cheap so $set
+        // dominates the measurement, not iterator/fromEntries overhead.
         ++rn;
-        replaceTarget.$set(Object.fromEntries(
-            Array.from({ length: 10 }, (_, i) => [`k${i}`, rn])
-        ) as Record<string, number>);
+        const next: Record<string, number> = {};
+        for (const k of replaceKeys) next[k] = rn;
+        replaceTarget.$set(next);
     });
 
     const fiveDeps = signal({ a: 0, b: 0, c: 0, d: 0, e: 0 });
