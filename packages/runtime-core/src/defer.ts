@@ -90,6 +90,7 @@ export const Defer = component<DeferProps>((ctx) => {
     return () => {
         // toRaw: props reads are reactive-proxied; a vnode must reach the
         // renderer as its raw object (dom bookkeeping is written onto it).
+        // Workaround for #191 — remove once vnodes are exempt from proxying.
         const rawFallback = toRaw(ctx.props.fallback as unknown as object) as
             | JSXElement
             | (() => JSXElement)
