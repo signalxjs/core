@@ -5,6 +5,7 @@ import { createModel, isModel, type Model } from './model.js';
 import { getModelProcessors } from './platform.js';
 import { getModelModifier, wrapModelWriteBack } from './model-modifiers.js';
 import { isComponent } from './utils/is-component.js';
+import { normalizeKey } from './utils/normalize-key.js';
 
 // Re-export platform types and functions
 export { setPlatformModelProcessor, getPlatformModelProcessor, registerModelProcessor } from './platform.js';
@@ -206,7 +207,7 @@ export function jsx(
             return {
                 type: type as Function,
                 props: componentProps,
-                key: key || componentProps.key || null,
+                key: normalizeKey(key ?? componentProps.key),
                 children: EMPTY_CHILDREN,
                 dom: null
             };
@@ -229,7 +230,7 @@ export function jsx(
         return {
             type: type as string | typeof Fragment,
             props: hasProps ? rest : EMPTY_PROPS,
-            key: key || rest.key || null,
+            key: normalizeKey(key ?? rest.key),
             children: normalizeChildren(children),
             dom: null
         };
@@ -413,7 +414,7 @@ export function jsx(
         return {
             type: type as Function,
             props: processedProps,
-            key: key || processedProps.key || null,
+            key: normalizeKey(key ?? processedProps.key),
             children: [], // Children are passed via props for components
             dom: null
         };
@@ -429,7 +430,7 @@ export function jsx(
     const vnode: VNode = {
         type: type as string | typeof Fragment,
         props: rest,
-        key: key || rest.key || null,
+        key: normalizeKey(key ?? rest.key),
         children: normalizeChildren(children),
         dom: null
     };

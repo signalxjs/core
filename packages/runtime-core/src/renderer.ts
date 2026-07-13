@@ -129,11 +129,13 @@ function sameSlotChildren(a: any, b: any): boolean {
 }
 
 function createKeyToKeyIndexMap(children: VNode[], beginIdx: number, endIdx: number) {
-    const map = new Map<string | number, number>();
+    const map = new Map<string, number>();
     for (let i = beginIdx; i <= endIdx; i++) {
         const key = children[i]?.key;
         if (key != null) {
-            const keyStr = String(key);
+            // jsx() normalizes keys to strings at creation; the coercion
+            // only fires for hand-built vnodes carrying numbers.
+            const keyStr = typeof key === 'string' ? key : String(key);
             if (process.env.NODE_ENV !== 'production' && map.has(keyStr)) {
                 console.warn(
                     `[SignalX] Duplicate key "${key}" detected in list. ` +
@@ -159,11 +161,12 @@ function findIndexInOld(children: VNode[], newChild: VNode, beginIdx: number, en
  */
 function checkDuplicateKeys(children: VNode[]): void {
     if (process.env.NODE_ENV === 'production') return;
-    
+
     const seenKeys = new Set<string>();
     for (const child of children) {
         if (child?.key != null) {
-            const keyStr = String(child.key);
+            const key = child.key;
+            const keyStr = typeof key === 'string' ? key : String(key);
             if (seenKeys.has(keyStr)) {
                 console.warn(
                     `[SignalX] Duplicate key "${child.key}" detected in list. ` +
@@ -756,7 +759,7 @@ export function createRenderer<HostNode = any, HostElement = any>(
         let newStartVNode = newChildren[0];
         let newEndVNode = newChildren[newEndIdx];
 
-        let oldKeyToIdx: Map<string | number, number> | undefined;
+        let oldKeyToIdx: Map<string, number> | undefined;
 
         while (oldStartIdx <= oldEndIdx && newStartIdx <= newEndIdx) {
             if (oldStartVNode == null) {
@@ -793,8 +796,9 @@ export function createRenderer<HostNode = any, HostElement = any>(
                 if (!oldKeyToIdx) {
                     oldKeyToIdx = createKeyToKeyIndexMap(oldChildren, oldStartIdx, oldEndIdx);
                 }
-                const idxInOld = newStartVNode.key != null
-                    ? oldKeyToIdx.get(String(newStartVNode.key))
+                const newKey = newStartVNode.key;
+                const idxInOld = newKey != null
+                    ? oldKeyToIdx.get(typeof newKey === 'string' ? newKey : String(newKey))
                     : findIndexInOld(oldChildren, newStartVNode, oldStartIdx, oldEndIdx);
 
                 if (idxInOld != null) {
