@@ -279,6 +279,9 @@ importers:
       sigx:
         specifier: workspace:^
         version: link:../sigx
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
       vite:
         specifier: ^8.0.14
         version: 8.0.14(@types/node@25.9.1)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)

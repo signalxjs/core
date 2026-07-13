@@ -35,6 +35,7 @@
     "devDependencies": {
         "@types/node": "^25.9.1",
         "sigx": "workspace:^",
+        "typescript": "^7.0.2",
         "vite": "^8.0.14"
     },
     "keywords": [
