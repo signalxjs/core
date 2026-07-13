@@ -32,7 +32,8 @@
         }
     },
     "files": [
-        "dist"
+        "dist",
+        "src"
     ],
     "scripts": {
         "build": "vite build && vite build --mode prod-dist && tsc --emitDeclarationOnly",
