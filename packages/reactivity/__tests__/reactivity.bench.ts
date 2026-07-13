@@ -137,9 +137,21 @@ describe('allocation and tracking churn', () => {
         }
     });
 
-    bench('signal() on non-proxyable values (Date, typed array)', () => {
+    // Hoisted so the loop measures signal()'s shouldNotProxy root check,
+    // not Date/TypedArray construction.
+    const sharedDate = new Date(0);
+    const sharedBuf = new Uint8Array(4);
+    bench('signal() on non-proxyable roots (Date, typed array)', () => {
         for (let i = 0; i < 1_000; i++) {
-            signal({ at: new Date(0), buf: new Uint8Array(4) });
+            signal(sharedDate);
+            signal(sharedBuf);
         }
+    });
+
+    const withExotic = signal({ at: sharedDate, buf: sharedBuf });
+    bench('read non-proxyable values off an object signal', () => {
+        // get trap runs shouldNotProxy on every object-valued read
+        void withExotic.at;
+        void withExotic.buf;
     });
 });
