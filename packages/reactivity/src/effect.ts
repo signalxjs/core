@@ -122,16 +122,28 @@ function flushPendingEffects(): void {
             // Snapshot-and-clear: a nested trigger during a run flushes its
             // own wave immediately (depth-first), exactly as before.
             const effects = pendingEffects.splice(0, pendingEffects.length);
-            for (const effect of effects) {
-                effect.flags &= ~QUEUED;
-                if (process.env.NODE_ENV !== 'production' && ++waveRuns > maxWaveEffectRuns) {
-                    throw new Error(
-                        `Runaway notification wave: more than ${maxWaveEffectRuns} effect ` +
-                        `runs in a single wave — an effect cascade is writing reactive ` +
-                        `state it depends on (directly or transitively).`
-                    );
+            let i = 0;
+            try {
+                for (; i < effects.length; i++) {
+                    const effect = effects[i];
+                    effect.flags &= ~QUEUED;
+                    if (process.env.NODE_ENV !== 'production' && ++waveRuns > maxWaveEffectRuns) {
+                        throw new Error(
+                            `Runaway notification wave: more than ${maxWaveEffectRuns} effect ` +
+                            `runs in a single wave — an effect cascade is writing reactive ` +
+                            `state it depends on (directly or transitively).`
+                        );
+                    }
+                    effect();
                 }
-                effect();
+            } finally {
+                // A throwing effect abandons the rest of the snapshot. Those
+                // effects are no longer in pendingEffects, so leaving QUEUED
+                // set would wedge them forever — clear it so a later write
+                // can re-queue them.
+                for (let j = i + 1; j < effects.length; j++) {
+                    effects[j].flags &= ~QUEUED;
+                }
             }
         }
         // Every notification wave ends by draining scheduled work (e.g. the
