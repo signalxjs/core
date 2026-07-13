@@ -1,9 +1,10 @@
 # RFC: SSR platform — one boundary model, the request lifecycle, the last mile
 
 Status: **proposed / under review — rev 1**. Tracking: signalxjs/core#171.
-Pre-1.0, no-compat (same stance as `rfc-use-async.md` / `rfc-async.md`): one way
-to do it. One deliberate revision to a frozen contract is called out explicitly
-(§1.4); everything else the `ssr-next` program froze stays frozen.
+Pre-1.0, no-compat (same stance as `rfc-use-async.md` and the value-first async
+RFC, #135/#136): one way to do it. One deliberate revision to a frozen contract
+is called out explicitly (§1.3); everything else the `ssr-next` program froze
+stays frozen.
 
 Relationship to the other RFCs:
 
@@ -11,10 +12,11 @@ Relationship to the other RFCs:
   `__SIGX_ASYNC__`, the `_useAsync`/`_useStream` provider seams, the layering
   rule ("runs standalone in a browser → `sigx`; needs a server →
   `@sigx/server-renderer`").
-- **Consumes `rfc-async.md`** (#135/#136, under review): `<Defer>` as the one
-  positional primitive, the `match` state→arm mapping, `errorScope`. This RFC
-  does not restate that design; it defines its **server half** (§2.2) and the
-  streaming boundary it keys off (§1).
+- **Consumes the value-first async RFC** (#135, PR #136 — under review; lands
+  as `docs/rfc-async.md`): `<Defer>` as the one positional primitive, the
+  `match` state→arm mapping, `errorScope`. This RFC does not restate that
+  design; it defines its **server half** (§2.2) and the streaming boundary it
+  keys off (§1).
 - **Depends on #119** (islands into the monorepo) and **resolves #122**
   (`client:only` cannot suppress the server render).
 
@@ -34,7 +36,7 @@ not require reading `examples/spa-ssr/server.ts`.
 
 ## Problem — stated against the current code
 
-1. **Three overlapping boundary concepts.** `<Defer>` (`rfc-async.md` §5:
+1. **Three overlapping boundary concepts.** `<Defer>` (#135 §5:
    code-split + SSR flush), islands `client:*` directives (hydration
    scheduling, `@sigx/ssr-islands`), and streaming placeholders
    (`render-core.ts` `__suspense` → `_pendingAsync`,
@@ -82,10 +84,13 @@ interface SSRBoundary {
   //  inline: await content, emit in place (blocking/string modes)
   //  stream: emit fallback + placeholder now, $SIGX_REPLACE later
   //  skip:   do not server-render at all (client:only — the #122 case)
-  hydrate: 'load' | 'idle' | 'visible' | 'media' | 'interaction' | 'only' | 'never';
+  hydrate: 'load' | 'idle' | 'visible' | 'media' | 'interaction' | 'never';
   fallback?: () => VNode;           // rendered while flush=stream is pending, or when flush=skip
   chunk?: string;                   // module ref for on-demand loading (lazy()/islands manifest)
-  props?: Record<string, unknown>;  // serialized island props (hydrate ≠ 'load' via root walk)
+  props?: Record<string, unknown>;  // serialized props — required whenever the boundary mounts
+                                    // independently of the root hydration walk: every boundary
+                                    // with hydrate ≠ 'load', and every flush:'skip' boundary
+                                    // (client:only) regardless of its hydrate strategy
 }
 ```
 
@@ -119,7 +124,7 @@ not a package switch.
 Internally all three produce the same `SSRBoundary` record; there is no
 "island" type distinct from a "defer" type.
 
-#### 1.2 The unified boundary table (blob)
+#### 1.1 The unified boundary table (blob)
 
 The server emits **one boundary table** per request — id → hydrate strategy,
 props snapshot, chunk ref — replacing `__SIGX_ISLANDS__`. `__SIGX_ASYNC__`
@@ -129,11 +134,11 @@ addressed (per `rfc-use-async.md` open question 4's resolution) but share
 null-prototype targets, `DANGEROUS_KEYS`), one dev-mode serializability
 warning path, and one **pluggable type-handler registry** (needed twice
 already: the `@sigx/store` adapter spec'd in `rfc-use-async.md`, and the
-Phase-3 cache in `rfc-async.md` §7 for which `__SIGX_ASYNC__` becomes the
+Phase-3 cache of #135 (§7) for which `__SIGX_ASYNC__` becomes the
 seed). Whether the two blobs merge into one `__SIGX_SSR__` script is open
 question 1.
 
-#### 1.3 Selective hydration is the hydrator
+#### 1.2 Selective hydration is the hydrator
 
 The islands client machinery (registry, chunk loader,
 `scheduleComponentHydration`, the `client:*` strategies) generalizes into
@@ -143,7 +148,7 @@ on a default SPA-SSR page that degenerates to exactly today's single walk, so
 the common path pays nothing. The `beforeHydrate → false` hook is retained
 unchanged as the resumability escape hatch for future packs.
 
-#### 1.4 The core seam: `resolveBoundary` (the one contract revision)
+#### 1.3 The core seam: `resolveBoundary` (the one contract revision)
 
 A new server plugin hook that runs **before setup capture**:
 
@@ -203,10 +208,10 @@ promise result. The router SSR contract (§3.2) feeds this — a route miss sets
   that scope's `fallback(e, retry)` HTML in place — same visual contract as
   the client. The boundary is marked in the boundary table so the client
   hydrator wires `retry` to a real remount + client re-render after
-  hydration (the scope's pinned contract from `rfc-async.md` §4, honored
+  hydration (the scope's pinned contract from #135 §4, honored
   cross-environment).
 - **Data errors already have a home:** a keyed `useAsync` rejection renders
-  `match`'s `error` arm server-side (`rfc-async.md` §8); nothing new needed.
+  `match`'s `error` arm server-side (#135 §8); nothing new needed.
 
 #### 2.3 Edge portability as a tested guarantee
 
@@ -275,9 +280,9 @@ file-system routing, no conventions beyond the seams in this RFC.
 
 ## What this RFC does not do
 
-- **Server functions / actions (RPC).** `rfc-async.md`'s manual writes
-  (`{ manual: true }` + `.run`) will eventually want a "fetcher runs on the
-  server" transport. That is a compiler + transport problem — a separate,
+- **Server functions / actions (RPC).** The value-first async RFC's manual
+  writes (#135: `{ manual: true }` + `.run`) will eventually want a "fetcher
+  runs on the server" transport. That is a compiler + transport problem — a separate,
   future RFC. Named here so reviewers see the door, not designed here.
 - **Resumability.** The `beforeHydrate → false` seam already permits a
   Qwik-style pack; no design now.
@@ -292,7 +297,7 @@ file-system routing, no conventions beyond the seams in this RFC.
 - `__SIGX_ASYNC__` wire format unchanged; `__SIGX_ISLANDS__` is replaced by
   the boundary table (pre-1.0; islands is an external companion until #119
   lands, so the blast radius is one pack we own).
-- One plugin-surface break: `handleAsyncSetup` → `resolveBoundary` (§1.4).
+- One plugin-surface break: `handleAsyncSetup` → `resolveBoundary` (§1.3).
 - `renderToString` / `renderToStream` / `renderToNodeStream` / `createSSR` /
   document APIs: additive only, except `renderToNodeStream` and
   `renderDocumentToNodeStream` moving to the `./node` entry (§2.3).
