@@ -36,10 +36,12 @@ export interface ComponentInstance {
  */
 export interface AppConfig {
     /**
-     * Global error handler for component errors.
-     * Return true to suppress the error from propagating.
+     * App-level error handler — the last stop for component errors (setup,
+     * render, reactive re-renders), DOM event-handler throws, and unhandled
+     * async data errors that no errorScope took. Return true to suppress
+     * the error from propagating. Usually set via `app.onError(fn)`.
      */
-    errorHandler?: (err: Error, instance: ComponentInstance | null, info: string) => boolean | void;
+    onError?: (err: Error, instance: ComponentInstance | null, info: string) => boolean | void;
 
     /**
      * Global warning handler (dev mode).
@@ -291,6 +293,22 @@ export interface App<TContainer = any> {
      * Register lifecycle hooks to observe all components
      */
     hook(hooks: AppLifecycleHooks): App<TContainer>;
+
+    /**
+     * Set the app-level error handler (single slot — the last stop after
+     * every errorScope declined). Return true from the handler to suppress
+     * the error from propagating. For multiple observers, use
+     * `app.hook({ onComponentError })`.
+     *
+     * @example
+     * ```ts
+     * app.onError((err, instance, info) => {
+     *     telemetry.report(err, { component: instance?.name, info });
+     *     return true;
+     * });
+     * ```
+     */
+    onError(handler: (err: Error, instance: ComponentInstance | null, info: string) => boolean | void): App<TContainer>;
 
     /**
      * Register a global directive, or retrieve a registered one.

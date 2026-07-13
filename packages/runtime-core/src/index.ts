@@ -95,6 +95,10 @@ export { useStream } from './use-stream.js';
 export { createModel, createModelFromBinding, isModel } from './model.js';
 export type { Model, ModelBindingTuple } from './model.js';
 
+// Error handling
+export { errorScope } from './error-scope.js';
+export type { ErrorScopeOptions } from './error-scope.js';
+
 // Error codes
 export { SigxError, SigxErrorCode } from './errors.js';
 export {
@@ -102,6 +106,7 @@ export {
     renderTargetNotFoundError,
     mountTargetNotFoundError,
     asyncSetupClientError,
+    errorScopeOutsideSetupError,
     provideOutsideSetupError,
     provideInvalidInjectableError,
 } from './errors.js';

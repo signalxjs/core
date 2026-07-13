@@ -29,6 +29,7 @@ import type {
 } from './app-types.js';
 
 import { getAppContextToken, setActiveAppContext, type Providable } from './di/injectable.js';
+import { ERROR_SCOPE_TOKEN, type ErrorScopeHandle } from './error-scope.js';
 import { isDirective } from './directives.js';
 import type { JSXElement } from './jsx-runtime.js';
 import { noMountFunctionError, provideInvalidInjectableError } from './errors.js';
@@ -182,6 +183,17 @@ export function defineApp<TContainer = any>(rootComponent: JSXElement): App<TCon
 
         hook(hooks) {
             context.hooks.push(hooks);
+            return app;
+        },
+
+        onError(handler) {
+            if (process.env.NODE_ENV !== 'production' && context.config.onError) {
+                console.warn(
+                    'app.onError() replaces the previous handler — for multiple observers use ' +
+                    'app.hook({ onComponentError }).'
+                );
+            }
+            context.config.onError = handler;
             return app;
         },
 
@@ -389,7 +401,12 @@ export function notifyComponentUpdated(context: AppContext | null, instance: Com
 
 /**
  * Handle an error in a component. Returns true if the error was handled.
- * Called by the renderer when an error occurs in setup or render.
+ * Called by the renderer when an error occurs in setup or render (and by
+ * the DOM event path and the async bubble).
+ *
+ * Order: nearest errorScope (walking the instance parent chain) → plugin
+ * hooks → app `onError`. Scoped recovery is local handling, like DOM event
+ * bubbling — the app layer sees only what escapes every scope.
  */
 export function handleComponentError(
     context: AppContext | null,
@@ -397,14 +414,25 @@ export function handleComponentError(
     instance: ComponentInstance | null,
     info: string
 ): boolean {
-    if (!context) return false;
-
-    if (process.env.NODE_ENV !== 'production') {
+    if (context && process.env.NODE_ENV !== 'production') {
         const devtools = getDevtoolsHook();
         if (devtools) devtools.emit({ type: 'component:error', app: context, instance, instanceId: getInstanceId(instance?.ctx ?? null), error: err, info });
     }
 
-    // First, try plugin hooks
+    // Nearest errorScope first — the walk runs even with a null app context
+    // (errorScope works in a bare render() without defineApp). Event-handler
+    // throws arrive with instance null, so they naturally skip to the app
+    // layer. A scope that declines (already errored) lets the walk continue.
+    let node = instance?.ctx as { provides?: Map<symbol, unknown>; parent?: unknown } | null | undefined;
+    while (node) {
+        const scope = node.provides?.get(ERROR_SCOPE_TOKEN) as ErrorScopeHandle | undefined;
+        if (scope && scope.handle(err, instance, info) === true) return true;
+        node = node.parent as typeof node;
+    }
+
+    if (!context) return false;
+
+    // Then, plugin hooks
     for (const hooks of context.hooks) {
         try {
             const handled = hooks.onComponentError?.(err, instance!, info);
@@ -415,13 +443,13 @@ export function handleComponentError(
         }
     }
 
-    // Then, try app-level error handler
-    if (context.config.errorHandler) {
+    // Then, the app-level onError handler
+    if (context.config.onError) {
         try {
-            const handled = context.config.errorHandler(err, instance, info);
+            const handled = context.config.onError(err, instance, info);
             if (handled === true) return true;
         } catch (handlerErr) {
-            console.error('Error in app.config.errorHandler:', handlerErr);
+            console.error('Error in app onError handler:', handlerErr);
         }
     }
 
@@ -474,10 +502,10 @@ export function reportUnhandledAsyncError(
 function handleHookError(context: AppContext, err: Error, instance: ComponentInstance, hookName: string): void {
     console.error(`Error in ${hookName} hook:`, err);
 
-    // Try the app error handler
-    if (context.config.errorHandler) {
+    // Try the app onError handler
+    if (context.config.onError) {
         try {
-            context.config.errorHandler(err, instance, `plugin hook: ${hookName}`);
+            context.config.onError(err, instance, `plugin hook: ${hookName}`);
         } catch {
             // Give up - we've done our best
         }
