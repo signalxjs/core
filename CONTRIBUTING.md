@@ -16,7 +16,7 @@ pnpm install
 pnpm build
 ```
 
-The `build` step is optional for tests: `pnpm test` and `pnpm typecheck` resolve the framework packages from source via the explicit per-entrypoint aliases in `vitest.config.ts` (`resolve.alias`) and the root `tsconfig.json` (`compilerOptions.paths`). You do need `pnpm build` before `pnpm verify:pack`, `pnpm size`, publishing, and running the `examples/` apps (they consume the built `@sigx/vite` plugin, which is not aliased).
+The `build` step is optional for tests: `pnpm test` and `pnpm typecheck` resolve the framework packages from source via the explicit per-entrypoint aliases in `vitest.config.ts` (`resolve.alias`) and the root `tsconfig.json` (`compilerOptions.paths`). You do need `pnpm build` before `pnpm verify:pack`, `pnpm size`, publishing, and running the `examples/` apps.
 
 ## Workspace layout
 
