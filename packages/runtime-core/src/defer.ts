@@ -18,7 +18,6 @@
  * state survives and the resolved component appears in place.
  */
 
-import { toRaw } from '@sigx/reactivity';
 import { component, type Define } from './component.js';
 import { jsx, Fragment, type JSXElement } from './jsx-runtime.js';
 import { getCurrentInstance } from './component-lifecycle.js';
@@ -88,16 +87,11 @@ export const Defer = component<DeferProps>((ctx) => {
     (node.provides ??= new Map()).set(DEFER_TOKEN, collector);
 
     return () => {
-        // toRaw: props reads are reactive-proxied; a vnode must reach the
-        // renderer as its raw object (dom bookkeeping is written onto it).
-        // Workaround for #191 — remove once vnodes are exempt from proxying.
-        const rawFallback = toRaw(ctx.props.fallback as unknown as object) as
-            | JSXElement
-            | (() => JSXElement)
-            | undefined;
         const fb =
             state.pending > 0
-                ? (typeof rawFallback === 'function' ? rawFallback() : rawFallback) ?? null
+                ? (typeof ctx.props.fallback === 'function'
+                    ? (ctx.props.fallback as () => JSXElement)()
+                    : ctx.props.fallback) ?? null
                 : null;
         // Constant shape: a null slot normalizes to a Comment vnode, so the
         // fallback toggles in place without shifting the children.
