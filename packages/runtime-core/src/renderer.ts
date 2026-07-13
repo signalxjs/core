@@ -897,7 +897,7 @@ export function createRenderer<HostNode = any, HostElement = any>(
         let moved = false;
         let maxNewIndexSoFar = 0;
         // newIndexToOldIndexMap[newIndex - s2] = oldIndex + 1 (0 = mount fresh)
-        const newIndexToOldIndexMap = new Array<number>(toBePatched).fill(0);
+        const newIndexToOldIndexMap: number[] = Array.from({ length: toBePatched }, () => 0);
 
         for (let j = i; j <= e1; j++) {
             const prevChild = oldChildren[j];
