@@ -65,7 +65,7 @@ async function* streamAllAsyncChunks(
     type TaggedResult = { index: number; script: string };
 
     // Pump slots live at PUMP_BASE and above. Core slots can GROW while
-    // streaming — deferred renders (Suspense children, nested useAsync
+    // streaming — deferred renders (Defer children, nested useData
     // components) push new entries onto ctx._pendingAsync mid-stream — so
     // they get the open-ended range below PUMP_BASE.
     const PUMP_BASE = 1 << 30;

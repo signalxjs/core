@@ -643,6 +643,14 @@ interface RenderBufState {
     len: number;
     /** Flush-hint threshold (Infinity in string mode: never hint) */
     threshold: number;
+    /**
+     * True while rendering inside a <Defer> boundary's deferred render:
+     * pending keyed reads are awaited inline (block mode) instead of
+     * spawning their own placeholders, so the boundary replaces ONCE with
+     * everything beneath it resolved. Per-driver — multiple deferred renders
+     * interleave on the shared SSRContext, so this must not live on ctx.
+     */
+    inDefer?: boolean;
 }
 
 /**
@@ -816,13 +824,14 @@ function* renderNode(
             yield { p: factory.preload().catch(() => undefined) };
         }
 
-        // Suspense boundaries in streaming mode: stream the fallback now,
-        // replace with the real children once their lazy deps resolve —
-        // reusing the standard placeholder/$SIGX_REPLACE machinery. In
-        // blocking/string mode Suspense needs no special handling: lazy
-        // children await inline (above), so the boundary never has pending
-        // promises and Suspense renders its children directly.
-        if (factory.__suspense && ctx._streaming) {
+        // <Defer> boundaries in streaming mode: stream the fallback now,
+        // replace with the real children once everything pending beneath
+        // them — lazy chunks AND keyed useData reads — resolves, reusing the
+        // standard placeholder/$SIGX_REPLACE machinery. In blocking/string
+        // mode Defer needs no special handling: lazy children await inline
+        // (above), keyed reads block per component, and the Defer component
+        // renders its children directly.
+        if (factory.__defer && ctx._streaming) {
             const id = ctx.nextId();
             const props = vnode.props || {};
 
@@ -845,11 +854,15 @@ function* renderNode(
             const capturedParentCtx = parentCtx;
 
             const deferredRender = (async () => {
-                let html = '';
+                // Leading comment mirrors the client Defer's constant render
+                // shape ([fallback-or-comment, …children]) so the streamed
+                // replacement hydrates against the client's null-fallback slot.
+                let html = '<!---->';
                 for (const item of items) {
                     // The deferred driver awaits unresolved lazy() preloads
-                    // inline (rule above), so this resolves to real content.
-                    html += await renderVNodeToString(item, ctx, appContext, capturedParentCtx);
+                    // inline (rule above) and — via inDefer — blocks on keyed
+                    // useData reads too, so this resolves to real content.
+                    html += await renderVNodeToString(item, ctx, appContext, capturedParentCtx, { inDefer: true });
                 }
                 return html;
             })();
@@ -907,8 +920,11 @@ function* renderNode(
             if (ssrLoads.length > 0) {
                 // Plugin hook: handleAsyncSetup
                 // Plugins can override the async mode.
-                // Default: 'stream' in streaming mode, 'block' in string mode.
-                let asyncMode: 'block' | 'stream' | 'skip' = ctx._streaming ? 'stream' : 'block';
+                // Default: 'stream' in streaming mode, 'block' in string mode
+                // — and 'block' inside a <Defer> deferred render, so the
+                // boundary's single replacement carries the resolved data
+                // instead of nesting its own placeholders.
+                let asyncMode: 'block' | 'stream' | 'skip' = (ctx._streaming && !state.inDefer) ? 'stream' : 'block';
                 let asyncPlaceholder: string | undefined;
                 let pluginHandled = false;
 
@@ -1183,9 +1199,9 @@ export async function* renderToChunks(
  * @param parentCtx - optional parent component context so deferred renders
  *   keep their provide/inject chain
  */
-export async function renderVNodeToString(element: JSXElement, ctx: SSRContext, appContext: AppContext | null = null, parentCtx: ComponentSetupContext | null = null): Promise<string> {
+export async function renderVNodeToString(element: JSXElement, ctx: SSRContext, appContext: AppContext | null = null, parentCtx: ComponentSetupContext | null = null, opts?: { inDefer?: boolean }): Promise<string> {
     const buf: string[] = [];
-    const state: RenderBufState = { len: 0, threshold: Infinity };
+    const state: RenderBufState = { len: 0, threshold: Infinity, inDefer: opts?.inDefer };
     const gen = renderNode(element, ctx, parentCtx, appContext, buf, state);
 
     let result = gen.next();

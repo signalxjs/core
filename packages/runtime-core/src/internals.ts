@@ -75,9 +75,6 @@ export { getModelSymbol } from './model.js';
 // Directive internals
 export { __DIRECTIVE__ } from './directives.js';
 
-// Lazy loading internals
-export { registerPendingPromise } from './lazy.js';
-
 // Component-setup helpers shared with the client hydrator
 export { createEmit, splitComponentProps } from './utils/component-props.js';
 

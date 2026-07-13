@@ -4,7 +4,7 @@
  * Defines a generic, strategy-agnostic extension point for server-side rendering.
  * Plugins can control component context creation, async behavior, HTML injection,
  * and client-side hydration — enabling custom hydration strategies, resumable SSR,
- * streaming Suspense, progressive enhancement, or any future strategy without
+ * streaming Defer boundaries, progressive enhancement, or any future strategy without
  * core changes.
  */
 
@@ -15,7 +15,7 @@ import type { SSRContext } from './server/context';
  * SSR Plugin interface for extending server rendering and client hydration.
  *
  * The core renderer is strategy-agnostic. Hydration strategies (selective
- * hydration, resumability, streaming Suspense, progressive enhancement, etc.)
+ * hydration, resumability, streaming Defer boundaries, progressive enhancement, etc.)
  * are implemented as plugins that hook into the lifecycle below.
  */
 export interface SSRPlugin {
@@ -92,12 +92,15 @@ export interface SSRPlugin {
          * When core handles streaming, it manages the deferred render and race loop.
          * Plugins that need to augment the streamed result should use `onAsyncComponentResolved`.
          *
-         * Note: this hook keys off useAsync/useStream setup work only. Suspense-boundary async
-         * (lazy() children) does not pass through here — Suspense boundaries
+         * Note: this hook keys off useData/useStream setup work only. <Defer>-boundary async
+         * (lazy() children) does not pass through here — Defer boundaries
          * stream via the same placeholder machinery and are observable on
-         * `ctx._pendingAsync` and in `onAsyncComponentResolved`.
+         * `ctx._pendingAsync` and in `onAsyncComponentResolved`. Keyed reads
+         * INSIDE a Defer's deferred render default to `'block'` (the boundary
+         * replaces once, with resolved data); a plugin forcing `'stream'`
+         * there wins and re-introduces nested placeholders.
          *
-         * @example Suspense plugin returns `{ mode: 'stream', placeholder: '<Spinner/>' }`
+         * @example A loading-UI plugin returns `{ mode: 'stream', placeholder: '<Spinner/>' }`
          * @example A plugin returns `{ mode: 'block' }` to force waiting
          */
         handleAsyncSetup?(

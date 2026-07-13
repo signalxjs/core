@@ -76,9 +76,11 @@ export * from './compound.js';
 export { jsx, jsxs, jsxDEV, Fragment, Text, Comment } from './jsx-runtime.js';
 export type { VNode, JSXChild, JSXChildren, JSXElement } from './jsx-runtime.js';
 
-// Lazy loading & Suspense
-export { lazy, Suspense, isLazyComponent } from './lazy.js';
-export type { LazyComponentFactory, SuspenseProps } from './lazy.js';
+// Lazy loading & <Defer>
+export { lazy, isLazyComponent } from './lazy.js';
+export type { LazyComponentFactory } from './lazy.js';
+export { Defer } from './defer.js';
+export type { DeferProps } from './defer.js';
 
 // Value-first async — reads, writes, composition (docs/rfc-async.md)
 export { useData } from './use-data.js';
@@ -92,9 +94,6 @@ export { useStream } from './use-stream.js';
 // Model (two-way binding)
 export { createModel, createModelFromBinding, isModel } from './model.js';
 export type { Model, ModelBindingTuple } from './model.js';
-
-// Error handling
-export { ErrorBoundary } from './error-boundary.js';
 
 // Error codes
 export { SigxError, SigxErrorCode } from './errors.js';
