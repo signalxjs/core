@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- **`@sigx/runtime-core`**: an element vnode passed **as a component prop** (a fallback, an icon, an array of items) now reaches the renderer as its raw object. Previously the reactive props proxy wrapped it — and, transitively, its dom node — corrupting the renderer's bookkeeping when the vnode toggled out of the tree: text children were removed while their element stayed behind, later mounts landed at the container end, and re-showing or unmounting threw inside the DOM (`removeChild ... is not a child of this node`). The props accessor now unwraps vnode-shaped values (the prop read itself stays reactive, so replacing the prop re-renders as usual), and `<Defer>`'s interim `toRaw` workaround is removed. (#191)
+
 ## [0.9.0] — 2026-07-13
 
 Value-first async lands (Phase 1 of `docs/rfc-async.md` rev 8, #189): one reactive async-cell concept exposed as a read/write pair — `useData` (keyed reads) and `useAction` (manual writes) — rendered with co-located `match`, coordinated with `all()`, with one thin tree wrapper `<Defer>` and setup-time `errorScope` replacing the React-style `<Suspense>`/`<ErrorBoundary>` wrappers. Pre-1.0, no-compat: the old primitives are removed outright.
