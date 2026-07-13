@@ -795,7 +795,8 @@ export function createRenderer<HostNode = any, HostElement = any>(
      * components `vnode.dom` is the trailing anchor comment — moving only
      * it (what the old diff did) left the content behind.
      */
-    function moveVNode(vnode: VNode, parent: HostElement, anchor: HostNode | null): void {
+    function moveVNode(vnode: VNode | null | undefined, parent: HostElement, anchor: HostNode | null): void {
+        if (vnode == null) return;
         if (vnode.type === Fragment) {
             const children = vnode.children;
             for (let i = 0; i < children.length; i++) {
