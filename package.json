@@ -30,7 +30,7 @@
     "build:server-renderer": "pnpm --filter @sigx/server-renderer run build",
     "dev:sigx": "pnpm --filter sigx run dev",
     "dev:vite": "pnpm --filter @sigx/vite run dev",
-    "typecheck": "tsgo --noEmit",
+    "typecheck": "tsc --noEmit",
     "lint": "oxlint packages/reactivity/src packages/runtime-core/src packages/runtime-dom/src packages/sigx/src",
     "lint:fix": "oxlint --fix packages/reactivity/src packages/runtime-core/src packages/runtime-dom/src packages/sigx/src",
     "publish:dry": "node scripts/publish.js --dry-run",
@@ -47,13 +47,12 @@
   },
   "devDependencies": {
     "@size-limit/preset-small-lib": "^11",
-    "@typescript/native-preview": "7.0.0-dev.20260514.1",
     "@vitest/coverage-v8": "^4.1.7",
     "happy-dom": "^20.9.0",
     "oxlint": "^1.66.0",
     "playwright": "^1.60.0",
     "size-limit": "^11",
-    "typescript": "^6.0.3",
+    "typescript": "^7.0.2",
     "vite": "^8.0.14",
     "vitest": "^4.1.7"
   },
