@@ -196,10 +196,11 @@ export function jsx(
     }
 
     if (!needsModelProcessing) {
-        // Fast path — no model bindings, avoid props clone entirely
+        // Fast path — no model bindings, no mutation clone needed
         if (isComponentType) {
-            // Single clone; `children` must stay an own key even when absent so
-            // `"children" in props` observability is unchanged.
+            // Single own-enumerable clone (JSX transforms always pass plain
+            // object literals); `children` must stay an own key even when
+            // absent so `"children" in props` observability is unchanged.
             const componentProps: Record<string, any> = props ? { ...props } : {};
             if (!('children' in componentProps)) componentProps.children = undefined;
             return {
