@@ -59,7 +59,7 @@ function ensureAsyncHydrationListener(): void {
 
     document.addEventListener('sigx:async-ready', (event: Event) => {
         const customEvent = event as CustomEvent;
-        const { id, state } = customEvent.detail || {};
+        const { id } = customEvent.detail || {};
 
         invalidateIslandCache();
         invalidateMarkerIndex(); // DOM changed — rebuild marker index on next lookup
