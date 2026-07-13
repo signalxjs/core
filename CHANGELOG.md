@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- **`@sigx/runtime-core`**: falsy JSX keys are no longer dropped — `key={0}` and `key=""` now actually key their elements instead of silently falling back to positional diffing. Keys are also normalized to strings once at vnode creation, so keyed reconciliation compares them without per-diff coercion (`key={1}` still matches `key="1"`). (#169)
 - **`@sigx/vite`**: the `sigx-types` CLI advertised in the README is now actually installable — the package manifest was missing its `bin` entry, so `npx sigx-types` could not resolve it. Also reordered the package's `exports` conditions to list `types` first, matching every other package. (#150)
 
 ## [0.7.0] — 2026-06-15
