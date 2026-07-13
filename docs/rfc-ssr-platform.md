@@ -8,15 +8,16 @@ stays frozen.
 
 Relationship to the other RFCs:
 
-- **Builds on `rfc-use-async.md`** (implemented): keyed `useAsync` transfer,
+- **Builds on `rfc-use-async.md`** (implemented): keyed data transfer,
   `__SIGX_ASYNC__`, the `_useAsync`/`_useStream` provider seams, the layering
   rule ("runs standalone in a browser → `sigx`; needs a server →
   `@sigx/server-renderer`").
-- **Consumes the value-first async RFC** (#135, PR #136 — under review; lands
-  as `docs/rfc-async.md`): `<Defer>` as the one positional primitive, the
-  `match` state→arm mapping, `errorScope`. This RFC does not restate that
-  design; it defines its **server half** (§2.2) and the streaming boundary it
-  keys off (§1).
+- **Consumes the value-first async RFC** (#135, **merged** as
+  `docs/rfc-async.md`, rev 8): `useData`/`useAction`, `<Defer>` as the one
+  positional primitive (during SSR streaming it observes pending data *and*
+  chunks — rfc-async §5), the `match` state→arm mapping, `errorScope`. This
+  RFC does not restate that design; it defines its **server half** (§2.2) and
+  the streaming boundary it keys off (§1).
 - **Depends on #119** (islands into the monorepo) and **resolves #122**
   (`client:only` cannot suppress the server render).
 
@@ -24,8 +25,9 @@ Relationship to the other RFCs:
 
 After `ssr-next` (#61, `docs/ssr-review.md`) the rendering engine is not the
 bottleneck: out-of-order streaming with mid-stream growth, `renderDocument`
-with `blocking`/`stream` modes and a shell promise, keyed `useAsync`
-serialization, `useStream` progressive text, hydration with mismatch recovery,
+with `blocking`/`stream` modes and a shell promise, keyed `useData`
+serialization (shipped as `useAsync`; renamed by rfc-async), `useStream`
+progressive text, hydration with mismatch recovery,
 and an `SSRPlugin` surface good enough that islands shipped as an external
 pack without core importing a line of strategy code.
 
@@ -134,8 +136,8 @@ addressed (per `rfc-use-async.md` open question 4's resolution) but share
 null-prototype targets, `DANGEROUS_KEYS`), one dev-mode serializability
 warning path, and one **pluggable type-handler registry** (needed twice
 already: the `@sigx/store` adapter spec'd in `rfc-use-async.md`, and the
-Phase-3 cache of #135 (§7) for which `__SIGX_ASYNC__` becomes the
-seed). Whether the two blobs merge into one `__SIGX_SSR__` script is open
+cache pack contract of #135 (rfc-async §7) for which `__SIGX_ASYNC__`
+becomes the seed). Whether the two blobs merge into one `__SIGX_SSR__` script is open
 question 1.
 
 #### 1.2 Selective hydration is the hydrator
@@ -210,8 +212,8 @@ promise result. The router SSR contract (§3.2) feeds this — a route miss sets
   hydrator wires `retry` to a real remount + client re-render after
   hydration (the scope's pinned contract from #135 §4, honored
   cross-environment).
-- **Data errors already have a home:** a keyed `useAsync` rejection renders
-  `match`'s `error` arm server-side (#135 §8); nothing new needed.
+- **Data errors already have a home:** a keyed `useData` rejection renders
+  `match`'s `error` arm server-side (rfc-async §6); nothing new needed.
 
 #### 2.3 Edge portability as a tested guarantee
 
@@ -281,7 +283,7 @@ file-system routing, no conventions beyond the seams in this RFC.
 ## What this RFC does not do
 
 - **Server functions / actions (RPC).** The value-first async RFC's manual
-  writes (#135: `{ manual: true }` + `.run`) will eventually want a "fetcher
+  writes (#135: `useAction` + `.run`) will eventually want a "fetcher
   runs on the server" transport. That is a compiler + transport problem — a separate,
   future RFC. Named here so reviewers see the door, not designed here.
 - **Resumability.** The `beforeHydrate → false` seam already permits a
@@ -318,8 +320,9 @@ file-system routing, no conventions beyond the seams in this RFC.
   `createRequestHandler` reference; `examples/spa-ssr` collapses to the new
   integration as the end-to-end proof.
 
-Sequencing: Phase 1 starts only after #136 (this RFC keys off `<Defer>` and
-`errorScope`) and #119 (islands in-tree) merge. Each phase = its own issue →
+Sequencing: both prerequisites have merged — #136 (the value-first async RFC
+this RFC keys off: `<Defer>`, `errorScope`) and #119 (islands in-tree) — so
+Phase 1 is unblocked once this RFC is approved. Each phase = its own issue →
 worktree → PR → Copilot review → merge.
 
 ## Open questions
