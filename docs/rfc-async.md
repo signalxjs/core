@@ -88,7 +88,7 @@ signature fuses the reactive key, the fetcher's argument, and conditional
 fetching:**
 
 ```ts
-type Key = string | null | undefined | false;               // falsy ⇒ 'idle', don't fetch
+type Key = string | null | undefined | false;               // skip values: see below
 type Fetcher<T, Arg> = (arg: Arg, ctx: { signal: AbortSignal }) => Promise<T>;
 
 useAsync<T>(key: string,    fetcher: Fetcher<T, string>, opts?): AsyncState<T>;  // keyed, SSR
@@ -109,6 +109,14 @@ const post = useAsync(
   (key, { signal }) => fetchPost(key, { signal }),    // resolved key passed in — no double read
 );
 ```
+
+**Skip values, pinned:** the getter skips (state `'idle'`, fetcher not run) on
+**any falsy result** — `null`, `undefined`, `false`, and `''`. Making the
+contract exactly "falsy" keeps implementations (`if (!key)`) and user
+intuition aligned; there is no legitimate empty-string key. Because an `''`
+usually means an interpolation bug rather than intent, it additionally fires
+a one-time dev-mode warning ("empty key skipped — did you mean to return
+null?").
 
 `AsyncState` — `state` is the canonical truth:
 
@@ -420,7 +428,8 @@ Each phase = its own issue → worktree → PR → Copilot review → merge.
 - `errorScope` ships Phase 1 with the §4 contract; the `SafeWidget` pattern is
   the nested-boundary migration.
 - Keep both `state` and `loading`; no `isReady`/`isError`.
-- `idle` via a null/false **getter** key only — no `enabled`/`skip` option.
+- `idle` via a falsy **getter** key only (`null`/`undefined`/`false`/`''`,
+  with a dev warning on `''`) — no `enabled`/`skip` option.
 - `all()` errors: first-error-wins + `.errors` (shapes pinned in §3).
 - `<Defer>` (over `Stream`/`Await`); its hydration axis belongs to #171.
 - Writes = manual-trigger `useAsync` with a distinct `AsyncAction` type;
