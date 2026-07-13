@@ -24,7 +24,7 @@
     ],
     "sideEffects": false,
     "scripts": {
-        "build": "tsgo",
+        "build": "tsc",
         "dev": "tsc --watch",
         "prepublishOnly": "pnpm run build"
     },
