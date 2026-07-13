@@ -1,6 +1,6 @@
 {
     "name": "@sigx/ssr-islands",
-    "version": "0.7.0",
+    "version": "0.8.0",
     "description": "Islands architecture for SignalX SSR — selective hydration via client:* directives",
     "type": "module",
     "main": "./dist/index.js",
