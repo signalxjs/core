@@ -31,33 +31,27 @@ export type InjectionToken<T> = symbol & { readonly __sigxTokenType?: T };
 
 /**
  * Create a typed DI token. `description` names the token in diagnostics
- * (`symbol.description`).
+ * (`symbol.description`). A typed alias of `Symbol` — zero runtime wrapper.
  * @internal
  */
-export function createToken<T>(description: string): InjectionToken<T> {
-    return Symbol(description) as InjectionToken<T>;
-}
+export const createToken = Symbol as unknown as <T>(description: string) => InjectionToken<T>;
 
 /**
  * Read a token's value from a provides Map, typed by the token. Accepts a
  * missing Map so callers can pass optional `provides` fields directly.
  * @internal
  */
-export function getProvided<T>(
+export const getProvided = <T>(
     provides: Map<symbol, unknown> | null | undefined,
     token: InjectionToken<T>
-): T | undefined {
-    return provides?.get(token) as T | undefined;
-}
+): T | undefined => provides?.get(token) as T | undefined;
 
 /**
  * Write a token's value into a provides Map, typed by the token.
  * @internal
  */
-export function setProvided<T>(
+export const setProvided = <T>(
     provides: Map<symbol, unknown>,
     token: InjectionToken<T>,
     value: T
-): void {
-    provides.set(token, value);
-}
+): void => void provides.set(token, value);
