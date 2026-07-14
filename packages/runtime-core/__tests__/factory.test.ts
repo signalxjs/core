@@ -344,6 +344,18 @@ describe("lifetime: 'scoped'", () => {
         expect(a).toBe(b);
     });
 
+    it('an explicitly provided undefined shadows the fallback resolution', () => {
+        const useThing = defineFactory(() => ({ id: {} }), 'scoped');
+
+        const node: MockComponentContext = {
+            provides: new Map<symbol, unknown>([[useThing._token, undefined]]),
+            parent: null
+        };
+        setCurrentInstance(node as ComponentSetupContext);
+
+        expect(useThing()).toBeUndefined();
+    });
+
     it('provider-owned instances are disposed when the provider unmounts', () => {
         const deactivated = vi.fn();
         const useThing = defineFactory((ctx) => {

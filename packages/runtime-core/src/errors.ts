@@ -61,6 +61,7 @@ export const SigxErrorCode = {
     // Dependency injection
     PROVIDE_OUTSIDE_SETUP: 'SIGX200',
     PROVIDE_INVALID_INJECTABLE: 'SIGX201',
+    REQUIRED_INJECTABLE_NOT_PROVIDED: 'SIGX202',
 } as const;
 
 // ============================================================================
@@ -136,6 +137,19 @@ export function provideOutsideSetupError(): SigxError {
             code: SigxErrorCode.PROVIDE_OUTSIDE_SETUP,
             suggestion:
                 'Move the defineProvide() call inside your component\'s setup function, or use app.defineProvide() at the app level.',
+        }
+    );
+}
+
+export function requiredInjectableNotProvidedError(name: string): SigxError {
+    return new SigxError(
+        `Injectable "${name}" was used without being provided.`,
+        {
+            code: SigxErrorCode.REQUIRED_INJECTABLE_NOT_PROVIDED,
+            suggestion:
+                `Provide it before use: app.defineProvide(use${name}, () => ...) before ` +
+                `mount/hydrate, or defineProvide(use${name}, () => ...) in an ancestor ` +
+                "component's setup.",
         }
     );
 }

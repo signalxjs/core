@@ -1,6 +1,6 @@
 import type { Lifetime, guid } from "../models/index.js";
 import { onUnmounted } from "../component.js";
-import { lookupProvided, useAppContext, type InjectableFunction } from "./injectable.js";
+import { lookupProvidedEntry, NOT_PROVIDED, useAppContext, type InjectableFunction } from "./injectable.js";
 
 export class SubscriptionHandler {
     private unsubs: (() => void)[] = [];
@@ -165,9 +165,9 @@ export function defineFactory<InferReturnSetup>(
 
     const resolveShared = (...args: unknown[]): Instance => {
         if (lifetime === 'scoped') {
-            const provided = lookupProvided<Instance>(token);
-            if (provided !== undefined) {
-                return provided;
+            const entry = lookupProvidedEntry(token);
+            if (entry !== NOT_PROVIDED) {
+                return entry as Instance;
             }
         }
 

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { defineInjectable, defineProvide } from '../src/di/injectable';
+import { defineInjectable, defineProvide, getAppContextToken } from '../src/di/injectable';
 import { setCurrentInstance, type ComponentSetupContext } from '../src/component';
+import { SigxError } from '../src/errors';
 
 type MockComponentContext = Omit<Partial<ComponentSetupContext>, 'parent'> & {
     provides: Map<any, any>;
@@ -170,5 +171,188 @@ describe('injectable lookup', () => {
         // No defineProvide called, should get global singleton
         const result = useService();
         expect(result.name).toBe('global-singleton');
+    });
+
+    it('explicitly provided undefined shadows the global fallback', () => {
+        const mockInstance: MockComponentContext = {
+            props: {},
+            provides: new Map(),
+            parent: null
+        };
+        setCurrentInstance(mockInstance as ComponentSetupContext);
+
+        const useValue = defineInjectable<string | undefined>(() => 'fallback');
+        defineProvide(useValue, () => undefined);
+
+        expect(useValue()).toBeUndefined();
+    });
+});
+
+describe('required injectables (defineInjectable(name))', () => {
+    afterEach(() => {
+        setCurrentInstance(null);
+    });
+
+    it('throws SIGX202 naming the injectable when used unprovided', () => {
+        const useRouter = defineInjectable<{ route: string }>('Router');
+
+        let caught: unknown;
+        try {
+            useRouter();
+        } catch (e) {
+            caught = e;
+        }
+        expect(caught).toBeInstanceOf(SigxError);
+        expect((caught as SigxError).code).toBe('SIGX202');
+        expect((caught as SigxError).message).toContain('"Router"');
+    });
+
+    it('throws unprovided inside a component too (no singleton fallback)', () => {
+        const mockInstance: MockComponentContext = {
+            props: {},
+            provides: new Map(),
+            parent: null
+        };
+        setCurrentInstance(mockInstance as ComponentSetupContext);
+
+        const useRouter = defineInjectable<{ route: string }>('Router');
+        expect(() => useRouter()).toThrow('Injectable "Router" was used without being provided.');
+    });
+
+    it('resolves normally when provided', () => {
+        const mockInstance: MockComponentContext = {
+            props: {},
+            provides: new Map(),
+            parent: null
+        };
+        setCurrentInstance(mockInstance as ComponentSetupContext);
+
+        const useRouter = defineInjectable<{ route: string }>('Router');
+        const router = { route: '/home' };
+        defineProvide(useRouter, () => router);
+
+        expect(useRouter()).toBe(router);
+    });
+
+    it('defineProvide without an explicit factory throws the same named error', () => {
+        const mockInstance: MockComponentContext = {
+            props: {},
+            provides: new Map(),
+            parent: null
+        };
+        setCurrentInstance(mockInstance as ComponentSetupContext);
+
+        const useRouter = defineInjectable<{ route: string }>('Router');
+        expect(() => defineProvide(useRouter)).toThrow('Injectable "Router" was used without being provided.');
+    });
+
+    it('carries the name as the token description', () => {
+        const useRouter = defineInjectable<object>('Router');
+        expect(useRouter._token.description).toBe('Router');
+    });
+});
+
+describe('app-level provides (live lookup through the root AppContext)', () => {
+    afterEach(() => {
+        setCurrentInstance(null);
+    });
+
+    function treeInApp() {
+        const appContext = { provides: new Map<symbol, unknown>() };
+        const root: MockComponentContext = {
+            props: {},
+            provides: new Map([[getAppContextToken(), appContext]]),
+            parent: null
+        };
+        const child: MockComponentContext = {
+            props: {},
+            provides: new Map(),
+            parent: root
+        };
+        return { appContext, child };
+    }
+
+    it('resolves app-level provides added after mount (live read, not a mount-time copy)', () => {
+        const { appContext, child } = treeInApp();
+        setCurrentInstance(child as ComponentSetupContext);
+
+        const useThing = defineInjectable(() => ({ src: 'global' }));
+
+        // Nothing provided yet: global fallback
+        expect(useThing().src).toBe('global');
+
+        // "Post-mount" app-level provide: visible on the next lookup
+        const late = { src: 'app' };
+        appContext.provides.set(useThing._token, late);
+        expect(useThing()).toBe(late);
+    });
+
+    it('component-tree provides take precedence over app-level provides', () => {
+        const { appContext, child } = treeInApp();
+        setCurrentInstance(child as ComponentSetupContext);
+
+        const useThing = defineInjectable(() => ({ src: 'global' }));
+        const appValue = { src: 'app' };
+        const treeValue = { src: 'tree' };
+        appContext.provides.set(useThing._token, appValue);
+        child.provides.set(useThing._token, treeValue);
+
+        expect(useThing()).toBe(treeValue);
+    });
+});
+
+describe('SSR global-fallback warning', () => {
+    afterEach(() => {
+        vi.unstubAllGlobals();
+        setCurrentInstance(null);
+        vi.restoreAllMocks();
+    });
+
+    it('warns once, naming the injectable, when the fallback fires server-side during a component render', () => {
+        vi.stubGlobal('window', undefined);
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        setCurrentInstance({ props: {}, provides: new Map(), parent: null } as unknown as ComponentSetupContext);
+
+        const useLeaky = defineInjectable(function leakyService() {
+            return { n: 1 };
+        });
+        useLeaky();
+        useLeaky();
+
+        expect(warn).toHaveBeenCalledTimes(1);
+        expect(warn.mock.calls[0][0]).toContain('leakyService');
+        expect(warn.mock.calls[0][0]).toContain('ALL SSR requests');
+    });
+
+    it('stays silent server-side with no app anywhere (bare script / test)', () => {
+        vi.stubGlobal('window', undefined);
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+        const useThing = defineInjectable(() => ({}));
+        useThing();
+
+        expect(warn).not.toHaveBeenCalled();
+    });
+
+    it('stays silent when the injectable is provided', () => {
+        vi.stubGlobal('window', undefined);
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        setCurrentInstance({ props: {}, provides: new Map(), parent: null } as unknown as ComponentSetupContext);
+
+        const useThing = defineInjectable(() => ({ src: 'global' }));
+        defineProvide(useThing, () => ({ src: 'provided' }));
+        useThing();
+
+        expect(warn).not.toHaveBeenCalled();
+    });
+
+    it('stays silent on the client (window defined)', () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        setCurrentInstance({ props: {}, provides: new Map(), parent: null } as unknown as ComponentSetupContext);
+
+        const useThing = defineInjectable(() => ({}));
+        useThing();
+
+        expect(warn).not.toHaveBeenCalled();
     });
 });
