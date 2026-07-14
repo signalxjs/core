@@ -114,6 +114,7 @@ pnpm lint        # oxlint over all packages' src (warnings fail: --deny-warnings
 pnpm lint:fix
 pnpm size        # size-limit bundle-size check (.size-limit.json)
 pnpm verify:pack # verify npm pack output is sane
+pnpm test:edge   # WinterCG smoke: stream a document from the prod dist with node: imports forbidden (after pnpm build)
 pnpm dev:sigx    # watch-build the sigx package
 pnpm dev:vite    # watch-build the vite plugin
 ```

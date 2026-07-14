@@ -42,6 +42,7 @@ packages/
 | Run all tests | `pnpm test` |
 | Run tests in watch mode | `pnpm test:watch` |
 | Lint | `pnpm lint` |
+| Edge smoke test (after `pnpm build`) | `pnpm test:edge` |
 | Try a runnable example | `pnpm --filter @sigx/spa-example dev` |
 
 ## Pre-push checklist
