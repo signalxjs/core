@@ -33,7 +33,7 @@ import type { SSRPlugin } from '../plugin';
 import { createSSRContext, type SSRContext, type SSRContextOptions } from './context';
 import { renderToChunks } from './render-core';
 import { emitBoundaryTable } from './serialize';
-import { renderHeadToString } from '../head';
+import { renderHeadToString, collectRootAttrs, mergeAttrsIntoTag } from '../head';
 import { responseSummary, type SSRResponse } from '../response';
 
 /** Same completion signal the plain streaming APIs emit. */
@@ -170,6 +170,15 @@ async function prepareDocument(
         pre = headClose >= 0
             ? pre.slice(0, headClose) + headHtml + '\n' + pre.slice(headClose)
             : pre + headHtml;
+    }
+
+    // htmlAttrs/bodyAttrs collected via useHead patch the template's own
+    // <html>/<body> open tags (rfc-ssr-platform §2.4) — both live in `pre`
+    // (the template up to the outlet).
+    if (headConfigs.length > 0) {
+        const { htmlAttrs, bodyAttrs } = collectRootAttrs(headConfigs);
+        pre = mergeAttrsIntoTag(pre, 'html', htmlAttrs);
+        pre = mergeAttrsIntoTag(pre, 'body', bodyAttrs);
     }
 
     // Split the tail at </body>: everything before it (entry scripts!)
