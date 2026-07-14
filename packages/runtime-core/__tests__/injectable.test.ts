@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { defineInjectable, defineProvide, getAppContextToken } from '../src/di/injectable';
 import { setCurrentInstance, type ComponentSetupContext } from '../src/component';
+import { defineApp } from '../src/app';
 import { SigxError } from '../src/errors';
 
 type MockComponentContext = Omit<Partial<ComponentSetupContext>, 'parent'> & {
@@ -322,6 +323,20 @@ describe('SSR global-fallback warning', () => {
         expect(warn).toHaveBeenCalledTimes(1);
         expect(warn.mock.calls[0][0]).toContain('leakyService');
         expect(warn.mock.calls[0][0]).toContain('ALL SSR requests');
+    });
+
+    it('warns when the fallback fires inside app.runWithContext (guard / entry-scope code)', () => {
+        vi.stubGlobal('window', undefined);
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const app = defineApp({} as never);
+
+        const useThing = defineInjectable(function guardService() {
+            return { n: 1 };
+        });
+        app.runWithContext(() => useThing());
+
+        expect(warn).toHaveBeenCalledTimes(1);
+        expect(warn.mock.calls[0][0]).toContain('guardService');
     });
 
     it('stays silent server-side with no app anywhere (bare script / test)', () => {
