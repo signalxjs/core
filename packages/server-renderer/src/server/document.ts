@@ -62,13 +62,12 @@ export interface DocumentOptions extends SSRContextOptions {
      */
     signal?: AbortSignal;
 
-    /**
-     * Error callback. `'shell'` fires before any byte is produced (the
-     * caller can still send a 500 page); `'stream'` fires mid-stream after
-     * the shell flushed (per-component errors stream their fallbacks and do
-     * NOT reach this — only stream-level failures do).
-     */
-    onError?: (error: Error, phase: 'shell' | 'stream') => void;
+    // onError / renderError are inherited from SSRContextOptions
+    // (rfc-ssr-platform §2.2): ONE callback receives per-component render
+    // failures (info.componentId set) and request-level failures (shell
+    // preparation, stream errors — info carries only the phase). A shell
+    // failure fires before any byte is produced, so the caller can still
+    // send a 500 page.
 
     /**
      * Serialize resolved useAsync/useStream values for hydration pickup.
@@ -145,6 +144,9 @@ async function prepareDocument(
         throwIfAborted(options.signal);
     }
     const shellHtml = shellChunks.join('');
+    // Shell produced — later failures (deferred renders) are stream-phase
+    // for error routing.
+    ctx._phase = 'stream';
 
     // Head: collected per-request by useHead via the component instances
     const headConfigs = ctx._headConfigs;
@@ -220,7 +222,7 @@ async function* documentChunks(
         // the entry's flag check always sees it.
         yield COMPLETION_SCRIPT;
     } catch (e) {
-        options.onError?.(e as Error, 'stream');
+        options.onError?.(e as Error, { phase: 'stream' });
         return; // end without the closing tail — visibly truncated
     }
 
@@ -235,7 +237,7 @@ function startPrepare(
     options: DocumentOptions
 ): Promise<PreparedDocument> {
     const prep = prepareDocument(engine, input, options);
-    prep.catch(e => options.onError?.(e as Error, 'shell'));
+    prep.catch(e => options.onError?.(e as Error, { phase: 'shell' }));
     return prep;
 }
 

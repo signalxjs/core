@@ -164,7 +164,7 @@ describe('renderDocumentToNodeStream — streaming mode (default)', () => {
 
         await expect(shell).rejects.toThrow(/outlet marker/);
         expect(onError).toHaveBeenCalledTimes(1);
-        expect(onError.mock.calls[0][1]).toBe('shell');
+        expect(onError.mock.calls[0][1]).toEqual({ phase: 'shell' });
     });
 
     it('stops early on AbortSignal without the document tail', async () => {

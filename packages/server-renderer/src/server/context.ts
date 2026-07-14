@@ -21,6 +21,22 @@ export interface CorePendingAsync {
     promise: Promise<string>;
 }
 
+/**
+ * What failed, and where in the request (rfc-ssr-platform §2.2). Component
+ * fields are present for per-component render failures; shell-preparation
+ * and stream-level failures carry only the phase.
+ */
+export interface SSRErrorInfo {
+    /** 'shell' before the first byte could flush; 'stream' after. */
+    phase: 'shell' | 'stream';
+    /** The failed component's numeric id (the `<!--$c:ID-->` scheme). */
+    componentId?: number;
+    /** The failed component's `__name` (or 'Anonymous'). */
+    componentName?: string;
+    /** Present when the failed component is a recorded boundary. */
+    boundaryId?: number;
+}
+
 export interface SSRContextOptions {
     /**
      * Enable streaming mode (default: true)
@@ -28,16 +44,19 @@ export interface SSRContextOptions {
     streaming?: boolean;
 
     /**
-     * Called when a component's setup() throws during SSR.
-     *
-     * Return a fallback HTML string to render in place of the failed component,
-     * or `null` to use the default error placeholder.
-     *
-     * @param error - The error thrown during rendering
-     * @param componentName - The component's `__name` (or 'Anonymous')
-     * @param componentId - The numeric component ID assigned by the SSR context
+     * The one error callback for the request (rfc-ssr-platform §2.2):
+     * per-component render failures (sync during the shell AND streamed
+     * deferred renders), shell-preparation failures, and stream-level
+     * failures all land here, distinguished by `info`.
      */
-    onComponentError?: (error: Error, componentName: string, componentId: number) => string | null;
+    onError?: (error: Error, info: SSRErrorInfo) => void;
+
+    /**
+     * The HTML rendered in place of a failed component. Default: the
+     * `<!--ssr-error:ID-->` boundary comment, plus a visible diagnostic box
+     * in development.
+     */
+    renderError?: (error: Error, info: SSRErrorInfo) => string;
 }
 
 export interface RenderOptions {
@@ -64,9 +83,21 @@ export interface SSRContext {
     _head: string[];
 
     /**
-     * Error callback for component rendering failures
+     * The request's error callback (per-component, shell, and stream-level
+     * failures — see SSRErrorInfo).
      */
-    _onComponentError?: (error: Error, componentName: string, componentId: number) => string | null;
+    _onError?: (error: Error, info: SSRErrorInfo) => void;
+
+    /**
+     * Failure-HTML hook — what renders in place of a failed component.
+     */
+    _renderError?: (error: Error, info: SSRErrorInfo) => string;
+
+    /**
+     * Which request phase the walk is in: 'shell' until the shell has been
+     * produced, 'stream' while deferred renders replay. Feeds SSRErrorInfo.
+     */
+    _phase: 'shell' | 'stream';
 
     /**
      * Registered SSR plugins
@@ -213,7 +244,9 @@ export function createSSRContext(options: SSRContextOptions = {}): SSRContext {
         _componentStack: componentStack,
         _head: head,
         _pluginData: pluginData,
-        _onComponentError: options.onComponentError,
+        _onError: options.onError,
+        _renderError: options.renderError,
+        _phase: 'shell',
         _appContext: null,
         _streaming: false,
         _pendingAsync: [],

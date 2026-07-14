@@ -716,7 +716,7 @@ describe('edge cases', () => {
 
 // ─── Error Boundary Tests ──────────────────────────────────────────
 
-describe('Error boundary (onComponentError)', () => {
+describe('Error routing (onError + renderError)', () => {
     it('should render default error comment when component throws', async () => {
         const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
@@ -733,24 +733,25 @@ describe('Error boundary (onComponentError)', () => {
         consoleSpy.mockRestore();
     });
 
-    it('should call onComponentError with error details', async () => {
+    it('should call onError with error details and render via renderError', async () => {
         const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-        const onComponentError = vi.fn(() => '<div class="fallback">Something went wrong</div>');
-        const ctx = createSSRContext({ onComponentError });
+        const onError = vi.fn();
+        const renderError = vi.fn(() => '<div class="fallback">Something went wrong</div>');
+        const ctx = createSSRContext({ onError, renderError });
 
         const html = await renderToString(
             <div><SetupThrowing /></div>,
             ctx
         );
 
-        expect(onComponentError).toHaveBeenCalledOnce();
-        const callArgs = onComponentError.mock.calls[0] as unknown as [Error, string, number];
-        const [error, name, id] = callArgs;
+        expect(onError).toHaveBeenCalledOnce();
+        const [error, info] = onError.mock.calls[0] as unknown as [Error, any];
         expect(error).toBeInstanceOf(Error);
         expect(error.message).toBe('Setup exploded');
-        expect(name).toBe('SetupThrowing');
-        expect(typeof id).toBe('number');
+        expect(info.componentName).toBe('SetupThrowing');
+        expect(typeof info.componentId).toBe('number');
+        expect(info.phase).toBe('shell');
 
         // Custom fallback HTML is rendered
         expect(html).toContain('<div class="fallback">Something went wrong</div>');
@@ -758,18 +759,18 @@ describe('Error boundary (onComponentError)', () => {
         consoleSpy.mockRestore();
     });
 
-    it('should use default fallback when onComponentError returns null', async () => {
+    it('should use the default failure HTML when only onError is provided', async () => {
         const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-        const onComponentError = vi.fn(() => null);
-        const ctx = createSSRContext({ onComponentError });
+        const onError = vi.fn();
+        const ctx = createSSRContext({ onError });
 
         const html = await renderToString(
             <div><SetupThrowing /></div>,
             ctx
         );
 
-        expect(onComponentError).toHaveBeenCalledOnce();
+        expect(onError).toHaveBeenCalledOnce();
         expect(html).toMatch(/<!--ssr-error:\d+-->/);
 
         consoleSpy.mockRestore();

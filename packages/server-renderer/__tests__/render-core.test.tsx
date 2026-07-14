@@ -302,11 +302,11 @@ describe('renderToString — component error handling', () => {
         consoleErr.mockRestore();
     });
 
-    it('uses onComponentError fallback when provided in context options', async () => {
+    it('uses the renderError hook when provided in context options', async () => {
         const consoleErr = vi.spyOn(console, 'error').mockImplementation(() => {});
         const ssr = createSSR();
         const ctx = createSSRContext({
-            onComponentError: (err: Error, name: string) => `<div data-error="${name}">${err.message}</div>`
+            renderError: (err, info) => `<div data-error="${info.componentName}">${err.message}</div>`
         });
         const html = await ssr.render((Boom as any)({}), ctx);
         expect(html).toContain('<div data-error="Boom">boom</div>');
@@ -318,8 +318,9 @@ describe('renderToString — component error handling', () => {
         // server data errors are always SOFT: the rejection settles the cell
         // to state 'errored' and the component renders its own error branch;
         // it must NOT land in the component-level catch (→ error fallback).
-        const onComponentError = vi.fn(
-            (err: Error, name: string) => `<i data-failed="${name}">${err.message}</i>`
+        const onError = vi.fn();
+        const renderError = vi.fn(
+            (err: Error, info: any) => `<i data-failed="${info.componentName}">${err.message}</i>`
         );
         const LoadFail = component(() => {
             const data = useData('rc-throw-fail', async () => {
@@ -335,9 +336,10 @@ describe('renderToString — component error handling', () => {
         }, { name: 'LoadFail' });
 
         const ssr = createSSR();
-        const ctx = createSSRContext({ onComponentError });
+        const ctx = createSSRContext({ onError, renderError });
         const html = await ssr.render((LoadFail as any)({}), ctx);
-        expect(onComponentError).not.toHaveBeenCalled();
+        expect(onError).not.toHaveBeenCalled();
+        expect(renderError).not.toHaveBeenCalled();
         expect(html).toContain('failed: load-fail');
         expect(html).not.toContain('data-failed');
         expect(html).not.toContain('no error');

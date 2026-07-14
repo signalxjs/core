@@ -37,7 +37,7 @@ import {
     resolveBuiltInDirective,
     matchAsyncState,
 } from 'sigx/internals';
-import type { SSRContext } from './context';
+import type { SSRContext, SSRErrorInfo } from './context';
 import type { ResolvedBoundary, SSRBoundaryRecord } from '../boundary';
 import { generateAppendScript } from './streaming';
 import { serializeBoundaryProps, getTypeHandlers } from './serialize';
@@ -509,26 +509,48 @@ function serverUseStream(this: any, key: string, source: () => AsyncIterable<str
 }
 
 /**
- * Error fallback for a failed component. Returns the HTML to emit in place of
- * the component ('' emits nothing).
+ * The default failure HTML (rfc-ssr-platform §2.2): the stable
+ * `<!--ssr-error:ID-->` boundary comment, plus a visible diagnostic box in
+ * development so a failed component is impossible to miss.
+ */
+export function defaultRenderError(error: Error, info: SSRErrorInfo): string {
+    const marker = info.componentId != null ? `<!--ssr-error:${info.componentId}-->` : '';
+    if (process.env.NODE_ENV === 'production') {
+        return marker;
+    }
+    const label = escapeHtml(`[SSR] <${info.componentName ?? 'Anonymous'}> failed during ${info.phase}: ${error.message}`);
+    return marker
+        + `<div style="border:2px solid #c00;border-radius:4px;background:#fff5f5;color:#900;`
+        + `padding:8px 12px;font:13px/1.5 ui-monospace,monospace;">${label}</div>`;
+}
+
+/**
+ * Error fallback for a failed component: report through the request's one
+ * error callback, then emit `renderError`'s HTML in its place ('' emits
+ * nothing).
  */
 function componentErrorFallback(e: unknown, ctx: SSRContext, componentName: string, id: number): string {
     const error = e instanceof Error ? e : new Error(String(e));
-    let fallbackHtml: string | null = null;
+    const info: SSRErrorInfo = {
+        phase: ctx._phase,
+        componentId: id,
+        componentName,
+        ...(ctx._boundaries.has(id) ? { boundaryId: id } : {})
+    };
 
-    if (ctx._onComponentError) {
-        fallbackHtml = ctx._onComponentError(error, componentName, id);
-    }
-
-    if (fallbackHtml === null || fallbackHtml === undefined) {
-        fallbackHtml = `<!--ssr-error:${id}-->`;
+    try {
+        ctx._onError?.(error, info);
+    } catch (hookErr) {
+        if (process.env.NODE_ENV !== 'production') {
+            console.error('Error in onError callback:', hookErr);
+        }
     }
 
     if (process.env.NODE_ENV !== 'production') {
         console.error(`Error rendering component ${componentName}:`, e);
     }
 
-    return fallbackHtml;
+    return ctx._renderError ? ctx._renderError(error, info) : defaultRenderError(error, info);
 }
 
 /**

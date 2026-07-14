@@ -47,7 +47,7 @@ export { renderToStream, renderToString, renderVNodeToString } from './server/in
 export { renderDocument, renderDocumentToWebStream } from './server/index.js';
 export type { DocumentOptions } from './server/document.js';
 export { createSSRContext } from './server/context.js';
-export type { SSRContext, SSRContextOptions, RenderOptions, CorePendingAsync } from './server/context.js';
+export type { SSRContext, SSRContextOptions, RenderOptions, CorePendingAsync, SSRErrorInfo } from './server/context.js';
 
 // The boundary model (rfc-ssr-platform §1)
 export type {

@@ -17,8 +17,8 @@
 import type { SSRPlugin } from './plugin';
 import type { JSXElement } from 'sigx';
 import type { App, AppContext } from 'sigx';
-import { SSRContext, createSSRContext, SSRContextOptions } from './server/context';
-import { renderToChunks, renderVNodeToString } from './server/render-core';
+import { SSRContext, createSSRContext, SSRContextOptions, SSRErrorInfo } from './server/context';
+import { renderToChunks, renderVNodeToString, defaultRenderError } from './server/render-core';
 import { generateStreamingScript, generateReplacementScript, generateAppendBootstrap } from './server/streaming';
 import { renderHeadToString } from './head';
 import type { StreamCallbacks } from './server/types';
@@ -132,15 +132,29 @@ async function* streamAllAsyncChunks(
                 script: generateReplacementScript(pending.id, finalHtml, extraScript || undefined, preScript || undefined)
             };
         }).catch(error => {
+            // A streamed component failure routes through the same error
+            // seam as the synchronous path (rfc-ssr-platform §2.2): report
+            // via onError, render via renderError — no hard-coded markup.
+            const err = error instanceof Error ? error : new Error(String(error));
+            const info: SSRErrorInfo = {
+                phase: 'stream',
+                componentId: pending.id,
+                ...(ctx._boundaries.has(pending.id) ? { boundaryId: pending.id } : {})
+            };
+            try {
+                ctx._onError?.(err, info);
+            } catch (hookErr) {
+                if (process.env.NODE_ENV !== 'production') {
+                    console.error('Error in onError callback:', hookErr);
+                }
+            }
             if (process.env.NODE_ENV !== 'production') {
                 console.error(`Error streaming async component ${pending.id}:`, error);
             }
+            const html = ctx._renderError ? ctx._renderError(err, info) : defaultRenderError(err, info);
             return {
                 index,
-                script: generateReplacementScript(
-                    pending.id,
-                    `<div style="color:red;">Error loading component</div>`
-                )
+                script: generateReplacementScript(pending.id, html)
             };
         });
     }
@@ -394,6 +408,10 @@ export function createSSR(): SSRInstance {
                 }
                 if (buffer) { yield buffer; buffer = ''; }
 
+                // Shell produced — later failures (deferred renders) are
+                // stream-phase for error routing.
+                ctx._phase = 'stream';
+
                 // Collect head from useHead() calls
                 const headConfigs = ctx._headConfigs;
                 if (headConfigs.length > 0) {
@@ -464,6 +482,7 @@ export function createSSR(): SSRInstance {
                 for await (const chunk of renderToChunks(element, ctx, null, appContext)) {
                     shellHtml += chunk;
                 }
+                ctx._phase = 'stream';
 
                 // Collect head from useHead() calls
                 const headConfigs = ctx._headConfigs;
