@@ -68,6 +68,9 @@ export { getAppContextToken, provideAppContext } from './di/injectable.js';
 // Async engine internals (for server renderers and cache packs)
 export { matchAsyncState, registerHandledAsyncOptionKeys, makeUnhandledReporter, normalizeError, makeAbortController, inertAbortSignal } from './async/shared.js';
 export { reportUnhandledAsyncError } from './app.js';
+// Live-client declaration (for non-web platform-identity modules — lynx/terminal;
+// NOT for @sigx/runtime-dom/platform, which SSR also evaluates)
+export { declareLiveClient, isLiveClient } from './async/environment.js';
 // The §7 pack contract: per-app engine swap + the default engine to delegate to
 export { ASYNC_ENGINE_TOKEN, provideAsyncEngine, defaultAsyncEngine } from './async/engine.js';
 export type { AsyncEngine, AsyncReadHandle } from './async/engine.js';

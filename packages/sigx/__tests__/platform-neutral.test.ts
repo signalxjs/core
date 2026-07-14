@@ -99,4 +99,42 @@ describe('runtime-core is platform-neutral', () => {
         expect(out.ran).toBe(false);
         expect(out.state).toBe('pending');
     });
+
+    it('declareLiveClient() lets useData/useStream auto-run WITHOUT a window (issue #204: lynx/terminal runtimes)', async () => {
+        const code = await bundleIife(`
+            import { useData, useStream } from '@sigx/runtime-core';
+            import { setCurrentInstance, declareLiveClient } from '@sigx/runtime-core/internals';
+
+            export async function probe(): Promise<{ dataRan: boolean; state: string; value: unknown; streamed: string }> {
+                declareLiveClient(); // what a non-web platform module does on import
+                let dataRan = false;
+                const ctx: any = { onUnmounted() { } };
+                const prev = setCurrentInstance(ctx);
+                let cell: any, stream: any;
+                try {
+                    cell = useData('live-key', async () => { dataRan = true; return 42; });
+                    stream = useStream('live-stream', async function* () { yield 'a'; yield 'b'; });
+                } finally {
+                    setCurrentInstance(prev);
+                }
+                // Drain the microtask queue: fetch and stream resolve without timers.
+                for (let i = 0; i < 20; i++) await Promise.resolve();
+                return { dataRan, state: cell.state, value: cell.value, streamed: stream.value };
+            }
+        `);
+
+        const sandbox: Record<string, unknown> = { console, setTimeout, clearTimeout, queueMicrotask };
+        sandbox.globalThis = sandbox;
+        const context = vm.createContext(sandbox);
+        vm.runInContext(code, context);
+        const out = await (vm.runInContext('__result.probe()', context) as Promise<{
+            dataRan: boolean; state: string; value: unknown; streamed: string;
+        }>);
+
+        // Declared live client ⇒ both primitives run their sources despite no window
+        expect(out.dataRan).toBe(true);
+        expect(out.state).toBe('ready');
+        expect(out.value).toBe(42);
+        expect(out.streamed).toBe('ab');
+    });
 });
