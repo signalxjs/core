@@ -500,7 +500,7 @@ describe('@sigx/cache', () => {
         expect(container.querySelector('.out')?.textContent).toBe('errored');
     });
 
-    it('SWR: a failed refresh keeps the last-good value — error arm gets (error, retry, stale), retry recovers', async () => {
+    it("SWR: after a failed refresh, .value clears but the last-good value surfaces as the error arm's stale — retry recovers", async () => {
         let calls = 0;
         const fetcher = vi.fn(async () => {
             calls++;
