@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { component, useData, defineApp } from 'sigx';
 import { createSSR } from '../src/index';
+import { toNodeStream } from '../src/node';
 import { createSSRContext } from '../src/server/context';
 import type { SSRPlugin } from '../src/plugin';
 import { TestText } from './test-utils';
@@ -125,7 +126,7 @@ describe('createSSR.render — sync-fail → async fallback', () => {
     });
 });
 
-describe('createSSR.renderNodeStream — async chunk streaming', () => {
+describe('createSSR.renderChunks via toNodeStream — async chunk streaming', () => {
     it('emits placeholders, then replacement scripts when useData resolves', async () => {
         const Async = component(() => {
             const data = useData('internals-stream', async () => {
@@ -142,7 +143,7 @@ describe('createSSR.renderNodeStream — async chunk streaming', () => {
         }, { name: 'AsyncStream' });
 
         const ssr = createSSR();
-        const stream = ssr.renderNodeStream((Async as any)({}));
+        const stream = toNodeStream(ssr.renderChunks((Async as any)({})));
         const html = await collectReadable(stream);
         expect(html).toContain('data-async-placeholder');
         expect(html).toContain('$SIGX_REPLACE');
@@ -172,7 +173,7 @@ describe('createSSR.renderNodeStream — async chunk streaming', () => {
         };
 
         const ssr = createSSR().use(plugin);
-        const stream = ssr.renderNodeStream((Async as any)({}));
+        const stream = toNodeStream(ssr.renderChunks((Async as any)({})));
         const html = await collectReadable(stream);
         // The plugin script is appended verbatim (not JSON-escaped) per render-api
         expect(html).toContain('window.AUG=1;');
@@ -222,7 +223,7 @@ describe('streamAllAsyncChunks — soft data error inside core promise', () => {
         }, { name: 'Failing' });
 
         const ssr = createSSR();
-        const stream = ssr.renderNodeStream((Failing as any)({}));
+        const stream = toNodeStream(ssr.renderChunks((Failing as any)({})));
         const html = await collectReadable(stream);
 
         // The replacement carries the error branch, not the red fallback
@@ -243,7 +244,7 @@ describe('streamAllAsyncChunks — plugin-only streaming (no core async)', () =>
             server: { getStreamingChunks: () => gen() }
         });
 
-        const stream = ssr.renderNodeStream((TestText as any)({ text: 'shell' }));
+        const stream = toNodeStream(ssr.renderChunks((TestText as any)({ text: 'shell' })));
         const html = await collectReadable(stream);
         expect(html).toContain('<plugin-chunk-only/>');
     });
@@ -265,7 +266,7 @@ describe('streamAllAsyncChunks — plugin-only streaming (no core async)', () =>
             server: { getStreamingChunks: () => gen() }
         });
 
-        const stream = ssr.renderNodeStream((TestText as any)({ text: 'shell' }));
+        const stream = toNodeStream(ssr.renderChunks((TestText as any)({ text: 'shell' })));
         const html = await collectReadable(stream);
         expect(html).toContain('<plugin-chunk-1/>');
         expect(html).toContain('<plugin-chunk-2/>');
@@ -289,7 +290,7 @@ describe('streamAllAsyncChunks — plugin-only streaming (no core async)', () =>
             .use({ name: 'a', server: { getStreamingChunks: () => genA() } })
             .use({ name: 'b', server: { getStreamingChunks: () => genB() } });
 
-        const stream = ssr.renderNodeStream((TestText as any)({ text: 'shell' }));
+        const stream = toNodeStream(ssr.renderChunks((TestText as any)({ text: 'shell' })));
         const html = await collectReadable(stream);
         // All four chunks make it through
         expect(html).toContain('<a-1/>');

@@ -23,6 +23,12 @@
             "development": "./dist/client/index.js",
             "production": "./dist/client/index.prod.js",
             "import": "./dist/client/index.js"
+        },
+        "./node": {
+            "types": "./dist/node.d.ts",
+            "development": "./dist/node.js",
+            "production": "./dist/node.prod.js",
+            "import": "./dist/node.js"
         }
     },
     "files": [

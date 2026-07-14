@@ -11,9 +11,9 @@ import { useHead } from 'sigx';
 import {
     createSSR,
     renderDocument,
-    renderDocumentToNodeStream,
     renderDocumentToWebStream
 } from '../src/index';
+import { renderDocumentToNodeStream } from '../src/node';
 import type { Readable } from 'node:stream';
 
 const TEMPLATE = `<!doctype html>

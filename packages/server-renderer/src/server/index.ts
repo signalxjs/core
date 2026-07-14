@@ -8,8 +8,8 @@
 // Load SSR type augmentations (SSRHelper, ComponentSetupContext extensions)
 import '../client-directives.js';
 
-export { renderToStream, renderToNodeStream, renderToString, renderToStreamWithCallbacks } from './render-api';
-export { renderDocument, renderDocumentToNodeStream, renderDocumentToWebStream } from './render-api';
+export { renderToStream, renderToString, renderToStreamWithCallbacks } from './render-api';
+export { renderDocument, renderDocumentToWebStream } from './render-api';
 export type { DocumentOptions } from './document';
 export { renderVNodeToString } from './render-core';
 export { createSSRContext } from './context';

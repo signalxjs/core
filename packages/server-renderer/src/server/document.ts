@@ -28,7 +28,6 @@
  * APIs stay opt-in to keep their output stable.
  */
 
-import { Readable } from 'node:stream';
 import type { JSXElement, AppContext } from 'sigx';
 import type { SSRPlugin } from '../plugin';
 import { createSSRContext, type SSRContext, type SSRContextOptions } from './context';
@@ -254,23 +253,21 @@ export async function renderDocumentImpl(
 }
 
 /**
- * Document as a Node.js Readable plus a `shell` promise that settles before
- * any byte is produced — await it to decide the HTTP status code, then pipe.
+ * Document as a raw async chunk generator plus a `shell` promise that
+ * settles before any byte is produced — await it to decide the HTTP status
+ * code. The runtime-agnostic primitive the Node entry wraps in a Readable.
  */
-export function renderDocumentToNodeStreamImpl(
+export function renderDocumentChunksImpl(
     engine: DocumentEngine,
     input: DocumentInput,
     options: DocumentOptions
-): { stream: Readable; shell: Promise<void> } {
+): { chunks: AsyncGenerator<string>; shell: Promise<void> } {
     const resolved: DocumentOptions = { ...options, mode: options.mode ?? 'stream' };
     const prep = startPrepare(engine, input, resolved);
     const shell = prep.then(() => undefined as void);
     shell.catch(() => { /* handled via onError / stream error */ });
     return {
-        // Non-object mode: backpressure/highWaterMark measured in BYTES —
-        // in object mode a few large HTML strings buffer far more memory
-        // than intended under slow clients.
-        stream: Readable.from(documentChunks(engine, prep, resolved), { objectMode: false }),
+        chunks: documentChunks(engine, prep, resolved),
         shell
     };
 }

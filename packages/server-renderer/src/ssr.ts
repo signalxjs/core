@@ -17,7 +17,6 @@
 import type { SSRPlugin } from './plugin';
 import type { JSXElement } from 'sigx';
 import type { App, AppContext } from 'sigx';
-import { Readable } from 'node:stream';
 import { SSRContext, createSSRContext, SSRContextOptions } from './server/context';
 import { renderToChunks, renderVNodeToString } from './server/render-core';
 import { generateStreamingScript, generateReplacementScript, generateAppendBootstrap } from './server/streaming';
@@ -27,7 +26,7 @@ import { stateSerializationPlugin } from './server/state-plugin';
 import { emitBoundaryTable, boundaryPatchJs } from './server/serialize';
 import {
     renderDocumentImpl,
-    renderDocumentToNodeStreamImpl,
+    renderDocumentChunksImpl,
     renderDocumentToWebStreamImpl,
     type DocumentOptions,
     type DocumentEngine
@@ -266,8 +265,12 @@ export interface SSRInstance {
     /** Render to a ReadableStream with streaming support */
     renderStream(input: JSXElement | App, options?: SSRContextOptions | SSRContext): ReadableStream<string>;
 
-    /** Render to a Node.js Readable stream (avoids WebStream overhead on Node.js) */
-    renderNodeStream(input: JSXElement | App, options?: SSRContextOptions | SSRContext): import('node:stream').Readable;
+    /**
+     * Render to a raw async chunk generator — the runtime-agnostic primitive
+     * both stream shapes wrap. Consume it directly, or hand it to
+     * `toNodeStream()` from `@sigx/server-renderer/node` for a Node Readable.
+     */
+    renderChunks(input: JSXElement | App, options?: SSRContextOptions | SSRContext): AsyncGenerator<string>;
 
     /** Render with callbacks for fine-grained streaming control */
     renderStreamWithCallbacks(
@@ -286,14 +289,17 @@ export interface SSRInstance {
     renderDocument(input: JSXElement | App, options: DocumentOptions): Promise<string>;
 
     /**
-     * Stream a complete HTML document as a Node.js Readable. The `shell`
-     * promise settles before any byte is produced — await it to pick the
-     * HTTP status code, then pipe. Default mode: 'stream'.
+     * Stream a complete HTML document as a raw async chunk generator plus
+     * the `shell` promise that settles before any byte is produced — await
+     * it to pick the HTTP status code. The runtime-agnostic primitive the
+     * Node and Web document streams wrap (`renderDocumentToNodeStream` in
+     * `@sigx/server-renderer/node` is `toNodeStream()` over this).
+     * Default mode: 'stream'.
      */
-    renderDocumentToNodeStream(
+    renderDocumentChunks(
         input: JSXElement | App,
         options: DocumentOptions
-    ): { stream: import('node:stream').Readable; shell: Promise<void> };
+    ): { chunks: AsyncGenerator<string>; shell: Promise<void> };
 
     /** Stream a complete HTML document as UTF-8 bytes (edge-friendly). Default mode: 'stream'. */
     renderDocumentToWebStream(input: JSXElement | App, options: DocumentOptions): ReadableStream<Uint8Array>;
@@ -366,19 +372,15 @@ export function createSSR(): SSRInstance {
             return result;
         },
 
-        renderStream(input, options?) {
+        renderChunks(input, options?) {
             const ctx = makeContext(options);
             ctx._streaming = true;
             const { element, appContext } = extractInput(input);
             ctx._appContext = appContext;
 
-            // Use pull-based ReadableStream backed by an async generator.
-            // Push-based enqueueing is the worst case for WebStreams
-            // throughput; pulling from a generator avoids it and provides
-            // natural backpressure.
-            async function* generateAll() {
+            async function* generateAll(): AsyncGenerator<string> {
                 // Phase 1: Render main page with chunk batching (4KB threshold).
-                // Batched enqueues are ~24x faster than individual ones.
+                // Batched chunks are ~24x faster than per-node emission.
                 let buffer = '';
                 const FLUSH_THRESHOLD = 4096;
 
@@ -419,7 +421,15 @@ export function createSSR(): SSRInstance {
                 yield `<script>window.__SIGX_STREAMING_COMPLETE__=true;window.dispatchEvent(new Event('sigx:ready'));</script>`;
             }
 
-            const generator = generateAll();
+            return generateAll();
+        },
+
+        renderStream(input, options?) {
+            // Use pull-based ReadableStream backed by the chunk generator.
+            // Push-based enqueueing is the worst case for WebStreams
+            // throughput; pulling from a generator avoids it and provides
+            // natural backpressure.
+            const generator = this.renderChunks(input, options);
 
             return new ReadableStream<string>({
                 async pull(controller) {
@@ -433,59 +443,11 @@ export function createSSR(): SSRInstance {
                     } catch (error) {
                         controller.error(error);
                     }
+                },
+                cancel() {
+                    void generator.return(undefined);
                 }
             });
-        },
-
-        renderNodeStream(input, options?) {
-            const ctx = makeContext(options);
-            ctx._streaming = true;
-            const { element, appContext } = extractInput(input);
-            ctx._appContext = appContext;
-
-            async function* generate(): AsyncGenerator<string> {
-                // Enable head collection
-                // Phase 1: Render the main page (placeholders for async components)
-                let buffer = '';
-                const FLUSH_THRESHOLD = 4096;
-                for await (const chunk of renderToChunks(element, ctx, null, appContext)) {
-                    buffer += chunk;
-                    if (buffer.length >= FLUSH_THRESHOLD) {
-                        yield buffer;
-                        buffer = '';
-                    }
-                }
-                if (buffer) { yield buffer; buffer = ''; }
-
-                // Collect head from useHead() calls
-                const headConfigs = ctx._headConfigs;
-                if (headConfigs.length > 0) {
-                    ctx.addHead(renderHeadToString(headConfigs));
-                }
-
-                // Phase 2: Injected HTML from plugins
-                for (const plugin of plugins) {
-                    const injected = plugin.server?.getInjectedHTML?.(ctx);
-                    if (injected) {
-                        const html = typeof injected === 'string' ? injected : await injected;
-                        if (html) yield html;
-                    }
-                }
-
-                // Boundary table (core protocol — empty renders emit nothing)
-                const boundaryTable = emitBoundaryTable(ctx);
-                if (boundaryTable) yield boundaryTable;
-
-                // Phase 3: Stream async chunks — core + plugin interleaved
-                for await (const chunk of streamAllAsyncChunks(ctx, plugins)) {
-                    yield chunk;
-                }
-
-                // Phase 4: Signal streaming complete
-                yield `<script>window.__SIGX_STREAMING_COMPLETE__=true;window.dispatchEvent(new Event('sigx:ready'));</script>`;
-            }
-
-            return Readable.from(generate(), { objectMode: true });
         },
 
         async renderStreamWithCallbacks(input, callbacks, options?) {
@@ -540,10 +502,10 @@ export function createSSR(): SSRInstance {
             return renderDocumentImpl(engine, { element, appContext }, options);
         },
 
-        renderDocumentToNodeStream(input, options) {
+        renderDocumentChunks(input, options) {
             const { element, appContext } = extractInput(input);
             const engine = makeDocumentEngine(options);
-            return renderDocumentToNodeStreamImpl(engine, { element, appContext }, options);
+            return renderDocumentChunksImpl(engine, { element, appContext }, options);
         },
 
         renderDocumentToWebStream(input, options) {
