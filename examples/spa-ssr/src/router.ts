@@ -54,14 +54,10 @@ export function createRouter(initialPath: Route): Router {
     return { route, navigate };
 }
 
-// DI token. Components retrieve the per-request router via useRouter().
-// The default factory throws on purpose — both entries (entry-server.tsx and
+// DI token, declared *required* (no fallback). Components retrieve the
+// per-request router via useRouter(); both entries (entry-server.tsx and
 // entry-client.tsx) must call `app.defineProvide(useRouter, () => createRouter(...))`
 // so each app instance gets its own router. This is what makes concurrent SSR
 // requests safe: each request creates a fresh router scoped to its app context.
-export const useRouter = defineInjectable<Router>(() => {
-    throw new Error(
-        'useRouter() called without a Router provided. ' +
-        'app.defineProvide(useRouter, () => createRouter(...)) before mount/hydrate.'
-    );
-});
+// Used unprovided, it throws SIGX202 naming the injectable.
+export const useRouter = defineInjectable<Router>('Router');

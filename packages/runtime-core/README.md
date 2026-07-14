@@ -31,6 +31,25 @@ const Timer = component(() => {
 });
 ```
 
+### Required injectables
+
+`defineInjectable(factory)` gives an injectable a zero-config fallback: used without a provider, it lazily creates a module-global singleton. That is right for optional services, and wrong for per-app services like a router — on the server, a forgotten provide would silently share one instance across every request (dev builds warn when this happens during SSR).
+
+Declare those services **required** by passing a name instead of a factory. There is no fallback; using it unprovided throws a structured error (`SIGX202`) naming the injectable:
+
+```tsx
+export const useRouter = defineInjectable<Router>('Router');
+
+// Per app (per request under SSR):
+const app = defineApp(<App />);
+app.defineProvide(useRouter, () => createRouter(url));
+
+// In any component:
+const router = useRouter();
+```
+
+App-level provides are read live: a `defineProvide` call made after `app.mount()` is visible to components mounted afterwards. Component-tree provides (`defineProvide` in setup) always take precedence.
+
 ### Dependency injection outside components
 
 Use-functions from `defineInjectable`/`defineFactory` resolve to app-context instances inside components. Code that runs outside component setup — router navigation guards, socket handlers, entry-scope code — must opt in with `app.runWithContext(fn)`, or it silently gets a separate realm-level fallback instance:
@@ -47,6 +66,18 @@ router.beforeEach((to) => {
 ```
 
 The context applies only to the **synchronous** portion of the callback — after an `await`, re-enter with another `runWithContext` call. Nested calls restore the previous context. Plugins receive the app in `install()` and can capture it to wrap their own callbacks.
+
+### Non-web renderers
+
+This package references no web global unguarded — it runs anywhere. One thing renderer authors must know: `useData`/`useStream` only auto-run their sources on a **live client**, and without a declaration that is detected as "`window` exists" (which keeps server renders safe). A client runtime with no `window` (native, terminal) must say so once, from its platform-identity module:
+
+```ts
+import { declareLiveClient } from '@sigx/runtime-core/internals';
+
+declareLiveClient(); // this runtime is a live client — keyed reads fetch on mount
+```
+
+Never call this from code a server render can evaluate (that would defeat the SSR guard) — it belongs in the module that defines your renderer's platform, the way `@sigx/runtime-dom/platform` defines the web's.
 
 > **Note:** Most users should install [`sigx`](https://www.npmjs.com/package/sigx) instead, which bundles this package with a DOM renderer and the reactivity system.
 

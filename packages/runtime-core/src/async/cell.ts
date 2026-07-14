@@ -27,6 +27,7 @@ import {
     inertAbortSignal,
 } from './shared.js';
 import { peekRestored, invalidateRestored, writeBack } from './restore.js';
+import { isLiveClient } from './environment.js';
 
 /**
  * In-flight dedupe for keyed client fetches (concurrent mounts share one
@@ -231,8 +232,8 @@ export function createDataCell<T>(
             });
             // SSR without a provider should never happen (the server walk
             // installs one), but guard anyway: never run fetchers outside a
-            // browser here.
-            if (typeof window !== 'undefined') void startRun(false);
+            // live client here (non-web runtimes declare via declareLiveClient).
+            if (isLiveClient()) void startRun(false);
         });
     }
 

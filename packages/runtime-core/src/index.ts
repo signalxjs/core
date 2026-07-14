@@ -109,6 +109,7 @@ export {
     errorScopeOutsideSetupError,
     provideOutsideSetupError,
     provideInvalidInjectableError,
+    requiredInjectableNotProvidedError,
 } from './errors.js';
 
 // Utilities
