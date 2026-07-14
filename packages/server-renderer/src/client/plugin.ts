@@ -70,7 +70,7 @@ declare module '@sigx/runtime-core' {
  * const app = defineApp(<App />);
  * app.use(ssrClientPlugin)
  *    .use(router)
- *    .hydrate('#app');
+ *    .hydrate!('#app');
  * ```
  */
 export const ssrClientPlugin: Plugin = {

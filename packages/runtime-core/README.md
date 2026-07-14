@@ -50,15 +50,22 @@ The context applies only to the **synchronous** portion of the callback — afte
 
 ### Writing plugins
 
-A plugin is a function or an object with `install(app, options?)`, registered with `app.use()`. Inside `install`, `app._context` is the supported surface for wiring app-wide services — pass it to seam provide-helpers or use `app.defineProvide` for injectables. The underscore marks it as an advanced surface, not a private one; no cast is needed:
+A plugin is a function or an object with `install(app, options?)`, registered with `app.use()`. Inside `install`, `app._context` is the supported surface for wiring app-wide services — pass it to seam provide-helpers (e.g. `provideAsyncEngine` from `sigx/internals`) or use `app.defineProvide` for injectables. The underscore marks it as an advanced surface, not a private one; no cast is needed:
 
 ```tsx
+import { defineInjectable, type Plugin } from '@sigx/runtime-core';
+
+class MyService {
+  close() { /* release sockets, timers, … */ }
+}
+
+export const useMyService = defineInjectable(() => new MyService());
+
 export const myPlugin: Plugin = {
   name: 'my-plugin',
   install(app) {
-    app.defineProvide(useMyService, () => createMyService());
-    provideMySeam(app._context, { /* seam config */ });
-    app._context.disposables.add(() => teardown());
+    const service = app.defineProvide(useMyService);
+    app._context.disposables.add(() => service.close());
   }
 };
 ```
