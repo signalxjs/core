@@ -102,18 +102,24 @@ const BrowserCard = component(() => {
 
 // ── @sigx/cache: staleTime + invalidate + optimistic mutate ────────────
 
-let cacheFetches = 0;
-async function fetchStamp(): Promise<{ stamp: string; fetchNo: number }> {
+// The counter only counts CLIENT refetches — a module-level "fetch #" would
+// exist separately on the server and in the browser, so its numbers carry no
+// meaning across the SSR/hydration boundary. The timestamp is the continuity
+// proof; `src` says which side produced it.
+let clientRefetches = 0;
+async function fetchStamp(): Promise<{ stamp: string; src: string }> {
     await new Promise(r => setTimeout(r, 120));
-    return { stamp: new Date().toLocaleTimeString(), fetchNo: ++cacheFetches };
+    const src = typeof window === 'undefined' ? 'server-rendered' : `client refetch #${++clientRefetches}`;
+    return { stamp: new Date().toLocaleTimeString(), src };
 }
 
 const CacheCard = component(() => {
-    // staleTime 10s: navigate away and back within the window — served from
-    // the cache, no refetch (the SSR value seeds the cache on hydration).
+    // staleTime 10s from the last fetch (the SSR value seeds the cache on
+    // hydration): revisits inside the window serve from the cache, later
+    // ones revalidate in the background.
     const stamp = useData('cache-stamp', fetchStamp, {
         cache: { staleTime: 10_000 },
-    }) as CachedAsyncState<{ stamp: string; fetchNo: number }>;
+    }) as CachedAsyncState<{ stamp: string; src: string }>;
 
     return () => (
         <div class="card">
@@ -122,7 +128,7 @@ const CacheCard = component(() => {
                 pending: () => <p>Loading…</p>,
                 ready: (s) => (
                     <p>
-                        fetched at {s.stamp} (fetch #{s.fetchNo}){' '}
+                        fetched at {s.stamp} ({s.src}){' '}
                         <button onClick={() => stamp.invalidate()}>Invalidate (refetch)</button>{' '}
                         <button onClick={() => stamp.mutate(c => ({ ...(c ?? s), stamp: 'mutated locally' }))}>
                             Mutate (write-through)
@@ -130,7 +136,7 @@ const CacheCard = component(() => {
                     </p>
                 ),
             })}
-            <p style="color: #555; font-size: 0.95em;">Leave and revisit this page within 10s — the card renders instantly from the cache with the same fetch number. <code>invalidate()</code> drops the entry and refetches; <code>mutate()</code> writes through without a request.</p>
+            <p style="color: #555; font-size: 0.95em;">Leave and revisit this page within 10s of the last fetch — the card renders instantly from the cache with the same timestamp, no request. Past 10s, revisiting revalidates in the background and the timestamp updates. <code>invalidate()</code> drops the entry and refetches; <code>mutate()</code> writes through without a request.</p>
         </div>
     );
 });
