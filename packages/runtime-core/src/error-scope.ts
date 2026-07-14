@@ -38,6 +38,20 @@ export interface ErrorScopeOptions {
 /** DI token under which a scope's handle lives on the owning ctx. @internal */
 export const ERROR_SCOPE_TOKEN: unique symbol = Symbol('sigx:errorScope');
 
+/**
+ * Server-rendered error staged for the NEXT errorScope() call — the SSR
+ * hydrator seeds it right before hydrating a component whose boundary
+ * record carries a server-caught scope error, so the scope starts in the
+ * errored state, the fallback hydrates against the server's fallback HTML,
+ * and `retry` is live (a real remount). @internal
+ */
+let _pendingScopeError: Error | null = null;
+
+/** Stage (or clear, with null) the server-caught error for the next scope. @internal */
+export function seedErrorScopeError(error: Error | null): void {
+    _pendingScopeError = error;
+}
+
 /** @internal */
 export interface ErrorScopeHandle {
     /** Returns true when this scope takes the error (renders its fallback). */
@@ -67,10 +81,16 @@ export function errorScope(options: ErrorScopeOptions): void {
         return;
     }
 
-    const state = signal({ error: null as Error | null, generation: 0 });
+    // A server-caught error staged by the hydrator seeds the scope errored:
+    // the first render is the fallback (matching the server's fallback HTML)
+    // and retry() performs the remount the server could not.
+    const seeded = _pendingScopeError;
+    _pendingScopeError = null;
+
+    const state = signal({ error: seeded, generation: 0 });
     // Synchronous mirror of `state.error !== null`: handle() must decide
     // (and dedupe) synchronously, but the reactive write is deferred below.
-    let errored = false;
+    let errored = seeded !== null;
 
     const retry = () => {
         errored = false;

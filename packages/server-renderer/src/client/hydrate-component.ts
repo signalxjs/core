@@ -26,6 +26,7 @@ import {
     provideAppContext,
     queueJob,
     nextJobId,
+    applyErrorScope,
 } from 'sigx/internals';
 import type { SchedulerJob } from 'sigx/internals';
 import {
@@ -168,6 +169,14 @@ export function hydrateComponent(vnode: VNode, dom: Node | null, parent: Node, t
         // (#111): hydration mounts descendants inside an ancestor's render
         // effect — setup reads must not become ancestor dependencies.
         renderFn = untrack(() => setup(componentCtx));
+        // errorScope: render through the scope wrapper (fallback while
+        // errored, generation-keyed subtree otherwise) — the same wrapping
+        // runtime-core's mountComponent applies. A hydrator-seeded server
+        // error makes the first render the fallback, matching the server's
+        // fallback HTML, with a live retry.
+        if (renderFn) {
+            renderFn = applyErrorScope(componentCtx, renderFn);
+        }
     } catch (err) {
         if (process.env.NODE_ENV !== 'production') {
             console.error(`Error hydrating component ${componentName}:`, err);

@@ -70,6 +70,13 @@ export interface SSRBoundaryRecord {
      * `vnode.type.__islandId || __name`).
      */
     component?: string;
+    /**
+     * Present when this component's errorScope caught a server-side throw
+     * and its fallback was rendered in place (rfc-ssr-platform §2.2). The
+     * hydrator seeds the client scope errored so the fallback hydrates
+     * cleanly and `retry` performs the remount the server could not.
+     */
+    errorScope?: { message: string };
 }
 
 /**

@@ -27,6 +27,7 @@
  */
 
 import { VNode, render } from 'sigx';
+import { seedErrorScopeError } from 'sigx/internals';
 import type { SSRBoundaryRecord, BoundaryHydrate } from '../boundary';
 import { hydrateComponent } from './hydrate-component';
 import { getCurrentAppContext, setCurrentAppContext } from './hydrate-context';
@@ -338,6 +339,9 @@ function hydrateBoundaryInPlace(marker: Comment, component: ComponentFactory, re
     }
 
     seedBoundaryState(record.state);
+    if (record.errorScope) {
+        seedErrorScopeError(new Error(record.errorScope.message));
+    }
     const vnode = recordVNode(component, record);
     const parent = container.parentNode!;
     try {
@@ -345,6 +349,7 @@ function hydrateBoundaryInPlace(marker: Comment, component: ComponentFactory, re
     } finally {
         // Clear even on throw so stale state can't seed the next hydration.
         seedBoundaryState(null);
+        seedErrorScopeError(null);
     }
 }
 
@@ -482,12 +487,19 @@ export function scheduleWalkedBoundary(
         // Stage the freshest state snapshot for the pack's restore hook.
         const fresh = (componentId !== null ? getBoundaryRecord(componentId) : undefined) ?? record;
         seedBoundaryState(fresh.state);
+        // A server-caught errorScope failure: seed the client scope errored
+        // so the fallback hydrates against the server's fallback HTML and
+        // retry() performs the remount (rfc-ssr-platform §2.2).
+        if (fresh.errorScope) {
+            seedErrorScopeError(new Error(fresh.errorScope.message));
+        }
         try {
             hydrateComponent(vnode, contentStart, parent, trailingMarker);
         } finally {
             setCurrentAppContext(prevAppContext);
             // Defensively clear: stale state must not leak into the next hydration.
             seedBoundaryState(null);
+            seedErrorScopeError(null);
         }
     };
 
