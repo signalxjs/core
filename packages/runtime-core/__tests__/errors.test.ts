@@ -8,6 +8,7 @@ import {
     asyncSetupClientError,
     provideOutsideSetupError,
     provideInvalidInjectableError,
+    requiredInjectableNotProvidedError,
 } from '../src/errors';
 
 describe('SigxError class', () => {
@@ -58,6 +59,7 @@ describe('SigxErrorCode', () => {
         expect(SigxErrorCode.ASYNC_SETUP_CLIENT).toBe('SIGX102');
         expect(SigxErrorCode.PROVIDE_OUTSIDE_SETUP).toBe('SIGX200');
         expect(SigxErrorCode.PROVIDE_INVALID_INJECTABLE).toBe('SIGX201');
+        expect(SigxErrorCode.REQUIRED_INJECTABLE_NOT_PROVIDED).toBe('SIGX202');
     });
 
     it('app-level codes are in 001-099 range', () => {
@@ -83,6 +85,7 @@ describe('SigxErrorCode', () => {
         const diCodes = [
             SigxErrorCode.PROVIDE_OUTSIDE_SETUP,
             SigxErrorCode.PROVIDE_INVALID_INJECTABLE,
+            SigxErrorCode.REQUIRED_INJECTABLE_NOT_PROVIDED,
         ];
         for (const code of diCodes) {
             const num = parseInt(code.replace('SIGX', ''), 10);
@@ -189,6 +192,31 @@ describe('Error factory functions', () => {
             const err = provideInvalidInjectableError();
             expect(err.suggestion).toBeDefined();
             expect(err.suggestion!.length).toBeGreaterThan(0);
+        });
+    });
+
+    describe('requiredInjectableNotProvidedError', () => {
+        it('returns SigxError with code SIGX202 naming the injectable', () => {
+            const err = requiredInjectableNotProvidedError('Router');
+            expect(err).toBeInstanceOf(SigxError);
+            expect(err.code).toBe('SIGX202');
+            expect(err.message).toContain('"Router"');
+        });
+
+        it('has a suggestion naming the conventional use-function', () => {
+            const err = requiredInjectableNotProvidedError('Router');
+            expect(err.suggestion).toContain('app.defineProvide(useRouter');
+        });
+
+        it('capitalizes lowercase identifier names in the suggestion', () => {
+            const err = requiredInjectableNotProvidedError('router');
+            expect(err.suggestion).toContain('app.defineProvide(useRouter');
+        });
+
+        it('falls back to a generic placeholder for non-identifier names', () => {
+            const err = requiredInjectableNotProvidedError('my router!');
+            expect(err.suggestion).toContain('app.defineProvide(<your use-function>');
+            expect(err.suggestion).not.toContain('usemy');
         });
     });
 });

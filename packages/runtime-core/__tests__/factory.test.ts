@@ -344,6 +344,30 @@ describe("lifetime: 'scoped'", () => {
         expect(a).toBe(b);
     });
 
+    it('a disposed provided instance is recreated, not served as a corpse', () => {
+        const useThing = defineFactory(() => ({ id: {} }), 'scoped');
+        const app = defineApp({} as any);
+
+        setCurrentInstance(nodeInApp(app) as ComponentSetupContext);
+        const first = useThing();
+        (first as { dispose: () => void }).dispose();
+
+        const second = useThing();
+        expect(second).not.toBe(first);
+    });
+
+    it('an explicitly provided undefined shadows the fallback resolution', () => {
+        const useThing = defineFactory(() => ({ id: {} }), 'scoped');
+
+        const node: MockComponentContext = {
+            provides: new Map<symbol, unknown>([[useThing._token, undefined]]),
+            parent: null
+        };
+        setCurrentInstance(node as ComponentSetupContext);
+
+        expect(useThing()).toBeUndefined();
+    });
+
     it('provider-owned instances are disposed when the provider unmounts', () => {
         const deactivated = vi.fn();
         const useThing = defineFactory((ctx) => {
