@@ -74,6 +74,21 @@ export interface DocumentOptions extends SSRContextOptions {
      * Default: true (unlike the lower-level render APIs, which are opt-in).
      */
     serializeState?: boolean;
+
+    /**
+     * Build assets to preload from the shell (rfc-ssr-platform §3.1) —
+     * typically resolved from the Vite client manifest via `collectAssets`
+     * from `@sigx/vite`. `<link rel="stylesheet">` / `<link rel="modulepreload">`
+     * tags are injected before `</head>` in the first flush. Chunks of every
+     * boundary recorded during the walk (`__SIGX_BOUNDARIES__` entries with a
+     * `chunk` ref) are modulepreloaded automatically on top of this list.
+     */
+    assets?: {
+        /** Module URLs to `<link rel="modulepreload">`. */
+        modulepreload?: string[];
+        /** Stylesheet URLs to `<link rel="stylesheet">`. */
+        stylesheets?: string[];
+    };
 }
 
 /** Rendering internals handed in by createSSR (avoids a module cycle). */
@@ -107,6 +122,43 @@ interface PreparedDocument {
 /** Normalize an unknown throw before it reaches the onError contract. */
 function toError(e: unknown): Error {
     return e instanceof Error ? e : new Error(String(e));
+}
+
+function escapeAttrValue(s: string): string {
+    return s
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+}
+
+/**
+ * Render the shell's asset links: caller-provided stylesheets and module
+ * preloads, plus an automatic `<link rel="modulepreload">` per boundary
+ * chunk recorded during the walk (deduped across both sources).
+ */
+function renderAssetLinks(assets: DocumentOptions['assets'], ctx: SSRContext): string {
+    const links: string[] = [];
+    const preloaded = new Set<string>();
+
+    for (const href of assets?.stylesheets ?? []) {
+        links.push(`<link rel="stylesheet" href="${escapeAttrValue(href)}">`);
+    }
+    for (const href of assets?.modulepreload ?? []) {
+        if (preloaded.has(href)) continue;
+        preloaded.add(href);
+        links.push(`<link rel="modulepreload" href="${escapeAttrValue(href)}">`);
+    }
+    // Boundary chunks: every recorded boundary that loads its component on
+    // demand gets its chunk warmed from the shell.
+    ctx._boundaries.forEach((record) => {
+        const url = record.chunk?.url;
+        if (!url || preloaded.has(url)) return;
+        preloaded.add(url);
+        links.push(`<link rel="modulepreload" href="${escapeAttrValue(url)}">`);
+    });
+
+    return links.join('\n');
 }
 
 function throwIfAborted(signal: AbortSignal | undefined): void {
@@ -155,7 +207,15 @@ async function prepareDocument(
 
     // Head: collected per-request by useHead via the component instances
     const headConfigs = ctx._headConfigs;
-    const headHtml = headConfigs.length > 0 ? renderHeadToString(headConfigs) : '';
+    let headHtml = headConfigs.length > 0 ? renderHeadToString(headConfigs) : '';
+
+    // Asset preloads (rfc-ssr-platform §3.1): caller-provided manifest assets
+    // plus every boundary chunk recorded during the walk — links land in the
+    // first shell flush, before the user head block.
+    const assetsHtml = renderAssetLinks(options.assets, ctx);
+    if (assetsHtml) {
+        headHtml = headHtml ? assetsHtml + '\n' + headHtml : assetsHtml;
+    }
 
     // Plugin-injected HTML (the state blob arrives through this hook)
     let injected = '';

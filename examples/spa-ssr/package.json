@@ -5,11 +5,9 @@
     "description": "Server-rendered SignalX SPA with Express and client hydration",
     "type": "module",
     "scripts": {
-        "dev": "tsx server.ts",
-        "build": "npm run build:client && npm run build:server",
-        "build:client": "vite build --outDir dist/client",
-        "build:server": "vite build --ssr src/entry-server.tsx --outDir dist/server",
-        "start": "cross-env NODE_ENV=production tsx server.ts"
+        "dev": "node server.mjs",
+        "build": "vite build --app",
+        "start": "cross-env NODE_ENV=production node --conditions production server.mjs"
     },
     "dependencies": {
         "sigx": "workspace:^",
@@ -25,7 +23,6 @@
         "@types/express": "^5.0.6",
         "@types/node": "^26.1.1",
         "cross-env": "^10.1.0",
-        "tsx": "^4.23.1",
         "vite": "^8.1.4",
         "typescript": "^7.0.2"
     }
