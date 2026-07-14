@@ -24,6 +24,7 @@ import { renderHeadToString } from './head';
 import type { StreamCallbacks } from './server/types';
 import { stateSerializationPlugin } from './server/state-plugin';
 import { emitBoundaryTable, boundaryPatchJs } from './server/serialize';
+import type { SSRResponse } from './response';
 import {
     renderDocumentImpl,
     renderDocumentChunksImpl,
@@ -299,7 +300,7 @@ export interface SSRInstance {
     renderDocumentChunks(
         input: JSXElement | App,
         options: DocumentOptions
-    ): { chunks: AsyncGenerator<string>; shell: Promise<void> };
+    ): { chunks: AsyncGenerator<string>; shell: Promise<SSRResponse> };
 
     /** Stream a complete HTML document as UTF-8 bytes (edge-friendly). Default mode: 'stream'. */
     renderDocumentToWebStream(input: JSXElement | App, options: DocumentOptions): ReadableStream<Uint8Array>;

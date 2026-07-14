@@ -16,6 +16,8 @@ export { createSSRContext } from './context';
 export type { SSRContext, SSRContextOptions, RenderOptions, CorePendingAsync } from './context';
 export { generateStreamingScript, generateReplacementScript, escapeJsonForScript, generateAppendBootstrap, generateAppendScript } from './streaming';
 export type { StreamCallbacks } from './types';
+export { useResponse, responseSummary } from '../response';
+export type { ResponseRecorder, ResponseState, SSRResponse } from '../response';
 export { stateSerializationPlugin } from './state-plugin';
 export { serializeAsyncScript, asyncAssignmentJs } from './state';
 export {

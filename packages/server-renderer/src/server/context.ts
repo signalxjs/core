@@ -7,6 +7,7 @@
 
 import type { SSRPlugin } from '../plugin';
 import type { SSRBoundaryRecord } from '../boundary';
+import type { ResponseState } from '../response';
 import type { HeadConfig, AppContext } from 'sigx';
 
 /**
@@ -140,6 +141,13 @@ export interface SSRContext {
     _boundaries: Map<number, SSRBoundaryRecord>;
 
     /**
+     * Per-request response state collected by useResponse() —
+     * status/headers/redirect, surfaced on the document shell promise
+     * (rfc-ssr-platform §2.1).
+     */
+    _response: ResponseState;
+
+    /**
      * Generate next component ID
      */
     nextId(): number;
@@ -215,6 +223,7 @@ export function createSSRContext(options: SSRContextOptions = {}): SSRContext {
         _asyncResults: new Map(),
         _asyncKeysByComponent: new Map(),
         _boundaries: boundaries,
+        _response: { headers: {} },
 
         nextId() {
             return ++componentId;

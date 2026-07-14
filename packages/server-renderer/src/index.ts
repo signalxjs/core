@@ -68,5 +68,9 @@ export type { SSRHelper } from './client-directives.js';
 // opt-in plugin — automatic under renderDocument)
 export { stateSerializationPlugin } from './server/state-plugin.js';
 
+// Per-request response seam (useResponse — inert on the client)
+export { useResponse } from './response.js';
+export type { ResponseRecorder, SSRResponse } from './response.js';
+
 // Server-side head rendering (useHead itself lives in sigx)
 export { renderHeadToString } from './head.js';

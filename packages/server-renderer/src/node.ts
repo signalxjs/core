@@ -24,6 +24,7 @@ import type { JSXElement, App } from 'sigx';
 import { createSSR } from './ssr';
 import type { SSRContext, SSRContextOptions } from './server/context';
 import type { DocumentOptions } from './server/document';
+import type { SSRResponse } from './response';
 
 /** Shared no-plugin instance — created once, reused for all standalone calls. */
 const _defaultSSR = createSSR();
@@ -93,15 +94,16 @@ export function renderToNodeStream(
  * import { renderDocumentToNodeStream } from '@sigx/server-renderer/node';
  *
  * const { stream, shell } = renderDocumentToNodeStream(app, { template });
- * try { await shell; } catch { return res.status(500).send(errorPage); }
- * res.status(200).setHeader('content-type', 'text/html');
+ * let head; try { head = await shell; } catch { return res.status(500).send(errorPage); }
+ * if (head.redirect) return res.redirect(head.redirect.status, head.redirect.location);
+ * res.status(head.status).set(head.headers).setHeader('content-type', 'text/html');
  * stream.pipe(res);
  * ```
  */
 export function renderDocumentToNodeStream(
     input: JSXElement | App,
     options: DocumentOptions
-): { stream: Readable; shell: Promise<void> } {
+): { stream: Readable; shell: Promise<SSRResponse> } {
     const { chunks, shell } = _defaultSSR.renderDocumentChunks(input, options);
     return {
         // Non-object mode: backpressure/highWaterMark measured in BYTES —

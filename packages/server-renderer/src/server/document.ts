@@ -34,6 +34,7 @@ import { createSSRContext, type SSRContext, type SSRContextOptions } from './con
 import { renderToChunks } from './render-core';
 import { emitBoundaryTable } from './serialize';
 import { renderHeadToString } from '../head';
+import { responseSummary, type SSRResponse } from '../response';
 
 /** Same completion signal the plain streaming APIs emit. */
 const COMPLETION_SCRIPT = `<script>window.__SIGX_STREAMING_COMPLETE__=true;window.dispatchEvent(new Event('sigx:ready'));</script>`;
@@ -194,6 +195,11 @@ async function* documentChunks(
     // rethrow so the stream errors before producing bytes.
     const p = await prep;
 
+    // A redirect requested via useResponse() short-circuits the body: the
+    // shell promise carries the redirect, the HTTP layer sends it, and no
+    // document bytes are produced (rfc-ssr-platform §2.1).
+    if (p.ctx._response.redirect) return;
+
     // First flush: template head (with collected head tags) + shell + state
     // + the rest of the body markup incl. entry scripts (downloads start
     // now; module execution waits for parse end regardless)
@@ -254,17 +260,18 @@ export async function renderDocumentImpl(
 
 /**
  * Document as a raw async chunk generator plus a `shell` promise that
- * settles before any byte is produced — await it to decide the HTTP status
- * code. The runtime-agnostic primitive the Node entry wraps in a Readable.
+ * settles before any byte is produced — await it to write the response
+ * head (status, headers, redirect — collected via useResponse()) before
+ * piping. The runtime-agnostic primitive the Node entry wraps in a Readable.
  */
 export function renderDocumentChunksImpl(
     engine: DocumentEngine,
     input: DocumentInput,
     options: DocumentOptions
-): { chunks: AsyncGenerator<string>; shell: Promise<void> } {
+): { chunks: AsyncGenerator<string>; shell: Promise<SSRResponse> } {
     const resolved: DocumentOptions = { ...options, mode: options.mode ?? 'stream' };
     const prep = startPrepare(engine, input, resolved);
-    const shell = prep.then(() => undefined as void);
+    const shell = prep.then(p => responseSummary(p.ctx));
     shell.catch(() => { /* handled via onError / stream error */ });
     return {
         chunks: documentChunks(engine, prep, resolved),

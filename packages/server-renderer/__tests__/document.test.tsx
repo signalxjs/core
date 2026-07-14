@@ -132,7 +132,8 @@ describe('renderDocumentToNodeStream — streaming mode (default)', () => {
     it('flushes head with the shell, then streams replacements, then the tail', async () => {
         const Page = makePage('Streamed');
         const { stream, shell } = renderDocumentToNodeStream((Page as any)({}), { template: TEMPLATE });
-        await expect(shell).resolves.toBeUndefined();
+        // The shell now resolves with the response summary (useResponse seam)
+        await expect(shell).resolves.toEqual({ status: 200, headers: {} });
         const html = await collectNodeStream(stream);
 
         // Head present in document head (streaming previously LOST it)
