@@ -38,7 +38,9 @@ import {
     matchAsyncState,
 } from 'sigx/internals';
 import type { SSRContext } from './context';
+import type { ResolvedBoundary, SSRBoundaryRecord } from '../boundary';
 import { generateAppendScript } from './streaming';
+import { serializeBoundaryProps, getTypeHandlers } from './serialize';
 
 // ============= HTML Utilities =============
 
@@ -205,16 +207,14 @@ function createComponentState(
     vnode: VNode,
     ctx: SSRContext,
     parentCtx: ComponentSetupContext | null,
-    appContext: AppContext | null
+    appContext: AppContext | null,
+    id: number
 ): ComponentRenderState {
     const componentName = (vnode.type as any).__name || 'Anonymous';
     const allProps = vnode.props || {};
 
     // Destructure props (filter out framework-internal keys)
     const { children, slots: slotsFromProps, $models: _modelsData, ...propsData } = allProps;
-
-    const id = ctx.nextId();
-    ctx.pushComponent(id);
 
     // Create slots from children, mirroring the client slot extractor so
     // server and client agree on slot presence (otherwise hydration could
@@ -739,6 +739,33 @@ function syncSubtreeWorker(
     return false;
 }
 
+/**
+ * Emit the streaming placeholder wrapper — the frozen
+ * `<div data-async-placeholder="ID" style="display:contents;">` protocol —
+ * around optional in-place content (a Defer/boundary fallback or a
+ * component's initial pre-data render). Shared by the <Defer> streaming
+ * branch and the stream-mode async component branch: one emission path for
+ * every `flush: 'stream'` rendering.
+ */
+function* emitStreamPlaceholder(
+    id: number,
+    content: JSXElement | null | undefined,
+    ctx: SSRContext,
+    parentContext: ComponentSetupContext | null,
+    appContext: AppContext | null,
+    buf: string[],
+    state: RenderBufState
+): Generator<Suspend, void, unknown> {
+    const open = `<div data-async-placeholder="${id}" style="display:contents;">`;
+    buf.push(open);
+    state.len += open.length;
+    if (content != null) {
+        yield* renderNode(content, ctx, parentContext, appContext, buf, state);
+    }
+    buf.push('</div>');
+    state.len += 6;
+}
+
 /** Rollback wrapper: on bail-out, restores buf/state to the entry marks. */
 function renderSyncSubtree(
     element: JSXElement,
@@ -835,17 +862,8 @@ function* renderNode(
             const id = ctx.nextId();
             const props = vnode.props || {};
 
-            const placeholder = `<div data-async-placeholder="${id}" style="display:contents;">`;
-            buf.push(placeholder);
-            state.len += placeholder.length;
-
             const fallback = typeof props.fallback === 'function' ? props.fallback() : props.fallback;
-            if (fallback != null) {
-                yield* renderNode(fallback, ctx, parentCtx, appContext, buf, state);
-            }
-
-            buf.push('</div>');
-            state.len += 6;
+            yield* emitStreamPlaceholder(id, fallback, ctx, parentCtx, appContext, buf, state);
 
             const children = props.children;
             const items: JSXElement[] = Array.isArray(children)
@@ -879,15 +897,87 @@ function* renderNode(
             return;
         }
 
+        // The component id is allocated (and pushed) BEFORE the boundary
+        // consult and the setup context — resolveBoundary and
+        // transformComponentContext both read their own id at the stack top.
+        // The nextId() call order is wire (marker sequence): keep it exactly
+        // here, matching where createComponentState allocated it before.
+        const id = ctx.nextId();
+        ctx.pushComponent(id);
+
+        // Plugin hook: resolveBoundary (rfc-ssr-platform §1.3) — the one
+        // pre-setup boundary decision. First plugin to return wins.
+        let boundary: ResolvedBoundary | undefined;
+        if (ctx._plugins) {
+            for (const plugin of ctx._plugins) {
+                const resolved = plugin.server?.resolveBoundary?.(vnode, ctx);
+                if (resolved) {
+                    boundary = resolved;
+                    break;
+                }
+            }
+        }
+
+        if (boundary) {
+            // Record the boundary for the client hydrator. `flush` is
+            // serialized only for 'skip' (fresh-mount vs hydrate is the only
+            // client-relevant distinction); everything else on the flush axis
+            // is a server-side concern.
+            const record: SSRBoundaryRecord = {};
+            if (boundary.flush === 'skip') record.flush = 'skip';
+            if (boundary.hydrate !== undefined) record.hydrate = boundary.hydrate;
+            if (boundary.media !== undefined) record.media = boundary.media;
+            if (boundary.chunk !== undefined) record.chunk = boundary.chunk;
+            const registryName = (vnode.type as any).__islandId || (vnode.type as any).__name;
+            if (registryName) record.component = registryName;
+            const props = boundary.props !== undefined
+                ? boundary.props
+                : serializeBoundaryProps(vnode.props, getTypeHandlers(ctx));
+            if (props !== undefined) record.props = props;
+            ctx.recordBoundary(id, record);
+        }
+
+        // flush: 'skip' — true skip-SSR (islands client:only). Setup never
+        // runs; transformComponentContext and afterRenderComponent are not
+        // called. Core emits the placeholder wrapper (the client's mount
+        // container) around the optional fallback, then the standard
+        // trailing marker.
+        if (boundary && boundary.flush === 'skip') {
+            const open = `<div data-boundary="${id}" style="display:contents;">`;
+            buf.push(open);
+            state.len += open.length;
+            if (boundary.fallback) {
+                try {
+                    yield* renderNode(boundary.fallback(), ctx, parentCtx, appContext, buf, state);
+                } catch (e) {
+                    const skipName = (vnode.type as any).__name || 'Anonymous';
+                    const fallbackHtml = componentErrorFallback(e, ctx, skipName, id);
+                    if (fallbackHtml) {
+                        buf.push(fallbackHtml);
+                        state.len += fallbackHtml.length;
+                    }
+                }
+            }
+            buf.push('</div>');
+            state.len += 6;
+            const marker = `<!--$c:${id}-->`;
+            buf.push(marker);
+            state.len += marker.length;
+            ctx.popComponent();
+            if (state.len >= state.threshold) yield FLUSH;
+            return;
+        }
+
         const setup = vnode.type.__setup;
-        const { componentName, id, ssrLoads, componentCtx } = createComponentState(vnode, ctx, parentCtx, appContext);
+        const { componentName, ssrLoads, componentCtx } = createComponentState(vnode, ctx, parentCtx, appContext, id);
 
         // Plugin hook: suppressComponentRender — lets a plugin skip running this
         // component's setup/render and emit a placeholder string instead (e.g.
         // islands `client:only` true skip-SSR). createComponentState already ran
         // transformComponentContext (so plugins have registered the component) and
-        // pushed the id, so on suppression we emit the placeholder + the standard
+        // the id is pushed, so on suppression we emit the placeholder + the standard
         // trailing marker, pop the component, and bail before setup/render.
+        // Superseded by resolveBoundary's `flush: 'skip'`; removal tracked in #199.
         if (ctx._plugins) {
             for (const plugin of ctx._plugins) {
                 const suppressed = plugin.server?.suppressComponentRender?.(id, vnode, ctx);
@@ -918,24 +1008,36 @@ function* renderNode(
 
             // Check if we have pending useAsync/useStream work
             if (ssrLoads.length > 0) {
-                // Plugin hook: handleAsyncSetup
-                // Plugins can override the async mode.
-                // Default: 'stream' in streaming mode, 'block' in string mode
-                // — and 'block' inside a <Defer> deferred render, so the
-                // boundary's single replacement carries the resolved data
-                // instead of nesting its own placeholders.
-                let asyncMode: 'block' | 'stream' | 'skip' = (ctx._streaming && !state.inDefer) ? 'stream' : 'block';
+                // The flush decision. A resolveBoundary flush wins:
+                // - 'inline' awaits in place even in streaming mode;
+                // - 'stream' streams when streaming (degrades to block in
+                //   string mode — a $SIGX_REPLACE with no stream to ride);
+                // - otherwise today's default: 'stream' in streaming mode,
+                //   'block' in string mode — and 'block' inside a <Defer>
+                //   deferred render, so the boundary's single replacement
+                //   carries the resolved data instead of nesting its own
+                //   placeholders.
+                // The legacy handleAsyncSetup hook is consulted only when no
+                // boundary flush was requested; removal tracked in #199.
+                let asyncMode: 'block' | 'stream' | 'skip';
                 let asyncPlaceholder: string | undefined;
                 let pluginHandled = false;
 
-                if (ctx._plugins) {
-                    for (const plugin of ctx._plugins) {
-                        const result = plugin.server?.handleAsyncSetup?.(id, ssrLoads, renderFn as () => any, ctx);
-                        if (result) {
-                            asyncMode = result.mode;
-                            asyncPlaceholder = result.placeholder;
-                            pluginHandled = true;
-                            break; // First plugin to handle wins
+                if (boundary?.flush === 'inline') {
+                    asyncMode = 'block';
+                } else if (boundary?.flush === 'stream') {
+                    asyncMode = ctx._streaming ? 'stream' : 'block';
+                } else {
+                    asyncMode = (ctx._streaming && !state.inDefer) ? 'stream' : 'block';
+                    if (ctx._plugins) {
+                        for (const plugin of ctx._plugins) {
+                            const result = plugin.server?.handleAsyncSetup?.(id, ssrLoads, renderFn as () => any, ctx);
+                            if (result) {
+                                asyncMode = result.mode;
+                                asyncPlaceholder = result.placeholder;
+                                pluginHandled = true;
+                                break; // First plugin to handle wins
+                            }
                         }
                     }
                 }
@@ -948,8 +1050,14 @@ function* renderNode(
                     buf.push(placeholder);
                     state.len += placeholder.length;
 
-                    // Render with initial state (before data loads)
-                    if (renderFn) {
+                    if (boundary?.fallback) {
+                        // A boundary fallback renders in place of content
+                        // (rfc-ssr-platform §1) — instead of the initial-state
+                        // pass. Rendered under the parent (it is the plugin's
+                        // content, not the component's).
+                        yield* renderNode(boundary.fallback(), ctx, parentCtx, appContext, buf, state);
+                    } else if (renderFn) {
+                        // Render with initial state (before data loads)
                         const result = (renderFn as () => any)();
                         if (result) {
                             if (Array.isArray(result)) {

@@ -10,6 +10,7 @@
 
 import type { VNode, ComponentSetupContext } from 'sigx';
 import type { SSRContext } from './server/context';
+import type { ResolvedBoundary } from './boundary';
 
 /**
  * SSR Plugin interface for extending server rendering and client hydration.
@@ -29,6 +30,40 @@ export interface SSRPlugin {
          * Use to initialize plugin-specific data via `ctx.setPluginData()`.
          */
         setup?(ctx: SSRContext): void;
+
+        /**
+         * The boundary seam (rfc-ssr-platform §1.3). Called once per component,
+         * after its id is allocated and pushed (read `ctx._componentStack` top
+         * if needed) but BEFORE the setup context is built and before
+         * `vnode.type.__setup` runs. First plugin to return an object wins.
+         *
+         * The returned axes flow into the render:
+         * - `flush: 'skip'` suppresses the server render entirely: setup never
+         *   runs, `transformComponentContext` and `afterRenderComponent` are
+         *   NOT called, and core emits the placeholder wrapper
+         *   `<div data-boundary="ID" style="display:contents;">` around the
+         *   (optional) `fallback` render, followed by the standard trailing
+         *   `<!--$c:ID-->` marker. The client fresh-mounts into the wrapper.
+         * - `flush: 'stream'` streams the boundary when it has pending async
+         *   setup work (keyed useAsync/useStream) and the render is streaming;
+         *   with no async work (or in string mode) it degrades to inline —
+         *   there is nothing to defer. `fallback`, when present, renders
+         *   inside the placeholder INSTEAD of the initial-state pass.
+         * - `flush: 'inline'` awaits async work in place even in streaming mode.
+         * - Omitted `flush` = today's default (stream in streaming mode,
+         *   block/inline otherwise).
+         * - `hydrate`/`media`/`chunk` are recorded in the per-request boundary
+         *   table (`__SIGX_BOUNDARIES__`) for the client hydrator; `props`
+         *   overrides the core-derived snapshot of `vnode.props` (packs strip
+         *   their directive vocabulary — core cannot know it).
+         *
+         * The placeholder wrappers are core protocol: `fallback` thunks get no
+         * id and must not emit their own wrapper element.
+         *
+         * @example Islands maps `client:only` → `{ flush: 'skip', hydrate: 'load' }`
+         * @example Islands maps `client:visible` → `{ hydrate: 'visible' }`
+         */
+        resolveBoundary?(vnode: VNode, ctx: SSRContext): ResolvedBoundary | undefined | void;
 
         /**
          * Called after ComponentSetupContext is constructed but BEFORE setup() runs.
