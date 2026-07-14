@@ -114,8 +114,10 @@ interface SSRBoundary {
   hydrate: 'load' | 'idle' | 'visible' | 'media' | 'interaction' | 'never';
   //  'interaction' is the one new strategy. load/idle/visible/media ship
   //  today as @sigx/ssr-islands client:* directives; 'never' has no
-  //  directive — it is the absence of one under the islands app default
-  //  (client:only is not a hydrate value: it maps to flush: 'skip')
+  //  directive — it is the absence of one under the islands app default.
+  //  Note: #171's original sketch listed 'only' on this axis; rev-1 review
+  //  dropped it to keep the axes orthogonal — client:only is not a hydrate
+  //  value, it decomposes into flush: 'skip' + hydrate: 'load'
   //
   //  The fields below are conditionally required — `?` means "not universal
   //  to every boundary", not "always optional"; each note states when the
