@@ -36,6 +36,16 @@ a drop-in equal of any third-party strategy pack, built only on the public
 
 See the [docs](https://sigx.dev/server/) for the Vite plugin setup and the full list of hydration strategies.
 
+## Run the example
+
+A runnable reference app lives in [`example/`](./example) — one server-rendered page with an island per strategy, the `sigxIslands()` Vite plugin, and the dev/prod request handlers:
+
+```bash
+pnpm --filter @sigx/ssr-islands-example dev     # dev: Vite middleware + createDevRequestHandler
+pnpm --filter @sigx/ssr-islands-example build   # client + server bundles, islands manifest
+pnpm --filter @sigx/ssr-islands-example start   # prod: static assets + createRequestHandler
+```
+
 ## License
 
 MIT © Andreas Ekdahl

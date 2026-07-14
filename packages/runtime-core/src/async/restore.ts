@@ -10,7 +10,10 @@
  * invalidates the entry, fetches fresh, and repopulates on success.
  *
  * Every function is guarded behind `typeof window` — runtime-core must
- * reference no web global unguarded (embedded/server runtimes).
+ * reference no web global unguarded (embedded/server runtimes). These
+ * guards deliberately stay `typeof window` (NOT `isLiveClient()`): the
+ * blob is an HTML-page transport, so on windowless live clients (lynx,
+ * terminal) pickup correctly misses and writeback correctly no-ops.
  */
 
 const MISS = { hit: false, value: undefined } as const;

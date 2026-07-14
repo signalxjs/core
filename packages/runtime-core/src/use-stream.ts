@@ -17,6 +17,7 @@
 import { signal } from '@sigx/reactivity';
 import { getCurrentInstance } from './component-lifecycle.js';
 import { peekRestored } from './async/restore.js';
+import { isLiveClient } from './async/environment.js';
 
 export function useStream(
     key: string,
@@ -35,7 +36,7 @@ export function useStream(
     const restored = peekRestored(key);
     const text = signal(restored.hit ? String(restored.value) : '');
 
-    if (!restored.hit && typeof window !== 'undefined') {
+    if (!restored.hit && isLiveClient()) {
         // Stop pulling when the component unmounts — breaking the for-await
         // closes the iterator (its return() runs), releasing the source.
         let stopped = false;

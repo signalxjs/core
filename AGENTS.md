@@ -133,7 +133,9 @@ free port automatically).
 - `packages/ssr-islands` → `@sigx/ssr-islands` — islands architecture (selective
   hydration via `client:*` directives). The first-party *reference* strategy pack
   riding `@sigx/server-renderer`'s public plugin API; a drop-in equal of any
-  third-party pack, with no privileged access to core.
+  third-party pack, with no privileged access to core. Its runnable example app
+  lives in-package at `packages/ssr-islands/example/` (private workspace
+  package, excluded from the npm pack).
 - `packages/cache` → `@sigx/cache` — cache policy for value-first async
   (staleTime/gcTime, revalidation, `invalidate()`, optimistic `mutate()`). The
   first-party pack on the rfc-async §7 engine seam — a drop-in equal of any

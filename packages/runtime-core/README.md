@@ -67,6 +67,18 @@ router.beforeEach((to) => {
 
 The context applies only to the **synchronous** portion of the callback — after an `await`, re-enter with another `runWithContext` call. Nested calls restore the previous context. Plugins receive the app in `install()` and can capture it to wrap their own callbacks.
 
+### Non-web renderers
+
+This package references no web global unguarded — it runs anywhere. One thing renderer authors must know: `useData`/`useStream` only auto-run their sources on a **live client**, and without a declaration that is detected as "`window` exists" (which keeps server renders safe). A client runtime with no `window` (native, terminal) must say so once, from its platform-identity module:
+
+```ts
+import { declareLiveClient } from '@sigx/runtime-core/internals';
+
+declareLiveClient(); // this runtime is a live client — keyed reads fetch on mount
+```
+
+Never call this from code a server render can evaluate (that would defeat the SSR guard) — it belongs in the module that defines your renderer's platform, the way `@sigx/runtime-dom/platform` defines the web's.
+
 > **Note:** Most users should install [`sigx`](https://www.npmjs.com/package/sigx) instead, which bundles this package with a DOM renderer and the reactivity system.
 
 ## 📚 Documentation
