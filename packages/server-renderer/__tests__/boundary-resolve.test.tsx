@@ -206,30 +206,20 @@ describe('flush axis × async setup work — the truth table', () => {
         expect(out).not.toContain('__SIGX_BOUNDARIES__');
     });
 
-    it('legacy handleAsyncSetup still consulted when no boundary flush is requested', async () => {
-        const Async = makeAsyncComponent('legacy-hook');
-        const legacy: SSRPlugin = {
-            name: 'legacy',
-            server: { handleAsyncSetup: () => ({ mode: 'block' as const }) }
-        };
-        const out = await collectStream(createSSR().use(legacy).renderStream((Async as any)({})) as ReadableStream<string>);
-        expect(out).toContain('>42<');
+    it('a keyed useData rejection under flush:"inline" renders the settled error state in place', async () => {
+        const Failing = component(() => {
+            const data = useData('inline-reject', async () => {
+                await new Promise(r => setTimeout(r, 5));
+                throw new Error('load failed');
+            });
+            return () => <div class="state">{data.state}</div>;
+        }, { name: 'Failing' });
+        const ssr = createSSR().use(boundaryPlugin('inline', () => ({ flush: 'inline' })));
+        const out = await collectStream(ssr.renderStream((Failing as any)({})) as ReadableStream<string>);
+        // Value-first async: the rejection is a value (match's error arm),
+        // rendered inline because the boundary blocked — no streamed replacement.
+        expect(out).toContain('<div class="state">errored</div>');
+        expect(out).not.toContain('$SIGX_REPLACE(');
         expect(out).not.toContain('data-async-placeholder');
-    });
-
-    it('a boundary flush wins over handleAsyncSetup', async () => {
-        const Async = makeAsyncComponent('boundary-beats-legacy');
-        const legacySpy = vi.fn(() => ({ mode: 'block' as const }));
-        const both: SSRPlugin = {
-            name: 'both',
-            server: {
-                resolveBoundary: () => ({ flush: 'stream' }),
-                handleAsyncSetup: legacySpy
-            }
-        };
-        const out = await collectStream(createSSR().use(both).renderStream((Async as any)({})) as ReadableStream<string>);
-        expect(out).toContain('data-async-placeholder');
-        expect(out).toContain('$SIGX_REPLACE(');
-        expect(legacySpy).not.toHaveBeenCalled();
     });
 });

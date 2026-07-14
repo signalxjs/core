@@ -974,31 +974,6 @@ function* renderNode(
         const setup = vnode.type.__setup;
         const { componentName, ssrLoads, componentCtx } = createComponentState(vnode, ctx, parentCtx, appContext, id);
 
-        // Plugin hook: suppressComponentRender — lets a plugin skip running this
-        // component's setup/render and emit a placeholder string instead (e.g.
-        // islands `client:only` true skip-SSR). createComponentState already ran
-        // transformComponentContext (so plugins have registered the component) and
-        // the id is pushed, so on suppression we emit the placeholder + the standard
-        // trailing marker, pop the component, and bail before setup/render.
-        // Superseded by resolveBoundary's `flush: 'skip'`; removal tracked in #199.
-        if (ctx._plugins) {
-            for (const plugin of ctx._plugins) {
-                const suppressed = plugin.server?.suppressComponentRender?.(id, vnode, ctx);
-                if (suppressed) {
-                    if (suppressed.placeholder != null) {
-                        buf.push(suppressed.placeholder);
-                        state.len += suppressed.placeholder.length;
-                    }
-                    const marker = `<!--$c:${id}-->`;
-                    buf.push(marker);
-                    state.len += marker.length;
-                    ctx.popComponent();
-                    if (state.len >= state.threshold) yield FLUSH;
-                    return;
-                }
-            }
-        }
-
         const prev = setCurrentInstance(componentCtx);
         try {
             // Run setup synchronously — it registers useAsync/useStream work
@@ -1020,36 +995,18 @@ function* renderNode(
                 //   deferred render, so the boundary's single replacement
                 //   carries the resolved data instead of nesting its own
                 //   placeholders.
-                // The legacy handleAsyncSetup hook is consulted only when no
-                // boundary flush was requested; removal tracked in #199.
-                let asyncMode: 'block' | 'stream' | 'skip';
-                let asyncPlaceholder: string | undefined;
-                let pluginHandled = false;
-
+                let asyncMode: 'block' | 'stream';
                 if (boundary?.flush === 'inline') {
                     asyncMode = 'block';
                 } else if (boundary?.flush === 'stream') {
                     asyncMode = ctx._streaming ? 'stream' : 'block';
                 } else {
                     asyncMode = (ctx._streaming && !state.inDefer) ? 'stream' : 'block';
-                    if (ctx._plugins) {
-                        for (const plugin of ctx._plugins) {
-                            const result = plugin.server?.handleAsyncSetup?.(id, ssrLoads, renderFn as () => any, ctx);
-                            if (result) {
-                                asyncMode = result.mode;
-                                asyncPlaceholder = result.placeholder;
-                                pluginHandled = true;
-                                break; // First plugin to handle wins
-                            }
-                        }
-                    }
                 }
 
                 if (asyncMode === 'stream') {
-                    // Use default placeholder if none provided by plugin
-                    const placeholder = asyncPlaceholder || `<div data-async-placeholder="${id}" style="display:contents;">`;
-
-                    // Render placeholder immediately
+                    // Render the placeholder wrapper immediately (frozen literal)
+                    const placeholder = `<div data-async-placeholder="${id}" style="display:contents;">`;
                     buf.push(placeholder);
                     state.len += placeholder.length;
 
@@ -1078,31 +1035,27 @@ function* renderNode(
                     buf.push('</div>');
                     state.len += 6;
 
-                    // If no plugin handled this, core manages the deferred render
-                    if (!pluginHandled) {
-                        const capturedRenderFn = renderFn;
-                        const capturedCtx = ctx;
-                        const capturedAppContext = appContext;
-                        const capturedComponentCtx = componentCtx;
+                    // Core always manages the deferred render and race-loop entry
+                    const capturedRenderFn = renderFn;
+                    const capturedCtx = ctx;
+                    const capturedAppContext = appContext;
+                    const capturedComponentCtx = componentCtx;
 
-                        const deferredRender = (async () => {
-                            await Promise.all(ssrLoads);
+                    const deferredRender = (async () => {
+                        await Promise.all(ssrLoads);
 
-                            let html = '';
-                            if (capturedRenderFn) {
-                                const result = (capturedRenderFn as () => any)();
-                                if (result) {
-                                    html = await renderVNodeToString(result, capturedCtx, capturedAppContext, capturedComponentCtx);
-                                }
+                        let html = '';
+                        if (capturedRenderFn) {
+                            const result = (capturedRenderFn as () => any)();
+                            if (result) {
+                                html = await renderVNodeToString(result, capturedCtx, capturedAppContext, capturedComponentCtx);
                             }
+                        }
 
-                            return html;
-                        })();
+                        return html;
+                    })();
 
-                        ctx._pendingAsync.push({ id, promise: deferredRender });
-                    }
-                } else if (asyncMode === 'skip') {
-                    // Plugin says skip — don't render content
+                    ctx._pendingAsync.push({ id, promise: deferredRender });
                 } else {
                     // Default: block — suspend until all async loads settle.
                     // A rejection is thrown back in here by the driver, landing

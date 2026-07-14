@@ -82,25 +82,6 @@ export interface SSRPlugin {
         ): ComponentSetupContext | void;
 
         /**
-         * Called after the component context is built (`transformComponentContext`
-         * has run, the component id is assigned and pushed) but BEFORE `setup()`
-         * and render. Lets a plugin skip running the component entirely and emit a
-         * placeholder string in its place — e.g. islands `client:only` true
-         * skip-SSR. Returning **any object** suppresses the render: the component's
-         * `setup`/render and `afterRenderComponent` are skipped, and core emits the
-         * (optional) `placeholder` string — when present, including an empty string
-         * — followed by the standard trailing `<!--$c:id-->` marker for hydration.
-         * Return void to render normally. First plugin to return an object wins.
-         *
-         * @example Islands maps `client:only` to resolveBoundary's flush: 'skip' (superseding this hook)
-         */
-        suppressComponentRender?(
-            id: number,
-            vnode: VNode,
-            ctx: SSRContext
-        ): { placeholder?: string } | void;
-
-        /**
          * Called after a component renders. Receives the accumulated HTML string.
          * Can transform it (e.g., wrap with markers, inject attributes).
          * Return a string to replace, or void to pass through.
@@ -111,39 +92,6 @@ export interface SSRPlugin {
             html: string,
             ctx: SSRContext
         ): string | void;
-
-        /**
-         * Called when a component has pending async setup work (keyed
-         * `useAsync()` fetchers / `useStream()` sources).
-         * Plugin decides the async model:
-         * - `'block'`: wait inline (overrides streaming default)
-         * - `'stream'`: render placeholder now, stream replacement later (this is the default in streaming mode)
-         * - `'skip'`: don't render this component server-side
-         *
-         * Return void to accept the default behavior:
-         * - In streaming mode (`renderStream`/`renderStreamWithCallbacks`): defaults to `'stream'`
-         * - In string mode (`renderToString`/`render`): defaults to `'block'`
-         *
-         * When core handles streaming, it manages the deferred render and race loop.
-         * Plugins that need to augment the streamed result should use `onAsyncComponentResolved`.
-         *
-         * Note: this hook keys off useData/useStream setup work only. <Defer>-boundary async
-         * (lazy() children) does not pass through here — Defer boundaries
-         * stream via the same placeholder machinery and are observable on
-         * `ctx._pendingAsync` and in `onAsyncComponentResolved`. Keyed reads
-         * INSIDE a Defer's deferred render default to `'block'` (the boundary
-         * replaces once, with resolved data); a plugin forcing `'stream'`
-         * there wins and re-introduces nested placeholders.
-         *
-         * @example A loading-UI plugin returns `{ mode: 'stream', placeholder: '<Spinner/>' }`
-         * @example A plugin returns `{ mode: 'block' }` to force waiting
-         */
-        handleAsyncSetup?(
-            id: number,
-            ssrLoads: Promise<void>[],
-            renderFn: () => any,
-            ctx: SSRContext
-        ): { mode: 'block' | 'stream' | 'skip'; placeholder?: string } | void;
 
         /**
          * Called after a core-managed async component resolves its deferred render.
