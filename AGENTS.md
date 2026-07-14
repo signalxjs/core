@@ -109,8 +109,8 @@ pnpm test -- packages/reactivity   # single test file/dir (substring match)
 pnpm test -- -t "name of test"     # single test by name (vitest -t)
 pnpm test:watch
 pnpm test:coverage
-pnpm typecheck   # tsgo (a fast TS compiler), config: tsconfig.json
-pnpm lint        # oxlint over the core packages' src
+pnpm typecheck   # tsc (TypeScript 7 native compiler), config: tsconfig.json
+pnpm lint        # oxlint over all packages' src (warnings fail: --deny-warnings)
 pnpm lint:fix
 pnpm size        # size-limit bundle-size check (.size-limit.json)
 pnpm verify:pack # verify npm pack output is sane
@@ -127,7 +127,16 @@ free port automatically).
 - `packages/runtime-core` → `@sigx/runtime-core` — component model, renderer base.
 - `packages/runtime-dom` → `@sigx/runtime-dom` — DOM renderer.
 - `packages/sigx` → `sigx` — umbrella public package.
-- `packages/server-renderer` → `@sigx/server-renderer` — SSR + hydration.
+- `packages/server-renderer` → `@sigx/server-renderer` — SSR + hydration. A
+  strategy-agnostic plugin platform; hydration strategies are plugins, not core.
+- `packages/ssr-islands` → `@sigx/ssr-islands` — islands architecture (selective
+  hydration via `client:*` directives). The first-party *reference* strategy pack
+  riding `@sigx/server-renderer`'s public plugin API; a drop-in equal of any
+  third-party pack, with no privileged access to core.
+- `packages/cache` → `@sigx/cache` — cache policy for value-first async
+  (staleTime/gcTime, revalidation, `invalidate()`, optimistic `mutate()`). The
+  first-party pack on the rfc-async §7 engine seam — a drop-in equal of any
+  third-party pack, no privileged access to core.
 - `packages/vite` → `@sigx/vite` — Vite plugin for dev/build/HMR.
 - `examples/` — runnable apps (`hello`, `spa`, `spa-ssr`).
 

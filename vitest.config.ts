@@ -25,6 +25,7 @@ export default defineConfig({
     },
     resolve: {
         alias: {
+            '@sigx/cache': resolve(__dirname, 'packages/cache/src/index.ts'),
             '@sigx/reactivity/internals': resolve(__dirname, 'packages/reactivity/src/internals.ts'),
             '@sigx/reactivity': resolve(__dirname, 'packages/reactivity/src/index.ts'),
             '@sigx/runtime-core/internals': resolve(__dirname, 'packages/runtime-core/src/internals.ts'),
@@ -35,6 +36,9 @@ export default defineConfig({
             '@sigx/server-renderer/server': resolve(__dirname, 'packages/server-renderer/src/server/index.ts'),
             '@sigx/server-renderer/client': resolve(__dirname, 'packages/server-renderer/src/client/index.ts'),
             '@sigx/server-renderer': resolve(__dirname, 'packages/server-renderer/src/index.ts'),
+            '@sigx/ssr-islands/server': resolve(__dirname, 'packages/ssr-islands/src/server/index.ts'),
+            '@sigx/ssr-islands/client': resolve(__dirname, 'packages/ssr-islands/src/client/index.ts'),
+            '@sigx/ssr-islands': resolve(__dirname, 'packages/ssr-islands/src/index.ts'),
             'sigx/internals': resolve(__dirname, 'packages/sigx/src/internals.ts'),
             'sigx/jsx-runtime': resolve(__dirname, 'packages/sigx/src/jsx-runtime.ts'),
             'sigx/jsx-dev-runtime': resolve(__dirname, 'packages/sigx/src/jsx-runtime.ts'),

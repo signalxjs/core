@@ -90,3 +90,58 @@ The augmentation is program-wide: any file in the app (or a directive
 package's published types) can declare it, and every JSX file gets the
 typed attribute. Unregistered names still work untyped via the
 `use:${string}` catch-all.
+
+## Model directive modifiers
+
+`model={...}` accepts a `modelModifiers` prop. The built-ins are:
+
+| Modifier   | Kind            | Effect                                                        |
+| ---------- | --------------- | ------------------------------------------------------------ |
+| `trim`     | value transform | Strip leading/trailing whitespace before write-back.         |
+| `number`   | value transform | Coerce a numeric string to a number (no-op if not numeric).  |
+| `lazy`     | timing          | Sync on `change` (blur/enter) instead of every keystroke.    |
+| `debounce` | timing          | Delay write-back by N ms (`true` ⇒ 300ms).                    |
+
+```tsx
+<input type="text" model={() => state.name} modelModifiers={{ trim: true }} />
+<input type="text" model={() => state.age}  modelModifiers={{ number: true }} />
+<input type="text" model={() => state.q}    modelModifiers={{ debounce: 300 }} />
+```
+
+Modifiers are **scoped per element type**: `trim`/`number` are value transforms,
+so they're only offered on value-bearing elements (text/number/range/textarea/
+select). On a checkbox/radio they're a compile error (and a dev-time warning) —
+only the timing modifiers (`lazy`/`debounce`) apply there.
+
+### Custom modifiers (`registerModelModifier`)
+
+The modifier system is a pluggable registry in `@sigx/runtime-core`, symmetric
+with `registerModelProcessor`. Value transforms run at the write-back boundary in
+the core runtime, so they work on **every** binding path (default `model`, named
+`model:name`, custom-element processors, components) and on **every platform**
+(DOM, Lynx, SSR) with no platform code. Only `timing` is platform-specific.
+
+```ts
+import { registerModelModifier } from 'sigx';
+
+// 1. Register the runtime behavior.
+registerModelModifier('uppercase', {
+    transform: (v) => (typeof v === 'string' ? v.toUpperCase() : v),
+});
+
+// 2. Augment the matching capability group so it type-checks in JSX.
+//    ValueModelModifiers → value transforms (auto-scoped to value-bearing
+//    elements, absent from checkbox/radio); TimingModelModifiers → timing.
+declare module '@sigx/runtime-core' {
+    interface ValueModelModifiers {
+        uppercase?: boolean;
+    }
+}
+
+// Now this type-checks on a text input and errors on a checkbox:
+<input type="text" model={() => state.code} modelModifiers={{ uppercase: true }} />;
+```
+
+A modifier definition has an optional `transform(value, ctx)` (value transform)
+and/or `timing` (`'lazy' | 'debounce'`). `registerModelModifier` returns an
+unregister function.

@@ -94,4 +94,68 @@ describe('allocation and tracking churn', () => {
     bench('re-track cost: effect with 50 deps re-running', () => {
         wide.p0 = ++wn;
     });
+
+    const arr = signal([0, 1, 2, 3]);
+    effect(() => { void arr.length; });
+    let an = 0;
+    bench('array push+pop churn with length subscriber', () => {
+        arr.push(++an);
+        arr.pop();
+    });
+
+    const nested = signal({ a: { b: { c: 0 } } });
+    void nested.a.b.c; // warm the nested proxy caches: bench measures steady state
+    bench('untracked nested object read', () => {
+        void nested.a.b.c; // outside any effect: pure get-trap fixed cost
+    });
+
+    const prim = signal(0);
+    effect(() => { void prim.value; });
+    let pn = 0;
+    bench('primitive .value write with 1 effect', () => {
+        prim.value = ++pn;
+    });
+
+    const replaceKeys = Array.from({ length: 10 }, (_, i) => `k${i}`);
+    const replaceTarget = signal(Object.fromEntries(
+        replaceKeys.map(k => [k, 0])
+    ) as Record<string, number>);
+    effect(() => { void replaceTarget.k0; });
+    let rn = 0;
+    bench('$set replace of 10-key object', () => {
+        // Plain-loop build keeps the (required) fresh object cheap so $set
+        // dominates the measurement, not iterator/fromEntries overhead.
+        ++rn;
+        const next: Record<string, number> = {};
+        for (const k of replaceKeys) next[k] = rn;
+        replaceTarget.$set(next);
+    });
+
+    const fiveDeps = signal({ a: 0, b: 0, c: 0, d: 0, e: 0 });
+    bench('create-and-stop 1k effects over 5 deps', () => {
+        for (let i = 0; i < 1_000; i++) {
+            const runner = effect(() => {
+                void (fiveDeps.a + fiveDeps.b + fiveDeps.c + fiveDeps.d + fiveDeps.e);
+            });
+            runner.stop();
+        }
+    });
+
+    // Hoisted so the loop measures signal()'s shouldNotProxy root check,
+    // not Date/TypedArray construction.
+    const sharedDate = new Date(0);
+    const sharedBuf = new Uint8Array(4);
+    bench('signal() on non-proxyable roots (Date, typed array)', () => {
+        for (let i = 0; i < 1_000; i++) {
+            signal(sharedDate);
+            signal(sharedBuf);
+        }
+    });
+
+    const withExotic = signal({ at: sharedDate, buf: sharedBuf });
+    bench('read non-proxyable values off an object signal', () => {
+        // get trap runs shouldNotProxy on every object-valued read
+        void withExotic.at;
+        void withExotic.buf;
+    });
 });

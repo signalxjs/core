@@ -6,6 +6,82 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- **`@sigx/cache`** (new package): cache POLICY for value-first async, riding the rfc-async §7 pack contract (#195). `app.use(cachePlugin())` installs a per-app engine; call sites opt in via the `cache` option the pack's module augmentation adds to core's open `AsyncOptions`/`ActionOptions`: `staleTime` (fresh values serve without fetching; stale ones serve immediately and revalidate as `'refreshing'`), `gcTime` retention across unmounts, `revalidateOnFocus`/`revalidateOnInterval`, `keepPreviousData` across key changes, `invalidate()`/`mutate()` write-through on cached reads, and per-action `invalidates` (exact keys or tuple prefixes) + `optimistic` apply with conditional rollback. Adopts `__SIGX_ASYNC__` as its initial cache state (blob-as-seed); reads/actions without `cache` options delegate to core's default engine verbatim.
+- **`@sigx/runtime-core`**: the §7 provider seam is now installable per app — `useData`/`useAction` resolve an app-provided `AsyncEngine` (DI token, `provideAsyncEngine` + the delegable `defaultAsyncEngine` exported via internals) when no SSR per-instance provider is present. Core's key machinery (getters, canonical tuple identity, dev guards) stays in front of any engine; the SSR `_useAsync` seam is unchanged and still takes precedence. (#195)
+
+### Fixed
+
+- **`@sigx/runtime-core`**: an element vnode passed **as a component prop** (a fallback, an icon, an array of items) now reaches the renderer as its raw object. Previously the reactive props proxy wrapped it — and, transitively, its dom node — corrupting the renderer's bookkeeping when the vnode toggled out of the tree: text children were removed while their element stayed behind, later mounts landed at the container end, and re-showing or unmounting threw inside the DOM (`removeChild ... is not a child of this node`). The props accessor now unwraps vnode-shaped values (the prop read itself stays reactive, so replacing the prop re-renders as usual), and `<Defer>`'s interim `toRaw` workaround is removed. (#191)
+
+## [0.9.0] — 2026-07-13
+
+Value-first async lands (Phase 1 of `docs/rfc-async.md` rev 8, #189): one reactive async-cell concept exposed as a read/write pair — `useData` (keyed reads) and `useAction` (manual writes) — rendered with co-located `match`, coordinated with `all()`, with one thin tree wrapper `<Defer>` and setup-time `errorScope` replacing the React-style `<Suspense>`/`<ErrorBoundary>` wrappers. Pre-1.0, no-compat: the old primitives are removed outright.
+
+### Added
+
+- **`sigx` / `@sigx/runtime-core`**: `useData(key, fetcher, opts?)` — THE keyed async read. Key is mandatory (data always has identity): a static string, or a reactive getter returning a string or a tuple of JSON primitives (canonical-JSON identity; a falsy getter result skips the fetch — state `'idle'`). The key is the fetcher's first argument (one shape everywhere: `(arg, ctx) => Promise<T>`); fetchers run untracked (dev warns on a signal read inside one). `AsyncState` gains a `state` enum (`idle | pending | ready | refreshing | errored`) and `match(arms)` — the typed path to a non-null value, with an `idle` arm and `(error, retry, stale)` in the error arm. Pinned semantics: key change hard-resets (value cleared, `'pending'`); same-key `refresh()` keeps the value (`'refreshing'`); `loading === (state === 'pending')` only; `refresh()` never rejects; a superseded run never writes state or `.error`; the underlying fetch aborts only when unshared (the in-flight dedupe map stays). `{ server: false }` keeps a read client-only (SSR renders the pending arm). (#189)
+- **`sigx` / `@sigx/runtime-core`**: `useAction(fn, opts?)` — the manual write counterpart. Never auto-runs; `run(input)` never rejects (resolves `RunResult<T>`; `SupersededError` is exported and distinguishable); in-flight requests are never aborted; `retry` re-runs the last input; `reset()` returns to `'idle'`. `ActionOptions` is an open, deliberately empty interface — packs augment it. (#189)
+- **`sigx` / `@sigx/runtime-core`**: `all()` — combine reads for all-or-nothing gating: object form (named `value`/`errors` records) and rest-tuple form; first-error-wins `.error` with collect-all `.errors`; combined `refresh()` refreshes every member in parallel; any idle member holds the combination at `'idle'`, any refreshing member (all values present) keeps the ready arm rendering. (#189)
+- **`sigx` / `@sigx/runtime-core`**: `<Defer fallback={…}>` — the one tree-positional async wrapper. Client: covers lazy chunk loading only (pending data renders through the owning component's `match`). SSR streaming: the fallback flushes with the shell and ONE replacement arrives when everything pending beneath it — lazy chunks and keyed `useData` reads — resolves. (#189)
+- **`sigx` / `@sigx/runtime-core`**: `errorScope({ fallback, onError })` — setup-time call scoping the calling component's subtree via DI. Catches descendant setup/render/re-render throws (`handleComponentError` walks the instance parent chain, nearest scope first, before plugin hooks and the app handler — and even without an app context); `retry` genuinely remounts the subtree (descendant effects stopped, `onUnmounted` run) rather than flipping a flag. Does not catch fetcher rejections (they land on `.error`) or event-handler throws. (#189)
+- **`sigx` / `@sigx/runtime-core`**: chainable `app.onError(handler)` — the app-level error handler (renames `app.config.errorHandler` to `config.onError`). Unhandled data errors from a `match()` without an `error` arm bubble here (info `'async'`) after the errorScope walk. (#189)
+- **`@sigx/runtime-dom`**: DOM event-handler and model write-back throws now route through `handleComponentError` (info `'event handler'`, instance `null`) — a returning-`true` app `onError` swallows them; otherwise they rethrow as before. `patchProp` gained an optional trailing `appContext` parameter (renderer-internal). (#189)
+
+### Changed
+
+- **`@sigx/server-renderer`**: `serverUseAsync` returns the new `AsyncState` shape (state enum + `match`); server cells are only ever `pending`/`ready`/`errored`. Data errors on the server are always SOFT — the component renders its error arm; a rejecting keyed read no longer routes to the component error fallback / red streaming replacement (setup throws still do). `{ server: false }` renders the pending arm. Wire format, request-level dedupe, and the `_useAsync`/`_useStream` provider seams are unchanged; tuple keys serialize under their canonical JSON string. (#189)
+- **`@sigx/runtime-core`**: `lazy()` rebuilt without the thrown-promise protocol: the wrapper reads a factory-level load signal, renders `null` while the chunk loads, registers with the nearest `<Defer>` at setup time via DI, and a rejected chunk throws from render into the standard error path (nearest `errorScope`, then app `onError`). `preload()`/`isLoaded()`/`isLazyComponent` are unchanged. (#189)
+- **`@sigx/runtime-core`**: async options flow through the provider seam whole (open `AsyncOptions`/`ActionOptions` interfaces — packs augment them, per the RFC §7 pack contract); the default engine dev-warns on option keys no installed pack handles. (#189)
+
+### Removed
+
+- **Breaking**: `useAsync` (replaced by `useData` — every call site gains the leading key argument in the fetcher: `(ctx) => …` becomes `(key, ctx) => …`), the unkeyed bare-fetcher form (use `{ server: false }` with a key), the `throwOnError` option (errors are always values; render them via the `error` arm), `<Suspense>` (+ `SuspenseProps`), `<ErrorBoundary>`, the throw-a-promise protocol and `registerPendingPromise`, the suspense-boundary async-context APIs, and `app.config.errorHandler` (now `config.onError` / `app.onError()`). (#189)
+
+## [0.8.0] — 2026-07-13
+
+Performance-and-correctness release from a full review of the reactivity and renderer hot paths: the keyed diff is now LIS-based (Vue-3-style), effect re-runs reuse their dependency links instead of tearing down and re-subscribing, and a batch of real bugs found during the review — SVG namespace inconsistencies, dropped falsy keys, keyed fragment/component reorders losing their content, and a throwing effect wedging its siblings — are fixed.
+
+### Changed
+
+- **`@sigx/reactivity`**: effect and computed re-runs reuse their dependency links (Vue 3.4-style active-link reuse) instead of full teardown plus re-subscription — a stable re-run performs zero allocations and zero Set operations per tracked read, and duplicate reads within a run dedup for free. Re-tracking an effect with 50 stable dependencies is ~1.36x faster; the two-pass mark/flush, queued-effect dedup, and value-change cutoff semantics are unchanged. (#162)
+- **`@sigx/runtime-core`**: keyed reconciliation is Vue-3-style — prefix/suffix sync plus a longest-increasing-subsequence pass that moves only the nodes outside the stable subsequence (a 100-row benchmark shuffle drops from ~99 DOM moves to 76; swaps move exactly the two displaced rows). Elements with a single unchanged-type child skip the reconcile machinery entirely (2–4x faster partial updates in benchmarks). (#163, #184)
+- **`@sigx/reactivity`**: hot-path allocation work throughout — the exotic-builtin check (`shouldNotProxy`) exits plain objects and arrays on two pointer compares with a per-prototype verdict cache (reads of Date/typed-array values ~1.5–2.3x faster), array mutators and multi-dep writes batch without per-call closures, `$set` is one stable closure per proxy (`state.$set === state.$set`), collection methods are no longer re-bound per access (`m.set === m.set`), and the nested-object cache allocates lazily. (#173, #177, #181)
+- **`@sigx/runtime-core`**: `jsx()` clones component props once instead of twice per vnode and the model path avoids an `Object.keys` allocation — component mounting is measurably cheaper. (#152)
+
+### Fixed
+
+- **`@sigx/runtime-core`**: reordering keyed **fragment or component** children now moves their entire rendered content. Previously the reconciler moved only the child's trailing anchor comment (`vnode.dom`), leaving the fragment's nodes / the component's subtree behind in the old position. Keyed reconciliation also now minimizes DOM moves with a longest-increasing-subsequence pass (Vue-3-style): a reorder moves only the nodes outside the stable subsequence instead of nearly every displaced node. (#184)
+- **`@sigx/runtime-core`**: falsy JSX keys are no longer dropped — `key={0}` and `key=""` now actually key their elements instead of silently falling back to positional diffing. Keys are also normalized to strings once at vnode creation, so keyed reconciliation compares them without per-diff coercion (`key={1}` still matches `key="1"`). (#169)
+- **`@sigx/reactivity`**: an effect that throws mid-notification-wave no longer permanently wedges the other effects queued in the same wave. Previously the abandoned effects kept their internal queued flag while being dropped from the queue, so no later write could ever re-run them. (#179)
+- **`@sigx/runtime-core`**: SVG namespace handling is now consistent between mount and patch. Previously patch re-derived SVG-ness from the tag name alone, so HTML elements whose names also exist in SVG (`title`, `text`, `image`, …) were patched down the SVG attribute path, elements inside `<foreignObject>` were misclassified, components mounted inside an `<svg>` rendered their subtree in the HTML namespace, and a child newly mounted during a fragment patch inside an `<svg>` (or a component swapping its root element type) lost the namespace entirely. The namespace is now computed once at mount, cached on the vnode, and threaded through fragment patches, type replacements, and component mounts. (#166)
+- **All packages**: published tarballs now include `src/`, so the shipped declaration maps (`dist/*.d.ts.map`) resolve and go-to-definition from `node_modules` lands in real TypeScript source instead of a missing file. (#158)
+- **`@sigx/vite`**: the `sigx-types` CLI advertised in the README is now actually installable — the package manifest was missing its `bin` entry, so `npx sigx-types` could not resolve it. Also reordered the package's `exports` conditions to list `types` first, matching every other package. (#150)
+
+## [0.7.0] — 2026-06-15
+
+Slot-presence semantics fix: a slot is now a callable accessor only when the parent actually provided content for it — `default` included — and reads as `undefined` otherwise. This makes presence a plain truthiness / optional-call check and resurrects the documented `slots.x?.() ?? fallback` pattern, which previously could never render its fallback.
+
+### Added
+
+- **`@sigx/server-renderer`**: new `suppressComponentRender(id, vnode, ctx)` server plugin hook. It runs after a component's context is built (so `transformComponentContext` has run and the id is assigned) but before `setup()`/render, and lets a plugin skip running the component entirely and emit a placeholder string in its place — the seam needed for true skip-SSR. Returning `{ placeholder }` suppresses the component's `setup`/render and its `afterRenderComponent` call; core still emits the trailing `<!--$c:id-->` marker so hydration anchors correctly. Works in both string and streaming modes. (#122)
+- **`@sigx/ssr-islands`**: `client:only` islands now genuinely skip SSR. Instead of rendering and hydrating in place like `client:load`, the component is no longer run on the server — an empty `<div data-island>` placeholder is emitted (the island still appears in `__SIGX_ISLANDS__`, with no captured state) and the client mounts the component fresh into it. Built on the new `suppressComponentRender` hook. The dev warning that `client:only` behaved like `client:load` is removed. (#122)
+- **`@sigx/server-renderer`**: client-side `transformComponentContext` hook on `SSRPlugin.client`, the hydration-time mirror of `SSRPlugin.server.transformComponentContext`. It is invoked after a component's `ComponentSetupContext` is built but before `setup()` runs during hydration, receiving `(vnode, componentCtx)` and able to mutate or replace the context (e.g. swap `ctx.signal`). This restores server/client symmetry — hydration is now as pluggable as render — while keeping core strategy-agnostic (no `client:*`/islands knowledge). (#120)
+- **`@sigx/ssr-islands`**: island components now restore their server-captured signal state on hydration. The pack implements the new client `transformComponentContext` seam to swap `ctx.signal` for a restoring variant that seeds each signal from the captured `__SIGX_ISLANDS__[id].state` (falling back to the literal initial), so an island resumes from its server value instead of re-initialising. The previously inert `initIslandHydration` wiring hook is removed. (#120)
+
+### Changed
+
+- **`@sigx/runtime-core` (breaking)**: slot accessors now reflect presence. Previously the slots object returned a callable for *every* key and empty slots returned `[]`, so `slots.header` was never `undefined`, optional chaining never short-circuited, and `slots.header?.() ?? fallback` was dead code — the fallback could not render. Now a slot — `default` and named slots alike — is a function only when content was provided for it and is `undefined` when it was not, so presence is a normal `slots.x` truthiness / `slots.x?.()` / `slots.x?.() ?? fallback` check. Presence stays reactive: a slot appearing or disappearing across a re-render flips the accessor between a function and `undefined` and re-renders the consumer; a slot supplied via the `slots` prop counts as present regardless of what it returns. Type-level, `default` and declared slots are now optional on the slots object, surfacing the few call sites that assumed presence as type errors. **Migration:** call slots optionally — `slots.default?.()` instead of `slots.default()` — since an unprovided slot (including `default` on a childless component) is now `undefined` and calling it directly throws. (#42)
+
+### Removed
+
+- **`@sigx/runtime-core`**: the deprecated flat type aliases `DefineProp`, `DefineModel`, `DefineEvent`, `DefineSlot`, and `DefineExpose` have been removed. Use the canonical `Define.*` namespace instead — `Define.Prop`, `Define.Model`, `Define.Event`, `Define.Slot`, `Define.Expose`. These aliases were `@deprecated` shims; since SignalX is still pre-1.0 they are dropped outright rather than carried. (#48)
+
+### Fixed
+
+- **`@sigx/server-renderer`**: server-side slot construction now mirrors the client slot extractor, so server and client agree on which slots are present (previously the server exposed `default` unconditionally and never separated `slot`-prop children into named slots). Un-slotted children form the `default` slot, `slot`-prop children group into their named slots, and a slot is present only when it has content — keeping `slots.x?.() ?? fallback` consistent across SSR and client and avoiding hydration mismatches. (#42)
+
 ## [0.6.3] — 2026-06-13
 
 Hydration-robustness patch: a structural mismatch between the server-rendered DOM and a component's first client render is now self-healing — sigx discards the abandoned SSR subtree and re-renders it on the client instead of leaving duplicate/orphaned content visible.
@@ -212,7 +288,10 @@ Initial public release of the SignalX (`sigx`) ecosystem on npm. Six packages pu
 - Node `^20.19.0 || >=22.12.0`
 - `@sigx/vite` peer-depends on `vite >=8.0.0`
 
-[Unreleased]: https://github.com/signalxjs/core/compare/v0.6.3...HEAD
+[Unreleased]: https://github.com/signalxjs/core/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/signalxjs/core/compare/v0.8.0...v0.9.0
+[0.8.0]: https://github.com/signalxjs/core/compare/v0.7.0...v0.8.0
+[0.7.0]: https://github.com/signalxjs/core/compare/v0.6.3...v0.7.0
 [0.6.3]: https://github.com/signalxjs/core/compare/v0.6.2...v0.6.3
 [0.6.2]: https://github.com/signalxjs/core/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/signalxjs/core/compare/v0.6.0...v0.6.1

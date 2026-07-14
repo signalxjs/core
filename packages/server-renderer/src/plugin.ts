@@ -4,7 +4,7 @@
  * Defines a generic, strategy-agnostic extension point for server-side rendering.
  * Plugins can control component context creation, async behavior, HTML injection,
  * and client-side hydration — enabling custom hydration strategies, resumable SSR,
- * streaming Suspense, progressive enhancement, or any future strategy without
+ * streaming Defer boundaries, progressive enhancement, or any future strategy without
  * core changes.
  */
 
@@ -15,7 +15,7 @@ import type { SSRContext } from './server/context';
  * SSR Plugin interface for extending server rendering and client hydration.
  *
  * The core renderer is strategy-agnostic. Hydration strategies (selective
- * hydration, resumability, streaming Suspense, progressive enhancement, etc.)
+ * hydration, resumability, streaming Defer boundaries, progressive enhancement, etc.)
  * are implemented as plugins that hook into the lifecycle below.
  */
 export interface SSRPlugin {
@@ -47,6 +47,25 @@ export interface SSRPlugin {
         ): ComponentSetupContext | void;
 
         /**
+         * Called after the component context is built (`transformComponentContext`
+         * has run, the component id is assigned and pushed) but BEFORE `setup()`
+         * and render. Lets a plugin skip running the component entirely and emit a
+         * placeholder string in its place — e.g. islands `client:only` true
+         * skip-SSR. Returning **any object** suppresses the render: the component's
+         * `setup`/render and `afterRenderComponent` are skipped, and core emits the
+         * (optional) `placeholder` string — when present, including an empty string
+         * — followed by the standard trailing `<!--$c:id-->` marker for hydration.
+         * Return void to render normally. First plugin to return an object wins.
+         *
+         * @example Islands plugin emits `<div data-island>` for `client:only`
+         */
+        suppressComponentRender?(
+            id: number,
+            vnode: VNode,
+            ctx: SSRContext
+        ): { placeholder?: string } | void;
+
+        /**
          * Called after a component renders. Receives the accumulated HTML string.
          * Can transform it (e.g., wrap with markers, inject attributes).
          * Return a string to replace, or void to pass through.
@@ -73,12 +92,15 @@ export interface SSRPlugin {
          * When core handles streaming, it manages the deferred render and race loop.
          * Plugins that need to augment the streamed result should use `onAsyncComponentResolved`.
          *
-         * Note: this hook keys off useAsync/useStream setup work only. Suspense-boundary async
-         * (lazy() children) does not pass through here — Suspense boundaries
+         * Note: this hook keys off useData/useStream setup work only. <Defer>-boundary async
+         * (lazy() children) does not pass through here — Defer boundaries
          * stream via the same placeholder machinery and are observable on
-         * `ctx._pendingAsync` and in `onAsyncComponentResolved`.
+         * `ctx._pendingAsync` and in `onAsyncComponentResolved`. Keyed reads
+         * INSIDE a Defer's deferred render default to `'block'` (the boundary
+         * replaces once, with resolved data); a plugin forcing `'stream'`
+         * there wins and re-introduces nested placeholders.
          *
-         * @example Suspense plugin returns `{ mode: 'stream', placeholder: '<Spinner/>' }`
+         * @example A loading-UI plugin returns `{ mode: 'stream', placeholder: '<Spinner/>' }`
          * @example A plugin returns `{ mode: 'block' }` to force waiting
          */
         handleAsyncSetup?(
@@ -134,6 +156,27 @@ export interface SSRPlugin {
          * @example Islands plugin returns void (allows default walk)
          */
         beforeHydrate?(container: Element): boolean | void;
+
+        /**
+         * Called after the ComponentSetupContext is constructed but BEFORE setup()
+         * runs during hydration. Client-side mirror of
+         * `server.transformComponentContext` — restores server/client symmetry so
+         * hydration is as pluggable as render. The plugin can mutate or replace the
+         * context: swap `ctx.signal` with a state-restoring variant, modify the ssr
+         * helper, etc.
+         *
+         * Return a new context to replace the default, or void to accept as-is.
+         *
+         * Unlike the server hook there is no `SSRContext` during hydration, so only
+         * the vnode and the built context are passed.
+         *
+         * @example Islands plugin swaps `ctx.signal` with a variant that seeds each
+         *          signal from the server-captured island state.
+         */
+        transformComponentContext?(
+            vnode: VNode,
+            componentCtx: ComponentSetupContext
+        ): ComponentSetupContext | void;
 
         /**
          * Called for each component encountered during the hydration walk.

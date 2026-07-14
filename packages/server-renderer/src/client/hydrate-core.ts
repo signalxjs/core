@@ -223,7 +223,7 @@ export function hydrateNode(vnode: VNode, dom: Node | null, parent: Node): Node 
                             patchDirective(fresh, key.slice(4), null, vnode.props[key], getCurrentAppContext());
                             hasDirectives = true;
                         } else if (key !== 'ref') {
-                            patchProp(fresh, key, null, vnode.props[key]);
+                            patchProp(fresh, key, null, vnode.props[key], undefined, getCurrentAppContext());
                         }
                     }
                     if (hasDirectives) {
@@ -269,7 +269,7 @@ export function hydrateNode(vnode: VNode, dom: Node | null, parent: Node): Node 
                     hasDirectives = true;
                 } else {
                     // Use patchProp for consistent prop handling (events, refs, etc.)
-                    patchProp(el, key, null, vnode.props[key]);
+                    patchProp(el, key, null, vnode.props[key], undefined, getCurrentAppContext());
                 }
             }
 

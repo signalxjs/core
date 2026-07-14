@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { component, useAsync, Comment } from 'sigx';
+import { component, useData, Comment } from 'sigx';
 import { renderToString, createSSR } from '../src/index';
 import { createSSRContext } from '../src/server/context';
 import {
@@ -202,11 +202,90 @@ describe('renderToString — Comment vnodes', () => {
 describe('renderToString — falsy slot children', () => {
     it('renders numeric 0 and empty-adjacent children passed to a component slot', async () => {
         const Wrap = component((ctx) => {
-            return () => <div class="wrap">{ctx.slots.default()}</div>;
+            return () => <div class="wrap">{ctx.slots.default?.()}</div>;
         }, { name: 'Wrap' });
 
         const html = await renderToString(<Wrap>{0}</Wrap>);
         expect(html).toContain('>0<');
+    });
+});
+
+describe('renderToString — slot presence parity', () => {
+    it('falls back for absent slots and renders content when provided', async () => {
+        const Card = component((ctx) => {
+            return () => (
+                <div class="card">
+                    {(ctx.slots as any).header?.() ?? <h2 class="fb">fallback</h2>}
+                    {ctx.slots.default?.() ?? <span class="dfb">no body</span>}
+                </div>
+            );
+        }, { name: 'Card' });
+
+        // Nothing provided → both fallbacks render (parity with the client,
+        // where absent slots read as undefined).
+        const empty = await renderToString(<Card />);
+        expect(empty).toContain('class="fb"');
+        expect(empty).toContain('class="dfb"');
+
+        // header via the slots prop, default via children → content, no fallbacks.
+        const CardWithSlots = Card as any;
+        const filled = await renderToString(
+            <CardWithSlots slots={{ header: () => <h1 class="h">H</h1> }}>
+                <p class="body">B</p>
+            </CardWithSlots>
+        );
+        expect(filled).toContain('class="h"');
+        expect(filled).toContain('class="body"');
+        expect(filled).not.toContain('class="fb"');
+        expect(filled).not.toContain('class="dfb"');
+    });
+
+    it('groups a slot-prop child into its named slot and excludes it from default', async () => {
+        const Card = component((ctx) => {
+            return () => (
+                <div class="card">
+                    {(ctx.slots as any).footer?.() ?? <span class="ffb">no footer</span>}
+                    {ctx.slots.default?.() ?? <span class="dfb">no body</span>}
+                </div>
+            );
+        }, { name: 'Card' });
+
+        // Only a footer slot-prop child → footer present, default absent.
+        const html = await renderToString(
+            <Card><div slot="footer" class="foot">F</div></Card>
+        );
+        expect(html).toContain('class="foot"');
+        expect(html).toContain('class="dfb"');     // default fell back
+        expect(html).not.toContain('class="ffb"');  // footer did not
+    });
+
+    it('drops a slot="default" child from the default slot, matching the client', async () => {
+        const Card = component((ctx) => {
+            return () => <div class="card">{ctx.slots.default?.() ?? <span class="dfb">no body</span>}</div>;
+        }, { name: 'Card' });
+
+        // An explicit slot="default" child is a named slot the client default
+        // accessor never reads — so for parity the server must not render it as
+        // default content (which would mismatch on hydration).
+        const html = await renderToString(<Card><p slot="default" class="explicit">X</p></Card>);
+        expect(html).toContain('class="dfb"');        // default fell back
+        expect(html).not.toContain('class="explicit"');
+    });
+
+    it('treats a slot named __proto__ as a plain key without prototype pollution', async () => {
+        const Card = component((ctx) => {
+            return () => <div class="card">{(ctx.slots as any)['__proto__']?.()}</div>;
+        }, { name: 'Card' });
+
+        const html = await renderToString(
+            <Card><span slot="__proto__" class="pp">P</span></Card>
+        );
+
+        // The pathological name is a working named slot...
+        expect(html).toContain('class="pp"');
+        // ...and constructing the slots object did not pollute the prototype.
+        expect(({} as any).polluted).toBeUndefined();
+        expect(Object.getPrototypeOf({})).toBe(Object.prototype);
     });
 });
 
@@ -234,39 +313,41 @@ describe('renderToString — component error handling', () => {
         consoleErr.mockRestore();
     });
 
-    it('routes useAsync throwOnError rejections to the error fallback in block mode', async () => {
-        // Block mode (string render) awaits keyed useAsync fetchers inline —
-        // with throwOnError, a rejection must land in the component-level
-        // catch (→ error fallback), not escape the render.
-        const consoleErr = vi.spyOn(console, 'error').mockImplementation(() => {});
+    it('never routes useData fetcher rejections to the error fallback in block mode (soft error)', async () => {
+        // Block mode (string render) awaits keyed useData fetchers inline —
+        // server data errors are always SOFT: the rejection settles the cell
+        // to state 'errored' and the component renders its own error branch;
+        // it must NOT land in the component-level catch (→ error fallback).
+        const onComponentError = vi.fn(
+            (err: Error, name: string) => `<i data-failed="${name}">${err.message}</i>`
+        );
         const LoadFail = component(() => {
-            useAsync('rc-throw-fail', async () => {
+            const data = useData('rc-throw-fail', async () => {
                 throw new Error('load-fail');
-            }, { throwOnError: true });
+            });
             return () => ({
                 type: 'div',
-                props: {},
+                props: { class: 'load-fail' },
                 key: null,
-                children: ['never shown'],
+                children: [data.error ? `failed: ${data.error.message}` : 'no error'],
                 dom: null
             } as any);
         }, { name: 'LoadFail' });
 
         const ssr = createSSR();
-        const ctx = createSSRContext({
-            onComponentError: (err: Error, name: string) => `<i data-failed="${name}">${err.message}</i>`
-        });
+        const ctx = createSSRContext({ onComponentError });
         const html = await ssr.render((LoadFail as any)({}), ctx);
-        expect(html).toContain('<i data-failed="LoadFail">load-fail</i>');
-        expect(html).not.toContain('never shown');
-        consoleErr.mockRestore();
+        expect(onComponentError).not.toHaveBeenCalled();
+        expect(html).toContain('failed: load-fail');
+        expect(html).not.toContain('data-failed');
+        expect(html).not.toContain('no error');
     });
 
-    it('renders the component error branch (not the fallback) when the fetcher rejects without throwOnError', async () => {
+    it('renders the component error branch (not the fallback) when the fetcher rejects', async () => {
         // Soft failure: the rejection lands in `.error` and the component
         // renders its own error branch — the error fallback never fires.
         const SoftFail = component(() => {
-            const data = useAsync('rc-soft-fail', async () => {
+            const data = useData('rc-soft-fail', async () => {
                 throw new Error('soft-fail');
             });
             return () => ({
@@ -302,10 +383,10 @@ describe('renderToString — async setup (Promise-returning)', () => {
     });
 });
 
-describe('renderToString — useAsync block mode', () => {
-    it('awaits keyed useAsync fetchers before rendering and yields synchronously after', async () => {
+describe('renderToString — useData block mode', () => {
+    it('awaits keyed useData fetchers before rendering and yields synchronously after', async () => {
         const Loaded = component(() => {
-            const data = useAsync('rc-block-inline', async () => {
+            const data = useData('rc-block-inline', async () => {
                 await Promise.resolve();
                 return 'ready';
             });

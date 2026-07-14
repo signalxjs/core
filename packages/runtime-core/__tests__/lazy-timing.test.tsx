@@ -306,13 +306,13 @@ describe('lazy() timing and navigation', () => {
     });
 
     // ========================================================================
-    // Verify: the .then() callback updates the correct loadState
+    // Verify: the factory-level shared load state reaches every instance
     // ========================================================================
 
-    it('should update the mounted instance loadState when promise resolves', async () => {
-        // This tests the closure capture issue: .then() captures loadState from
-        // the first instance. If the component is unmounted and remounted, the
-        // new instance has a different loadState.
+    it('should update the mounted instance when the shared promise resolves', async () => {
+        // Load state lives on the FACTORY (one shared signal), not on the
+        // instance: unmounting and remounting must not lose the subscription —
+        // whichever instance is mounted when the chunk settles re-renders.
         const Dashboard = component(() => {
             return () => <div class="dashboard">Dashboard</div>;
         }, { name: 'Dashboard' });
@@ -402,7 +402,7 @@ describe('lazy() timing and navigation', () => {
 
     it('should forward children to inner component', async () => {
         const Wrapper = component(({ slots }) => {
-            return () => <div class="wrapper">{slots.default()}</div>;
+            return () => <div class="wrapper">{slots.default?.()}</div>;
         }, { name: 'Wrapper' });
 
         const LazyWrapper = lazy(

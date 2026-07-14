@@ -1,4 +1,5 @@
-import { component, useAsync, useHead } from 'sigx';
+import { component, useData, useHead } from 'sigx';
+import type { CachedAsyncState } from '@sigx/cache';
 
 /** Fake API with a per-key hit counter so dedupe is visible in the UI. */
 const hits: Record<string, number> = {};
@@ -8,7 +9,7 @@ async function fetchQuote(key: string): Promise<{ text: string; fetchNo: number 
     return { text: 'Signals all the way down.', fetchNo: hits[key] };
 }
 
-/** Rejects on every second call — exercises the error branch + retry. */
+/** Rejects on every second call — exercises the error arm + retry. */
 let flakyCalls = 0;
 async function fetchFlaky(): Promise<{ ok: string }> {
     await new Promise(r => setTimeout(r, 120));
@@ -19,72 +20,117 @@ async function fetchFlaky(): Promise<{ ok: string }> {
 // ── Dedupe: two components, ONE key → one fetch per request/page ──────
 
 const QuoteCard = component(() => {
-    const quote = useAsync('quote', () => fetchQuote('quote'));
+    // The key is also the fetcher's first argument — one shape everywhere.
+    const quote = useData('quote', (key) => fetchQuote(key));
     return () => (
         <div class="card">
             <h3 style="margin-top: 0;">Dedupe A</h3>
-            <p>{quote.value ? `"${quote.value.text}" — fetch #${quote.value.fetchNo}` : 'Loading…'}</p>
+            {quote.match({
+                pending: () => <p>Loading…</p>,
+                ready: (q) => <p>{`"${q.text}" — fetch #${q.fetchNo}`}</p>,
+            })}
         </div>
     );
 });
 
 const QuoteBadge = component(() => {
     // Same key as QuoteCard — joins the SAME fetch, never issues a second one
-    const quote = useAsync('quote', () => fetchQuote('quote'));
+    const quote = useData('quote', (key) => fetchQuote(key));
     return () => (
         <div class="card">
             <h3 style="margin-top: 0;">Dedupe B (same key)</h3>
-            <p>{quote.value
-                ? `fetch #${quote.value.fetchNo} — same number as Dedupe A proves one fetch served both`
-                : 'Loading…'}</p>
+            {quote.match({
+                pending: () => <p>Loading…</p>,
+                ready: (q) => <p>{`fetch #${q.fetchNo} — same number as Dedupe A proves one fetch served both`}</p>,
+            })}
         </div>
     );
 });
 
-// ── Error branch + refresh(): no error boundary needed ────────────────
+// ── Error arm + retry: no error boundary needed ────────────────────────
 
 const FlakyCard = component(() => {
-    const flaky = useAsync('flaky', fetchFlaky);
+    const flaky = useData('flaky', fetchFlaky);
     return () => (
         <div class="card">
-            <h3 style="margin-top: 0;">Soft errors + refresh()</h3>
-            {flaky.loading && <p>Loading…</p>}
-            {flaky.error && (
-                <p style="color: #b00;">
-                    {flaky.error.message}{' '}
-                    <button onClick={() => flaky.refresh()}>Retry</button>
-                </p>
-            )}
-            {flaky.value && (
-                <p>
-                    ✅ {flaky.value.ok}{' '}
-                    <button onClick={() => flaky.refresh()}>Refetch (will fail again)</button>
-                </p>
-            )}
-            <p style="color: #555; font-size: 0.95em;">The fetcher rejects every odd call. Without <code>throwOnError</code> the error lands on <code>.error</code> and this card owns its retry UI — the rest of the page is untouched.</p>
+            <h3 style="margin-top: 0;">Soft errors + retry</h3>
+            {flaky.match({
+                pending: () => <p>Loading…</p>,
+                error: (e, retry) => (
+                    <p style="color: #b00;">
+                        {e.message}{' '}
+                        <button onClick={retry}>Retry</button>
+                    </p>
+                ),
+                ready: (v) => (
+                    <p>
+                        ✅ {v.ok}{' '}
+                        <button onClick={() => flaky.refresh()}>Refetch (will fail again)</button>
+                    </p>
+                ),
+            })}
+            <p style="color: #555; font-size: 0.95em;">The fetcher rejects every odd call. The error lands on the <code>error</code> arm with its own <code>retry</code> — this card owns its retry UI and the rest of the page is untouched.</p>
         </div>
     );
 });
 
-// ── Unkeyed useAsync: client-only by definition ────────────────────────
+// ── { server: false }: keyed but client-only ───────────────────────────
 
 const BrowserCard = component(() => {
-    // No key → never runs on the server. SSR ships the loading branch;
-    // the browser fills it in after hydration.
-    const browser = useAsync(async () => {
+    // server:false → never runs during SSR. The server ships the pending
+    // arm; the browser fetches after hydration. Still keyed — identity for
+    // dedupe and future cache coverage.
+    const browser = useData('browser-info', async () => {
         await new Promise(r => setTimeout(r, 300));
         return {
             viewport: `${window.innerWidth}×${window.innerHeight}`,
             language: navigator.language
         };
-    });
+    }, { server: false });
     return () => (
         <div class="card">
-            <h3 style="margin-top: 0;">Unkeyed = client-only</h3>
-            {browser.value
-                ? <p>Viewport {browser.value.viewport} · language {browser.value.language}</p>
-                : <p>Measuring in your browser…</p>}
-            <p style="color: #555; font-size: 0.95em;"><code>useAsync(fn)</code> without a key never runs during SSR — view source: this card ships as the loading branch. Right for browser-dependent work.</p>
+            <h3 style="margin-top: 0;">{'{ server: false } = client-only'}</h3>
+            {browser.match({
+                pending: () => <p>Measuring in your browser…</p>,
+                ready: (b) => <p>Viewport {b.viewport} · language {b.language}</p>,
+            })}
+            <p style="color: #555; font-size: 0.95em;"><code>useData(key, fn, {'{ server: false }'})</code> never runs during SSR — view source: this card ships as the pending arm. Right for browser-dependent work.</p>
+        </div>
+    );
+});
+
+
+// ── @sigx/cache: staleTime + invalidate + optimistic mutate ────────────
+
+let cacheFetches = 0;
+async function fetchStamp(): Promise<{ stamp: string; fetchNo: number }> {
+    await new Promise(r => setTimeout(r, 120));
+    return { stamp: new Date().toLocaleTimeString(), fetchNo: ++cacheFetches };
+}
+
+const CacheCard = component(() => {
+    // staleTime 10s: navigate away and back within the window — served from
+    // the cache, no refetch (the SSR value seeds the cache on hydration).
+    const stamp = useData('cache-stamp', fetchStamp, {
+        cache: { staleTime: 10_000 },
+    }) as CachedAsyncState<{ stamp: string; fetchNo: number }>;
+
+    return () => (
+        <div class="card">
+            <h3 style="margin-top: 0;">@sigx/cache: staleTime + invalidate + mutate</h3>
+            {stamp.match({
+                pending: () => <p>Loading…</p>,
+                ready: (s) => (
+                    <p>
+                        fetched at {s.stamp} (fetch #{s.fetchNo}){' '}
+                        <button onClick={() => stamp.invalidate()}>Invalidate (refetch)</button>{' '}
+                        <button onClick={() => stamp.mutate(c => ({ ...(c ?? s), stamp: 'mutated locally' }))}>
+                            Mutate (write-through)
+                        </button>
+                    </p>
+                ),
+            })}
+            <p style="color: #555; font-size: 0.95em;">Leave and revisit this page within 10s — the card renders instantly from the cache with the same fetch number. <code>invalidate()</code> drops the entry and refetches; <code>mutate()</code> writes through without a request.</p>
         </div>
     );
 });
@@ -92,17 +138,18 @@ const BrowserCard = component(() => {
 export const Data = component(() => {
     useHead({
         title: 'Data loading',
-        meta: [{ name: 'description', content: 'useAsync patterns: dedupe, soft errors, refresh, client-only' }]
+        meta: [{ name: 'description', content: 'useData patterns: dedupe, error arm + retry, refresh, client-only' }]
     });
 
     return () => (
         <>
-            <h1>useAsync patterns</h1>
+            <h1>useData patterns</h1>
             <p>One primitive, four behaviors — reload the page (server-fetched + restored) and click the buttons (client refetch).</p>
             <QuoteCard />
             <QuoteBadge />
             <FlakyCard />
             <BrowserCard />
+            <CacheCard />
         </>
     );
 });

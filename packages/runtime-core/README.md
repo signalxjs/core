@@ -52,7 +52,7 @@ The context applies only to the **synchronous** portion of the callback — afte
 
 ## 📚 Documentation
 
-The complete export list (component model, JSX runtime, lifecycle, lazy/Suspense, DI, control flow, directives, error handling), guides and live examples → **<https://sigx.dev/core/packages/runtime-core/overview/>**
+The complete export list (component model, JSX runtime, lifecycle, lazy/Defer, DI, control flow, directives, error handling), guides and live examples → **<https://sigx.dev/core/packages/runtime-core/overview/>**
 
 ## License
 

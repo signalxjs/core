@@ -1,9 +1,11 @@
 // JSX runtime for @sigx/runtime-core
 
-import { detectAccess, isComputed } from '@sigx/reactivity';
+import { detectAccess, detectAccessDev, isComputed } from '@sigx/reactivity';
 import { createModel, isModel, type Model } from './model.js';
 import { getModelProcessors } from './platform.js';
+import { getModelModifier, wrapModelWriteBack } from './model-modifiers.js';
 import { isComponent } from './utils/is-component.js';
+import { normalizeKey } from './utils/normalize-key.js';
 
 // Re-export platform types and functions
 export { setPlatformModelProcessor, getPlatformModelProcessor, registerModelProcessor } from './platform.js';
@@ -100,6 +102,80 @@ function normalizeChild(c: JSXChild): VNode {
 // isComponent is imported from ./utils/is-component.js
 
 /**
+ * Detect the `[stateObj, key]` tuple a model getter reads. In development,
+ * warns when the getter is a transformed expression (e.g. `() => state.x * 2`)
+ * that would silently mis-bind, since two-way binding writes back to the last
+ * property read. Production uses the lean {@link detectAccess} path.
+ */
+function detectModelBinding(selector: () => any): [any, string | symbol] | null {
+    if (process.env.NODE_ENV !== 'production') {
+        const { access, looksTransformed } = detectAccessDev(selector);
+        if (access && looksTransformed) {
+            console.warn(
+                "[sigx] A `model` getter should read a signal property directly, " +
+                "e.g. model={() => state.field}. The getter returned a value different " +
+                "from the property it read (`" + String(access[1]) + "`), so writes will " +
+                "go back to that property and won't match what the input shows. " +
+                "Bind to a signal property or a writable computed instead."
+            );
+        }
+        return access;
+    }
+    return detectAccess(selector);
+}
+
+/**
+ * Dev-only warning when a value-transform modifier (`trim`/`number`/custom) is a
+ * structural no-op for the bound value: on a checkbox/radio (boolean/array value),
+ * or where the initial bound value is a non-string, non-numeric type. Conservative
+ * to avoid false positives — an initially-empty (`''`/`null`/`undefined`) string
+ * field never warns. Mirrors the {@link detectModelBinding} dev-warning style.
+ */
+function warnNoOpModifiers(
+    type: string,
+    originalProps: Record<string, any>,
+    stateObj: object,
+    stateKey: string,
+    modifiers: Record<string, any>,
+): void {
+    let hasTransform = false;
+    for (const name in modifiers) {
+        const opt = modifiers[name];
+        if (opt === false || opt == null) continue;
+        if (getModelModifier(name)?.transform) { hasTransform = true; break; }
+    }
+    if (!hasTransform) return;
+
+    // Class 1: value transform on a toggle — value is boolean/array, never a string.
+    if (type === 'input' && (originalProps.type === 'checkbox' || originalProps.type === 'radio')) {
+        console.warn(
+            "[sigx] `modelModifiers` value transforms (e.g. `trim`/`number`) are no-ops on " +
+            `<input type="${originalProps.type}">: the bound value is a boolean/array, not a ` +
+            "string. Remove them, or bind the modifier to a text/number input."
+        );
+        return;
+    }
+
+    // Class 2: built-in trim/number where the initial value clearly isn't a string.
+    // Skip null/undefined/'' (legitimate empty string targets) and numbers under `number`.
+    if (modifiers.trim || modifiers.number) {
+        const initial = (stateObj as Record<string, any>)[stateKey];
+        if (
+            initial != null && initial !== '' &&
+            typeof initial !== 'string' &&
+            !(modifiers.number && typeof initial === 'number')
+        ) {
+            console.warn(
+                "[sigx] `modelModifiers` `trim`/`number` operate on string input values, but the " +
+                `bound state is of type \`${typeof initial}\`. The transform still runs on the ` +
+                "input's string and writes back a string/number, which won't match the bound " +
+                "type — bind a string value, or remove the modifier."
+            );
+        }
+    }
+}
+
+/**
  * Create a JSX element - this is the core function called by TSX transpilation
  */
 export function jsx(
@@ -121,13 +197,17 @@ export function jsx(
     }
 
     if (!needsModelProcessing) {
-        // Fast path — no model bindings, avoid props clone entirely
+        // Fast path — no model bindings, no mutation clone needed
         if (isComponentType) {
-            const { children, ...rest } = (props || {});
+            // Single own-enumerable clone (JSX transforms always pass plain
+            // object literals); `children` must stay an own key even when
+            // absent so `"children" in props` observability is unchanged.
+            const componentProps: Record<string, any> = props ? { ...props } : {};
+            if (!('children' in componentProps)) componentProps.children = undefined;
             return {
                 type: type as Function,
-                props: { ...rest, children },
-                key: key || rest.key || null,
+                props: componentProps,
+                key: normalizeKey(key ?? componentProps.key),
                 children: EMPTY_CHILDREN,
                 dom: null
             };
@@ -150,7 +230,7 @@ export function jsx(
         return {
             type: type as string | typeof Fragment,
             props: hasProps ? rest : EMPTY_PROPS,
-            key: key || rest.key || null,
+            key: normalizeKey(key ?? rest.key),
             children: normalizeChildren(children),
             dom: null
         };
@@ -159,6 +239,7 @@ export function jsx(
     // Slow path: model bindings present, clone props for mutation
     const processedProps = { ...props };
     const models: Record<string, Model<any>> = {};
+    let hasModels = false;
 
     // Handle model props (two-way binding)
     if (props) {
@@ -176,7 +257,7 @@ export function jsx(
                 }
                 // Convert getter function to tuple using detectAccess
                 else if (typeof modelBinding === "function") {
-                    const detected = detectAccess(modelBinding);
+                    const detected = detectModelBinding(modelBinding);
                     if (detected && typeof detected[1] === 'string') {
                         tuple = detected as [object, string];
                     }
@@ -214,17 +295,38 @@ export function jsx(
                                 break;
                             }
                         }
+                        if (process.env.NODE_ENV !== 'production' && props.modelModifiers) {
+                            warnNoOpModifiers(type, props, stateObj, stateKey, props.modelModifiers);
+                        }
                     }
 
                     // For components: create Model<T> object
                     if (isComponentType) {
-                        models.model = createModel(tuple, updateHandler);
+                        // Wrap once so the Model setter and the onUpdate handler apply
+                        // value-transforms consistently (timing is inert for components).
+                        const handler = props.modelModifiers
+                            ? wrapModelWriteBack(updateHandler, props.modelModifiers)
+                            : updateHandler;
+                        models.model = createModel(tuple, handler);
+                        hasModels = true;
                         // Keep onUpdate handler for backward compatibility
-                        processedProps["onUpdate:modelValue"] = updateHandler;
-                    } else if (!handled) {
-                        // Generic fallback for intrinsic elements
-                        processedProps.modelValue = (stateObj as Record<string, any>)[stateKey];
-                        processedProps["onUpdate:modelValue"] = updateHandler;
+                        processedProps["onUpdate:modelValue"] = handler;
+                    } else {
+                        if (!handled) {
+                            // Generic fallback for intrinsic elements
+                            processedProps.modelValue = (stateObj as Record<string, any>)[stateKey];
+                            processedProps["onUpdate:modelValue"] = updateHandler;
+                        }
+                        // Apply modifiers uniformly: wrap whatever write-back handler
+                        // settled on onUpdate:modelValue — the processor's (handled),
+                        // or the generic fallback's — so value-transforms run in core
+                        // and timing hints reach the platform, on every path.
+                        if (props.modelModifiers) {
+                            const h = processedProps["onUpdate:modelValue"];
+                            if (typeof h === "function") {
+                                processedProps["onUpdate:modelValue"] = wrapModelWriteBack(h, props.modelModifiers);
+                            }
+                        }
                     }
                     delete processedProps.model;
                 }
@@ -242,7 +344,7 @@ export function jsx(
                 }
                 // Handle function form: model:propName={() => state.prop}
                 else if (typeof modelBinding === "function") {
-                    const detected = detectAccess(modelBinding);
+                    const detected = detectModelBinding(modelBinding);
                     if (detected && typeof detected[1] === 'string') {
                         tuple = detected as [object, string];
                     }
@@ -270,15 +372,27 @@ export function jsx(
                         };
                     }
 
+                    if (process.env.NODE_ENV !== 'production' && typeof type === "string" && props.modelModifiers) {
+                        warnNoOpModifiers(type, props, stateObj, stateKey, props.modelModifiers);
+                    }
+
+                    // Apply modifiers uniformly on the named path too (closes the
+                    // model:name coverage gap): wrap the write-back handler so
+                    // value-transforms run in core for components and intrinsics alike.
+                    const handler = props.modelModifiers
+                        ? wrapModelWriteBack(updateHandler, props.modelModifiers)
+                        : updateHandler;
+
                     // For components: create Model<T> object with the prop name
                     if (isComponentType) {
-                        models[name] = createModel(tuple, updateHandler);
+                        models[name] = createModel(tuple, handler);
+                        hasModels = true;
                         // Keep onUpdate handler for backward compatibility
-                        processedProps[eventName] = updateHandler;
+                        processedProps[eventName] = handler;
                     } else {
                         // For intrinsic elements: put value directly on props
                         processedProps[name] = (stateObj as Record<string, any>)[stateKey];
-                        processedProps[eventName] = updateHandler;
+                        processedProps[eventName] = handler;
                     }
                     delete processedProps[propKey];
                 }
@@ -287,18 +401,20 @@ export function jsx(
     }
 
     // Attach models to props for component instantiation
-    if (Object.keys(models).length > 0) {
+    if (hasModels) {
         processedProps.$models = models;
     }
 
     // Handle sigx components - create a VNode with the component factory as type
     // The renderer will detect __setup and call mountComponent
     if (isComponent(type)) {
-        const { children, ...rest } = processedProps;
+        // processedProps is already a fresh clone; just ensure `children` stays
+        // an own key even when absent (matches the fast path's observability).
+        if (!('children' in processedProps)) processedProps.children = undefined;
         return {
             type: type as Function,
-            props: { ...rest, children },
-            key: key || rest.key || null,
+            props: processedProps,
+            key: normalizeKey(key ?? processedProps.key),
             children: [], // Children are passed via props for components
             dom: null
         };
@@ -314,7 +430,7 @@ export function jsx(
     const vnode: VNode = {
         type: type as string | typeof Fragment,
         props: rest,
-        key: key || rest.key || null,
+        key: normalizeKey(key ?? rest.key),
         children: normalizeChildren(children),
         dom: null
     };

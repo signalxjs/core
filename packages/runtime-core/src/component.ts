@@ -7,6 +7,7 @@
  */
 
 import { getComponentPlugins } from "./plugins.js";
+import { normalizeKey } from "./utils/normalize-key.js";
 import type {
     ComponentSetupContext,
     PlatformElement,
@@ -21,12 +22,8 @@ import type {
 export type {
     ComponentAttributeExtensions,
     Define,
-    DefineProp,
     ModelBinding,
-    DefineModel,
     EventDefinition,
-    DefineEvent,
-    DefineSlot,
     SlotsObject,
     EmitFn,
     PlatformTypes,
@@ -38,7 +35,6 @@ export type {
     ComponentSetupContext,
     ViewFn,
     SetupFn,
-    DefineExpose,
     Ref,
     Exposed,
     ComponentRef,
@@ -100,7 +96,7 @@ type StripInternalMarkers<T> = {
  * 
  * @example
  * ```tsx
- * type CardProps = DefineProp<"title", string> & DefineSlot<"header">;
+ * type CardProps = Define.Prop<"title", string> & Define.Slot<"header">;
  * 
  * export const Card = component<CardProps>((ctx) => {
  *     const { title } = ctx.props;
@@ -109,7 +105,7 @@ type StripInternalMarkers<T> = {
  *     return () => (
  *         <div class="card">
  *             {slots.header?.() ?? <h2>{title}</h2>}
- *             {slots.default()}
+ *             {slots.default?.()}
  *         </div>
  *     );
  * });
@@ -130,7 +126,7 @@ export function component<
         return {
             type: factory,
             props: props || {},
-            key: props?.key || null,
+            key: normalizeKey(props?.key),
             children: [],
             dom: null
         };

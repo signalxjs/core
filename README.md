@@ -57,7 +57,9 @@ Full guides, API reference and live examples → **<https://sigx.dev/core/>**
 | `@sigx/runtime-core`   | [npm](https://www.npmjs.com/package/@sigx/runtime-core)   | [docs](https://sigx.dev/core/packages/runtime-core/overview/) | Component model and renderer base shared between targets |
 | `@sigx/runtime-dom`    | [npm](https://www.npmjs.com/package/@sigx/runtime-dom)    | [docs](https://sigx.dev/core/packages/runtime-dom/overview/)  | DOM renderer |
 | `sigx`                 | [npm](https://www.npmjs.com/package/sigx)                 | [docs](https://sigx.dev/core/)                                | The public umbrella package — what you import in apps |
-| `@sigx/server-renderer`| [npm](https://www.npmjs.com/package/@sigx/server-renderer)| [docs](https://sigx.dev/server/)                              | SSR — render components to HTML on the server |
+| `@sigx/server-renderer`| [npm](https://www.npmjs.com/package/@sigx/server-renderer)| [docs](https://sigx.dev/server/)                              | SSR — render components to HTML on the server (pluggable hydration strategies) |
+| `@sigx/ssr-islands`    | [npm](https://www.npmjs.com/package/@sigx/ssr-islands)    | [docs](https://sigx.dev/server/)                              | Islands architecture — selective hydration via `client:*` directives (reference strategy pack) |
+| `@sigx/cache`          | [npm](https://www.npmjs.com/package/@sigx/cache)          | [docs](https://sigx.dev/)                                     | Cache policy for value-first async — staleTime, revalidation, `invalidate()`, optimistic `mutate()` (rfc-async §7 pack) |
 | `@sigx/vite`           | [npm](https://www.npmjs.com/package/@sigx/vite)           | [docs](https://sigx.dev/vite/)                                | Vite plugin for dev/build with HMR |
 
 ## Part of SignalX

@@ -37,6 +37,18 @@ export { normalizeSubTree } from './utils/normalize.js';
 
 // Platform bridge
 export { setPlatformModelProcessor, getPlatformModelProcessor, registerModelProcessor, getModelProcessors } from './platform.js';
+
+// Model modifier internals (for platform renderers — DOM, Lynx)
+export {
+    registerModelModifier,
+    getModelModifier,
+    applyModelTransforms,
+    resolveTiming,
+    wrapModelWriteBack,
+    getHandlerModifiers,
+    createDebounceScheduler,
+} from './model-modifiers.js';
+export type { ResolvedTiming, DebounceScheduler } from './model-modifiers.js';
 export { setDefaultMount, getDefaultMount } from './app.js';
 
 // Plugin system internals
@@ -53,14 +65,18 @@ export { getComponentPlugins, applyContextExtensions, registerComponentPlugin, r
 // DI internals
 export { getAppContextToken, provideAppContext } from './di/injectable.js';
 
+// Async engine internals (for server renderers and cache packs)
+export { matchAsyncState, registerHandledAsyncOptionKeys, makeUnhandledReporter, normalizeError, makeAbortController, inertAbortSignal } from './async/shared.js';
+export { reportUnhandledAsyncError } from './app.js';
+// The §7 pack contract: per-app engine swap + the default engine to delegate to
+export { ASYNC_ENGINE_TOKEN, provideAsyncEngine, defaultAsyncEngine } from './async/engine.js';
+export type { AsyncEngine, AsyncReadHandle } from './async/engine.js';
+
 // Model internals
 export { getModelSymbol } from './model.js';
 
 // Directive internals
 export { __DIRECTIVE__ } from './directives.js';
-
-// Lazy loading internals
-export { registerPendingPromise } from './lazy.js';
 
 // Component-setup helpers shared with the client hydrator
 export { createEmit, splitComponentProps } from './utils/component-props.js';

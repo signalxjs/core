@@ -3,7 +3,7 @@
 // ============================================================================
 
 import type { Dep, Signal, PrimitiveSignal, Primitive } from './types';
-import { currentSubscriber, batch, createDep, track, trigger } from './effect';
+import { currentSubscriber, batch, startBatch, endBatch, createDep, track, trigger } from './effect';
 import { getDevtoolsHook, registerReactiveProxy, notifySignalUpdated } from './devtools-hook';
 import {
     isReactive,
@@ -78,16 +78,64 @@ export function detectAccess(selector: () => any): [any, string | symbol] | null
     return result;
 }
 
+/**
+ * Dev-only variant of {@link detectAccess} that also reports whether the
+ * selector returned a value different from the last property it read.
+ *
+ * A valid model getter is a property-access chain whose return value IS the
+ * leaf property (`() => state.a.b` returns `state.a.b`; a writable computed
+ * `() => c.value` returns `c.value`). A transformed expression like
+ * `() => transform(state.x)` or `() => state.count * 2` returns something
+ * other than the property it read, which means a two-way binding would write
+ * the transformed value back into that property — almost never the intent.
+ *
+ * @internal Used by the JSX runtime to warn in development.
+ */
+export function detectAccessDev(
+    selector: () => any
+): { access: [any, string | symbol] | null; looksTransformed: boolean } {
+    let result: [any, string | symbol] | null = null;
+    const prev = accessObserver;
+
+    accessObserver = (target, key) => {
+        result = [target, key];
+    };
+
+    let returnValue: any;
+    try {
+        returnValue = selector();
+    } finally {
+        accessObserver = prev;
+    }
+
+    // `as` resets control-flow narrowing — TS only sees the `= null` init, not
+    // the assignment that happens inside the access-observer callback.
+    const access = result as [any, string | symbol] | null;
+    let looksTransformed = false;
+    if (access && typeof access[1] === 'string') {
+        const [obj, key] = access;
+        // Object.is (not !==) so a getter that legitimately returns NaN — where
+        // the bound property is also NaN — isn't flagged as transformed.
+        looksTransformed = !Object.is((obj as Record<string, any>)[key], returnValue);
+    }
+
+    return { access, looksTransformed };
+}
+
 const arrayInstrumentations: Record<string, Function> = {};
 
-// Mutator methods — wrap in batch to coalesce reactive triggers
+// Mutator methods — batch to coalesce reactive triggers. Imperative
+// startBatch/endBatch (in try/finally) instead of batch(fn): these run on
+// every mutator call and must not allocate a closure or copy rest args.
 ['push', 'pop', 'shift', 'unshift', 'splice', 'sort', 'reverse'].forEach(method => {
-    arrayInstrumentations[method] = function (this: any, ...args: any[]) {
-        let res;
-        batch(() => {
-            res = (Array.prototype as any)[method].apply(this, args);
-        });
-        return res;
+    const original = (Array.prototype as any)[method];
+    arrayInstrumentations[method] = function (this: any) {
+        startBatch();
+        try {
+            return original.apply(this, arguments);
+        } finally {
+            endBatch();
+        }
     };
 });
 
@@ -105,6 +153,10 @@ const arrayInstrumentations: Record<string, Function> = {};
         return (Array.prototype as any)[method].apply(raw, args);
     };
 });
+
+// Set lookup for the get trap: `hasOwnProperty` walks the prototype chain
+// on every array property access; this is a single hash probe.
+const arrayInstrumentedKeys = new Set(Object.keys(arrayInstrumentations));
 
 // Overload for primitive types - wraps in { value: T }, no $set (use .value instead)
 /**
@@ -156,7 +208,9 @@ export function signal<T>(target: T): PrimitiveSignal<T> | Signal<T & object> {
     // Collections need the Map upfront for their write method instrumentations.
     const isCollectionTarget = isCollection(objectTarget);
     let depsMap: Map<string | symbol, Dep> | null = isCollectionTarget ? new Map() : null;
-    const reactiveCache = new WeakMap<object, any>();
+    // Lazy: most signals (primitives wrapped as { value }, flat objects)
+    // never read a nested object, so don't pay a WeakMap per signal().
+    let reactiveCache: WeakMap<object, any> | null = null;
 
     // DevTools id — only minted when a hook is currently installed.
     // The id stays on the proxy for the rest of its life via
@@ -189,17 +243,23 @@ export function signal<T>(target: T): PrimitiveSignal<T> | Signal<T & object> {
 
     // Create collection instrumentations if this is a collection.
     // The notify closure routes Map/Set mutations through the same
-    // devtools emit path as plain object property writes.
-    const collectionInstrumentations = isCollectionTarget
-        ? createCollectionInstrumentations(depsMap!, getOrCreateDep, (key) => {
+    // devtools emit path as plain object property writes. The proxy is
+    // installed via setProxy right after construction below.
+    const collectionSupport = isCollectionTarget
+        ? createCollectionInstrumentations(objectTarget, depsMap!, getOrCreateDep, (key) => {
             notifySignalUpdated(signalId, key);
         })
         : null;
+    const collectionInstrumentations = collectionSupport ? collectionSupport.instrumentations : null;
+
+    // One $set closure per proxy, created on first read (was: a fresh
+    // closure per $set access).
+    let setFn: ((newValue: T & object) => void) | null = null;
 
     const proxy = new Proxy(objectTarget, {
         get(obj, prop, receiver) {
             if (prop === '$set') {
-                return (newValue: T & object) => {
+                return setFn ??= (newValue: T & object) => {
                     batch(() => {
                         if (Array.isArray(obj) && Array.isArray(newValue)) {
                             const len = newValue.length;
@@ -231,17 +291,15 @@ export function signal<T>(target: T): PrimitiveSignal<T> | Signal<T & object> {
                     return (obj as Set<any> | Map<any, any>).size;
                 }
                 
-                // Check if this is an instrumented method
+                // Instrumented methods close over the raw target and proxy,
+                // so they are returned as-is — no per-access bind. Method
+                // identity is stable (m.set === m.set).
                 if (prop in collectionInstrumentations) {
-                    const instrumented = collectionInstrumentations[prop];
-                    if (typeof instrumented === 'function') {
-                        return instrumented.bind(receiver);
-                    }
-                    return instrumented;
+                    return collectionInstrumentations[prop];
                 }
             }
 
-            if (Array.isArray(obj) && typeof prop === 'string' && arrayInstrumentations.hasOwnProperty(prop)) {
+            if (Array.isArray(obj) && typeof prop === 'string' && arrayInstrumentedKeys.has(prop)) {
                 return arrayInstrumentations[prop];
             }
 
@@ -261,7 +319,7 @@ export function signal<T>(target: T): PrimitiveSignal<T> | Signal<T & object> {
             // If the value is an object, make it reactive too (with caching)
             // Skip exotic built-ins like Date, RegExp, etc. that have internal slots
             if (value && typeof value === 'object' && !shouldNotProxy(value)) {
-                let cached = reactiveCache.get(value);
+                let cached = (reactiveCache ??= new WeakMap()).get(value);
                 if (!cached) {
                     cached = signal(value);
                     reactiveCache.set(value, cached);
@@ -289,13 +347,14 @@ export function signal<T>(target: T): PrimitiveSignal<T> | Signal<T & object> {
                         typeof newValue === 'number' && newValue < oldLength;
 
                     if (lengthChanged || lengthShrunk) {
-                        batch(() => {
-                            const dep = depsMap!.get(prop);
+                        startBatch();
+                        try {
+                            const dep = depsMap.get(prop);
                             if (dep) {
                                 trigger(dep);
                             }
                             if (lengthChanged) {
-                                const lengthDep = depsMap!.get('length');
+                                const lengthDep = depsMap.get('length');
                                 if (lengthDep) {
                                     trigger(lengthDep);
                                 }
@@ -303,11 +362,13 @@ export function signal<T>(target: T): PrimitiveSignal<T> | Signal<T & object> {
                             if (lengthShrunk) {
                                 // Trigger indices that are now out of bounds
                                 for (let i = newValue as number; i < oldLength; i++) {
-                                    const idxDep = depsMap!.get(String(i));
+                                    const idxDep = depsMap.get(String(i));
                                     if (idxDep) trigger(idxDep);
                                 }
                             }
-                        });
+                        } finally {
+                            endBatch();
+                        }
                     } else {
                         const dep = depsMap.get(prop);
                         if (dep) {
@@ -349,6 +410,10 @@ export function signal<T>(target: T): PrimitiveSignal<T> | Signal<T & object> {
     // Store the raw ↔ reactive mappings
     reactiveToRaw.set(proxy, objectTarget);
     rawToReactive.set(objectTarget, proxy);
+
+    // Late-bind the proxy into the collection instrumentations (they are
+    // built before the Proxy exists).
+    if (collectionSupport) collectionSupport.setProxy(proxy);
 
     // Associate the proxy with its devtools id so consumers can look
     // it up later (e.g. when the panel asks for a signal's current

@@ -160,7 +160,7 @@ describe('createSlots', () => {
     it('returns default slot children from an array', () => {
         const children = [{ type: 'span', props: {}, key: null, children: [], dom: null }];
         const slots = createSlots(children);
-        const result = slots.default();
+        const result = slots.default!();
         expect(result).toHaveLength(1);
         expect(result[0]).toBe(children[0]);
     });
@@ -168,7 +168,7 @@ describe('createSlots', () => {
     it('filters null, false, and true from default slot', () => {
         const children = ['text', null, false, true, 0];
         const slots = createSlots(children);
-        const result = slots.default();
+        const result = slots.default!();
         expect(result).toEqual(['text', 0]);
     });
 
@@ -177,7 +177,7 @@ describe('createSlots', () => {
         const body = { type: 'p', props: {}, key: null, children: [], dom: null };
         const slots = createSlots([header, body]);
 
-        expect(slots.default()).toEqual([body]);
+        expect(slots.default!()).toEqual([body]);
 
         const headerSlot = (slots as any).header();
         expect(headerSlot).toEqual([header]);
@@ -199,16 +199,69 @@ describe('createSlots', () => {
         expect(result[0].props.text).toBe('Alice');
     });
 
-    it('returns empty array for a missing named slot', () => {
+    // ── presence: a slot accessor exists only when content was provided ──
+
+    it('reads an unprovided named slot as undefined', () => {
         const slots = createSlots([]);
-        const result = (slots as any).nonexistent();
-        expect(result).toEqual([]);
+        expect((slots as any).nonexistent).toBeUndefined();
     });
 
-    it('returns empty default slot for null children', () => {
-        const slots = createSlots(null);
-        const result = slots.default();
-        expect(result).toEqual([]);
+    it('reads the default slot as undefined when there are no children', () => {
+        expect(createSlots(null).default).toBeUndefined();
+        expect(createSlots([]).default).toBeUndefined();
+        expect(createSlots([null, false, true]).default).toBeUndefined();
+    });
+
+    it('reads the default slot as undefined when every child is a named slot', () => {
+        const only = { type: 'div', props: { slot: 'header' }, key: null, children: [], dom: null };
+        const slots = createSlots([only]);
+        expect(slots.default).toBeUndefined();
+        // ...but the named slot is present.
+        expect(typeof (slots as any).header).toBe('function');
+    });
+
+    it('makes the documented `slots.x?.() ?? fallback` pattern work for absent slots', () => {
+        const slots = createSlots([]);
+        expect((slots as any).header?.() ?? 'fallback').toBe('fallback');
+        expect(slots.default?.() ?? 'fallback').toBe('fallback');
+    });
+
+    it('treats a slot provided via the slots prop as present even if it renders nothing', () => {
+        const slots = createSlots([], { maybe: () => null });
+        expect(typeof (slots as any).maybe).toBe('function');
+        // Provided-but-empty still counts as present; calling normalizes null to [].
+        expect((slots as any).maybe()).toEqual([]);
+    });
+
+    it('does not treat inherited Object.prototype names as present slots', () => {
+        const slots = createSlots([{ type: 'span', props: {}, key: null, children: [], dom: null }]);
+        // `toString`/`constructor` are inherited members, not provided slots.
+        expect((slots as any).toString).toBeUndefined();
+        expect((slots as any).constructor).toBeUndefined();
+        expect((slots as any).toString?.() ?? 'fb').toBe('fb');
+    });
+
+    it('ignores inherited members of the slots prop object when resolving presence', () => {
+        // A plain `{}` inherits Object.prototype.toString (a function); it must
+        // not be mistaken for a provided `toString` slot.
+        const slots = createSlots([], {});
+        expect((slots as any).toString).toBeUndefined();
+    });
+
+    it('supports a slot literally named like an Object.prototype member', () => {
+        const child = { type: 'div', props: { slot: 'toString' }, key: null, children: [], dom: null };
+        const slots = createSlots([child]);
+        expect(typeof (slots as any).toString).toBe('function');
+        expect((slots as any).toString()).toEqual([child]);
+    });
+
+    it('classifies a slot="default" child as named, leaving the default slot absent', () => {
+        // A child with an explicit `slot="default"` is a named slot like any
+        // other; the default accessor reads only un-slotted children, so with
+        // no un-slotted children the default slot is absent.
+        const child = { type: 'p', props: { slot: 'default' }, key: null, children: [], dom: null };
+        const slots = createSlots([child]);
+        expect(slots.default).toBeUndefined();
     });
 
     it('returns a stable accessor function per named slot', () => {
@@ -221,9 +274,9 @@ describe('createSlots', () => {
         const child = { type: 'span', props: {}, key: null, children: [], dom: null };
         const slots = createSlots([child]);
 
-        const first = slots.default();
+        const first = slots.default!();
         first.push('corruption');
-        const second = slots.default();
+        const second = slots.default!();
         expect(second).toEqual([child]);
         expect(second).not.toBe(first);
     });
@@ -232,33 +285,37 @@ describe('createSlots', () => {
         const child = { type: 'div', props: { slot: '__proto__' }, key: null, children: [], dom: null };
         const slots = createSlots([child]);
 
-        // Force extraction.
-        expect(slots.default()).toEqual([]);
+        // Only a named child means no default content — reading `default`
+        // forces extraction and reads as undefined.
+        expect(slots.default).toBeUndefined();
 
         expect(({} as any).polluted).toBeUndefined();
         expect(Object.prototype.hasOwnProperty.call(Object.prototype, '0')).toBe(false);
-        // The default slot stays clean and repeated extraction is stable.
-        expect(slots.default()).toEqual([]);
+        // Repeated access stays clean.
+        expect(slots.default).toBeUndefined();
 
         // The pathological name is still a WORKING named slot: the proxy
         // must not let the inherited __proto__ accessor shadow it.
         expect((slots as any)['__proto__']()).toEqual([child]);
     });
 
-    it('re-extracts after a version bump swaps the children', () => {
+    it('re-extracts and flips slot presence after a version bump swaps the children', () => {
         const a = { type: 'span', props: {}, key: null, children: [], dom: null };
         const b = { type: 'em', props: { slot: 'side' }, key: null, children: [], dom: null };
         const slots = createSlots([a]);
 
-        expect(slots.default()).toEqual([a]);
-        expect((slots as any).side()).toEqual([]);
+        expect(slots.default!()).toEqual([a]);
+        // `side` is absent → undefined.
+        expect((slots as any).side).toBeUndefined();
 
         // The renderer's contract: _children is only reassigned together
         // with a version bump.
         slots._children = [b];
         slots._version.v++;
 
-        expect(slots.default()).toEqual([]);
+        // Presence flips both ways: default disappears, side appears.
+        expect(slots.default).toBeUndefined();
+        expect(typeof (slots as any).side).toBe('function');
         expect((slots as any).side()).toEqual([b]);
     });
 });

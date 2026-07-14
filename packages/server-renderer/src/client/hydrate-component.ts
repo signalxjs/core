@@ -13,7 +13,7 @@ import {
     effect,
     untrack
 } from 'sigx';
-import type { ComponentSetupContext, SlotsObject } from 'sigx';
+import type { ComponentSetupContext } from 'sigx';
 import {
     setCurrentInstance,
     createPropsAccessor,
@@ -21,7 +21,6 @@ import {
     normalizeSubTree,
     patch,
     mount,
-    patchProp,
     createEmit,
     splitComponentProps,
     provideAppContext,
@@ -31,7 +30,8 @@ import {
 import type { SchedulerJob } from 'sigx/internals';
 import {
     InternalVNode,
-    getCurrentAppContext
+    getCurrentAppContext,
+    getClientPlugins
 } from './hydrate-context';
 import { hydrateNode } from './hydrate-core';
 
@@ -64,7 +64,6 @@ export function hydrateComponent(vnode: VNode, dom: Node | null, parent: Node, t
 
     // With trailing markers, find the marker if not provided
     let anchor: Comment | null = trailingMarker || null;
-    let componentId: number | null = null;
 
     if (!anchor) {
         // Find this component's trailing marker by traversing forward.
@@ -98,13 +97,6 @@ export function hydrateComponent(vnode: VNode, dom: Node | null, parent: Node, t
 
         if (bestAnchor) {
             anchor = bestAnchor;
-            componentId = bestId;
-        }
-    } else {
-        // Extract component ID from provided marker
-        const text = anchor.data;
-        if (text.startsWith('$c:')) {
-            componentId = parseInt(text.slice(3), 10);
         }
     }
 
@@ -136,7 +128,7 @@ export function hydrateComponent(vnode: VNode, dom: Node | null, parent: Node, t
         isHydrating: true
     };
 
-    const componentCtx: ComponentSetupContext = {
+    let componentCtx: ComponentSetupContext = {
         el: parent as HTMLElement,
         signal: signal,
         props: createPropsAccessor(reactiveProps),
@@ -153,7 +145,17 @@ export function hydrateComponent(vnode: VNode, dom: Node | null, parent: Node, t
         ssr: ssrHelper
     };
 
-    // For ROOT component only (no parent), provide the AppContext
+    // Let plugins transform the context before setup runs (mirror of the
+    // server's transformComponentContext). A strategy pack can swap ctx.signal
+    // for a state-restoring variant here — core stays strategy-agnostic.
+    for (const plugin of getClientPlugins()) {
+        const next = plugin.client?.transformComponentContext?.(vnode, componentCtx);
+        if (next) componentCtx = next;
+    }
+
+    // For ROOT component only (no parent), provide the AppContext. Run this AFTER
+    // the transform hooks so a plugin that returns a replacement context still
+    // receives the AppContext (the hook contract allows swapping the whole ctx).
     if (!parentInstance && getCurrentAppContext()) {
         provideAppContext(componentCtx, getCurrentAppContext()!);
     }
@@ -174,7 +176,7 @@ export function hydrateComponent(vnode: VNode, dom: Node | null, parent: Node, t
         setCurrentInstance(prev);
     }
 
-    // Streamed async components (and Suspense boundaries) render inside a
+    // Streamed async components (and Defer boundaries) render inside a
     // <div data-async-placeholder> wrapper that is NOT part of the vnode
     // tree. Hydrate against the wrapper's children — matching the wrapper
     // itself against the component's first element would mismatch and mount

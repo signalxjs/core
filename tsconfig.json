@@ -10,6 +10,7 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "paths": {
+      "@sigx/cache": ["./packages/cache/src/index.ts"],
       "@sigx/reactivity": ["./packages/reactivity/src/index.ts"],
       "@sigx/reactivity/internals": ["./packages/reactivity/src/internals.ts"],
       "@sigx/runtime-core": ["./packages/runtime-core/src/index.ts"],
@@ -22,6 +23,10 @@
       "@sigx/server-renderer": ["./packages/server-renderer/src/index.ts"],
       "@sigx/server-renderer/server": ["./packages/server-renderer/src/server/index.ts"],
       "@sigx/server-renderer/client": ["./packages/server-renderer/src/client/index.ts"],
+      "@sigx/ssr-islands": ["./packages/ssr-islands/src/index.ts"],
+      "@sigx/ssr-islands/server": ["./packages/ssr-islands/src/server/index.ts"],
+      "@sigx/ssr-islands/client": ["./packages/ssr-islands/src/client/index.ts"],
+      "@sigx/ssr-islands/jsx": ["./packages/ssr-islands/src/jsx.d.ts"],
       "sigx": ["./packages/sigx/src/index.ts"],
       "sigx/internals": ["./packages/sigx/src/internals.ts"],
       "sigx/jsx-runtime": ["./packages/sigx/src/index.ts"],

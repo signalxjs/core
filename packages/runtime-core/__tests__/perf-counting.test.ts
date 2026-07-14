@@ -83,8 +83,30 @@ describe('renderer op counts (mock host)', () => {
         expect(counts.createElement).toBe(0);
         expect(counts.remove).toBe(0);
         expect(counts.setText).toBe(0);
-        // Keyed double-ended diff performs the swap with bounded moves.
-        expect(counts.insert).toBeLessThanOrEqual(4);
+        // The LIS keyed diff moves exactly the two displaced rows.
+        expect(counts.insert).toBeLessThanOrEqual(2);
+    });
+
+    it('pseudo-random shuffle of 100 rows moves only non-LIS rows', () => {
+        const rows = makeRows(100);
+        renderer.render(rowList(rows) as any, container);
+        ops.reset();
+
+        // Same deterministic pseudo-shuffle as renderer.bench.ts.
+        const shuffled = rows.slice();
+        for (let i = shuffled.length - 1; i > 0; i--) {
+            const j = (i * 7919 + 13) % (i + 1);
+            [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+        }
+        renderer.render(rowList(shuffled) as any, container);
+
+        const counts = ops.counts();
+        expect(counts.createElement).toBe(0);
+        expect(counts.remove).toBe(0);
+        // Every row survives; the LIS diff moves exactly n − |LIS| rows.
+        // This permutation's longest increasing subsequence has length 24,
+        // so 76 moves. (The greedy two-ended diff moved ~99 rows here.)
+        expect(counts.insert).toBe(76);
     });
 
     it('append one row to 1000 creates exactly one element', () => {
@@ -193,7 +215,7 @@ describe('component render counts (DOM)', () => {
 
         const Child = component((ctx) => () => {
             childRenders();
-            return jsx('div', { children: ctx.slots.default() });
+            return jsx('div', { children: ctx.slots.default?.() });
         });
 
         const Parent = component(() => () =>
@@ -220,7 +242,7 @@ describe('component render counts (DOM)', () => {
 
         const Child = component((ctx) => () => {
             childRenders();
-            return jsx('div', { children: ctx.slots.default() });
+            return jsx('div', { children: ctx.slots.default?.() });
         });
 
         const Parent = component(() => () =>
@@ -246,7 +268,7 @@ describe('component render counts (DOM)', () => {
 
         const Child = component((ctx) => () => {
             childRenders();
-            return jsx('div', { children: ctx.slots.default() });
+            return jsx('div', { children: ctx.slots.default?.() });
         });
 
         const Parent = component(() => () =>
@@ -314,7 +336,7 @@ describe('component render counts (DOM)', () => {
 
         const Child = component((ctx) => () => {
             childRenders();
-            return jsx('div', { children: ctx.slots.default() });
+            return jsx('div', { children: ctx.slots.default?.() });
         });
 
         const Parent = component(() => () =>

@@ -35,6 +35,7 @@ import {
     createPropsAccessor,
     provideAppContext,
     resolveBuiltInDirective,
+    matchAsyncState,
 } from 'sigx/internals';
 import type { SSRContext } from './context';
 import { generateAppendScript } from './streaming';
@@ -215,15 +216,56 @@ function createComponentState(
     const id = ctx.nextId();
     ctx.pushComponent(id);
 
-    // Create slots from children
+    // Create slots from children, mirroring the client slot extractor so
+    // server and client agree on slot presence (otherwise hydration could
+    // mismatch). Un-slotted children form the default slot; children with a
+    // `slot` prop group into named slots. A slot accessor exists only when
+    // content was provided for it — an absent slot reads as `undefined`, so
+    // `slots.x?.()` / `?? fallback` behave the same as on the client.
     // Only null/undefined/boolean mean "no children" — falsy render output
     // like the number 0 or '' is valid slot content.
-    const defaultSlot = () => children == null || typeof children === 'boolean'
-        ? []
-        : (Array.isArray(children) ? children : [children]);
-    const slots: SlotsObject<any> = slotsFromProps
-        ? { default: defaultSlot, ...slotsFromProps }
-        : { default: defaultSlot };
+    const defaultChildren: any[] = [];
+    const elementNamed: Record<string, any[]> = Object.create(null);
+    if (children != null && typeof children !== 'boolean') {
+        const items = Array.isArray(children) ? children : [children];
+        for (const child of items) {
+            if (child && typeof child === 'object' && child.props && child.props.slot) {
+                const name = child.props.slot;
+                (elementNamed[name] ?? (elementNamed[name] = [])).push(child);
+            } else if (child != null && child !== false && child !== true) {
+                defaultChildren.push(child);
+            }
+        }
+    }
+    // Null-prototype dictionary: slot names come from user-controlled `slot`
+    // props and the `slots` prop, so a name like "__proto__" must be a plain
+    // key (a normal object would route it through the prototype setter,
+    // polluting the prototype and breaking the client's "__proto__"-named
+    // slot parity).
+    const slots: SlotsObject<any> = Object.create(null);
+    if (defaultChildren.length > 0) {
+        slots.default = () => defaultChildren.slice();
+    }
+    for (const name in elementNamed) {
+        // A child with `slot="default"` is a named slot on the client too,
+        // but the client's `default` accessor only reads un-slotted children,
+        // so such content is unreachable there. Skip it here for parity —
+        // installing it at `slots.default` would render on the server but not
+        // the client, causing a hydration mismatch. `slots.default` is driven
+        // solely by the un-slotted children above (and the `slots` prop below).
+        if (name === 'default') continue;
+        const list = elementNamed[name];
+        slots[name] = () => list.slice();
+    }
+    // Slots provided via the `slots` prop take precedence over element-based
+    // ones of the same name, matching the client extractor.
+    if (slotsFromProps) {
+        for (const name of Object.keys(slotsFromProps)) {
+            if (typeof slotsFromProps[name] === 'function') {
+                slots[name] = slotsFromProps[name];
+            }
+        }
+    }
 
     // Pending async work for this component (useAsync/useStream register
     // here; block mode awaits these inline, streaming mode defers behind a
@@ -307,39 +349,54 @@ function recordComponentKey(ctx: SSRContext, id: number, key: string): void {
     }
 }
 
-/** Shared inert state for unkeyed / { server: false } calls on the server. */
-const INERT_ASYNC_STATE = {
+/**
+ * Shared inert state for { server: false } calls on the server: the pending
+ * arm renders into the HTML and the client fetches after hydration.
+ */
+const INERT_PENDING_STATE = Object.freeze({
+    state: 'pending' as const,
     value: null,
-    loading: true,
     error: null,
+    loading: true,
+    match: (arms: { pending?: () => unknown }) => arms.pending?.(),
     refresh: () => Promise.resolve()
-};
+});
 
 /**
- * useAsync server provider (shared; invoked as instance._useAsync(...)).
+ * useData server provider (shared; invoked as instance._useAsync(...)).
  *
  * Keyed calls fetch on the server (deduped per request by key), settle
  * through the component's ssrLoads (block: awaited inline; streaming:
  * deferred behind the placeholder), and record their value for the
- * __SIGX_ASYNC__ hydration blob. Unkeyed / { server: false } calls never
- * run here — the loading branch renders into the HTML and the client
- * fetches after hydration.
+ * __SIGX_ASYNC__ hydration blob. `{ server: false }` calls never run here —
+ * the pending arm renders into the HTML and the client fetches after
+ * hydration. Core resolves keys (getter → canonical string) and pre-binds
+ * the fetcher's argument before this seam, so server cells are only ever
+ * 'pending' | 'ready' | 'errored'.
+ *
+ * The options bag arrives whole (open AsyncOptions interface) — this
+ * provider reads `server` and ignores the rest; pack options are the pack
+ * provider's business.
  */
 function serverUseAsync(
     this: any,
     key: string | null,
     fetcher: (fctx: { signal: AbortSignal }) => Promise<unknown>,
-    options: { throwOnError?: boolean; server?: boolean } = {}
+    options: { server?: boolean } & Record<string, unknown> = {}
 ) {
     if (key === null || options.server === false) {
-        return INERT_ASYNC_STATE;
+        return INERT_PENDING_STATE;
     }
 
     const ctx: SSRContext = this.__ssrCtx;
     const id: number = this.__ssrId;
     const ssrLoads: Promise<void>[] = this._ssrLoads;
 
-    const state = { data: null as unknown, pending: true, failure: null as Error | null };
+    const state = {
+        st: 'pending' as 'pending' | 'ready' | 'errored',
+        data: null as unknown,
+        failure: null as Error | null
+    };
 
     // Request-level dedupe: same key → one fetch, shared result
     let promise = ctx._asyncCache.get(key);
@@ -349,29 +406,31 @@ function serverUseAsync(
     }
 
     const settled = (promise as Promise<unknown>).then(value => {
+        state.st = 'ready';
         state.data = value;
-        state.pending = false;
         ctx._asyncResults.set(key, value);
         recordComponentKey(ctx, id, key);
     }, e => {
+        // Soft failure: the component renders its error arm. Nothing is
+        // serialized — the client refetches (fail-safe).
+        state.st = 'errored';
         state.failure = e instanceof Error ? e : new Error(String(e));
-        state.pending = false;
-        if (options.throwOnError) {
-            // Reject the load → component error fallback (block mode) or
-            // error replacement (streaming) — same as a setup throw.
-            throw state.failure;
-        }
-        // Soft failure: the component renders its own error branch.
-        // Nothing is serialized — the client refetches (fail-safe).
     });
     ssrLoads.push(settled);
 
     return {
+        get state() { return state.st; },
         get value() { return state.data; },
-        get loading() { return state.pending; },
-        get error() {
-            if (options.throwOnError && state.failure) throw state.failure;
-            return state.failure;
+        get loading() { return state.st === 'pending'; },
+        get error() { return state.failure; },
+        match(arms: Parameters<typeof matchAsyncState>[1]) {
+            return matchAsyncState({
+                state: state.st,
+                value: state.data,
+                error: state.failure,
+                stale: null,
+                retry: () => { /* no-op on the server */ }
+            }, arms);
         },
         refresh: () => Promise.resolve() // no-op on the server
     };
@@ -584,6 +643,14 @@ interface RenderBufState {
     len: number;
     /** Flush-hint threshold (Infinity in string mode: never hint) */
     threshold: number;
+    /**
+     * True while rendering inside a <Defer> boundary's deferred render:
+     * pending keyed reads are awaited inline (block mode) instead of
+     * spawning their own placeholders, so the boundary replaces ONCE with
+     * everything beneath it resolved. Per-driver — multiple deferred renders
+     * interleave on the shared SSRContext, so this must not live on ctx.
+     */
+    inDefer?: boolean;
 }
 
 /**
@@ -757,13 +824,14 @@ function* renderNode(
             yield { p: factory.preload().catch(() => undefined) };
         }
 
-        // Suspense boundaries in streaming mode: stream the fallback now,
-        // replace with the real children once their lazy deps resolve —
-        // reusing the standard placeholder/$SIGX_REPLACE machinery. In
-        // blocking/string mode Suspense needs no special handling: lazy
-        // children await inline (above), so the boundary never has pending
-        // promises and Suspense renders its children directly.
-        if (factory.__suspense && ctx._streaming) {
+        // <Defer> boundaries in streaming mode: stream the fallback now,
+        // replace with the real children once everything pending beneath
+        // them — lazy chunks AND keyed useData reads — resolves, reusing the
+        // standard placeholder/$SIGX_REPLACE machinery. In blocking/string
+        // mode Defer needs no special handling: lazy children await inline
+        // (above), keyed reads block per component, and the Defer component
+        // renders its children directly.
+        if (factory.__defer && ctx._streaming) {
             const id = ctx.nextId();
             const props = vnode.props || {};
 
@@ -786,11 +854,15 @@ function* renderNode(
             const capturedParentCtx = parentCtx;
 
             const deferredRender = (async () => {
-                let html = '';
+                // Leading comment mirrors the client Defer's constant render
+                // shape ([fallback-or-comment, …children]) so the streamed
+                // replacement hydrates against the client's null-fallback slot.
+                let html = '<!---->';
                 for (const item of items) {
                     // The deferred driver awaits unresolved lazy() preloads
-                    // inline (rule above), so this resolves to real content.
-                    html += await renderVNodeToString(item, ctx, appContext, capturedParentCtx);
+                    // inline (rule above) and — via inDefer — blocks on keyed
+                    // useData reads too, so this resolves to real content.
+                    html += await renderVNodeToString(item, ctx, appContext, capturedParentCtx, { inDefer: true });
                 }
                 return html;
             })();
@@ -810,6 +882,30 @@ function* renderNode(
         const setup = vnode.type.__setup;
         const { componentName, id, ssrLoads, componentCtx } = createComponentState(vnode, ctx, parentCtx, appContext);
 
+        // Plugin hook: suppressComponentRender — lets a plugin skip running this
+        // component's setup/render and emit a placeholder string instead (e.g.
+        // islands `client:only` true skip-SSR). createComponentState already ran
+        // transformComponentContext (so plugins have registered the component) and
+        // pushed the id, so on suppression we emit the placeholder + the standard
+        // trailing marker, pop the component, and bail before setup/render.
+        if (ctx._plugins) {
+            for (const plugin of ctx._plugins) {
+                const suppressed = plugin.server?.suppressComponentRender?.(id, vnode, ctx);
+                if (suppressed) {
+                    if (suppressed.placeholder != null) {
+                        buf.push(suppressed.placeholder);
+                        state.len += suppressed.placeholder.length;
+                    }
+                    const marker = `<!--$c:${id}-->`;
+                    buf.push(marker);
+                    state.len += marker.length;
+                    ctx.popComponent();
+                    if (state.len >= state.threshold) yield FLUSH;
+                    return;
+                }
+            }
+        }
+
         const prev = setCurrentInstance(componentCtx);
         try {
             // Run setup synchronously — it registers useAsync/useStream work
@@ -824,8 +920,11 @@ function* renderNode(
             if (ssrLoads.length > 0) {
                 // Plugin hook: handleAsyncSetup
                 // Plugins can override the async mode.
-                // Default: 'stream' in streaming mode, 'block' in string mode.
-                let asyncMode: 'block' | 'stream' | 'skip' = ctx._streaming ? 'stream' : 'block';
+                // Default: 'stream' in streaming mode, 'block' in string mode
+                // — and 'block' inside a <Defer> deferred render, so the
+                // boundary's single replacement carries the resolved data
+                // instead of nesting its own placeholders.
+                let asyncMode: 'block' | 'stream' | 'skip' = (ctx._streaming && !state.inDefer) ? 'stream' : 'block';
                 let asyncPlaceholder: string | undefined;
                 let pluginHandled = false;
 
@@ -1100,9 +1199,9 @@ export async function* renderToChunks(
  * @param parentCtx - optional parent component context so deferred renders
  *   keep their provide/inject chain
  */
-export async function renderVNodeToString(element: JSXElement, ctx: SSRContext, appContext: AppContext | null = null, parentCtx: ComponentSetupContext | null = null): Promise<string> {
+export async function renderVNodeToString(element: JSXElement, ctx: SSRContext, appContext: AppContext | null = null, parentCtx: ComponentSetupContext | null = null, opts?: { inDefer?: boolean }): Promise<string> {
     const buf: string[] = [];
-    const state: RenderBufState = { len: 0, threshold: Infinity };
+    const state: RenderBufState = { len: 0, threshold: Infinity, inDefer: opts?.inDefer };
     const gen = renderNode(element, ctx, parentCtx, appContext, buf, state);
 
     let result = gen.next();

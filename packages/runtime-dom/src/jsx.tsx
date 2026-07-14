@@ -1,5 +1,5 @@
 import '@sigx/runtime-core';
-import type { Model } from '@sigx/runtime-core';
+import type { Model, ModelModifiers, ToggleModelModifiers } from '@sigx/runtime-core';
 
 // Custom CSS properties type that allows both string and number for numeric properties
 type CSSNumericProperty = string | number;
@@ -751,6 +751,10 @@ declare global {
             // Model directive (two-way binding)
             model?: [object, string] | (() => V) | Model<any>;
             [key: `model:${string}`]: [object, string] | (() => any);
+            // Model directive modifiers — value transforms (trim/number) + timing
+            // (lazy/debounce). Single source of truth in @sigx/runtime-core; augment
+            // ValueModelModifiers / TimingModelModifiers there to add custom modifiers.
+            modelModifiers?: ModelModifiers;
 
             // Explicit update event support
             "onUpdate:modelValue"?: (value: V) => void;
@@ -777,6 +781,9 @@ declare global {
             // The update event for checkbox/radio is always the checked state (boolean)
             "onUpdate:modelValue"?: (checked: boolean) => void;
             [key: `model:${string}`]: [object, string] | (() => any);
+            // Toggle values are boolean/array — only timing modifiers apply.
+            // `trim`/`number` are intentionally absent (compile error if used).
+            modelModifiers?: ToggleModelModifiers;
         }
 
         interface TextInputAttributes<T = HTMLInputElement> extends FormElementAttributes<T, string> {

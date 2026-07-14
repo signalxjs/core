@@ -12,7 +12,8 @@ import type {
 } from './types';
 import { ComputedSymbol } from './types';
 import {
-    cleanup,
+    startTracking,
+    endTracking,
     createDep,
     track,
     setCurrentSubscriber,
@@ -109,7 +110,7 @@ export function computed<T>(
             }
         }
         computedEffect.flags = COMPUTING;
-        cleanup(computedEffect);
+        startTracking(computedEffect);
         const prevEffect = getCurrentSubscriber();
         setCurrentSubscriber(computedEffect);
         try {
@@ -131,6 +132,9 @@ export function computed<T>(
             computedEffect.flags = DIRTY | ERRORED;
             throw err;
         } finally {
+            // A throwing getter keeps only the deps read before the throw —
+            // the same resulting dep set as the old cleanup-up-front flow.
+            endTracking(computedEffect);
             setCurrentSubscriber(prevEffect);
         }
     };

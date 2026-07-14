@@ -37,12 +37,24 @@ export interface Dep {
     version: number;
     /** Present iff this dep is a computed's output dep. */
     computed?: Subscriber;
+    /**
+     * Link of the subscriber currently (re-)running, installed by
+     * startTracking. Lets track() reuse the existing link with one
+     * identity compare instead of allocating and re-subscribing.
+     */
+    active?: Link;
 }
 
 /** A subscriber's edge to one Dep, with the version seen at track time. */
 export interface Link {
     dep: Dep;
+    /** Owning subscriber — the identity check behind active-link reuse. */
+    sub: Subscriber;
     version: number;
+    /** Re-tracked during the current run; unseen links are swept. */
+    seen: boolean;
+    /** Saved dep.active for LIFO restore across nested runs. */
+    prevActive: Link | undefined;
 }
 
 export interface Subscriber extends EffectFn {

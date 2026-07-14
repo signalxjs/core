@@ -1,4 +1,5 @@
 import { defineApp } from 'sigx';
+import { cachePlugin } from '@sigx/cache';
 import { renderDocument, renderDocumentToNodeStream } from '@sigx/server-renderer/server';
 import type { Readable } from 'node:stream';
 import { App } from './App';
@@ -17,10 +18,13 @@ export function render(url: string, template: string, opts: RenderOpts): RenderR
     // Per-request: fresh app + fresh router scoped to this URL. No module-level
     // state is shared between requests, so concurrent SSR can't interleave.
     const app = defineApp(<App />);
+    // Same plugin set as the client (the SSR provider seam outranks the
+    // engine server-side, so this is inert during the render itself).
+    app.use(cachePlugin());
     app.defineProvide(useRouter, () => createRouter(parseUrl(url)));
 
     if (opts.bot) {
-        // Blocking document: every useAsync()/useStream() resolves inline —
+        // Blocking document: every useData()/useStream() resolves inline —
         // crawlers and AI agents get the full content with zero client JS work.
         return { kind: 'blocking', html: renderDocument(app, { template, mode: 'blocking' }) };
     }

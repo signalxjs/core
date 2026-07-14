@@ -16,11 +16,11 @@ pnpm install
 pnpm build
 ```
 
-The `build` step is required before tests because some packages consume each other's `dist/` output through the workspace.
+The `build` step is optional for tests: `pnpm test` and `pnpm typecheck` resolve the framework packages from source via the explicit per-entrypoint aliases in `vitest.config.ts` (`resolve.alias`) and the root `tsconfig.json` (`compilerOptions.paths`). You do need `pnpm build` before `pnpm verify:pack`, `pnpm size`, publishing, and running the `examples/` apps.
 
 ## Workspace layout
 
-Six packages live under `packages/`. See the table in the root `README.md` for what each one does.
+Seven packages live under `packages/`. See the table in the root `README.md` for what each one does.
 
 ```
 packages/
@@ -29,6 +29,8 @@ packages/
   runtime-dom/     → @sigx/runtime-dom    (DOM renderer)
   sigx/            → sigx                 (umbrella package)
   server-renderer/ → @sigx/server-renderer (SSR + hydration)
+  ssr-islands/     → @sigx/ssr-islands    (islands architecture strategy pack)
+  cache/           → @sigx/cache          (async cache policy pack)
   vite/            → @sigx/vite           (Vite plugin)
 ```
 

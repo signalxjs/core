@@ -25,10 +25,15 @@ coverage:
 # Don't post coverage status before the upload arrives. after_n_builds is the
 # number of coverage uploads per commit — this repo uploads once, from the
 # `coverage` job in ci.yml. Bump it if more upload sources are added.
+#
+# require_ci_to_pass is OFF: GitHub's branch ruleset already requires every CI
+# check, so codecov gating on CI is redundant — and when codecov cannot resolve
+# the CI state (ci_passed stays null, seen on release PR #193) it silently
+# never posts the REQUIRED codecov/patch status, deadlocking the merge.
 codecov:
   notify:
     after_n_builds: 1
-  require_ci_to_pass: true
+  require_ci_to_pass: false
 
 # Inline annotations on the exact uncovered changed lines, right in the PR diff.
 github_checks:

@@ -289,6 +289,51 @@ describe('defineApp', () => {
     });
 
     // -----------------------------------------------------------------------
+    // app.onError()
+    // -----------------------------------------------------------------------
+
+    describe('app.onError()', () => {
+        it('sets config.onError to the handler', () => {
+            const handler = vi.fn();
+            const app = defineApp(rootEl);
+            app.onError(handler);
+            expect(app.config.onError).toBe(handler);
+        });
+
+        it('returns app for chaining', () => {
+            const app = defineApp(rootEl);
+            const result = app.onError(vi.fn());
+            expect(result).toBe(app);
+        });
+
+        it('the registered handler is invoked by handleComponentError', () => {
+            const handler = vi.fn(() => true);
+            const app = defineApp(rootEl);
+            app.onError(handler);
+            const err = new Error('boom');
+            const inst = mockInstance();
+            const result = handleComponentError(app._context, err, inst, 'render');
+            expect(handler).toHaveBeenCalledWith(err, inst, 'render');
+            expect(result).toBe(true);
+        });
+
+        it('dev-warns when replacing an existing handler (and replaces it)', () => {
+            const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+            const first = vi.fn();
+            const second = vi.fn();
+            const app = defineApp(rootEl);
+            app.onError(first);
+            expect(warnSpy).not.toHaveBeenCalled();
+            app.onError(second);
+            expect(warnSpy).toHaveBeenCalledWith(
+                expect.stringContaining('replaces the previous handler'),
+            );
+            expect(app.config.onError).toBe(second);
+            warnSpy.mockRestore();
+        });
+    });
+
+    // -----------------------------------------------------------------------
     // app.directive()
     // -----------------------------------------------------------------------
 
@@ -665,15 +710,15 @@ describe('Notification hooks', () => {
     });
 
     // -----------------------------------------------------------------------
-    // Hook errors delegate to config.errorHandler
+    // Hook errors delegate to config.onError
     // -----------------------------------------------------------------------
 
-    describe('hook error delegation to config.errorHandler', () => {
-        it('forwards hook error to config.errorHandler', () => {
+    describe('hook error delegation to config.onError', () => {
+        it('forwards hook error to config.onError', () => {
             const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
             const handler = vi.fn();
             const ctx = makeContext([{ onComponentCreated: () => { throw new Error('oops'); } }]);
-            ctx.config.errorHandler = handler;
+            ctx.config.onError = handler;
             notifyComponentCreated(ctx, mockInstance());
             expect(handler).toHaveBeenCalledWith(
                 expect.any(Error),
@@ -693,7 +738,7 @@ describe('Notification hooks', () => {
             expect(handleComponentError(null, new Error(), null, 'test')).toBe(false);
         });
 
-        it('returns false when no hooks and no errorHandler', () => {
+        it('returns false when no hooks and no onError handler', () => {
             const ctx = makeContext();
             expect(handleComponentError(ctx, new Error(), null, 'test')).toBe(false);
         });
@@ -713,10 +758,10 @@ describe('Notification hooks', () => {
             expect(handleComponentError(ctx, new Error(), mockInstance(), 'x')).toBe(false);
         });
 
-        it('falls through to config.errorHandler when hook does not handle', () => {
+        it('falls through to config.onError when hook does not handle', () => {
             const handler = vi.fn(() => true);
             const ctx = makeContext([{ onComponentError: vi.fn() }]);
-            ctx.config.errorHandler = handler;
+            ctx.config.onError = handler;
             const err = new Error('e');
             const inst = mockInstance();
             const result = handleComponentError(ctx, err, inst, 'info');
@@ -724,9 +769,9 @@ describe('Notification hooks', () => {
             expect(result).toBe(true);
         });
 
-        it('returns false when errorHandler does not return true', () => {
+        it('returns false when onError does not return true', () => {
             const ctx = makeContext();
-            ctx.config.errorHandler = vi.fn();
+            ctx.config.onError = vi.fn();
             expect(handleComponentError(ctx, new Error(), mockInstance(), 'z')).toBe(false);
         });
 
@@ -736,7 +781,7 @@ describe('Notification hooks', () => {
             const ctx = makeContext([
                 { onComponentError: () => { throw new Error('hook crash'); } },
             ]);
-            ctx.config.errorHandler = handler;
+            ctx.config.onError = handler;
             const result = handleComponentError(ctx, new Error(), mockInstance(), 'test');
             expect(errorSpy).toHaveBeenCalled();
             expect(handler).toHaveBeenCalled();
@@ -744,13 +789,13 @@ describe('Notification hooks', () => {
             errorSpy.mockRestore();
         });
 
-        it('catches errors thrown by config.errorHandler', () => {
+        it('catches errors thrown by config.onError', () => {
             const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
             const ctx = makeContext();
-            ctx.config.errorHandler = () => { throw new Error('handler crash'); };
+            ctx.config.onError = () => { throw new Error('handler crash'); };
             const result = handleComponentError(ctx, new Error(), mockInstance(), 'test');
             expect(errorSpy).toHaveBeenCalledWith(
-                expect.stringContaining('app.config.errorHandler'),
+                expect.stringContaining('onError handler'),
                 expect.any(Error),
             );
             expect(result).toBe(false);
@@ -767,10 +812,10 @@ describe('Notification hooks', () => {
             expect(h2).not.toHaveBeenCalled();
         });
 
-        it('does not call errorHandler when a hook already handled the error', () => {
+        it('does not call config.onError when a hook already handled the error', () => {
             const handler = vi.fn();
             const ctx = makeContext([{ onComponentError: () => true }]);
-            ctx.config.errorHandler = handler;
+            ctx.config.onError = handler;
             handleComponentError(ctx, new Error(), mockInstance(), 'x');
             expect(handler).not.toHaveBeenCalled();
         });

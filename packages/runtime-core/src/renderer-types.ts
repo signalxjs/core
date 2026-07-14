@@ -19,6 +19,12 @@ import type { AppContext } from './app.js';
 export interface InternalVNode extends VNode {
     /** The reactive effect that re-renders the component */
     _effect?: EffectRunner;
+    /**
+     * Cached "created in the SVG namespace" flag, computed contextually at
+     * mount and carried forward on every same-type patch. Hydrated vnodes
+     * don't have it until their first patch.
+     */
+    _svg?: boolean;
     /** The rendered sub-tree VNode of a component */
     _subTree?: VNode | null;
     /**
@@ -40,7 +46,7 @@ export interface InternalVNode extends VNode {
 }
 
 export interface RendererOptions<HostNode = any, HostElement = any> {
-    patchProp(el: HostElement, key: string, prevValue: any, nextValue: any, isSVG?: boolean): void;
+    patchProp(el: HostElement, key: string, prevValue: any, nextValue: any, isSVG?: boolean, appContext?: AppContext | null): void;
     insert(child: HostNode, parent: HostElement, anchor?: HostNode | null): void;
     remove(child: HostNode): void;
     createElement(type: string, isSVG?: boolean, isCustomizedBuiltIn?: string): HostElement;

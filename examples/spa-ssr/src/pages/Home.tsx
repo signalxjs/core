@@ -1,4 +1,4 @@
-import { component, useAsync, useHead } from 'sigx';
+import { component, useData, useHead } from 'sigx';
 
 import { useRouter, type Route } from '../router';
 
@@ -19,21 +19,22 @@ async function fetchStats(): Promise<Stats> {
  * The async boundary lives in its OWN component, scoped to the data it owns.
  * In streaming mode only THIS card gets a placeholder and is swapped when the
  * fetch resolves — everything else on the page streams as plain shell HTML,
- * exactly once. (Putting useAsync in the page component would wrap the whole
+ * exactly once. (Putting useData in the page component would wrap the whole
  * page in the boundary: the full content would ship twice and visibly swap.)
  */
 const StatsCard = component(() => {
-    // Keyed useAsync runs on the server; serialized into
+    // Keyed useData runs on the server; serialized into
     // window.__SIGX_ASYNC__ by renderDocument and restored during hydration
     // — the client does NOT refetch (watch the network tab / server log).
-    const stats = useAsync('stats', fetchStats);
+    const stats = useData('stats', fetchStats);
 
     return () => (
         <div class="card">
             <h3 style="margin-top: 0;">Server-loaded data (no client refetch)</h3>
-            {stats.value
-                ? <p><code>useAsync()</code> fetched on the server: ⭐ {stats.value.stars} · ⬇ {stats.value.downloads} · rendered {stats.value.renderedAt}</p>
-                : <p>Loading stats…</p>}
+            {stats.match({
+                pending: () => <p>Loading stats…</p>,
+                ready: (s) => <p><code>useData()</code> fetched on the server: ⭐ {s.stars} · ⬇ {s.downloads} · rendered {s.renderedAt}</p>,
+            })}
             <p style="color: #555; font-size: 0.95em;">The values were serialized into <code>window.__SIGX_ASYNC__</code> and restored during hydration — the fetch did not run again in your browser.</p>
         </div>
     );

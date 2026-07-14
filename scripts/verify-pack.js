@@ -36,6 +36,7 @@ const PACKAGES = [
     'packages/runtime-dom',
     'packages/sigx',
     'packages/server-renderer',
+    'packages/ssr-islands',
     'packages/vite',
 ];
 
