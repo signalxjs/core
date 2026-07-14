@@ -475,4 +475,202 @@ describe('@sigx/cache', () => {
         const r = await action.run();
         expect(r).toEqual({ ok: true, value: 42 });
     });
+
+    // ====================================================================
+    // Error handling on cached reads (SWR)
+    // ====================================================================
+
+    it('an initial cached fetch failure settles as errored with the error exposed', async () => {
+        const fetcher = vi.fn(async () => {
+            throw new Error('boom');
+        });
+        let cell!: AsyncState<number>;
+
+        const Root = component(() => {
+            cell = useData('err-initial', fetcher, { cache: {} });
+            return () => <div class="out">{cell.state}</div>;
+        });
+        const container = mountWith(cachePlugin(), jsx(Root, {}));
+        await settle();
+
+        expect(cell.state).toBe('errored');
+        expect(cell.error?.message).toBe('boom');
+        expect(cell.value).toBeNull();
+        expect(cell.loading).toBe(false);
+        expect(container.querySelector('.out')?.textContent).toBe('errored');
+    });
+
+    it('SWR: a failed refresh keeps the last-good value — error arm gets (error, retry, stale), retry recovers', async () => {
+        let calls = 0;
+        const fetcher = vi.fn(async () => {
+            calls++;
+            if (calls === 2) throw new Error('flaky');
+            return `v${calls}`;
+        });
+        let cell!: AsyncState<string>;
+
+        const Root = component(() => {
+            cell = useData('err-swr', fetcher, { cache: { staleTime: 60_000 } });
+            return () => <div />;
+        });
+        mountWith(cachePlugin(), jsx(Root, {}));
+        await settle();
+        expect(cell.value).toBe('v1');
+
+        // refresh() forces a refetch; its failure must never reject.
+        await expect(cell.refresh()).resolves.toBeUndefined();
+        await settle();
+
+        expect(cell.state).toBe('errored');
+        expect(cell.error?.message).toBe('flaky');
+        expect(cell.value).toBeNull();
+
+        // The error arm sees the last-good value as `stale`.
+        let seenStale: string | null = null;
+        let retryFn!: () => void;
+        const rendered = cell.match({
+            ready: v => `R:${v}`,
+            error: (e, retry, stale) => {
+                seenStale = stale;
+                retryFn = retry;
+                return `E:${e.message}`;
+            },
+        });
+        expect(rendered).toBe('E:flaky');
+        expect(seenStale).toBe('v1');
+
+        retryFn();
+        await settle();
+        expect(cell.state).toBe('ready');
+        expect(cell.value).toBe('v3');
+        expect(cell.match({ ready: v => `R:${v}`, error: e => `E:${e.message}` })).toBe('R:v3');
+    });
+
+    it('two consumers joining one in-flight fetch that rejects both settle errored from a single fetch', async () => {
+        const rejecters: Array<(e: Error) => void> = [];
+        const fetcher = vi.fn(() => new Promise<never>((_, rej) => { rejecters.push(rej); }));
+        const show = signal({ second: false });
+        let a!: AsyncState<never>, b!: AsyncState<never>;
+
+        const A = component(() => {
+            a = useData('err-shared', fetcher, { cache: {} });
+            return () => <div />;
+        });
+        const B = component(() => {
+            b = useData('err-shared', fetcher, { cache: {} });
+            return () => <div />;
+        });
+        const Root = component(() => () => (
+            <div>
+                {jsx(A, {})}
+                {show.second ? jsx(B, {}) : null}
+            </div>
+        ));
+        mountWith(cachePlugin(), jsx(Root, {}));
+        await tick();
+
+        // B mounts while A's fetch is in flight — it joins, no second fetch.
+        show.second = true;
+        await tick();
+        expect(fetcher).toHaveBeenCalledTimes(1);
+
+        rejecters[0](new Error('shared boom'));
+        await settle();
+        expect(a.state).toBe('errored');
+        expect(b.state).toBe('errored');
+        expect(a.error?.message).toBe('shared boom');
+        expect(b.error?.message).toBe('shared boom');
+    });
+
+    it('a synchronously-throwing fetcher settles as errored instead of crashing the mount', async () => {
+        const fetcher = (() => {
+            throw new Error('sync boom');
+        }) as unknown as () => Promise<never>;
+        let cell!: AsyncState<never>;
+
+        const Root = component(() => {
+            cell = useData('err-sync', fetcher, { cache: {} });
+            return () => <div />;
+        });
+        mountWith(cachePlugin(), jsx(Root, {}));
+        await settle();
+
+        expect(cell.state).toBe('errored');
+        expect(cell.error?.message).toBe('sync boom');
+    });
+
+    // ====================================================================
+    // Key handling on cached reads
+    // ====================================================================
+
+    it('a falsy getter key is idle; truthy fetches; back to falsy returns to idle', async () => {
+        const on = signal({ v: false });
+        const fetcher = vi.fn(async () => 'loaded');
+        let cell!: AsyncState<string>;
+
+        const Root = component(() => {
+            cell = useData(() => (on.v ? 'falsy-toggle' : null), fetcher, { cache: { staleTime: 60_000 } });
+            return () => <div class="out">{cell.state}</div>;
+        });
+        const container = mountWith(cachePlugin(), jsx(Root, {}));
+        await settle();
+        expect(cell.state).toBe('idle');
+        expect(fetcher).not.toHaveBeenCalled();
+
+        on.v = true;
+        await settle();
+        expect(cell.state).toBe('ready');
+        expect(cell.value).toBe('loaded');
+
+        on.v = false;
+        await settle();
+        expect(cell.state).toBe('idle');
+        expect(cell.value).toBeNull();
+        expect(cell.error).toBeNull();
+        expect(fetcher).toHaveBeenCalledTimes(1);
+        expect(container.querySelector('.out')?.textContent).toBe('idle');
+    });
+
+    it('a same-canonical key re-emission hands the freshest raw arg to store-driven refetches', async () => {
+        const touch = signal({ n: 0 });
+        const tuples: Array<readonly [string, string]> = [];
+        const args: unknown[] = [];
+        const fetcher = vi.fn(async (arg: readonly [string, string]) => {
+            args.push(arg);
+            return 'ok';
+        });
+        let cell!: CachedAsyncState<string>;
+
+        const Root = component(() => {
+            cell = useData(
+                () => {
+                    void touch.n; // unrelated dependency — re-runs the getter without changing the key
+                    const t = ['stable', 'id'] as const;
+                    tuples.push(t);
+                    return t;
+                },
+                fetcher,
+                { cache: { staleTime: 60_000 } }
+            ) as CachedAsyncState<string>;
+            return () => <div />;
+        });
+        mountWith(cachePlugin(), jsx(Root, {}));
+        await settle();
+        expect(fetcher).toHaveBeenCalledTimes(1);
+        expect(args[0]).toBe(tuples[0]);
+
+        // Same canonical identity, fresh tuple object: no refetch, but the
+        // NEW raw must replace the old one on the entry…
+        touch.n = 1;
+        await settle();
+        expect(fetcher).toHaveBeenCalledTimes(1);
+        const latest = tuples[tuples.length - 1];
+        expect(latest).not.toBe(tuples[0]);
+
+        // …so a store-driven refetch (invalidate uses entry.rawArg) gets it.
+        cell.invalidate();
+        await settle();
+        expect(fetcher).toHaveBeenCalledTimes(2);
+        expect(args[1]).toBe(latest);
+    });
 });
