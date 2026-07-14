@@ -36,6 +36,23 @@ import App from './App';
 defineApp(<App />).use(ssrClientPlugin).hydrate('#root');
 ```
 
+## Runtime portability & request isolation
+
+The `.` and `./server` entries are **WinterCG-clean** — no Node builtins on
+the string / Web-stream / document paths, verified in CI by an edge smoke
+test that forbids every `node:` import while streaming a document through
+the production dist. Node-only Readable shapes (`renderToNodeStream`,
+`renderDocumentToNodeStream`, the `toNodeStream` adapter) live in
+`@sigx/server-renderer/node`.
+
+Request isolation is a contract, not a runtime feature: **the per-request
+`SSRContext` is the isolation mechanism — AsyncLocalStorage is never
+required.** Everything a request collects (head configs, response state,
+async results, the boundary table) lives on its own context, created per
+render call; concurrent renders share nothing. AsyncLocalStorage remains
+only a best-effort backstop for user code reading `getCurrentInstance()`
+after an `await` inside setup, which is dev-warned.
+
 ## 📚 Documentation
 
 Streaming and string rendering, the plugin system, hydration, head management — full guides, the complete API reference and live examples → **<https://sigx.dev/server/>**
