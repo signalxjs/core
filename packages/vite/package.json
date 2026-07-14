@@ -21,6 +21,10 @@
         "./ssr": {
             "types": "./dist/ssr.d.ts",
             "import": "./dist/ssr.js"
+        },
+        "./islands": {
+            "types": "./dist/islands.d.ts",
+            "import": "./dist/islands.js"
         }
     },
     "bin": {
@@ -39,7 +43,8 @@
     "peerDependencies": {
         "sigx": "*",
         "vite": ">=8.0.0",
-        "@sigx/server-renderer": "*"
+        "@sigx/server-renderer": "*",
+        "@sigx/ssr-islands": "*"
     },
     "devDependencies": {
         "@types/node": "^26.1.1",
@@ -67,6 +72,9 @@
     },
     "peerDependenciesMeta": {
         "@sigx/server-renderer": {
+            "optional": true
+        },
+        "@sigx/ssr-islands": {
             "optional": true
         }
     }
