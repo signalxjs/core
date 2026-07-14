@@ -130,7 +130,7 @@ const CacheCard = component(() => {
                     <p>
                         fetched at {s.stamp} ({s.src}){' '}
                         <button onClick={() => stamp.invalidate()}>Invalidate (refetch)</button>{' '}
-                        <button onClick={() => stamp.mutate(c => ({ ...(c ?? s), stamp: 'mutated locally' }))}>
+                        <button onClick={() => stamp.mutate(c => ({ ...(c ?? s), src: 'mutated locally — no request' }))}>
                             Mutate (write-through)
                         </button>
                     </p>
