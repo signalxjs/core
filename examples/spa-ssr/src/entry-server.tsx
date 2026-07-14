@@ -1,6 +1,7 @@
 import { defineApp } from 'sigx';
 import { cachePlugin } from '@sigx/cache';
-import { renderDocument, renderDocumentToNodeStream } from '@sigx/server-renderer/server';
+import { renderDocument } from '@sigx/server-renderer/server';
+import { renderDocumentToNodeStream } from '@sigx/server-renderer/node';
 import type { Readable } from 'node:stream';
 import { App } from './App';
 import { createRouter, parseUrl, useRouter } from './router';

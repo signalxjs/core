@@ -36,8 +36,10 @@ import {
     provideAppContext,
     resolveBuiltInDirective,
     matchAsyncState,
+    ERROR_SCOPE_TOKEN,
 } from 'sigx/internals';
-import type { SSRContext } from './context';
+import type { ErrorScopeHandle } from 'sigx/internals';
+import type { SSRContext, SSRErrorInfo } from './context';
 import type { ResolvedBoundary, SSRBoundaryRecord } from '../boundary';
 import { generateAppendScript } from './streaming';
 import { serializeBoundaryProps, getTypeHandlers } from './serialize';
@@ -509,26 +511,80 @@ function serverUseStream(this: any, key: string, source: () => AsyncIterable<str
 }
 
 /**
- * Error fallback for a failed component. Returns the HTML to emit in place of
- * the component ('' emits nothing).
+ * Internal server-side view of an errorScope (set on the component ctx by
+ * errorScope() during setup — see runtime-core/src/error-scope.ts).
+ */
+interface ServerErrorScope {
+    fallback?: (error: Error, retry: () => void) => JSXElement;
+}
+
+/**
+ * A descendant throw claimed by an enclosing errorScope — rethrown so it
+ * propagates up the generator stack to the owning component's frame, which
+ * rewinds its subtree output and renders the scope fallback in its place.
+ */
+class ScopeThrow extends Error {
+    constructor(
+        public readonly original: Error,
+        public readonly scope: ServerErrorScope
+    ) {
+        super(original.message);
+    }
+}
+
+/** Nearest errorScope on this component or an ancestor (self first). */
+function findEnclosingScope(componentCtx: ComponentSetupContext | null): ServerErrorScope | null {
+    let current: any = componentCtx;
+    while (current) {
+        if (current.__errorScope) return current.__errorScope as ServerErrorScope;
+        current = current.parent;
+    }
+    return null;
+}
+
+/**
+ * The default failure HTML (rfc-ssr-platform §2.2): the stable
+ * `<!--ssr-error:ID-->` boundary comment, plus a visible diagnostic box in
+ * development so a failed component is impossible to miss.
+ */
+export function defaultRenderError(error: Error, info: SSRErrorInfo): string {
+    const marker = info.componentId != null ? `<!--ssr-error:${info.componentId}-->` : '';
+    if (process.env.NODE_ENV === 'production') {
+        return marker;
+    }
+    const label = escapeHtml(`[SSR] <${info.componentName ?? 'Anonymous'}> failed during ${info.phase}: ${error.message}`);
+    return marker
+        + `<div style="border:2px solid #c00;border-radius:4px;background:#fff5f5;color:#900;`
+        + `padding:8px 12px;font:13px/1.5 ui-monospace,monospace;">${label}</div>`;
+}
+
+/**
+ * Error fallback for a failed component: report through the request's one
+ * error callback, then emit `renderError`'s HTML in its place ('' emits
+ * nothing).
  */
 function componentErrorFallback(e: unknown, ctx: SSRContext, componentName: string, id: number): string {
     const error = e instanceof Error ? e : new Error(String(e));
-    let fallbackHtml: string | null = null;
+    const info: SSRErrorInfo = {
+        phase: ctx._phase,
+        componentId: id,
+        componentName,
+        ...(ctx._boundaries.has(id) ? { boundaryId: id } : {})
+    };
 
-    if (ctx._onComponentError) {
-        fallbackHtml = ctx._onComponentError(error, componentName, id);
-    }
-
-    if (fallbackHtml === null || fallbackHtml === undefined) {
-        fallbackHtml = `<!--ssr-error:${id}-->`;
+    try {
+        ctx._onError?.(error, info);
+    } catch (hookErr) {
+        if (process.env.NODE_ENV !== 'production') {
+            console.error('Error in onError callback:', hookErr);
+        }
     }
 
     if (process.env.NODE_ENV !== 'production') {
         console.error(`Error rendering component ${componentName}:`, e);
     }
 
-    return fallbackHtml;
+    return ctx._renderError ? ctx._renderError(error, info) : defaultRenderError(error, info);
 }
 
 /**
@@ -974,6 +1030,19 @@ function* renderNode(
         const setup = vnode.type.__setup;
         const { componentName, ssrLoads, componentCtx } = createComponentState(vnode, ctx, parentCtx, appContext, id);
 
+        // Rewind marks for a possible errorScope fallback (two locals —
+        // consulted only when a scope catches below).
+        const bufMark = buf.length;
+        const lenMark = state.len;
+        let ownScope: ServerErrorScope | null = null;
+        let scopeMarks: {
+            pendingAsync: number;
+            pendingStreams: number;
+            headConfigs: number;
+            boundaries: number;
+            threshold: number;
+        } | null = null;
+
         const prev = setCurrentInstance(componentCtx);
         try {
             // Run setup synchronously — it registers useAsync/useStream work
@@ -982,6 +1051,23 @@ function* renderNode(
             // Support legacy async setup — suspend if it returns a promise
             if (renderFn && typeof (renderFn as any).then === 'function') {
                 renderFn = (yield { p: renderFn as Promise<any> }) as any;
+            }
+
+            // errorScope (rfc-ssr-platform §2.2): a scoped subtree must stay
+            // rewindable — suppress mid-subtree flushing (bytes that left the
+            // process cannot be taken back) and snapshot the per-request
+            // containers descendants append to, so a caught throw can undo
+            // the partial subtree before the fallback renders in its place.
+            ownScope = (componentCtx as any).__errorScope ?? null;
+            if (ownScope) {
+                scopeMarks = {
+                    pendingAsync: ctx._pendingAsync.length,
+                    pendingStreams: ctx._pendingStreams.length,
+                    headConfigs: ctx._headConfigs.length,
+                    boundaries: ctx._boundaries.size,
+                    threshold: state.threshold
+                };
+                state.threshold = Infinity;
             }
 
             // Check if we have pending useAsync/useStream work
@@ -1095,12 +1181,88 @@ function* renderNode(
                 }
             }
         } catch (e) {
-            const fallbackHtml = componentErrorFallback(e, ctx, componentName, id);
-            if (fallbackHtml) {
-                buf.push(fallbackHtml);
-                state.len += fallbackHtml.length;
+            const raw = e instanceof ScopeThrow
+                ? e.original
+                : (e instanceof Error ? e : new Error(String(e)));
+            const claimedScope = e instanceof ScopeThrow ? e.scope : findEnclosingScope(componentCtx);
+            // Re-read from the ctx: setup may have called errorScope() and
+            // THEN thrown, before the post-setup ownScope read ran.
+            const ownScopeNow: ServerErrorScope | null =
+                ownScope ?? ((componentCtx as any).__errorScope ?? null);
+
+            if (claimedScope && claimedScope !== ownScopeNow) {
+                // An enclosing scope owns this error — propagate up the
+                // generator stack to the owning component's frame.
+                throw e instanceof ScopeThrow ? e : new ScopeThrow(raw, claimedScope);
+            }
+
+            if (claimedScope && ownScopeNow && claimedScope === ownScopeNow) {
+                // This component's errorScope catches: rewind everything the
+                // subtree produced and render the fallback in its place —
+                // the same visual contract as the client (rfc-async §4).
+                buf.length = bufMark;
+                state.len = lenMark;
+                if (scopeMarks) {
+                    ctx._pendingAsync.length = scopeMarks.pendingAsync;
+                    ctx._pendingStreams.length = scopeMarks.pendingStreams;
+                    ctx._headConfigs.length = scopeMarks.headConfigs;
+                    if (ctx._boundaries.size > scopeMarks.boundaries) {
+                        // Map preserves insertion order — entries past the
+                        // mark belong to the rewound subtree.
+                        const doomed = Array.from(ctx._boundaries.keys()).slice(scopeMarks.boundaries);
+                        for (const key of doomed) ctx._boundaries.delete(key);
+                    }
+                }
+                // Descendant frames bailed without popping — restore this
+                // component to the top of the id stack.
+                while (
+                    ctx._componentStack.length > 0 &&
+                    ctx._componentStack[ctx._componentStack.length - 1] !== id
+                ) {
+                    ctx.popComponent();
+                }
+
+                if (process.env.NODE_ENV !== 'production') {
+                    console.error(`[errorScope] server render failed below <${componentName}>:`, raw);
+                }
+
+                // Notify the scope exactly like the client's error walk would
+                // (fires the scope's onError observer, marks it errored).
+                const handle = (componentCtx as any).provides?.get(ERROR_SCOPE_TOKEN) as ErrorScopeHandle | undefined;
+                handle?.handle(raw, null, 'ssr render');
+
+                if (ownScopeNow.fallback) {
+                    // Server-side retry is inert; the boundary marking below
+                    // wires the client's retry to a real remount.
+                    const retryNoop = () => { /* remounts after hydration */ };
+                    try {
+                        yield* renderNode(ownScopeNow.fallback(raw, retryNoop), ctx, componentCtx, appContext, buf, state);
+                    } catch (fallbackErr) {
+                        const fallbackHtml = componentErrorFallback(fallbackErr, ctx, componentName, id);
+                        if (fallbackHtml) {
+                            buf.push(fallbackHtml);
+                            state.len += fallbackHtml.length;
+                        }
+                    }
+                }
+
+                // Mark the boundary so the hydrator seeds the client scope
+                // errored: the fallback hydrates against this exact HTML and
+                // retry() performs the remount the server could not.
+                ctx.recordBoundary(id, {
+                    ...ctx._boundaries.get(id),
+                    hydrate: 'load',
+                    errorScope: { message: raw.message }
+                });
+            } else {
+                const fallbackHtml = componentErrorFallback(e, ctx, componentName, id);
+                if (fallbackHtml) {
+                    buf.push(fallbackHtml);
+                    state.len += fallbackHtml.length;
+                }
             }
         } finally {
+            if (scopeMarks) state.threshold = scopeMarks.threshold;
             setCurrentInstance(prev || null);
         }
 

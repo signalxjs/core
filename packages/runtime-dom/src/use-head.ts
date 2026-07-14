@@ -63,6 +63,28 @@ export interface HeadScript {
     [key: string]: string | boolean | undefined;
 }
 
+export interface HeadStyle {
+    /**
+     * Raw CSS — the explicit opt-in for unescaped content (closing-tag
+     * sequences are still neutralized server-side).
+     */
+    innerHTML: string;
+    [key: string]: string | undefined;
+}
+
+export interface HeadNoscript {
+    /**
+     * Raw fallback markup — the explicit opt-in for unescaped content
+     * (closing-tag sequences are still neutralized server-side).
+     */
+    innerHTML: string;
+}
+
+export interface HeadBase {
+    href?: string;
+    target?: string;
+}
+
 export interface HeadConfig {
     /** Page title */
     title?: string;
@@ -74,10 +96,23 @@ export interface HeadConfig {
     link?: HeadLink[];
     /** Script tags */
     script?: HeadScript[];
+    /** Style tags (raw CSS via the explicit innerHTML opt-in) */
+    style?: HeadStyle[];
+    /** Noscript fallback (raw markup via the explicit innerHTML opt-in) */
+    noscript?: HeadNoscript[];
+    /** Document base URL/target — one per document, last config wins */
+    base?: HeadBase;
     /** HTML language attribute */
     htmlAttrs?: { lang?: string; dir?: string; [key: string]: string | undefined };
     /** Body attributes */
     bodyAttrs?: { class?: string; [key: string]: string | undefined };
+    /**
+     * Server-render ordering control: collected configs render into the
+     * document <head> in ascending priority (default 0), ties in call
+     * order — lower = earlier. Client-side application (SPA navigations)
+     * is per-call and does not reorder the live head.
+     */
+    priority?: number;
 }
 
 // ============= Client-side Head Management =============
@@ -143,6 +178,41 @@ function applyHeadClient(config: HeadConfig): (() => void) {
             document.head.appendChild(el);
             managed.push(el);
         }
+    }
+
+    if (config.style) {
+        for (const style of config.style) {
+            const { innerHTML, ...rest } = style;
+            const el = document.createElement('style');
+            for (const [k, v] of Object.entries(rest)) {
+                if (v !== undefined) el.setAttribute(k, v);
+            }
+            el.textContent = innerHTML;
+            el.setAttribute('data-sigx-head', String(token));
+            document.head.appendChild(el);
+            managed.push(el);
+        }
+    }
+
+    if (config.noscript) {
+        for (const noscript of config.noscript) {
+            const el = document.createElement('noscript');
+            el.textContent = noscript.innerHTML;
+            el.setAttribute('data-sigx-head', String(token));
+            document.head.appendChild(el);
+            managed.push(el);
+        }
+    }
+
+    if (config.base) {
+        // One <base> per document — replace any existing one.
+        document.querySelector('base')?.remove();
+        const el = document.createElement('base');
+        if (config.base.href !== undefined) el.setAttribute('href', config.base.href);
+        if (config.base.target !== undefined) el.setAttribute('target', config.base.target);
+        el.setAttribute('data-sigx-head', String(token));
+        document.head.insertBefore(el, document.head.firstChild);
+        managed.push(el);
     }
 
     if (config.htmlAttrs) {

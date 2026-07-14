@@ -64,6 +64,30 @@ jobs:
       - name: Verify pack
         run: pnpm verify:pack
 
+  edge-smoke:
+    # rfc-ssr-platform §2.3: the production dist must stream a document
+    # through the Web-stream path with every Node builtin import forbidden
+    # (the module-graph property WinterCG runtimes enforce for real).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+
+      - name: Edge smoke test
+        run: pnpm test:edge
+
   coverage:
     runs-on: ubuntu-latest
     steps:

@@ -76,6 +76,10 @@ export type { AsyncEngine, AsyncReadHandle } from './async/engine.js';
 export { SSR_SERIALIZER_TOKEN, provideSSRSerializerHandlers } from './ssr-serialize.js';
 export type { SSRTypeHandler } from './ssr-serialize.js';
 
+// errorScope internals (for the SSR hydrator: render wrapping + server-error seeding)
+export { applyErrorScope, seedErrorScopeError, ERROR_SCOPE_TOKEN } from './error-scope.js';
+export type { ErrorScopeHandle } from './error-scope.js';
+
 // Model internals
 export { getModelSymbol } from './model.js';
 

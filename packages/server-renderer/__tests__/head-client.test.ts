@@ -140,3 +140,41 @@ describe('useHead (client mode) — no current instance', () => {
         expect(document.title).toBe('Standalone');
     });
 });
+
+describe('useHead (client mode) — style / noscript / base (rfc-ssr-platform §2.4)', () => {
+    it('appends a <style> tag with textContent (never parsed as HTML)', () => {
+        useHead({ style: [{ innerHTML: 'body{color:red}</style><script>alert(1)</script>', media: 'screen' }] });
+        const el = document.head.querySelector('style');
+        expect(el).toBeTruthy();
+        expect(el!.getAttribute('media')).toBe('screen');
+        expect(el!.textContent).toContain('body{color:red}');
+        // textContent assignment cannot spawn elements
+        expect(document.head.querySelector('script')).toBeNull();
+        expect(el!.hasAttribute('data-sigx-head')).toBe(true);
+    });
+
+    it('appends a <noscript> tag with textContent', () => {
+        useHead({ noscript: [{ innerHTML: 'enable JS' }] });
+        const el = document.head.querySelector('noscript');
+        expect(el).toBeTruthy();
+        expect(el!.textContent).toBe('enable JS');
+    });
+
+    it('installs <base> first in head, replacing any existing base', () => {
+        const stale = document.createElement('base');
+        stale.setAttribute('href', '/old/');
+        document.head.appendChild(stale);
+        const marker = document.createElement('meta');
+        marker.setAttribute('name', 'first');
+        document.head.appendChild(marker);
+
+        useHead({ base: { href: '/app/', target: '_self' } });
+
+        const bases = document.head.querySelectorAll('base');
+        expect(bases.length).toBe(1);
+        expect(bases[0].getAttribute('href')).toBe('/app/');
+        expect(bases[0].getAttribute('target')).toBe('_self');
+        // Inserted before everything else
+        expect(document.head.firstElementChild!.tagName.toLowerCase()).toBe('base');
+    });
+});

@@ -8,6 +8,7 @@ export default defineLibConfig({
     entry: {
         'index': 'src/index.ts',
         'server/index': 'src/server/index.ts',
+        'node': 'src/node.ts',
         'client/index': 'src/client/index.ts'
     },
     // node: builtins must stay external (renderToNodeStream needs node:stream);

@@ -27,4 +27,4 @@ export { show } from './directives/show.js';
 
 // Head management (browser-standalone; server collection via instance seam)
 export { useHead } from './use-head.js';
-export type { HeadConfig, HeadMeta, HeadLink, HeadScript } from './use-head.js';
+export type { HeadConfig, HeadMeta, HeadLink, HeadScript, HeadStyle, HeadNoscript, HeadBase } from './use-head.js';

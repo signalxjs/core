@@ -44,10 +44,10 @@ export type { SSRPlugin } from './plugin.js';
 
 // Re-export from server (convenience)
 export { renderToStream, renderToString, renderVNodeToString } from './server/index.js';
-export { renderDocument, renderDocumentToNodeStream, renderDocumentToWebStream } from './server/index.js';
+export { renderDocument, renderDocumentToWebStream } from './server/index.js';
 export type { DocumentOptions } from './server/document.js';
 export { createSSRContext } from './server/context.js';
-export type { SSRContext, SSRContextOptions, RenderOptions, CorePendingAsync } from './server/context.js';
+export type { SSRContext, SSRContextOptions, RenderOptions, CorePendingAsync, SSRErrorInfo } from './server/context.js';
 
 // The boundary model (rfc-ssr-platform §1)
 export type {
@@ -67,6 +67,10 @@ export type { SSRHelper } from './client-directives.js';
 // State serialization (__SIGX_ASYNC__ transfer for useAsync/useStream;
 // opt-in plugin — automatic under renderDocument)
 export { stateSerializationPlugin } from './server/state-plugin.js';
+
+// Per-request response seam (useResponse — inert on the client)
+export { useResponse } from './response.js';
+export type { ResponseRecorder, SSRResponse } from './response.js';
 
 // Server-side head rendering (useHead itself lives in sigx)
 export { renderHeadToString } from './head.js';

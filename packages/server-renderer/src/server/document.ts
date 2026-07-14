@@ -28,13 +28,13 @@
  * APIs stay opt-in to keep their output stable.
  */
 
-import { Readable } from 'node:stream';
 import type { JSXElement, AppContext } from 'sigx';
 import type { SSRPlugin } from '../plugin';
 import { createSSRContext, type SSRContext, type SSRContextOptions } from './context';
 import { renderToChunks } from './render-core';
 import { emitBoundaryTable } from './serialize';
-import { renderHeadToString } from '../head';
+import { renderHeadToString, collectRootAttrs, mergeAttrsIntoTag } from '../head';
+import { responseSummary, type SSRResponse } from '../response';
 
 /** Same completion signal the plain streaming APIs emit. */
 const COMPLETION_SCRIPT = `<script>window.__SIGX_STREAMING_COMPLETE__=true;window.dispatchEvent(new Event('sigx:ready'));</script>`;
@@ -62,13 +62,12 @@ export interface DocumentOptions extends SSRContextOptions {
      */
     signal?: AbortSignal;
 
-    /**
-     * Error callback. `'shell'` fires before any byte is produced (the
-     * caller can still send a 500 page); `'stream'` fires mid-stream after
-     * the shell flushed (per-component errors stream their fallbacks and do
-     * NOT reach this — only stream-level failures do).
-     */
-    onError?: (error: Error, phase: 'shell' | 'stream') => void;
+    // onError / renderError are inherited from SSRContextOptions
+    // (rfc-ssr-platform §2.2): ONE callback receives per-component render
+    // failures (info.componentId set) and request-level failures (shell
+    // preparation, stream errors — info carries only the phase). A shell
+    // failure fires before any byte is produced, so the caller can still
+    // send a 500 page.
 
     /**
      * Serialize resolved useAsync/useStream values for hydration pickup.
@@ -103,6 +102,11 @@ interface PreparedDocument {
     postBody: string;
     /** The closing tail (</body></html>…) — emitted after all chunks. */
     postTail: string;
+}
+
+/** Normalize an unknown throw before it reaches the onError contract. */
+function toError(e: unknown): Error {
+    return e instanceof Error ? e : new Error(String(e));
 }
 
 function throwIfAborted(signal: AbortSignal | undefined): void {
@@ -145,6 +149,9 @@ async function prepareDocument(
         throwIfAborted(options.signal);
     }
     const shellHtml = shellChunks.join('');
+    // Shell produced — later failures (deferred renders) are stream-phase
+    // for error routing.
+    ctx._phase = 'stream';
 
     // Head: collected per-request by useHead via the component instances
     const headConfigs = ctx._headConfigs;
@@ -168,6 +175,15 @@ async function prepareDocument(
         pre = headClose >= 0
             ? pre.slice(0, headClose) + headHtml + '\n' + pre.slice(headClose)
             : pre + headHtml;
+    }
+
+    // htmlAttrs/bodyAttrs collected via useHead patch the template's own
+    // <html>/<body> open tags (rfc-ssr-platform §2.4) — both live in `pre`
+    // (the template up to the outlet).
+    if (headConfigs.length > 0) {
+        const { htmlAttrs, bodyAttrs } = collectRootAttrs(headConfigs);
+        pre = mergeAttrsIntoTag(pre, 'html', htmlAttrs);
+        pre = mergeAttrsIntoTag(pre, 'body', bodyAttrs);
     }
 
     // Split the tail at </body>: everything before it (entry scripts!)
@@ -195,6 +211,11 @@ async function* documentChunks(
     // rethrow so the stream errors before producing bytes.
     const p = await prep;
 
+    // A redirect requested via useResponse() short-circuits the body: the
+    // shell promise carries the redirect, the HTTP layer sends it, and no
+    // document bytes are produced (rfc-ssr-platform §2.1).
+    if (p.ctx._response.redirect) return;
+
     // First flush: template head (with collected head tags) + shell + state
     // + the rest of the body markup incl. entry scripts (downloads start
     // now; module execution waits for parse end regardless)
@@ -215,7 +236,7 @@ async function* documentChunks(
         // the entry's flag check always sees it.
         yield COMPLETION_SCRIPT;
     } catch (e) {
-        options.onError?.(e as Error, 'stream');
+        options.onError?.(toError(e), { phase: 'stream' });
         return; // end without the closing tail — visibly truncated
     }
 
@@ -230,7 +251,7 @@ function startPrepare(
     options: DocumentOptions
 ): Promise<PreparedDocument> {
     const prep = prepareDocument(engine, input, options);
-    prep.catch(e => options.onError?.(e as Error, 'shell'));
+    prep.catch(e => options.onError?.(toError(e), { phase: 'shell' }));
     return prep;
 }
 
@@ -254,23 +275,22 @@ export async function renderDocumentImpl(
 }
 
 /**
- * Document as a Node.js Readable plus a `shell` promise that settles before
- * any byte is produced — await it to decide the HTTP status code, then pipe.
+ * Document as a raw async chunk generator plus a `shell` promise that
+ * settles before any byte is produced — await it to write the response
+ * head (status, headers, redirect — collected via useResponse()) before
+ * piping. The runtime-agnostic primitive the Node entry wraps in a Readable.
  */
-export function renderDocumentToNodeStreamImpl(
+export function renderDocumentChunksImpl(
     engine: DocumentEngine,
     input: DocumentInput,
     options: DocumentOptions
-): { stream: Readable; shell: Promise<void> } {
+): { chunks: AsyncGenerator<string>; shell: Promise<SSRResponse> } {
     const resolved: DocumentOptions = { ...options, mode: options.mode ?? 'stream' };
     const prep = startPrepare(engine, input, resolved);
-    const shell = prep.then(() => undefined as void);
+    const shell = prep.then(p => responseSummary(p.ctx));
     shell.catch(() => { /* handled via onError / stream error */ });
     return {
-        // Non-object mode: backpressure/highWaterMark measured in BYTES —
-        // in object mode a few large HTML strings buffer far more memory
-        // than intended under slow clients.
-        stream: Readable.from(documentChunks(engine, prep, resolved), { objectMode: false }),
+        chunks: documentChunks(engine, prep, resolved),
         shell
     };
 }
