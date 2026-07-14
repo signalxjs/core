@@ -111,6 +111,8 @@ export function defineApp<TContainer = any>(rootComponent: JSXElement): App<TCon
     let isMounted = false;
     let container: TContainer | null = null;
     let unmountFn: (() => void) | null = null;
+    // Dev-only: warn once per app when runWithContext gets an async callback.
+    let warnedAsyncRunWithContext = false;
 
     const app: App<TContainer> = {
         config: context.config,
@@ -172,10 +174,27 @@ export function defineApp<TContainer = any>(rootComponent: JSXElement): App<TCon
             // outside components (router guards, socket handlers, entry-scope
             // code). Synchronous only: restored in finally, so the context
             // never leaks past the first await of an async fn. Nested calls
-            // restore the previous context.
+            // restore the previous context. (Async continuation support via
+            // AsyncLocalStorage was considered and deferred: browsers have no
+            // ALS, so it would silently split state client-side — revisit
+            // when TC39 AsyncContext is available cross-platform.)
             const prev = setActiveAppContext(context);
             try {
-                return fn();
+                const result = fn();
+                if (process.env.NODE_ENV !== 'production'
+                    && !warnedAsyncRunWithContext
+                    && result !== null
+                    && (typeof result === 'object' || typeof result === 'function')
+                    && typeof (result as { then?: unknown }).then === 'function') {
+                    warnedAsyncRunWithContext = true;
+                    console.warn(
+                        'app.runWithContext(fn) got a callback that returned a Promise — the app ' +
+                        'context applies only to its synchronous portion and is restored before ' +
+                        'any awaited continuation runs. After an await, re-enter with another ' +
+                        'runWithContext call to resolve more dependencies.'
+                    );
+                }
+                return result;
             } finally {
                 setActiveAppContext(prev);
             }

@@ -46,7 +46,23 @@ router.beforeEach((to) => {
 });
 ```
 
-The context applies only to the **synchronous** portion of the callback — after an `await`, re-enter with another `runWithContext` call. Nested calls restore the previous context. Plugins receive the app in `install()` and can capture it to wrap their own callbacks.
+The context applies only to the **synchronous** portion of the callback — after an `await`, re-enter with another `runWithContext` call (dev builds warn once per app when the callback returns a Promise):
+
+```tsx
+// ❌ Wrong — after the await, useSession() resolves a realm fallback, not the app's instance
+await app.runWithContext(async () => {
+  const user = await fetchUser();
+  useSession().user = user; // context already restored here
+});
+
+// ✅ Right — re-enter for each synchronous section that resolves dependencies
+const user = await fetchUser();
+app.runWithContext(() => {
+  useSession().user = user;
+});
+```
+
+Nested calls restore the previous context. Plugins receive the app in `install()` and can capture it to wrap their own callbacks.
 
 ### Non-web renderers
 

@@ -5,7 +5,7 @@
  * (DOM mount) and on a server-rendered app object alike. See issue #101.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { component, jsx, defineApp, defineFactory } from '@sigx/runtime-core';
 // Side effect: registers the DOM default mount so app.mount(container) works.
 import '@sigx/runtime-dom';
@@ -58,6 +58,34 @@ describe('app.runWithContext integration', () => {
         const outside = app.runWithContext(() => useStore());
         expect(outside).toBe(inComponent);
         expect(outside.hits).toBe(1);
+    });
+
+    it('dev-warns once per app when the callback returns a Promise, passing the value through', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const app = defineApp(jsx('div', {}));
+
+        const p = app.runWithContext(async () => 'value');
+        app.runWithContext(async () => 'again');
+
+        expect(warn).toHaveBeenCalledTimes(1);
+        expect(warn.mock.calls[0][0]).toContain('synchronous portion');
+        await expect(p).resolves.toBe('value');
+
+        // A second app warns independently.
+        const app2 = defineApp(jsx('div', {}));
+        void app2.runWithContext(async () => 'other');
+        expect(warn).toHaveBeenCalledTimes(2);
+        vi.restoreAllMocks();
+    });
+
+    it('stays silent for synchronous callbacks', () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const app = defineApp(jsx('div', {}));
+
+        expect(app.runWithContext(() => 7)).toBe(7);
+
+        expect(warn).not.toHaveBeenCalled();
+        vi.restoreAllMocks();
     });
 
     it('plugin installed via app.use can capture the app and wrap callbacks (router-guard pattern)', () => {
