@@ -90,7 +90,7 @@ describe('islands app mode (app.use(islandsPlugin()))', () => {
         let clientSetupRuns = 0;
         const Tap = component(() => {
             clientSetupRuns++;
-            const n = signal(0, 'n');
+            const n = signal(0);
             return () => <button class="tap">{n.value}</button>;
         }, { name });
 
