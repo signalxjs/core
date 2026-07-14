@@ -207,5 +207,16 @@ describe('Error factory functions', () => {
             const err = requiredInjectableNotProvidedError('Router');
             expect(err.suggestion).toContain('app.defineProvide(useRouter');
         });
+
+        it('capitalizes lowercase identifier names in the suggestion', () => {
+            const err = requiredInjectableNotProvidedError('router');
+            expect(err.suggestion).toContain('app.defineProvide(useRouter');
+        });
+
+        it('falls back to a generic placeholder for non-identifier names', () => {
+            const err = requiredInjectableNotProvidedError('my router!');
+            expect(err.suggestion).toContain('app.defineProvide(<your use-function>');
+            expect(err.suggestion).not.toContain('usemy');
+        });
     });
 });

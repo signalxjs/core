@@ -166,7 +166,9 @@ export function defineFactory<InferReturnSetup>(
     const resolveShared = (...args: unknown[]): Instance => {
         if (lifetime === 'scoped') {
             const entry = lookupProvidedEntry(token);
-            if (entry !== NOT_PROVIDED) {
+            // A disposed instance falls through to the appContext branch below,
+            // whose recovery logic recreates it instead of serving a corpse.
+            if (entry !== NOT_PROVIDED && !isDisposedInstance(entry)) {
                 return entry as Instance;
             }
         }
