@@ -258,6 +258,73 @@ describe('boundary hydrator', () => {
         });
     });
 
+    describe('streamed boundaries × the hydrate axis', () => {
+        it("explicit mode runs the leftover scan for already-replaced streamed boundaries", async () => {
+            let setupRuns = 0;
+            const name = uniqueName('Leftover');
+            registerComponent(name, component(() => {
+                setupRuns++;
+                return () => <div class="s">streamed</div>;
+            }, { name }) as any);
+
+            const Root = component(() => () => <main>x</main>, { name: 'Root' });
+            // $SIGX_REPLACE already ran: real content inside the placeholder, not yet hydrated
+            container = createSSRContainer(
+                '<div data-async-placeholder="3" style="display:contents;"><div class="s">streamed</div></div><!--$c:3-->'
+            );
+            setBoundaryTable({ '3': { hydrate: 'load', component: name } });
+
+            hydrate((Root as any)({}), container, makeAppContext({ boundaries: 'explicit' }));
+            await nextTick();
+
+            expect(setupRuns).toBe(1);
+            expect(container.querySelector('[data-async-placeholder]')!.hasAttribute('data-hydrated')).toBe(true);
+        });
+
+        it("a streamed boundary marked hydrate:'never' stays static", async () => {
+            let setupRuns = 0;
+            const name = uniqueName('NeverStream');
+            registerComponent(name, component(() => {
+                setupRuns++;
+                return () => <div class="s">streamed</div>;
+            }, { name }) as any);
+
+            const Root = component(() => () => <main>x</main>, { name: 'Root' });
+            container = createSSRContainer(
+                '<div data-async-placeholder="3" style="display:contents;"><div class="s">streamed</div></div><!--$c:3-->'
+            );
+            setBoundaryTable({ '3': { hydrate: 'never', component: name } });
+
+            hydrate((Root as any)({}), container, makeAppContext({ boundaries: 'explicit' }));
+            await nextTick();
+
+            expect(setupRuns).toBe(0);
+            expect(container.querySelector('[data-async-placeholder]')!.hasAttribute('data-hydrated')).toBe(false);
+        });
+
+        it('table scheduling skips a boundary still showing its streaming placeholder', async () => {
+            let setupRuns = 0;
+            const name = uniqueName('Pending');
+            registerComponent(name, component(() => {
+                setupRuns++;
+                return () => <div class="s">real</div>;
+            }, { name }) as any);
+
+            // Content has NOT streamed in yet — the placeholder still shows the fallback
+            container = createSSRContainer(
+                '<div data-async-placeholder="3" style="display:contents;">loading…</div><!--$c:3-->'
+            );
+            setBoundaryTable({ '3': { hydrate: 'load', component: name } });
+
+            scheduleTableBoundaries();
+            await nextTick();
+
+            // The sigx:async-ready flow owns it; the fallback is not hydrated
+            expect(setupRuns).toBe(0);
+            expect(container.innerHTML).toContain('loading…');
+        });
+    });
+
     describe('fast path — no table', () => {
         it('hydrate() with no boundary table is the plain walk', async () => {
             let clicked = false;

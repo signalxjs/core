@@ -400,6 +400,21 @@ function scheduleTableBoundary(id: number, record: SSRBoundaryRecord): void {
         return;
     }
 
+    // A boundary still showing its streaming placeholder belongs to the
+    // sigx:async-ready flow — its content has not arrived yet, and hydrating
+    // the fallback would waste work and risk a double mount once the
+    // replacement lands. (A placeholder already marked data-hydrated was
+    // handled by that flow.)
+    {
+        let prev: Node | null = marker.previousSibling;
+        while (prev && prev.nodeType !== Node.ELEMENT_NODE) {
+            prev = prev.previousSibling;
+        }
+        if (prev && (prev as Element).hasAttribute?.('data-async-placeholder')) {
+            return;
+        }
+    }
+
     const doHydrate = async () => {
         if (process.env.NODE_ENV !== 'production') {
             console.log(`%c[Hydrate] 🎯 Strategy "${strategy}" fired for "${record.component}" — loading component...`, 'color: #673ab7; font-weight: bold');
@@ -519,6 +534,11 @@ function reportAsyncHydrateError(err: unknown): void {
  * Hydrate a boundary whose content just streamed in via $SIGX_REPLACE.
  */
 async function hydrateAsyncBoundary(container: Element, record: SSRBoundaryRecord): Promise<void> {
+    // The hydrate axis holds for streamed content too: a boundary
+    // explicitly marked 'never' stays static HTML.
+    if (record.hydrate === 'never') {
+        return;
+    }
     if (!record.component) {
         if (process.env.NODE_ENV !== 'production') {
             console.error(`[Hydrate] No component name in boundary record`);

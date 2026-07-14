@@ -39,6 +39,11 @@ export const DANGEROUS_KEYS = new Set(['__proto__', 'constructor', 'prototype'])
  * wording this check originally shipped with).
  */
 export function isSerializable(key: string, value: unknown, what = 'useAsync'): boolean {
+    // Consequence differs by payload: a skipped useAsync value refetches on
+    // the client; a skipped boundary prop / signal snapshot is simply absent.
+    const consequence = what === 'useAsync'
+        ? ' The client will refetch.'
+        : ' It will be missing on the client.';
     if (DANGEROUS_KEYS.has(key)) {
         if (process.env.NODE_ENV !== 'production') {
             const label = what === 'useAsync' ? 'useAsync/useStream key' : `${what} key`;
@@ -53,7 +58,7 @@ export function isSerializable(key: string, value: unknown, what = 'useAsync'): 
         if (process.env.NODE_ENV !== 'production') {
             console.warn(
                 `[SSR] ${what}("${key}") resolved to a ${typeof value} — not ` +
-                `JSON-serializable, skipped. The client will refetch.`
+                `JSON-serializable, skipped.${consequence}`
             );
         }
         return false;
@@ -65,8 +70,7 @@ export function isSerializable(key: string, value: unknown, what = 'useAsync'): 
             if (process.env.NODE_ENV !== 'production') {
                 console.warn(
                     `[SSR] ${what}("${key}") resolved to a value JSON cannot ` +
-                    `represent (symbol / toJSON returning undefined), skipped. ` +
-                    `The client will refetch.`
+                    `represent (symbol / toJSON returning undefined), skipped.${consequence}`
                 );
             }
             return false;
@@ -76,7 +80,7 @@ export function isSerializable(key: string, value: unknown, what = 'useAsync'): 
         if (process.env.NODE_ENV !== 'production') {
             console.warn(
                 `[SSR] ${what}("${key}") resolved to a non-JSON-serializable ` +
-                `value (circular?), skipped. The client will refetch.`
+                `value (circular?), skipped.${consequence}`
             );
         }
         return false;

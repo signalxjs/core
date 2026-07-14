@@ -79,6 +79,11 @@ export function hydrate(element: any, container: Element, appContext?: AppContex
     // install) — no root walk; ONLY boundary-table entries hydrate.
     if (getHydrateDefaults(appContext).boundaries === 'explicit') {
         scheduleTableBoundaries();
+        // Streamed boundaries whose $SIGX_REPLACE ran before the listener
+        // was ready still need hydrating — same scan as the walk path.
+        if (hasBoundaries) {
+            hydrateLeftoverBoundaries(container);
+        }
         for (const plugin of plugins) {
             plugin.client?.afterHydrate?.(container);
         }

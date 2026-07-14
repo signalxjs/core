@@ -54,6 +54,10 @@ export function getIslandData(): Record<string, IslandInfo> {
     const view: Record<string, IslandInfo> = {};
     if (table) {
         for (const id in table) {
+            // hydrate: 'never' has no islands spelling — those boundaries
+            // are not islands and never hydrate; keep them out of the view
+            // rather than coercing an impossible strategy value.
+            if (table[id].hydrate === 'never') continue;
             view[id] = recordToIslandInfo(table[id]);
         }
     }
