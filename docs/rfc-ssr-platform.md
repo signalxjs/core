@@ -106,7 +106,8 @@ augmented by packs):
 
 ```ts
 interface SSRBoundary {
-  id: string;                       // stable per request (existing component-id scheme)
+  id: number;                       // stable per request — the existing numeric component-id
+                                    // scheme (the <!--$c:ID--> markers stay frozen)
   flush: 'inline' | 'stream' | 'skip';
   //  inline: await content, emit in place (blocking/string modes)
   //  stream: emit fallback + placeholder now, $SIGX_REPLACE later
@@ -125,8 +126,10 @@ interface SSRBoundary {
   media?: string;                   // required iff hydrate: 'media' — the query string
   fallback?: () => VNode;           // flush: 'stream' | 'skip' only — emitted in place of
                                     // content; when absent those modes emit an empty placeholder
-  chunk?: string;                   // required iff the boundary loads its component on demand
-                                    // (lazy()/islands manifest) — the module ref
+  chunk?: { url: string; export?: string };
+                                    // required iff the boundary loads its component on demand —
+                                    // the module ref (the islands manifest's
+                                    // { chunkUrl, exportName }; lazy() uses the default export)
   props?: Record<string, unknown>;  // required iff the boundary mounts independently of the
                                     // root hydration walk: every boundary with hydrate ≠ 'load',
                                     // and every flush:'skip' boundary (client:only) regardless
