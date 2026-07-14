@@ -110,13 +110,19 @@ interface SSRBoundary {
   hydrate: 'load' | 'idle' | 'visible' | 'media' | 'interaction' | 'never';
   //  'interaction' is the one new strategy; the rest ship in
   //  @sigx/ssr-islands today as client:* directives
-  media?: string;                   // the media query — required when hydrate: 'media'
-  fallback?: () => VNode;           // rendered while flush=stream is pending, or when flush=skip
-  chunk?: string;                   // module ref for on-demand loading (lazy()/islands manifest)
-  props?: Record<string, unknown>;  // serialized props — required whenever the boundary mounts
-                                    // independently of the root hydration walk: every boundary
-                                    // with hydrate ≠ 'load', and every flush:'skip' boundary
-                                    // (client:only) regardless of its hydrate strategy
+  //
+  //  The fields below are conditionally required — `?` means "not universal
+  //  to every boundary", not "always optional"; each note states when the
+  //  field must be present:
+  media?: string;                   // required iff hydrate: 'media' — the query string
+  fallback?: () => VNode;           // flush: 'stream' | 'skip' only — emitted in place of
+                                    // content; when absent those modes emit an empty placeholder
+  chunk?: string;                   // required iff the boundary loads its component on demand
+                                    // (lazy()/islands manifest) — the module ref
+  props?: Record<string, unknown>;  // required iff the boundary mounts independently of the
+                                    // root hydration walk: every boundary with hydrate ≠ 'load',
+                                    // and every flush:'skip' boundary (client:only) regardless
+                                    // of its hydrate strategy
 }
 ```
 
