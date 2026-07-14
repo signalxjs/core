@@ -134,8 +134,11 @@ export function collectRootAttrs(configs: HeadConfig[]): {
     htmlAttrs: Record<string, string>;
     bodyAttrs: Record<string, string>;
 } {
-    const htmlAttrs: Record<string, string> = {};
-    const bodyAttrs: Record<string, string> = {};
+    // Null-prototype accumulators: attribute names are user strings, and a
+    // key like __proto__ must be plain data (same discipline as the response
+    // headers bag).
+    const htmlAttrs: Record<string, string> = Object.create(null);
+    const bodyAttrs: Record<string, string> = Object.create(null);
     for (const config of sortByPriority(configs)) {
         if (config.htmlAttrs) {
             for (const [k, v] of Object.entries(config.htmlAttrs)) {

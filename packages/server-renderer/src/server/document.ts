@@ -104,6 +104,11 @@ interface PreparedDocument {
     postTail: string;
 }
 
+/** Normalize an unknown throw before it reaches the onError contract. */
+function toError(e: unknown): Error {
+    return e instanceof Error ? e : new Error(String(e));
+}
+
 function throwIfAborted(signal: AbortSignal | undefined): void {
     if (signal?.aborted) {
         throw signal.reason instanceof Error ? signal.reason : new Error('renderDocument aborted');
@@ -231,7 +236,7 @@ async function* documentChunks(
         // the entry's flag check always sees it.
         yield COMPLETION_SCRIPT;
     } catch (e) {
-        options.onError?.(e as Error, { phase: 'stream' });
+        options.onError?.(toError(e), { phase: 'stream' });
         return; // end without the closing tail — visibly truncated
     }
 
@@ -246,7 +251,7 @@ function startPrepare(
     options: DocumentOptions
 ): Promise<PreparedDocument> {
     const prep = prepareDocument(engine, input, options);
-    prep.catch(e => options.onError?.(e as Error, { phase: 'shell' }));
+    prep.catch(e => options.onError?.(toError(e), { phase: 'shell' }));
     return prep;
 }
 

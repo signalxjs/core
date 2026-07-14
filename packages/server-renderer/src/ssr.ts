@@ -342,6 +342,67 @@ export function createSSR(): SSRInstance {
         return ctx;
     }
 
+    // Closure-scoped (not a `this`-sensitive method — survives destructuring):
+    // the runtime-agnostic chunk primitive both stream shapes wrap.
+    function renderChunks(
+        input: JSXElement | App,
+        options?: SSRContextOptions | SSRContext
+    ): AsyncGenerator<string> {
+        const ctx = makeContext(options);
+        ctx._streaming = true;
+        const { element, appContext } = extractInput(input);
+        ctx._appContext = appContext;
+
+        async function* generateAll(): AsyncGenerator<string> {
+            // Phase 1: Render main page with chunk batching (4KB threshold).
+            // Batched chunks are ~24x faster than per-node emission.
+            let buffer = '';
+            const FLUSH_THRESHOLD = 4096;
+
+            for await (const chunk of renderToChunks(element, ctx, null, appContext)) {
+                buffer += chunk;
+                if (buffer.length >= FLUSH_THRESHOLD) {
+                    yield buffer;
+                    buffer = '';
+                }
+            }
+            if (buffer) { yield buffer; buffer = ''; }
+
+            // Shell produced — later failures (deferred renders) are
+            // stream-phase for error routing.
+            ctx._phase = 'stream';
+
+            // Collect head from useHead() calls
+            const headConfigs = ctx._headConfigs;
+            if (headConfigs.length > 0) {
+                ctx.addHead(renderHeadToString(headConfigs));
+            }
+
+            // Phase 2: Injected HTML from plugins
+            for (const plugin of plugins) {
+                const injected = plugin.server?.getInjectedHTML?.(ctx);
+                if (injected) {
+                    const html = typeof injected === 'string' ? injected : await injected;
+                    if (html) yield html;
+                }
+            }
+
+            // Boundary table (core protocol — empty renders emit nothing)
+            const boundaryTable = emitBoundaryTable(ctx);
+            if (boundaryTable) yield boundaryTable;
+
+            // Phase 3: Stream async chunks — core + plugin interleaved
+            for await (const chunk of streamAllAsyncChunks(ctx, plugins)) {
+                yield chunk;
+            }
+
+            // Phase 4: Signal streaming complete
+            yield `<script>window.__SIGX_STREAMING_COMPLETE__=true;window.dispatchEvent(new Event('sigx:ready'));</script>`;
+        }
+
+        return generateAll();
+    }
+
     return {
         use(plugin: SSRPlugin): SSRInstance {
             plugins.push(plugin);
@@ -387,68 +448,15 @@ export function createSSR(): SSRInstance {
             return result;
         },
 
-        renderChunks(input, options?) {
-            const ctx = makeContext(options);
-            ctx._streaming = true;
-            const { element, appContext } = extractInput(input);
-            ctx._appContext = appContext;
-
-            async function* generateAll(): AsyncGenerator<string> {
-                // Phase 1: Render main page with chunk batching (4KB threshold).
-                // Batched chunks are ~24x faster than per-node emission.
-                let buffer = '';
-                const FLUSH_THRESHOLD = 4096;
-
-                for await (const chunk of renderToChunks(element, ctx, null, appContext)) {
-                    buffer += chunk;
-                    if (buffer.length >= FLUSH_THRESHOLD) {
-                        yield buffer;
-                        buffer = '';
-                    }
-                }
-                if (buffer) { yield buffer; buffer = ''; }
-
-                // Shell produced — later failures (deferred renders) are
-                // stream-phase for error routing.
-                ctx._phase = 'stream';
-
-                // Collect head from useHead() calls
-                const headConfigs = ctx._headConfigs;
-                if (headConfigs.length > 0) {
-                    ctx.addHead(renderHeadToString(headConfigs));
-                }
-
-                // Phase 2: Injected HTML from plugins
-                for (const plugin of plugins) {
-                    const injected = plugin.server?.getInjectedHTML?.(ctx);
-                    if (injected) {
-                        const html = typeof injected === 'string' ? injected : await injected;
-                        if (html) yield html;
-                    }
-                }
-
-                // Boundary table (core protocol — empty renders emit nothing)
-                const boundaryTable = emitBoundaryTable(ctx);
-                if (boundaryTable) yield boundaryTable;
-
-                // Phase 3: Stream async chunks — core + plugin interleaved
-                for await (const chunk of streamAllAsyncChunks(ctx, plugins)) {
-                    yield chunk;
-                }
-
-                // Phase 4: Signal streaming complete
-                yield `<script>window.__SIGX_STREAMING_COMPLETE__=true;window.dispatchEvent(new Event('sigx:ready'));</script>`;
-            }
-
-            return generateAll();
-        },
+        renderChunks,
 
         renderStream(input, options?) {
             // Use pull-based ReadableStream backed by the chunk generator.
             // Push-based enqueueing is the worst case for WebStreams
             // throughput; pulling from a generator avoids it and provides
-            // natural backpressure.
-            const generator = this.renderChunks(input, options);
+            // natural backpressure. (renderChunks is closure-scoped — the
+            // methods are not `this`-sensitive and survive destructuring.)
+            const generator = renderChunks(input, options);
 
             return new ReadableStream<string>({
                 async pull(controller) {
