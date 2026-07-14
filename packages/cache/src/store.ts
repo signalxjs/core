@@ -7,8 +7,9 @@
  * blob-as-seed) and stays interchangeable with core's default engine.
  */
 
-import type { AsyncFetcherContext } from 'sigx';
-import { normalizeError, makeAbortController, inertAbortSignal } from 'sigx/internals';
+import type { AsyncFetcherContext } from '@sigx/runtime-core';
+import { normalizeError, makeAbortController, inertAbortSignal } from '@sigx/runtime-core/internals';
+import type { CacheDefaults } from './options.js';
 
 /** Store-side view of one mounted cell — notified when its entry changes. */
 export interface EntrySubscriber {
@@ -39,14 +40,30 @@ export interface CacheEntry {
     intervalTimer: ReturnType<typeof setInterval> | null;
 }
 
-export interface CacheDefaults {
-    /** How long a value counts as fresh (ms). Default 0 — always revalidate on mount. */
-    staleTime?: number;
-    /** Retention after the last consumer unmounts (ms). Default 5 minutes. */
-    gcTime?: number;
-}
-
 const DEFAULT_GC_TIME = 5 * 60_000;
+
+/**
+ * The default attention trigger: window focus + visibilitychange. Installed
+ * only when a DOM is present — non-web runtimes pass their own trigger via
+ * `cachePlugin({ revalidateTrigger })` (app resume, terminal focus, …).
+ */
+function domAttentionTrigger(revalidate: () => void): (() => void) | void {
+    if (typeof window === 'undefined') return;
+    const listener = () => {
+        if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+        revalidate();
+    };
+    window.addEventListener('focus', listener);
+    if (typeof document !== 'undefined') {
+        document.addEventListener('visibilitychange', listener);
+    }
+    return () => {
+        window.removeEventListener('focus', listener);
+        if (typeof document !== 'undefined') {
+            document.removeEventListener('visibilitychange', listener);
+        }
+    };
+}
 
 /** Read the page blob without consuming it (the store seeds from it once per key). */
 function peekBlob(key: string): { hit: boolean; value: unknown } {
@@ -82,13 +99,16 @@ export class CacheStore {
     private entries = new Map<string, CacheEntry>();
     /** Blob adoption is INITIAL state (§7): each key seeds at most once per store lifetime. */
     private seeded = new Set<string>();
-    private focusListener: (() => void) | null = null;
+    private triggerInstalled = false;
+    private triggerUnsub: (() => void) | null = null;
+    private readonly revalidateTrigger: (revalidate: () => void) => (() => void) | void;
     readonly defaultStaleTime: number;
     readonly defaultGcTime: number;
 
     constructor(defaults: CacheDefaults = {}) {
         this.defaultStaleTime = defaults.staleTime ?? 0;
         this.defaultGcTime = defaults.gcTime ?? DEFAULT_GC_TIME;
+        this.revalidateTrigger = defaults.revalidateTrigger ?? domAttentionTrigger;
     }
 
     ensure(key: string): CacheEntry {
@@ -155,7 +175,7 @@ export class CacheStore {
         entry.gcTime = isFirst ? policy.gcTime : Math.max(entry.gcTime, policy.gcTime);
         if (policy.revalidateOnFocus) {
             entry.revalidateOnFocus = true;
-            this.ensureFocusListener();
+            this.ensureRevalidateTrigger();
         }
         if (policy.revalidateOnInterval !== undefined) {
             entry.revalidateOnInterval =
@@ -293,20 +313,22 @@ export class CacheStore {
         }
     }
 
-    /** Focus/visibility revalidation — one listener per store, added lazily. */
-    private ensureFocusListener(): void {
-        if (this.focusListener || typeof window === 'undefined') return;
-        this.focusListener = () => {
-            if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
-            for (const entry of this.entries.values()) {
-                if (!entry.revalidateOnFocus || entry.subscribers.size === 0 || !entry.fetcher) continue;
-                void this.fetch(entry.key, entry.fetcher, entry.rawArg, true);
-            }
-        };
-        window.addEventListener('focus', this.focusListener);
-        if (typeof document !== 'undefined') {
-            document.addEventListener('visibilitychange', this.focusListener);
-        }
+    /**
+     * Attention revalidation — the trigger subscribes ONE "revalidate now"
+     * callback per store, lazily on the first read that opts in. The event
+     * source is the platform's: DOM focus/visibility by default, whatever
+     * `cachePlugin({ revalidateTrigger })` provided otherwise.
+     */
+    private ensureRevalidateTrigger(): void {
+        if (this.triggerInstalled) return;
+        this.triggerInstalled = true;
+        this.triggerUnsub =
+            this.revalidateTrigger(() => {
+                for (const entry of this.entries.values()) {
+                    if (!entry.revalidateOnFocus || entry.subscribers.size === 0 || !entry.fetcher) continue;
+                    void this.fetch(entry.key, entry.fetcher, entry.rawArg, true);
+                }
+            }) ?? null;
     }
 
     private ensureIntervalTimer(entry: CacheEntry): void {
@@ -318,19 +340,17 @@ export class CacheStore {
         }, entry.revalidateOnInterval);
     }
 
-    /** App teardown: clear every timer and listener. */
+    /** App teardown: clear every timer and unsubscribe the attention trigger. */
     destroy(): void {
         for (const entry of this.entries.values()) {
             if (entry.gcTimer) clearTimeout(entry.gcTimer);
             if (entry.intervalTimer) clearInterval(entry.intervalTimer);
         }
         this.entries.clear();
-        if (this.focusListener && typeof window !== 'undefined') {
-            window.removeEventListener('focus', this.focusListener);
-            if (typeof document !== 'undefined') {
-                document.removeEventListener('visibilitychange', this.focusListener);
-            }
-            this.focusListener = null;
+        if (this.triggerUnsub) {
+            this.triggerUnsub();
+            this.triggerUnsub = null;
         }
+        this.triggerInstalled = false;
     }
 }

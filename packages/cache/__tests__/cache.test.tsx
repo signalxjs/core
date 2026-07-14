@@ -369,6 +369,41 @@ describe('@sigx/cache', () => {
         await vi.waitFor(() => expect(calls).toBeGreaterThanOrEqual(2), { timeout: 2000 });
     });
 
+    it('a custom revalidateTrigger replaces the DOM listener; its unsubscribe runs on app teardown', async () => {
+        let calls = 0;
+        const fetcher = vi.fn(async () => ++calls);
+        let fire: (() => void) | null = null;
+        const unsubscribe = vi.fn(() => { fire = null; });
+        const trigger = vi.fn((revalidate: () => void) => {
+            fire = revalidate;
+            return unsubscribe;
+        });
+        let cell!: AsyncState<number>;
+
+        const Root = component(() => {
+            cell = useData('trigger-key', fetcher, { cache: { revalidateOnFocus: true } });
+            return () => <div />;
+        });
+        mountWith(cachePlugin({ revalidateTrigger: trigger }), jsx(Root, {}));
+        await settle();
+        expect(calls).toBe(1);
+        expect(trigger).toHaveBeenCalledTimes(1);
+
+        // The platform's attention event fires ⇒ flagged reads revalidate…
+        fire!();
+        await settle();
+        expect(calls).toBe(2);
+        expect(cell.value).toBe(2);
+
+        // …and the DOM default was NOT installed alongside it.
+        window.dispatchEvent(new Event('focus'));
+        await settle();
+        expect(calls).toBe(2);
+
+        apps.pop()!.unmount();
+        expect(unsubscribe).toHaveBeenCalledTimes(1);
+    });
+
     // ====================================================================
     // gcTime
     // ====================================================================
