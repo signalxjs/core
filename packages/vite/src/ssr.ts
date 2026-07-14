@@ -146,37 +146,25 @@ export async function createDevRequestHandler(
     vite: ViteDevServer,
     options: DevRequestHandlerOptions
 ): Promise<NodeRequestHandler> {
-    // Lazy import: @sigx/server-renderer is required only when the SSR
-    // handler is actually used, not by every @sigx/vite consumer.
-    const { createRequestHandler } = await import('@sigx/server-renderer/node');
-
     const templatePath = resolvePath(vite.config.root, options.template ?? 'index.html');
     const entryExport = options.entryExport ?? 'createApp';
 
-    const inner = createRequestHandler({
-        template: async (url) => {
-            const raw = await readFile(templatePath, 'utf-8');
-            return vite.transformIndexHtml(url, raw);
-        },
-        app: async (url) => {
-            const mod = await vite.ssrLoadModule(options.entry);
-            const factory = mod[entryExport];
-            if (typeof factory !== 'function') {
-                throw new Error(
-                    `[sigx:ssr] entry module "${options.entry}" does not export ` +
-                    `"${entryExport}(url)" — export a per-request app factory ` +
-                    `(see the router SSR contract).`
-                );
-            }
-            return factory(url);
-        },
-        document: options.document as never,
-        isBot: options.isBot as never,
-        ssr: options.ssr as never
-    });
+    // The renderer must live in the SAME module graph as the app: the entry
+    // loads through Vite's SSR module runner (where the plugin's
+    // ssr.noExternal keeps the whole @sigx family), so the handler's
+    // renderer has to come through the runner too — a Node-resolved copy
+    // would carry its own DI token identities and never see the app's
+    // provides. When the family IS externalized, the runner resolves to
+    // Node's instances anyway, so this is consistent in both setups.
+    async function loadHandlerFactory(): Promise<typeof import('@sigx/server-renderer/node')> {
+        return (await vite.ssrLoadModule('@sigx/server-renderer/node')) as unknown as
+            typeof import('@sigx/server-renderer/node');
+    }
+    // Fail fast at startup if the peer is missing.
+    await loadHandlerFactory();
 
     return async function devHandler(req, res, next) {
-        await inner(req, res, (err?: unknown) => {
+        const forward = (err?: unknown) => {
             // Map SSR stack frames back to source before surfacing.
             if (err instanceof Error) {
                 vite.ssrFixStacktrace(err);
@@ -186,6 +174,36 @@ export async function createDevRequestHandler(
                 res.statusCode = 500;
                 res.end('<!doctype html><title>500</title><h1>Internal Server Error</h1>');
             }
-        });
+        };
+
+        try {
+            // Per request through the runner: module-graph invalidations
+            // (edits to app OR framework source) apply on the next request.
+            const { createRequestHandler } = await loadHandlerFactory();
+            const inner = createRequestHandler({
+                template: async (url) => {
+                    const raw = await readFile(templatePath, 'utf-8');
+                    return vite.transformIndexHtml(url, raw);
+                },
+                app: async (url) => {
+                    const mod = await vite.ssrLoadModule(options.entry);
+                    const factory = mod[entryExport];
+                    if (typeof factory !== 'function') {
+                        throw new Error(
+                            `[sigx:ssr] entry module "${options.entry}" does not export ` +
+                            `"${entryExport}(url)" — export a per-request app factory ` +
+                            `(see the router SSR contract).`
+                        );
+                    }
+                    return factory(url);
+                },
+                document: options.document as never,
+                isBot: options.isBot as never,
+                ssr: options.ssr as never
+            });
+            await inner(req, res, forward);
+        } catch (err) {
+            forward(err);
+        }
     };
 }
