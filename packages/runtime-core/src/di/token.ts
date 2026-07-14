@@ -3,8 +3,9 @@
  *
  * The internal seam pattern — a symbol token plus a structurally-typed
  * provide helper (`provideAsyncEngine`, `provideSSRSerializerHandlers`,
- * `provideHydrateDefaults`, `ERROR_SCOPE_TOKEN`) — used to declare plain
- * `unique symbol` tokens, forcing an `as X | undefined` cast at every read.
+ * `provideHydrateDefaults`) — used to declare plain `unique symbol` tokens,
+ * forcing an `as X | undefined` cast at every read. The same applied to bare
+ * tokens set directly on a provides Map (`ERROR_SCOPE_TOKEN`).
  * An `InjectionToken<T>` is still a plain symbol at runtime, but carries its
  * value type at the type level so `getProvided`/`setProvided` (and the typed
  * `lookupProvided` overload) infer `T` at the call site.
