@@ -90,7 +90,7 @@ export function islandsPlugin(options?: IslandsPluginOptions): SSRPlugin & { ins
             // Islands mode is an app declaration, carried by the plugin —
             // never implied by a package import (rfc-ssr-platform open
             // question 5, resolved as plugin-provided via the DI seam).
-            provideHydrateDefaults((app as any)._context, { boundaries: 'explicit' });
+            provideHydrateDefaults(app._context, { boundaries: 'explicit' });
             registerClientPlugin(this as unknown as SSRPlugin);
         },
 

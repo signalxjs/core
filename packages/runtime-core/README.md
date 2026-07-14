@@ -67,6 +67,28 @@ router.beforeEach((to) => {
 
 The context applies only to the **synchronous** portion of the callback — after an `await`, re-enter with another `runWithContext` call. Nested calls restore the previous context. Plugins receive the app in `install()` and can capture it to wrap their own callbacks.
 
+### Writing plugins
+
+A plugin is a function or an object with `install(app, options?)`, registered with `app.use()`. Inside `install`, `app._context` is the supported surface for wiring app-wide services — pass it to seam provide-helpers (e.g. `provideAsyncEngine` from `sigx/internals`) or use `app.defineProvide` for injectables. The underscore marks it as an advanced surface, not a private one; no cast is needed:
+
+```tsx
+import { defineInjectable, type Plugin } from '@sigx/runtime-core';
+
+class MyService {
+  close() { /* release sockets, timers, … */ }
+}
+
+export const useMyService = defineInjectable(() => new MyService());
+
+export const myPlugin: Plugin = {
+  name: 'my-plugin',
+  install(app) {
+    const service = app.defineProvide(useMyService);
+    app._context.disposables.add(() => service.close());
+  }
+};
+```
+
 ### Non-web renderers
 
 This package references no web global unguarded — it runs anywhere. One thing renderer authors must know: `useData`/`useStream` only auto-run their sources on a **live client**, and without a declaration that is detected as "`window` exists" (which keeps server renders safe). A client runtime with no `window` (native, terminal) must say so once, from its platform-identity module:
