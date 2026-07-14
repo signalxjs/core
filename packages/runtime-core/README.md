@@ -31,6 +31,25 @@ const Timer = component(() => {
 });
 ```
 
+### Required injectables
+
+`defineInjectable(factory)` gives an injectable a zero-config fallback: used without a provider, it lazily creates a module-global singleton. That is right for optional services, and wrong for per-app services like a router — on the server, a forgotten provide would silently share one instance across every request (dev builds warn when this happens during SSR).
+
+Declare those services **required** by passing a name instead of a factory. There is no fallback; using it unprovided throws a structured error (`SIGX202`) naming the injectable:
+
+```tsx
+export const useRouter = defineInjectable<Router>('Router');
+
+// Per app (per request under SSR):
+const app = defineApp(<App />);
+app.defineProvide(useRouter, () => createRouter(url));
+
+// In any component:
+const router = useRouter();
+```
+
+App-level provides are read live: a `defineProvide` call made after `app.mount()` is visible to components mounted afterwards. Component-tree provides (`defineProvide` in setup) always take precedence.
+
 ### Dependency injection outside components
 
 Use-functions from `defineInjectable`/`defineFactory` resolve to app-context instances inside components. Code that runs outside component setup — router navigation guards, socket handlers, entry-scope code — must opt in with `app.runWithContext(fn)`, or it silently gets a separate realm-level fallback instance:
@@ -63,6 +82,28 @@ app.runWithContext(() => {
 ```
 
 Nested calls restore the previous context. Plugins receive the app in `install()` and can capture it to wrap their own callbacks.
+
+### Writing plugins
+
+A plugin is a function or an object with `install(app, options?)`, registered with `app.use()`. Inside `install`, `app._context` is the supported surface for wiring app-wide services — pass it to seam provide-helpers (e.g. `provideAsyncEngine` from `sigx/internals`) or use `app.defineProvide` for injectables. The underscore marks it as an advanced surface, not a private one; no cast is needed:
+
+```tsx
+import { defineInjectable, type Plugin } from '@sigx/runtime-core';
+
+class MyService {
+  close() { /* release sockets, timers, … */ }
+}
+
+export const useMyService = defineInjectable(() => new MyService());
+
+export const myPlugin: Plugin = {
+  name: 'my-plugin',
+  install(app) {
+    const service = app.defineProvide(useMyService);
+    app._context.disposables.add(() => service.close());
+  }
+};
+```
 
 ### Non-web renderers
 
