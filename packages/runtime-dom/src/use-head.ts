@@ -107,8 +107,10 @@ export interface HeadConfig {
     /** Body attributes */
     bodyAttrs?: { class?: string; [key: string]: string | undefined };
     /**
-     * Ordering control: configs render in ascending priority (default 0),
-     * ties in call order. Lower = earlier in <head>.
+     * Server-render ordering control: collected configs render into the
+     * document <head> in ascending priority (default 0), ties in call
+     * order — lower = earlier. Client-side application (SPA navigations)
+     * is per-call and does not reorder the live head.
      */
     priority?: number;
 }

@@ -52,7 +52,7 @@ describe('@sigx/server-renderer dependency direction', () => {
 
 describe('@sigx/server-renderer edge portability (rfc-ssr-platform §2.3)', () => {
     it("only the ./node entry imports node: builtins — ./server and '.' are WinterCG-clean", () => {
-        const NODE_IMPORT = /(?:import\s[^;]*?from\s*|import\s*\(\s*|require\s*\(\s*)['"]node:/;
+        const NODE_IMPORT = /(?:import\s[^;]*?from\s*|export\s[^;]*?from\s*|import\s*\(\s*|require\s*\(\s*)['"]node:/;
         const offenders = collectTsFiles(join(pkgRoot, 'src'))
             .filter((file) => !file.endsWith('node.ts'))
             .filter((file) => NODE_IMPORT.test(readFileSync(file, 'utf-8')));

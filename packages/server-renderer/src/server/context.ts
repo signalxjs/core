@@ -256,7 +256,9 @@ export function createSSRContext(options: SSRContextOptions = {}): SSRContext {
         _asyncResults: new Map(),
         _asyncKeysByComponent: new Map(),
         _boundaries: boundaries,
-        _response: { headers: {} },
+        // Null-prototype headers bag: names can be caller-derived strings,
+        // and special keys (__proto__, constructor) must be plain data.
+        _response: { headers: Object.create(null) },
 
         nextId() {
             return ++componentId;

@@ -85,6 +85,22 @@ describe('useResponse — shell surface', () => {
     });
 });
 
+describe('useResponse — header-name safety', () => {
+    it('special keys become plain data, never prototype mutation', async () => {
+        const Page = component(() => {
+            useResponse().header('__proto__', 'evil').header('constructor', 'evil2');
+            return () => <p>x</p>;
+        }, { name: 'Page' });
+
+        const { shell } = createSSR().renderDocumentChunks((Page as any)({}), { template: TEMPLATE });
+        const head = await shell;
+        expect(Object.prototype).not.toHaveProperty('evil');
+        expect(head.headers['__proto__']).toBe('evil');
+        expect(head.headers['constructor']).toBe('evil2');
+        expect(({} as any).evil).toBeUndefined();
+    });
+});
+
 describe('useResponse — inert outside SSR', () => {
     it('is chainable and harmless with no server render', () => {
         expect(() => {
