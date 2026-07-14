@@ -49,6 +49,15 @@ export type { DocumentOptions } from './server/document.js';
 export { createSSRContext } from './server/context.js';
 export type { SSRContext, SSRContextOptions, RenderOptions, CorePendingAsync } from './server/context.js';
 
+// The boundary model (rfc-ssr-platform §1)
+export type {
+    SSRBoundary,
+    SSRBoundaryRecord,
+    ResolvedBoundary,
+    BoundaryFlush,
+    BoundaryHydrate
+} from './boundary.js';
+
 // Re-export from client (convenience)
 export { ssrClientPlugin } from './client/index.js';
 

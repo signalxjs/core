@@ -165,6 +165,36 @@ export function serializeBoundaryProps(
     return hasProps ? result : undefined;
 }
 
+/**
+ * The shell-time boundary table script — one `__SIGX_BOUNDARIES__`
+ * assignment for every recorded boundary. Returns `''` when the table is
+ * empty: a page without boundaries emits nothing (the SPA-SSR fast path
+ * stays byte-identical).
+ */
+export function emitBoundaryTable(ctx: SSRContext): string {
+    if (ctx._boundaries.size === 0) return '';
+    const table: Record<number, unknown> = {};
+    ctx._boundaries.forEach((record, id) => {
+        table[id] = record;
+    });
+    return `<script>${assignmentJs('__SIGX_BOUNDARIES__', table, getTypeHandlers(ctx))}</script>`;
+}
+
+/**
+ * The per-id mid-stream table patch — the same assignment statement scoped
+ * to one boundary. Rides `generateReplacementScript`'s preScript slot so an
+ * updated record (post-async state re-capture) is installed BEFORE
+ * `$SIGX_REPLACE` dispatches `sigx:async-ready`. Also covers boundaries
+ * first recorded after the shell flushed (e.g. inside a Defer's deferred
+ * render): Object.assign onto the (possibly undefined) global creates the
+ * entry either way.
+ */
+export function boundaryPatchJs(ctx: SSRContext, id: number): string {
+    const record = ctx._boundaries.get(id);
+    if (!record) return '';
+    return assignmentJs('__SIGX_BOUNDARIES__', { [id]: record }, getTypeHandlers(ctx));
+}
+
 const NO_HANDLERS: readonly SSRTypeHandler[] = [];
 
 /**

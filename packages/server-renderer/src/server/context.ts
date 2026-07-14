@@ -6,6 +6,7 @@
  */
 
 import type { SSRPlugin } from '../plugin';
+import type { SSRBoundaryRecord } from '../boundary';
 import type { HeadConfig, AppContext } from 'sigx';
 
 /**
@@ -132,6 +133,13 @@ export interface SSRContext {
     _asyncKeysByComponent: Map<number, string[]>;
 
     /**
+     * Per-request boundary table (id → record). Populated by core when a
+     * plugin's `resolveBoundary` accepts a component; emitted as
+     * `__SIGX_BOUNDARIES__` when non-empty.
+     */
+    _boundaries: Map<number, SSRBoundaryRecord>;
+
+    /**
      * Generate next component ID
      */
     nextId(): number;
@@ -165,6 +173,21 @@ export interface SSRContext {
      * Set plugin-specific data by plugin name.
      */
     setPluginData<T>(pluginName: string, data: T): void;
+
+    /**
+     * Record a boundary in the per-request table. Core calls this from the
+     * render walk; exposed for advanced plugins that manage boundaries
+     * outside the `resolveBoundary` flow.
+     */
+    recordBoundary(id: number, record: SSRBoundaryRecord): void;
+
+    /**
+     * Read a boundary record for augmentation — packs write captured state
+     * through this (e.g. islands' signal snapshot after render / async
+     * resolution). Mutations before the shell flush ship with the table;
+     * later mutations ship via the per-id mid-stream patch.
+     */
+    getBoundary(id: number): SSRBoundaryRecord | undefined;
 }
 
 /**
@@ -175,6 +198,7 @@ export function createSSRContext(options: SSRContextOptions = {}): SSRContext {
     const componentStack: number[] = [];
     const head: string[] = [];
     const pluginData = new Map<string, any>();
+    const boundaries = new Map<number, SSRBoundaryRecord>();
 
     return {
         _componentId: componentId,
@@ -190,6 +214,7 @@ export function createSSRContext(options: SSRContextOptions = {}): SSRContext {
         _asyncCache: new Map(),
         _asyncResults: new Map(),
         _asyncKeysByComponent: new Map(),
+        _boundaries: boundaries,
 
         nextId() {
             return ++componentId;
@@ -217,6 +242,14 @@ export function createSSRContext(options: SSRContextOptions = {}): SSRContext {
 
         setPluginData<T>(pluginName: string, data: T): void {
             pluginData.set(pluginName, data);
+        },
+
+        recordBoundary(id: number, record: SSRBoundaryRecord): void {
+            boundaries.set(id, record);
+        },
+
+        getBoundary(id: number): SSRBoundaryRecord | undefined {
+            return boundaries.get(id);
         }
     };
 }

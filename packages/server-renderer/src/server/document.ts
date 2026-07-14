@@ -33,6 +33,7 @@ import type { JSXElement, AppContext } from 'sigx';
 import type { SSRPlugin } from '../plugin';
 import { createSSRContext, type SSRContext, type SSRContextOptions } from './context';
 import { renderToChunks } from './render-core';
+import { emitBoundaryTable } from './serialize';
 import { renderHeadToString } from '../head';
 
 /** Same completion signal the plain streaming APIs emit. */
@@ -155,6 +156,9 @@ async function prepareDocument(
         const i = plugin.server?.getInjectedHTML?.(ctx);
         if (i) injected += typeof i === 'string' ? i : await i;
     }
+
+    // Boundary table (core protocol — empty renders emit nothing)
+    injected += emitBoundaryTable(ctx);
 
     let pre = options.template.slice(0, outletIdx);
     const post = options.template.slice(outletIdx + outlet.length);

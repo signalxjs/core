@@ -24,6 +24,15 @@ export {
     serializeBoundaryProps,
     getTypeHandlers,
     isSerializable,
-    DANGEROUS_KEYS
+    DANGEROUS_KEYS,
+    emitBoundaryTable,
+    boundaryPatchJs
 } from './serialize';
 export type { SSRTypeHandler } from './serialize';
+export type {
+    SSRBoundary,
+    SSRBoundaryRecord,
+    ResolvedBoundary,
+    BoundaryFlush,
+    BoundaryHydrate
+} from '../boundary';
