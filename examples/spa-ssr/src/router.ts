@@ -15,7 +15,7 @@ const ROUTE_TABLE: ReadonlyArray<{ path: Route; chunks?: () => Promise<unknown>[
     { path: '/forms' },
     { path: '/data' },
     { path: '/ai' },
-    { path: '/about', chunks: () => [TechDetails.preload!()] }
+    { path: '/about', chunks: () => [TechDetails.preload()] }
 ];
 
 const ROUTES: ReadonlyArray<Route> = ROUTE_TABLE.map(r => r.path);

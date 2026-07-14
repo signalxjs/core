@@ -21,7 +21,25 @@ describe('scanIslandExports', () => {
             export { Inner, Inner as Chart };
             export default component(() => {});
         `;
-        expect(scanIslandExports(code).sort()).toEqual(['Chart', 'Counter', 'Inner', 'Widget']);
+        const pairs = scanIslandExports(code).sort((a, b) => a.exported.localeCompare(b.exported));
+        expect(pairs).toEqual([
+            { local: 'Inner', exported: 'Chart' },
+            { local: 'Counter', exported: 'Counter' },
+            { local: 'Inner', exported: 'Inner' },
+            { local: 'Widget', exported: 'Widget' }
+        ]);
+    });
+});
+
+describe('transform — aliased exports', () => {
+    it('stamps via the LOCAL binding (the alias is not a local identifier)', () => {
+        const plugin = sigxIslands() as any;
+        const code = `const Inner = component(() => {});\nexport { Inner as Chart };`;
+        const result = plugin.transform.call({}, code, '/proj/src/islands/Chart.ts');
+        expect(result.code).toContain('Inner.__islandId = "Chart"');
+        expect(result.code).toContain('typeof Inner ===');
+        // Referencing the alias would throw a ReferenceError at evaluation
+        expect(result.code).not.toContain('typeof Chart');
     });
 });
 

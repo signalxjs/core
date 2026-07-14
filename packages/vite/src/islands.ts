@@ -45,23 +45,41 @@ const MANIFEST_FILE = '.vite/sigx-islands-manifest.json';
 const DEFAULT_INCLUDE = ['**/*.island.ts', '**/*.island.tsx', '**/islands/**/*.ts', '**/islands/**/*.tsx'];
 const DEFAULT_EXCLUDE = ['**/node_modules/**', '**/dist/**'];
 
+/** One named export of an island module: the local binding + the exported name. */
+export interface IslandExport {
+    /** The module-local identifier (what the transform can reference). */
+    local: string;
+    /** The public export name (the island id / manifest key). */
+    exported: string;
+}
+
 /**
  * Extract the named exports of an island module (source-level scan, same
  * pragmatic approach as the HMR transform). Covers:
  *   export const X = …   export function X(…)   export { X, Y as Z }
+ * For aliased exports the LOCAL binding is what code inside the module can
+ * reference — the exported alias is not a local identifier.
  */
-export function scanIslandExports(code: string): string[] {
-    const names = new Set<string>();
+export function scanIslandExports(code: string): IslandExport[] {
+    const byExported = new Map<string, IslandExport>();
     for (const match of code.matchAll(/export\s+(?:const|let|var|function)\s+([A-Za-z_$][\w$]*)/g)) {
-        names.add(match[1]);
+        byExported.set(match[1], { local: match[1], exported: match[1] });
     }
     for (const match of code.matchAll(/export\s*\{([^}]*)\}/g)) {
         for (const piece of match[1].split(',')) {
-            const name = piece.split(/\sas\s/).pop()?.trim();
-            if (name && /^[A-Za-z_$][\w$]*$/.test(name)) names.add(name);
+            const parts = piece.split(/\sas\s/).map((p) => p.trim());
+            const local = parts[0];
+            const exported = parts[parts.length - 1];
+            if (
+                local && exported &&
+                /^[A-Za-z_$][\w$]*$/.test(local) &&
+                /^[A-Za-z_$][\w$]*$/.test(exported)
+            ) {
+                byExported.set(exported, { local, exported });
+            }
         }
     }
-    return [...names];
+    return [...byExported.values()];
 }
 
 /** Walk a directory collecting files (bounded to the project tree). */
@@ -93,15 +111,15 @@ export function sigxIslands(options: SigxIslandsOptions = {}): Plugin {
         for (const file of walkFiles(root)) {
             if (!filter(file)) continue;
             const code = fs.readFileSync(file, 'utf-8');
-            for (const name of scanIslandExports(code)) {
-                if (islands.has(name) && islands.get(name) !== file) {
+            for (const { exported } of scanIslandExports(code)) {
+                if (islands.has(exported) && islands.get(exported) !== file) {
                     console.warn(
-                        `[sigx:islands] duplicate island export name "${name}" ` +
-                        `(${islands.get(name)} vs ${file}) — island names must be unique; keeping the first.`
+                        `[sigx:islands] duplicate island export name "${exported}" ` +
+                        `(${islands.get(exported)} vs ${file}) — island names must be unique; keeping the first.`
                     );
                     continue;
                 }
-                islands.set(name, file);
+                islands.set(exported, file);
             }
         }
     }
@@ -135,14 +153,17 @@ export function sigxIslands(options: SigxIslandsOptions = {}): Plugin {
         transform(code, id) {
             const clean = id.split('?')[0];
             if (!filter(clean)) return null;
-            const names = scanIslandExports(code);
-            if (names.length === 0) return null;
+            const exports = scanIslandExports(code);
+            if (exports.length === 0) return null;
             // Stamp the stable island identity on every exported component
-            // factory — the registry key the boundary table's `component`
-            // field carries (vnode.type.__islandId || __name).
-            const stamps = names
-                .map((name) =>
-                    `if (typeof ${name} === 'function' && ${name}.__setup) { ${name}.__islandId = ${JSON.stringify(name)}; }`)
+            // factory — referenced via the LOCAL binding (an aliased export's
+            // public name is not a local identifier and would throw at module
+            // evaluation); the stamped id is the EXPORTED name, the registry
+            // key the boundary table's `component` field carries
+            // (vnode.type.__islandId || __name).
+            const stamps = exports
+                .map(({ local, exported }) =>
+                    `if (typeof ${local} === 'function' && ${local}.__setup) { ${local}.__islandId = ${JSON.stringify(exported)}; }`)
                 .join('\n');
             return { code: `${code}\n;${stamps}\n`, map: null };
         },
