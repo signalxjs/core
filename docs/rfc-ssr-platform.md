@@ -325,7 +325,7 @@ file-system routing, no conventions beyond the seams in this RFC.
 
 - **Server functions / actions (RPC).** The value-first async RFC's manual
   writes (#135: `useAction` + `.run`) will eventually want a "fetcher
-  runs on the server" transport. That is a compiler + transport problem — a separate,
+  runs on the server" transport. That is a compiler + transport problem — a separate
   future RFC. Named here so reviewers see the door, not designed here.
 - **Resumability.** The `beforeHydrate → false` seam already permits a
   Qwik-style pack; no design now.
@@ -338,8 +338,8 @@ file-system routing, no conventions beyond the seams in this RFC.
 - Marker formats and the streaming wire protocol (`$SIGX_REPLACE`,
   `$SIGX_APPEND`) unchanged.
 - `__SIGX_ASYNC__` wire format unchanged; `__SIGX_ISLANDS__` is replaced by
-  the boundary table (pre-1.0; islands is an external companion until #119
-  lands, so the blast radius is one pack we own).
+  the boundary table (pre-1.0; islands is in-tree since #119, so the blast
+  radius is one pack we own).
 - One plugin-surface break: `handleAsyncSetup` + `suppressComponentRender` →
   `resolveBoundary` (§1.3).
 - `renderToString` / `renderToStream` / `renderToNodeStream` / `createSSR` /
