@@ -930,7 +930,10 @@ function* renderNode(
             if (boundary.chunk !== undefined) record.chunk = boundary.chunk;
             const registryName = (vnode.type as any).__islandId || (vnode.type as any).__name;
             if (registryName) record.component = registryName;
-            const props = boundary.props !== undefined
+            // A present `props` key wins even when undefined ("no props") —
+            // packs pass their filtered snapshot explicitly so the core
+            // derivation never re-includes their directive vocabulary.
+            const props = 'props' in boundary
                 ? boundary.props
                 : serializeBoundaryProps(vnode.props, getTypeHandlers(ctx));
             if (props !== undefined) record.props = props;

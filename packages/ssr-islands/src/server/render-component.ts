@@ -8,6 +8,7 @@
 import {
     signal
 } from 'sigx';
+import { isSerializable } from '@sigx/server-renderer/server';
 
 /**
  * Signal factory used by island components on the server to declare reactive
@@ -99,22 +100,17 @@ export function createTrackingSignal(signalMap: Map<string, any>): SSRSignalFn {
 }
 
 /**
- * Serialize captured signal state for client hydration
+ * Serialize captured signal state for client hydration. Serializability
+ * checks route through the shared serializer discipline in
+ * `@sigx/server-renderer` — one dev-warning path for every blob.
  */
 export function serializeSignalState(signalMap: Map<string, any>): Record<string, any> | undefined {
     if (signalMap.size === 0) return undefined;
 
     const state: Record<string, any> = {};
     for (const [key, value] of signalMap) {
-        try {
-            // Test if serializable
-            JSON.stringify(value);
+        if (isSerializable(key, value, 'island signal')) {
             state[key] = value;
-        } catch {
-            // Skip non-serializable values
-            if (process.env.NODE_ENV !== 'production') {
-                console.warn(`SSR: Signal "${key}" has non-serializable value, skipping`);
-            }
         }
     }
     return Object.keys(state).length > 0 ? state : undefined;

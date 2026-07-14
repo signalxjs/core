@@ -17,7 +17,7 @@ import {
 } from 'sigx';
 import { registerComponent, type ComponentFactory } from './registry';
 import { loadIslandComponent } from './chunk-loader';
-import { getIslandServerState } from './island-context';
+import { getIslandServerState, getIslandData, invalidateIslandCache } from './island-context';
 import { filterClientDirectives, CLIENT_DIRECTIVE_PREFIX } from '../client-directives';
 import type { IslandInfo } from './types';
 
@@ -210,7 +210,7 @@ export function scheduleComponentHydration(
             break;
 
         case 'only': {
-            // Skip-SSR: the server emitted an empty <div data-island> placeholder
+            // Skip-SSR: the server emitted an empty <div data-boundary> placeholder
             // (no component content). Mount the component fresh into it instead of
             // hydrating. Fall back to in-place hydration when there is no
             // placeholder (back-compat with content that was SSR'd in place).
@@ -218,7 +218,7 @@ export function scheduleComponentHydration(
             // DOM when this component produced no leading element. Identify the
             // placeholder by matching this component's marker id AND the
             // display:contents sentinel, so user markup carrying a coincidental
-            // data-island isn't mistaken for it.
+            // data-boundary isn't mistaken for it.
             const wantId = trailingMarker ? parseMarkerId(trailingMarker) : null;
             let ph: Node | null = contentStart;
             while (ph && ph !== trailingMarker && ph.nodeType !== Node.ELEMENT_NODE) ph = ph.nextSibling;
@@ -252,14 +252,15 @@ function parseMarkerId(marker: Comment): number | null {
 }
 
 /**
- * Is this element the skip-SSR placeholder emitted by the islands server hook for
- * component `wantId`? Matches both the `data-island` id AND the `display:contents`
- * sentinel that `suppressComponentRender` always sets, so user markup that merely
- * carries a coincidental `data-island="<id>"` is not mistaken for the placeholder.
+ * Is this element the skip-SSR placeholder emitted by core for component
+ * `wantId`? Matches both the `data-boundary` id AND the `display:contents`
+ * sentinel that the flush:'skip' path always sets, so user markup that merely
+ * carries a coincidental `data-boundary="<id>"` is not mistaken for the
+ * placeholder.
  */
 function isSkipSsrPlaceholder(el: Element | null, wantId: number | null): boolean {
     return !!el && wantId != null
-        && el.getAttribute?.('data-island') === String(wantId)
+        && el.getAttribute?.('data-boundary') === String(wantId)
         && (el as HTMLElement).style?.display === 'contents';
 }
 
@@ -328,7 +329,7 @@ function observeComponentVisibility(contentStart: Node | null, trailingMarker: C
     return observer;
 }
 
-// ============= Islands-based Hydration (from __SIGX_ISLANDS__) =============
+// ============= Islands-based Hydration (from __SIGX_BOUNDARIES__) =============
 
 /**
  * Hydrate islands based on their strategies (selective hydration)
@@ -338,18 +339,10 @@ export function hydrateIslands(): void {
     // and should not rely on stale cached DOM references.
     _markerIndex = null;
 
-    const dataScript = document.getElementById('__SIGX_ISLANDS__');
-    if (!dataScript) {
-        return;
-    }
-
-    let islandData: Record<string, IslandInfo>;
-    try {
-        islandData = JSON.parse(dataScript.textContent || '{}');
-    } catch {
-        console.error('Failed to parse island data');
-        return;
-    }
+    // Fresh read of the boundary table (window.__SIGX_BOUNDARIES__) — the
+    // entry point must not observe a view cached before streaming patches.
+    invalidateIslandCache();
+    const islandData = getIslandData();
 
     for (const [idStr, info] of Object.entries(islandData)) {
         const id = parseInt(idStr, 10);

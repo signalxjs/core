@@ -12,7 +12,7 @@
  * `window.__SIGX_BOUNDARIES__` for the client hydrator.
  */
 
-import type { VNode } from 'sigx';
+import type { JSXElement } from 'sigx';
 
 export type BoundaryFlush = 'inline' | 'stream' | 'skip';
 //  inline: await content, emit in place (blocking/string modes)
@@ -37,7 +37,7 @@ export interface SSRBoundary {
      * the core-owned placeholder wrapper. The thunk gets no id and must not
      * emit its own wrapper element.
      */
-    fallback?: () => VNode;
+    fallback?: () => JSXElement;
     /** Module ref for boundaries that load their component on demand. */
     chunk?: { url: string; export?: string };
     /** Props snapshot for client-side mounting. */

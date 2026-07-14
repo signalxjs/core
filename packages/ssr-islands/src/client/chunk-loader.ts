@@ -22,7 +22,7 @@ const chunkLoadCache = new Map<string, Promise<ComponentFactory | undefined>>();
 /**
  * Load an island's component, trying all resolution paths.
  *
- * @param info - The island's hydration info (from __SIGX_ISLANDS__ JSON)
+ * @param info - The island's hydration info (from the __SIGX_BOUNDARIES__ table)
  * @returns The resolved ComponentFactory, or undefined if not found
  */
 export async function loadIslandComponent(info: IslandInfo): Promise<ComponentFactory | undefined> {
@@ -112,7 +112,7 @@ async function loadFromChunkUrl(
  * Call early (e.g. on DOMContentLoaded) to warm the browser cache
  * for islands that will hydrate later (client:visible, client:idle).
  *
- * @param islands - Island data from __SIGX_ISLANDS__
+ * @param islands - Island data from the __SIGX_BOUNDARIES__ table
  * @param strategies - Only prefetch islands with these strategies (default: all deferred)
  */
 export function prefetchIslandChunks(

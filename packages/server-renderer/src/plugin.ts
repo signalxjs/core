@@ -92,7 +92,7 @@ export interface SSRPlugin {
          * — followed by the standard trailing `<!--$c:id-->` marker for hydration.
          * Return void to render normally. First plugin to return an object wins.
          *
-         * @example Islands plugin emits `<div data-island>` for `client:only`
+         * @example Islands maps `client:only` to resolveBoundary's flush: 'skip' (superseding this hook)
          */
         suppressComponentRender?(
             id: number,

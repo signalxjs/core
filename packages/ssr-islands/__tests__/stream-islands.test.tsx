@@ -11,7 +11,7 @@ import { createSSR } from '../../server-renderer/src/ssr';
 import { islandsPlugin } from '../src/plugin';
 // Import client-directives for ComponentAttributeExtensions augmentation (client:* types)
 import '../src/client-directives';
-import { parseIslandData } from './test-utils';
+import { parseIslandData, parseBoundaryTable } from './test-utils';
 import type { SSRSignalFn } from './test-utils';
 
 // ─── Test Components ───────────────────────────────────────────────
@@ -65,7 +65,7 @@ describe('island rendering (renderToString)', () => {
             );
 
             // The island data should be in the rendered HTML
-            expect(html).toContain('__SIGX_ISLANDS__');
+            expect(html).toContain('__SIGX_BOUNDARIES__');
             const islandData = parseIslandData(html);
             const islands = Object.values(islandData);
             expect(islands.length).toBeGreaterThan(0);
@@ -80,7 +80,7 @@ describe('island rendering (renderToString)', () => {
             const html = await ssr.render(<WithSignal />);
 
             // No islands registered
-            expect(html).not.toContain('__SIGX_ISLANDS__');
+            expect(html).not.toContain('__SIGX_BOUNDARIES__');
         });
     });
 
@@ -96,35 +96,41 @@ describe('island rendering (renderToString)', () => {
             const ssr = createSSR().use(islandsPlugin());
             const html = await ssr.render(<IslandCounter client:only initial={5} />);
             // True skip-SSR: the component never runs server-side, so its content
-            // is absent and a <div data-island> placeholder stands in its place.
-            expect(html).toContain('data-island=');
+            // is absent and a <div data-boundary> placeholder stands in its place.
+            expect(html).toContain('data-boundary=');
             expect(html).not.toContain('island-counter');
             expect(html).not.toContain('>5<');
-            const islands = parseIslandData(html);
-            const island = Object.values(islands)[0] as any;
-            expect(island.strategy).toBe('only');
+            // client:only decomposes onto the two boundary axes on the wire
+            // (rfc-ssr-platform §1): skip the server render, mount on load.
+            const records = parseBoundaryTable(html);
+            const record = Object.values(records)[0] as any;
+            expect(record.flush).toBe('skip');
+            expect(record.hydrate).toBe('load');
             // No render ran, so no signal state was captured.
-            expect(island.state).toBeUndefined();
+            expect(record.state).toBeUndefined();
         });
 
         it('skips SSR for client:only in streaming mode too (#122)', async () => {
             const ssr = createSSR().use(islandsPlugin());
             const html = await collectStream(ssr.renderStream(<IslandCounter client:only initial={5} />));
-            expect(html).toContain('data-island=');
+            expect(html).toContain('data-boundary=');
             expect(html).not.toContain('island-counter');
         });
 
-        it('should include __SIGX_ISLANDS__ JSON for islands', async () => {
+        it('should include __SIGX_BOUNDARIES__ JSON for islands', async () => {
             const ssr = createSSR().use(islandsPlugin());
             const html = await ssr.render(<IslandCounter client:load />);
-            expect(html).toContain('__SIGX_ISLANDS__');
-            expect(html).toContain('application/json');
+            // Executable assignment sharing the __SIGX_ASYNC__ discipline —
+            // null-prototype merge target, plain-global client read.
+            expect(html).toContain(
+                'window.__SIGX_BOUNDARIES__=Object.assign(Object.create(null),window.__SIGX_BOUNDARIES__,'
+            );
         });
 
-        it('should not include __SIGX_ISLANDS__ when no islands', async () => {
+        it('should not include __SIGX_BOUNDARIES__ when no islands', async () => {
             const ssr = createSSR().use(islandsPlugin());
             const html = await ssr.render(<SimpleDiv />);
-            expect(html).not.toContain('__SIGX_ISLANDS__');
+            expect(html).not.toContain('__SIGX_BOUNDARIES__');
         });
 
         it('should serialize island props', async () => {
@@ -150,10 +156,10 @@ describe('island rendering (renderToString)', () => {
 });
 
 describe('island streaming (renderToStream)', () => {
-    it('should include __SIGX_ISLANDS__ for island content', async () => {
+    it('should include __SIGX_BOUNDARIES__ for island content', async () => {
         const ssr = createSSR().use(islandsPlugin());
         const html = await collectStream(ssr.renderStream(<IslandCounter client:load />));
-        expect(html).toContain('__SIGX_ISLANDS__');
+        expect(html).toContain('__SIGX_BOUNDARIES__');
     });
 
     describe('streaming async components', () => {
@@ -244,7 +250,7 @@ describe('island streaming (renderToStreamWithCallbacks)', () => {
 
             const shellHtml = (callbacks.onShellReady as any).mock.calls[0][0] as string;
             // Sync islands should have their data in the shell
-            expect(shellHtml).toContain('__SIGX_ISLANDS__');
+            expect(shellHtml).toContain('__SIGX_BOUNDARIES__');
         });
 
         it('should call onAsyncChunk with replacement scripts', async () => {
