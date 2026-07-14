@@ -112,8 +112,10 @@ interface SSRBoundary {
   //  stream: emit fallback + placeholder now, $SIGX_REPLACE later
   //  skip:   do not server-render at all (client:only — the #122 case)
   hydrate: 'load' | 'idle' | 'visible' | 'media' | 'interaction' | 'never';
-  //  'interaction' is the one new strategy; the rest ship in
-  //  @sigx/ssr-islands today as client:* directives
+  //  'interaction' is the one new strategy. load/idle/visible/media ship
+  //  today as @sigx/ssr-islands client:* directives; 'never' has no
+  //  directive — it is the absence of one under the islands app default
+  //  (client:only is not a hydrate value: it maps to flush: 'skip')
   //
   //  The fields below are conditionally required — `?` means "not universal
   //  to every boundary", not "always optional"; each note states when the
@@ -197,7 +199,11 @@ A new server plugin hook that runs **before setup capture**:
 resolveBoundary?(
   vnode: VNode,
   ctx: SSRContext
-): Partial<Pick<SSRBoundary, 'flush' | 'hydrate' | 'fallback'>> | undefined;
+): Partial<Pick<SSRBoundary,
+  'flush' | 'hydrate' | 'media' | 'fallback' | 'chunk'>> | undefined;
+// id and props are core-derived (the component-id scheme; the props
+// snapshot from vnode.props) — the hook contributes the decision axes plus
+// what only the pack can know: the media query, the manifest chunk ref.
 ```
 
 First plugin to return wins (the existing convention shared by
