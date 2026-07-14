@@ -5,13 +5,18 @@
  * (DOM mount) and on a server-rendered app object alike. See issue #101.
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { component, jsx, defineApp, defineFactory } from '@sigx/runtime-core';
 // Side effect: registers the DOM default mount so app.mount(container) works.
 import '@sigx/runtime-dom';
 import { renderToString } from '@sigx/server-renderer';
 
 describe('app.runWithContext integration', () => {
+    // Guaranteed spy cleanup even when an assertion throws mid-test.
+    afterEach(() => {
+        vi.restoreAllMocks();
+    });
+
     it('client app: a guard-style callback resolves the instance the mounted components use', () => {
         const useStore = defineFactory(() => ({ user: null as string | null }), 'scoped');
 
@@ -75,7 +80,6 @@ describe('app.runWithContext integration', () => {
         const app2 = defineApp(jsx('div', {}));
         void app2.runWithContext(async () => 'other');
         expect(warn).toHaveBeenCalledTimes(2);
-        vi.restoreAllMocks();
     });
 
     it('stays silent for synchronous callbacks', () => {
@@ -85,7 +89,6 @@ describe('app.runWithContext integration', () => {
         expect(app.runWithContext(() => 7)).toBe(7);
 
         expect(warn).not.toHaveBeenCalled();
-        vi.restoreAllMocks();
     });
 
     it('plugin installed via app.use can capture the app and wrap callbacks (router-guard pattern)', () => {

@@ -182,17 +182,24 @@ export function defineApp<TContainer = any>(rootComponent: JSXElement): App<TCon
             const prev = setActiveAppContext(context);
             try {
                 const result = fn();
-                if (process.env.NODE_ENV !== 'production'
-                    && !warnedAsyncRunWithContext
-                    && isPromise(result)) {
-                    warnedAsyncRunWithContext = true;
-                    console.warn(
-                        'app.runWithContext(fn) got a callback that returned a Promise (or ' +
-                        'other thenable) — the app context applies only to its synchronous ' +
-                        'portion and is restored before any awaited continuation runs. After ' +
-                        'an await, re-enter with another runWithContext call to resolve more ' +
-                        'dependencies.'
-                    );
+                if (process.env.NODE_ENV !== 'production' && !warnedAsyncRunWithContext) {
+                    // The probe must never alter behavior: a hostile `then`
+                    // getter (Proxy trap) could throw, so swallow probe errors
+                    // and pass the value through regardless.
+                    let thenable = false;
+                    try {
+                        thenable = isPromise(result);
+                    } catch { /* probe only — never affect the return value */ }
+                    if (thenable) {
+                        warnedAsyncRunWithContext = true;
+                        console.warn(
+                            'app.runWithContext(fn) got a callback that returned a Promise (or ' +
+                            'other thenable) — the app context applies only to its synchronous ' +
+                            'portion and is restored before any awaited continuation runs. After ' +
+                            'an await, re-enter with another runWithContext call to resolve more ' +
+                            'dependencies.'
+                        );
+                    }
                 }
                 return result;
             } finally {
