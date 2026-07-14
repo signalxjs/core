@@ -247,9 +247,17 @@ export function sigxPlugin(options: SigxPluginOptions = {}): Plugin {
                     resolve: {
                         dedupe: [...SIGX_CORE_PACKAGES],
                     },
-                    ssr: {
-                        noExternal: SIGX_SSR_NO_EXTERNAL
-                    },
+                    // In the ORCHESTRATED ssr mode the server bundle must
+                    // EXTERNALIZE its dependencies: the production request
+                    // handler (@sigx/server-renderer/node) loads from
+                    // node_modules, so a bundled copy of the runtime inside
+                    // entry-server.js would carry its own DI token identities
+                    // and never see the app's provides. Standalone
+                    // `vite build --ssr` flows (self-contained bundles) keep
+                    // the classic noExternal hygiene.
+                    ...(ssr
+                        ? {}
+                        : { ssr: { noExternal: SIGX_SSR_NO_EXTERNAL } }),
                     build: {
                         rollupOptions: {
                             output: {
@@ -263,7 +271,9 @@ export function sigxPlugin(options: SigxPluginOptions = {}): Plugin {
                     },
                     // SSR mode: one `vite build` builds both environments —
                     // client (with its asset manifest, feeding collectAssets)
-                    // and server (the SSR entry).
+                    // and server (the SSR entry, dependencies external — the
+                    // whole @sigx family resolves from node_modules, sharing
+                    // one module graph with the production request handler).
                     ...(ssr && {
                         builder: {},
                         environments: {
@@ -274,6 +284,9 @@ export function sigxPlugin(options: SigxPluginOptions = {}): Plugin {
                                 }
                             },
                             ssr: {
+                                resolve: {
+                                    external: true
+                                },
                                 build: {
                                     outDir: ssr.serverOutDir ?? 'dist/server',
                                     rollupOptions: {
