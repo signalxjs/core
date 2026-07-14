@@ -54,7 +54,11 @@ away).
   `onShellReady` so TTFB is the first shell write.
 
 `NODE_ENV=production` is forced before adapters load so React and Vue use
-their production builds.
+their production builds — they branch at runtime. sigx picks dev vs prod at
+*module resolution* via export conditions, so every bench script passes
+`node --conditions production`; without it the dev dist (live
+`process.env.NODE_ENV` reads per component) is measured and deep-tree looks
+~4x slower than production reality.
 
 ## Quick regression suite (`bench:quick`)
 
