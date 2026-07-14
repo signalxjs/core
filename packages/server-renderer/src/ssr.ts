@@ -24,6 +24,7 @@ import { generateStreamingScript, generateReplacementScript, generateAppendBoots
 import { renderHeadToString } from './head';
 import type { StreamCallbacks } from './server/types';
 import { stateSerializationPlugin } from './server/state-plugin';
+import { emitBoundaryTable, boundaryPatchJs } from './server/serialize';
 import {
     renderDocumentImpl,
     renderDocumentToNodeStreamImpl,
@@ -117,6 +118,14 @@ async function* streamAllAsyncChunks(
                     if (result.script) extraScript += result.script;
                     if (result.preScript) preScript += result.preScript;
                 }
+            }
+            // Boundary-table patch: plugins above may have mutated the
+            // record (post-async state re-capture) — re-emit it so the
+            // fresh record is installed before $SIGX_REPLACE dispatches
+            // sigx:async-ready. Prepended: the record must land before any
+            // plugin preScript that reads it.
+            if (ctx._boundaries.has(pending.id)) {
+                preScript = boundaryPatchJs(ctx, pending.id) + preScript;
             }
             return {
                 index,
@@ -324,6 +333,7 @@ export function createSSR(): SSRInstance {
             // Single walk: fully-sync trees complete without suspending, async
             // trees suspend at their awaits — no sync-attempt/re-render fallback.
             const ctx = makeContext(options);
+            ctx._appContext = appContext;
             let result = await renderVNodeToString(element, ctx, appContext);
 
             // Collect injected HTML from all plugins
@@ -333,6 +343,9 @@ export function createSSR(): SSRInstance {
                     result += typeof injected === 'string' ? injected : await injected;
                 }
             }
+
+            // Boundary table (core protocol — empty renders emit nothing)
+            result += emitBoundaryTable(ctx);
 
             // Collect streaming chunks (for renderToString, await all)
             for (const plugin of plugins) {
@@ -357,6 +370,7 @@ export function createSSR(): SSRInstance {
             const ctx = makeContext(options);
             ctx._streaming = true;
             const { element, appContext } = extractInput(input);
+            ctx._appContext = appContext;
 
             // Use pull-based ReadableStream backed by an async generator.
             // Push-based enqueueing is the worst case for WebStreams
@@ -392,6 +406,10 @@ export function createSSR(): SSRInstance {
                     }
                 }
 
+                // Boundary table (core protocol — empty renders emit nothing)
+                const boundaryTable = emitBoundaryTable(ctx);
+                if (boundaryTable) yield boundaryTable;
+
                 // Phase 3: Stream async chunks — core + plugin interleaved
                 for await (const chunk of streamAllAsyncChunks(ctx, plugins)) {
                     yield chunk;
@@ -423,6 +441,7 @@ export function createSSR(): SSRInstance {
             const ctx = makeContext(options);
             ctx._streaming = true;
             const { element, appContext } = extractInput(input);
+            ctx._appContext = appContext;
 
             async function* generate(): AsyncGenerator<string> {
                 // Enable head collection
@@ -453,6 +472,10 @@ export function createSSR(): SSRInstance {
                     }
                 }
 
+                // Boundary table (core protocol — empty renders emit nothing)
+                const boundaryTable = emitBoundaryTable(ctx);
+                if (boundaryTable) yield boundaryTable;
+
                 // Phase 3: Stream async chunks — core + plugin interleaved
                 for await (const chunk of streamAllAsyncChunks(ctx, plugins)) {
                     yield chunk;
@@ -469,6 +492,7 @@ export function createSSR(): SSRInstance {
             const ctx = makeContext(options);
             ctx._streaming = true;
             const { element, appContext } = extractInput(input);
+            ctx._appContext = appContext;
 
             try {
                 // Enable head collection
@@ -491,6 +515,9 @@ export function createSSR(): SSRInstance {
                         shellHtml += typeof injected === 'string' ? injected : await injected;
                     }
                 }
+
+                // Boundary table (core protocol — empty renders emit nothing)
+                shellHtml += emitBoundaryTable(ctx);
 
                 shellHtml += `<script>window.__SIGX_STREAMING_COMPLETE__=true;window.dispatchEvent(new Event('sigx:ready'));</script>`;
 

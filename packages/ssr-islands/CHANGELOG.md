@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+Rebuilt as the reference pack on the SSR boundary model (rfc-ssr-platform §1,
+signalxjs/core#199, shipped in signalxjs/core#200). The plugin is now a mapping
+from `client:*` directives to `SSRBoundary` records via the new pre-setup
+`resolveBoundary` seam: `client:only` decomposes into `flush: 'skip'` +
+`hydrate: 'load'`, captured signal state (#120) writes into the core boundary
+record, and the client scheduler/registry/chunk-loader are facades over the
+core boundary hydrator in `@sigx/server-renderer/client`. **`__SIGX_ISLANDS__`
+is gone** — islands ride the core `window.__SIGX_BOUNDARIES__` table — and the
+skip-SSR placeholder attribute is `data-boundary` (was `data-island`). New:
+the `client:interaction` directive (hydrate on first
+pointerdown/keydown/touchstart/focusin), and a pluggable app mode —
+`app.use(islandsPlugin())` declares islands hydration (only boundary-table
+entries hydrate, no root walk), so the client entry is
+`defineApp(<App />).use(ssrClientPlugin).use(islandsPlugin()).hydrate('#app')`;
+the standalone `hydrateIslands()` entry remains. Public API is preserved
+through facades; the pack keeps zero privileged access to core.
+
 ## [0.7.0] - 2026-06-15
 
 ### Fixed

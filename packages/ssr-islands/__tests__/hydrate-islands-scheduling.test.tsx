@@ -1,6 +1,6 @@
 /**
  * Tests for client/hydrate-islands.ts scheduling paths driven through
- * hydrateIslands() (the __SIGX_ISLANDS__ data path), plus the standalone
+ * hydrateIslands() (the __SIGX_BOUNDARIES__ data path), plus the standalone
  * helpers: cleanupPendingHydrations, invalidateMarkerIndex, seedPendingServerState.
  *
  * These complement hydration-strategies.test.tsx (which drives the full-tree
@@ -51,17 +51,11 @@ describe('hydrateIslands scheduling', () => {
 
     // ─── parse + marker error paths ──────────────────────────────────
 
-    it('logs and bails when island data is invalid JSON', () => {
-        const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-        const script = document.createElement('script');
-        script.id = '__SIGX_ISLANDS__';
-        script.type = 'application/json';
-        script.textContent = '{ broken';
-        document.head.appendChild(script);
-
+    it('is a no-op when no boundary table is present', () => {
+        delete (window as any).__SIGX_BOUNDARIES__;
         container = createSSRContainer('<span>x</span><!--$c:1-->');
         expect(() => hydrateIslands()).not.toThrow();
-        expect(errorSpy).toHaveBeenCalledWith('Failed to parse island data');
+        expect(container.innerHTML).toBe('<span>x</span><!--$c:1-->');
     });
 
     it('warns when an island marker is not found in the DOM', () => {
@@ -254,7 +248,7 @@ describe('hydrateIslands scheduling', () => {
         await nextTick();
 
         expect(observerConstructed).toBe(false);
-        expect(warnSpy.mock.calls.flat().join(' ')).toContain('No element found for island hydration');
+        expect(warnSpy.mock.calls.flat().join(' ')).toContain('No element found for boundary hydration');
 
         delete (globalThis as any).IntersectionObserver;
     });
@@ -294,10 +288,10 @@ describe('hydrateIslands scheduling', () => {
         hydrateIslands();
         await vi.advanceTimersByTimeAsync(50);
         await nextTick();
-        expect(warnSpy.mock.calls.flat().join(' ')).toContain('No element found for island hydration');
+        expect(warnSpy.mock.calls.flat().join(' ')).toContain('No element found for boundary hydration');
     });
 
-    it('mounts a client:only island into a data-island placeholder (clearing SSR content)', async () => {
+    it('mounts a client:only island into a data-boundary placeholder (clearing SSR content)', async () => {
         let mounted = false;
         const name = uniqueName('OnlyPlaceholder');
         registerComponent(name, component(() => {
@@ -305,8 +299,8 @@ describe('hydrateIslands scheduling', () => {
             return () => <span class="co">only</span>;
         }, { name }));
 
-        // A real skip-SSR placeholder: <div data-island> with stale content.
-        container = createSSRContainer('<div data-island="1">stale</div><!--$c:1-->');
+        // A real skip-SSR placeholder: <div data-boundary> with stale content.
+        container = createSSRContainer('<div data-boundary="1">stale</div><!--$c:1-->');
         createIslandDataScript({ '1': { strategy: 'only', componentId: name, props: {} } });
 
         hydrateIslands();

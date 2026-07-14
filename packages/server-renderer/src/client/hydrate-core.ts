@@ -19,6 +19,23 @@ import { patchProp, patchDirective, onElementMounted } from 'sigx/internals';
 import type { AppContext } from 'sigx';
 import { normalizeElement, setCurrentAppContext, getCurrentAppContext, getClientPlugins } from './hydrate-context';
 import { hydrateComponent } from './hydrate-component';
+import { getHydrateDefaults } from './hydrate-defaults';
+import {
+    getBoundaryTable,
+    scheduleTableBoundaries,
+    scheduleWalkedBoundary,
+    hydrateLeftoverBoundaries,
+    findComponentBoundaries,
+    parseMarkerId
+} from './boundary-hydrator';
+import type { SSRBoundaryRecord } from '../boundary';
+
+/**
+ * Walk-scoped boundary table — set by hydrate() when the page carries a
+ * non-empty __SIGX_BOUNDARIES__ table, consulted in hydrateNode's component
+ * branch. Null on the boundary-free fast path: the walk pays nothing.
+ */
+let _walkTable: Record<string, SSRBoundaryRecord> | null = null;
 
 /**
  * Hydrate a server-rendered app.
@@ -54,8 +71,42 @@ export function hydrate(element: any, container: Element, appContext?: AppContex
         }
     }
 
-    // Walk existing DOM, attach handlers, and mount components
-    hydrateNode(vnode, container.firstChild, container);
+    const table = getBoundaryTable();
+    let hasBoundaries = false;
+    for (const _key in table) { hasBoundaries = true; break; }
+
+    // boundaries: 'explicit' (provided per app, e.g. by islandsPlugin's
+    // install) — no root walk; ONLY boundary-table entries hydrate.
+    if (getHydrateDefaults(appContext).boundaries === 'explicit') {
+        scheduleTableBoundaries();
+        // Streamed boundaries whose $SIGX_REPLACE ran before the listener
+        // was ready still need hydrating — same scan as the walk path.
+        if (hasBoundaries) {
+            hydrateLeftoverBoundaries(container);
+        }
+        for (const plugin of plugins) {
+            plugin.client?.afterHydrate?.(container);
+        }
+        (container as any)._vnode = vnode;
+        return;
+    }
+
+    // Walk existing DOM, attach handlers, and mount components. With a
+    // boundary table present, the walk intercepts recorded boundaries and
+    // schedules them per strategy; without one this is exactly the plain
+    // single walk (zero added work).
+    _walkTable = hasBoundaries ? table : null;
+    try {
+        hydrateNode(vnode, container.firstChild, container);
+    } finally {
+        _walkTable = null;
+    }
+
+    // Streamed boundaries whose $SIGX_REPLACE ran before the listener was
+    // ready still need hydrating.
+    if (hasBoundaries) {
+        hydrateLeftoverBoundaries(container);
+    }
 
     // Post-hydration hooks
     for (const plugin of plugins) {
@@ -158,7 +209,20 @@ export function hydrateNode(vnode: VNode, dom: Node | null, parent: Node): Node 
     }
 
     if (isComponent(vnode.type)) {
-        // Let plugins intercept component hydration (e.g., islands scheduling)
+        // Boundary-table interception: a component recorded in the table
+        // schedules per its strategy instead of hydrating inline
+        // (hydrate:'load' records schedule immediately — same walk order,
+        // plus the state-snapshot staging). Paid only when a table exists.
+        if (_walkTable) {
+            const { trailingMarker } = findComponentBoundaries(dom);
+            const id = trailingMarker ? parseMarkerId(trailingMarker) : null;
+            const record = id !== null ? _walkTable[String(id)] : undefined;
+            if (record) {
+                return scheduleWalkedBoundary(vnode, dom, parent, record);
+            }
+        }
+
+        // Let plugins intercept component hydration
         const plugins = getClientPlugins();
         for (const plugin of plugins) {
             const result = plugin.client?.hydrateComponent?.(vnode, dom, parent);

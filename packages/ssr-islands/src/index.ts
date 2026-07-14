@@ -69,7 +69,6 @@ export {
 // Server
 export { createTrackingSignal, serializeSignalState } from './server/render-component';
 export type { SSRSignalFn } from './server/render-component';
-export { generateIslandDataScript } from './server/render-islands';
 
 // Types
 export type { IslandInfo, PendingAsyncComponent, HydrationStrategy } from './types';

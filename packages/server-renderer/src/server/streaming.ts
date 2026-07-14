@@ -8,17 +8,10 @@
  * Plugins (e.g., islands) can augment replacements via `onAsyncComponentResolved`.
  */
 
-/**
- * Escape a JSON string for safe embedding inside <script> tags.
- * Prevents XSS by replacing characters that could break out of the script context.
- */
-export function escapeJsonForScript(json: string): string {
-    return json
-        .replace(/</g, '\\u003c')
-        .replace(/>/g, '\\u003e')
-        .replace(/\u2028/g, '\\u2028')
-        .replace(/\u2029/g, '\\u2029');
-}
+import { escapeJsonForScript } from './serialize';
+
+// Re-exported for existing import sites (this was its original home).
+export { escapeJsonForScript };
 
 /**
  * Generate the streaming bootstrap script (injected once before any replacements).

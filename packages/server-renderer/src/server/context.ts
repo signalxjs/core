@@ -6,7 +6,8 @@
  */
 
 import type { SSRPlugin } from '../plugin';
-import type { HeadConfig } from 'sigx';
+import type { SSRBoundaryRecord } from '../boundary';
+import type { HeadConfig, AppContext } from 'sigx';
 
 /**
  * Core-managed pending async component.
@@ -72,6 +73,14 @@ export interface SSRContext {
     _plugins?: SSRPlugin[];
 
     /**
+     * The app context of the render input (null when rendering a bare
+     * element). Set by the render entry points; the DI source for per-app
+     * serializer type handlers and other app-level provides read at request
+     * time.
+     */
+    _appContext: AppContext | null;
+
+    /**
      * Plugin-specific data storage, keyed by plugin name.
      * Plugins store their own state here via `getPluginData` / `setPluginData`.
      */
@@ -124,6 +133,13 @@ export interface SSRContext {
     _asyncKeysByComponent: Map<number, string[]>;
 
     /**
+     * Per-request boundary table (id → record). Populated by core when a
+     * plugin's `resolveBoundary` accepts a component; emitted as
+     * `__SIGX_BOUNDARIES__` when non-empty.
+     */
+    _boundaries: Map<number, SSRBoundaryRecord>;
+
+    /**
      * Generate next component ID
      */
     nextId(): number;
@@ -157,6 +173,21 @@ export interface SSRContext {
      * Set plugin-specific data by plugin name.
      */
     setPluginData<T>(pluginName: string, data: T): void;
+
+    /**
+     * Record a boundary in the per-request table. Core calls this from the
+     * render walk; exposed for advanced plugins that manage boundaries
+     * outside the `resolveBoundary` flow.
+     */
+    recordBoundary(id: number, record: SSRBoundaryRecord): void;
+
+    /**
+     * Read a boundary record for augmentation — packs write captured state
+     * through this (e.g. islands' signal snapshot after render / async
+     * resolution). Mutations before the shell flush ship with the table;
+     * later mutations ship via the per-id mid-stream patch.
+     */
+    getBoundary(id: number): SSRBoundaryRecord | undefined;
 }
 
 /**
@@ -167,6 +198,7 @@ export function createSSRContext(options: SSRContextOptions = {}): SSRContext {
     const componentStack: number[] = [];
     const head: string[] = [];
     const pluginData = new Map<string, any>();
+    const boundaries = new Map<number, SSRBoundaryRecord>();
 
     return {
         _componentId: componentId,
@@ -174,6 +206,7 @@ export function createSSRContext(options: SSRContextOptions = {}): SSRContext {
         _head: head,
         _pluginData: pluginData,
         _onComponentError: options.onComponentError,
+        _appContext: null,
         _streaming: false,
         _pendingAsync: [],
         _headConfigs: [],
@@ -181,6 +214,7 @@ export function createSSRContext(options: SSRContextOptions = {}): SSRContext {
         _asyncCache: new Map(),
         _asyncResults: new Map(),
         _asyncKeysByComponent: new Map(),
+        _boundaries: boundaries,
 
         nextId() {
             return ++componentId;
@@ -208,6 +242,14 @@ export function createSSRContext(options: SSRContextOptions = {}): SSRContext {
 
         setPluginData<T>(pluginName: string, data: T): void {
             pluginData.set(pluginName, data);
+        },
+
+        recordBoundary(id: number, record: SSRBoundaryRecord): void {
+            boundaries.set(id, record);
+        },
+
+        getBoundary(id: number): SSRBoundaryRecord | undefined {
+            return boundaries.get(id);
         }
     };
 }

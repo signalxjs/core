@@ -32,4 +32,4 @@ export interface PendingAsyncComponent {
     islandInfo: IslandInfo;
 }
 
-export type HydrationStrategy = 'load' | 'idle' | 'visible' | 'media' | 'only';
+export type HydrationStrategy = 'load' | 'idle' | 'visible' | 'media' | 'interaction' | 'only';

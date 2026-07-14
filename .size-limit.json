@@ -28,7 +28,7 @@
     {
         "name": "@sigx/server-renderer",
         "path": "packages/server-renderer/dist/index.prod.js",
-        "limit": "10 KB",
+        "limit": "11 KB",
         "ignore": [
             "sigx",
             "sigx/*",
@@ -39,7 +39,7 @@
     {
         "name": "@sigx/server-renderer/client (browser entry)",
         "path": "packages/server-renderer/dist/client/index.prod.js",
-        "limit": "3 KB",
+        "limit": "5 KB",
         "ignore": [
             "sigx",
             "sigx/*",
@@ -49,7 +49,7 @@
     {
         "name": "@sigx/ssr-islands",
         "path": "packages/ssr-islands/dist/index.prod.js",
-        "limit": "4.5 KB",
+        "limit": "2 KB",
         "ignore": [
             "sigx",
             "sigx/*",
@@ -70,7 +70,7 @@
     {
         "name": "@sigx/ssr-islands/client (browser entry)",
         "path": "packages/ssr-islands/dist/client/index.prod.js",
-        "limit": "3 KB",
+        "limit": "1 KB",
         "ignore": [
             "sigx",
             "sigx/*",

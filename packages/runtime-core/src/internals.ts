@@ -72,6 +72,10 @@ export { reportUnhandledAsyncError } from './app.js';
 export { ASYNC_ENGINE_TOKEN, provideAsyncEngine, defaultAsyncEngine } from './async/engine.js';
 export type { AsyncEngine, AsyncReadHandle } from './async/engine.js';
 
+// SSR serializer type-handler seam (per-app provide, consumed by @sigx/server-renderer)
+export { SSR_SERIALIZER_TOKEN, provideSSRSerializerHandlers } from './ssr-serialize.js';
+export type { SSRTypeHandler } from './ssr-serialize.js';
+
 // Model internals
 export { getModelSymbol } from './model.js';
 

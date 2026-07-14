@@ -392,7 +392,7 @@ describe('hydration strategies', () => {
             }, { name: 'ClientOnlyComponent' });
 
             // client:only renders an empty placeholder on server
-            const ssrHtml = `<div data-island="1" style="display:contents;"></div><!--$c:1-->`;
+            const ssrHtml = `<div data-boundary="1" style="display:contents;"></div><!--$c:1-->`;
             container = createSSRContainer(ssrHtml);
 
             const vnode = {
@@ -409,12 +409,12 @@ describe('hydration strategies', () => {
             expect(setupCalled).toBe(true);
         });
 
-        it('should render component content fresh into the data-island placeholder', async () => {
+        it('should render component content fresh into the data-boundary placeholder', async () => {
             const ClientOnlyContent = component(() => {
                 return () => <div class="co-content">Fresh mount</div>;
             }, { name: 'ClientOnlyContent' });
 
-            const ssrHtml = `<div data-island="1" style="display:contents;"></div><!--$c:1-->`;
+            const ssrHtml = `<div data-boundary="1" style="display:contents;"></div><!--$c:1-->`;
             container = createSSRContainer(ssrHtml);
 
             const vnode = {
@@ -428,8 +428,8 @@ describe('hydration strategies', () => {
             hydrate(vnode, container);
             await vi.advanceTimersByTimeAsync(0);
 
-            // Fresh-mounted content lives INSIDE the data-island placeholder.
-            const placeholder = container.querySelector('[data-island]');
+            // Fresh-mounted content lives INSIDE the data-boundary placeholder.
+            const placeholder = container.querySelector('[data-boundary]');
             expect(placeholder).toBeTruthy();
             const content = placeholder!.querySelector('.co-content');
             expect(content).toBeTruthy();
@@ -438,7 +438,7 @@ describe('hydration strategies', () => {
     });
 
     describe('hydrateIslands()', () => {
-        it('should discover and hydrate islands from __SIGX_ISLANDS__ data', async () => {
+        it('should discover and hydrate islands from __SIGX_BOUNDARIES__ data', async () => {
             let hydrated = false;
 
             const IslandComp = component(() => {
@@ -467,7 +467,7 @@ describe('hydration strategies', () => {
             expect(hydrated).toBe(true);
         });
 
-        it('should handle missing __SIGX_ISLANDS__ script gracefully', () => {
+        it('should handle missing __SIGX_BOUNDARIES__ script gracefully', () => {
             // No script tag, should not throw
             expect(() => hydrateIslands()).not.toThrow();
         });
