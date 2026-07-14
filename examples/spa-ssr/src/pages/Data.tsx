@@ -136,7 +136,7 @@ const CacheCard = component(() => {
                     </p>
                 ),
             })}
-            <p style="color: #555; font-size: 0.95em;">Leave and revisit this page within 10s of the last fetch — the card renders instantly from the cache with the same timestamp, no request. Past 10s, revisiting revalidates in the background and the timestamp updates. <code>invalidate()</code> drops the entry and refetches; <code>mutate()</code> writes through without a request.</p>
+            <p style="color: #555; font-size: 0.95em;">Use the nav links to leave and revisit within 10s of the last fetch — the card renders instantly from the cache with the same timestamp, no request. Past 10s, revisiting revalidates in the background and the timestamp updates. A full reload always shows a new time: the server fetches per request (each request gets a fresh app and cache) and re-seeds the client cache on hydration. <code>invalidate()</code> drops the entry and refetches; <code>mutate()</code> writes through without a request.</p>
         </div>
     );
 });
