@@ -98,7 +98,11 @@ not require reading `examples/spa-ssr/server.ts`.
 ### 1. One boundary model
 
 **Definition.** An *SSR boundary* is a position in the tree with two
-orthogonal axes:
+orthogonal axes. The type and the machinery around it live in
+`@sigx/server-renderer` (per the frozen layering rule: needs a server →
+`@sigx/server-renderer`); the runtime stays SSR-free and contributes only
+the authoring inputs (`<Defer>` in runtime-core, `client:*` prop types
+augmented by packs):
 
 ```ts
 interface SSRBoundary {
