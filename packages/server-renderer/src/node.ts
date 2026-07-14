@@ -20,6 +20,7 @@
  */
 
 import { Readable } from 'node:stream';
+import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { JSXElement, App } from 'sigx';
 import { createSSR } from './ssr';
 import type { SSRContext, SSRContextOptions } from './server/context';
@@ -111,5 +112,150 @@ export function renderDocumentToNodeStream(
         // than intended under slow clients.
         stream: toNodeStream(chunks, { objectMode: false }),
         shell
+    };
+}
+
+// ============================================================================
+// createRequestHandler — the copyable production handler (rfc-ssr-platform
+// §3.3). Explicitly NOT a meta-framework: no file-system routing, no
+// conventions beyond the public seams — just the dispatch every hand-written
+// server repeats (bot → blocking document; everyone else → shell-first
+// streaming with the shell as the status/redirect decision point).
+// ============================================================================
+
+/** Default crawler detection for the blocking-mode dispatch. */
+const BOT_UA = /bot|crawl|spider|slurp|bingpreview|facebookexternalhit|embedly|quora link preview|outbrain|pinterest|vkshare|whatsapp|telegrambot/i;
+
+export interface RequestHandlerOptions {
+    /**
+     * The document template containing the outlet marker — a string for the
+     * common prebuilt case, or a per-request resolver (the dev handler in
+     * `@sigx/vite` passes `vite.transformIndexHtml` through here).
+     */
+    template: string | ((url: string, req: IncomingMessage) => string | Promise<string>);
+
+    /**
+     * Per-request app factory: build a FRESH app for this URL — per-request
+     * provides (router, cache) are what make concurrent SSR safe. May also
+     * return a bare element for provider-less pages.
+     */
+    app: (url: string, req: IncomingMessage) => App | JSXElement | Promise<App | JSXElement>;
+
+    /**
+     * Document options for the render (assets, onError, renderError, outlet,
+     * serializeState, …) — static, or resolved per request. `template` and
+     * `mode` are owned by the handler.
+     */
+    document?:
+        | Omit<DocumentOptions, 'template' | 'mode'>
+        | ((url: string, req: IncomingMessage) => Omit<DocumentOptions, 'template' | 'mode'>);
+
+    /**
+     * Crawler detection: bots get `mode: 'blocking'` (complete inline
+     * content, no replacement scripts). Default: a common crawler UA regex.
+     * Pass `() => false` to always stream.
+     */
+    isBot?: (userAgent: string, req: IncomingMessage) => boolean;
+
+    /**
+     * The SSR instance to render with (plugins!). Default: a plugin-less
+     * shared instance.
+     */
+    ssr?: Pick<ReturnType<typeof createSSR>, 'renderDocumentChunks'>;
+}
+
+export type NodeRequestHandler = (
+    req: IncomingMessage,
+    res: ServerResponse,
+    next?: (err?: unknown) => void
+) => Promise<void>;
+
+/**
+ * Create a connect-style production request handler over the public
+ * document API.
+ *
+ * ```ts
+ * import { createRequestHandler } from '@sigx/server-renderer/node';
+ *
+ * const handler = createRequestHandler({
+ *     template,
+ *     app: (url) => makeApp(url),           // fresh app per request
+ *     document: { assets }                  // manifest preloads etc.
+ * });
+ * server.use(handler);                      // Express / connect / node:http
+ * ```
+ *
+ * Dispatch: crawlers get a blocking document; everyone else gets shell-first
+ * streaming. The shell resolution (`useResponse`'s `{ status, headers,
+ * redirect }`) writes the response head before the first byte; a redirect
+ * sends the location and no body. A shell failure calls `next(err)` when
+ * available, else a minimal 500.
+ */
+export function createRequestHandler(options: RequestHandlerOptions): NodeRequestHandler {
+    const ssr = options.ssr ?? _defaultSSR;
+    const isBot = options.isBot ?? ((ua) => BOT_UA.test(ua));
+
+    return async function handleRequest(req, res, next) {
+        const url = req.url ?? '/';
+        try {
+            const [template, input] = await Promise.all([
+                typeof options.template === 'function'
+                    ? options.template(url, req)
+                    : options.template,
+                options.app(url, req)
+            ]);
+            const docOptions =
+                typeof options.document === 'function'
+                    ? options.document(url, req)
+                    : options.document;
+            const mode = isBot(String(req.headers['user-agent'] ?? ''), req)
+                ? ('blocking' as const)
+                : ('stream' as const);
+
+            const { chunks, shell } = ssr.renderDocumentChunks(input, {
+                ...docOptions,
+                template,
+                mode
+            });
+
+            // The shell is the status/redirect decision point (§2.1).
+            const head = await shell;
+
+            if (head.redirect) {
+                res.writeHead(head.redirect.status, { location: head.redirect.location });
+                res.end();
+                await chunks.return?.(undefined); // release the (empty) generator
+                return;
+            }
+
+            res.writeHead(head.status, {
+                'content-type': 'text/html; charset=utf-8',
+                ...head.headers
+            });
+
+            const body = toNodeStream(chunks, { objectMode: false });
+            body.pipe(res);
+            await new Promise<void>((resolve) => {
+                body.on('end', resolve);
+                body.on('error', (err) => {
+                    // Mid-stream failure after the head was sent: the document
+                    // generator already routed it to onError; end the response
+                    // visibly truncated.
+                    if (process.env.NODE_ENV !== 'production') {
+                        console.error('[createRequestHandler] stream error:', err);
+                    }
+                    res.end();
+                    resolve();
+                });
+            });
+        } catch (err) {
+            // Shell (or app-factory) failure — no byte has been written yet.
+            if (next) {
+                next(err);
+                return;
+            }
+            res.writeHead(500, { 'content-type': 'text/html; charset=utf-8' });
+            res.end('<!doctype html><title>500</title><h1>Internal Server Error</h1>');
+        }
     };
 }
