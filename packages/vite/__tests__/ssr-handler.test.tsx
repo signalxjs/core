@@ -60,7 +60,13 @@ function mockVite(entryModule: Record<string, unknown>): ViteDevServer {
         config: { root },
         transformIndexHtml: vi.fn(async (_url: string, html: string) =>
             html.replace('<head>', '<head><script type="module" src="/@vite/client"></script>')),
-        ssrLoadModule: vi.fn(async () => entryModule),
+        // The handler loads BOTH the renderer and the entry through the
+        // module runner (one module graph); the mock serves the real node
+        // entry for the former.
+        ssrLoadModule: vi.fn(async (id: string) =>
+            id === '@sigx/server-renderer/node'
+                ? import('@sigx/server-renderer/node')
+                : entryModule),
         ssrFixStacktrace: vi.fn()
     } as unknown as ViteDevServer;
 }
@@ -91,7 +97,21 @@ describe('createDevRequestHandler', () => {
         const handler = await createDevRequestHandler(vite, { entry: '/src/entry-server.tsx' });
         await run(handler, '/a');
         await run(handler, '/b');
-        expect(vite.ssrLoadModule).toHaveBeenCalledTimes(2);
+        const entryLoads = (vite.ssrLoadModule as any).mock.calls
+            .filter((c: string[]) => c[0] === '/src/entry-server.tsx').length;
+        expect(entryLoads).toBe(2);
+    });
+
+    it('loads the RENDERER through the module runner (one graph with the app — #207)', async () => {
+        const vite = mockVite({ createApp: () => defineApp((Home as any)({})) });
+        const handler = await createDevRequestHandler(vite, { entry: '/src/entry-server.tsx' });
+        await run(handler, '/');
+        // A Node-resolved renderer would carry its own DI token identities
+        // and never see the app's provides ("useRouter() called without a
+        // Router provided" in real dev servers).
+        const rendererLoads = (vite.ssrLoadModule as any).mock.calls
+            .filter((c: string[]) => c[0] === '@sigx/server-renderer/node').length;
+        expect(rendererLoads).toBeGreaterThan(0);
     });
 
     it('supports a custom entry export name', async () => {
