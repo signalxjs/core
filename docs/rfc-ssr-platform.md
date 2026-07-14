@@ -1,10 +1,25 @@
 # RFC: SSR platform — one boundary model, the request lifecycle, the last mile
 
-Status: **proposed / under review — rev 1**. Tracking: signalxjs/core#171.
+Status: **proposed / under review — rev 2**. Tracking: signalxjs/core#171.
 Pre-1.0, no-compat (same stance as `rfc-use-async.md` and the value-first async
 RFC, #135/#136): one way to do it. One deliberate revision to a frozen contract
 is called out explicitly (§1.3); everything else the `ssr-next` program froze
 stays frozen.
+
+> **rev-2 changes** (post-merge factual sweep): the branch now carries
+> everything through v0.9.0 + `@sigx/cache` (#196) and the doc was re-verified
+> against that code. #122 reframed — it was closed by the dedicated
+> `suppressComponentRender` hook (#129) while this RFC was drafted, so §1.3's
+> `resolveBoundary` now supersedes *two* hooks (`handleAsyncSetup` +
+> `suppressComponentRender`) rather than resolving #122 itself. The error
+> problem statement is sharpened: the synchronous render path already routes
+> to `onComponentError` / `<!--ssr-error:ID-->`; the gap is the streamed path
+> and a configurable `renderError` (§2.2 generalizes the existing seam, it
+> does not invent one). `SSRBoundary` gains `media?` (the query
+> `hydrate: 'media'` needs — islands carries it today) and the §1.1 boundary
+> table inherits the #120 signal-state snapshot from `__SIGX_ISLANDS__`. The
+> pluggable serializer names its landed registration precedent
+> (`provideAsyncEngine`, #196).
 
 Relationship to the other RFCs:
 
@@ -18,8 +33,10 @@ Relationship to the other RFCs:
   chunks — rfc-async §5), the `match` state→arm mapping, `errorScope`. This
   RFC does not restate that design; it defines its **server half** (§2.2) and
   the streaming boundary it keys off (§1).
-- **Depends on #119** (islands into the monorepo) and **resolves #122**
-  (`client:only` cannot suppress the server render).
+- **Depends on #119** (islands into the monorepo, merged) and **subsumes the
+  #122 stopgap**: `client:only` render suppression shipped as the dedicated
+  `suppressComponentRender` hook (#129); §1.3 folds that hook into the
+  general boundary seam.
 
 ## Where the engine stands
 
@@ -41,15 +58,17 @@ not require reading `examples/spa-ssr/server.ts`.
 1. **Three overlapping boundary concepts.** `<Defer>` (#135 §5:
    code-split + SSR flush), islands `client:*` directives (hydration
    scheduling, `@sigx/ssr-islands`), and streaming placeholders
-   (`render-core.ts` `__suspense` → `_pendingAsync`,
+   (`render-core.ts` `__defer` → `_pendingAsync`,
    `<div data-async-placeholder>`) are one concept observed from three angles
    — each with its own markers, its own client scheduler, and (for islands)
    its own state blob.
 2. **Pluggability worked, and found its exact limits.** Islands was built
    entirely on public seams — validation of the model — and hit three walls:
-   - `client:only` renders + hydrates in place because `render-core` captures
-     the component's setup **before** `transformComponentContext` runs, so no
-     pack can suppress the server render (#122, "needs a core seam");
+   - `client:only` could not suppress the server render (#122) until core
+     grew a dedicated `suppressComponentRender` hook (#129) — a
+     single-purpose, skip-only patch that proved the pre-setup position
+     right but left the flush decision in a different hook at a different
+     time (§1.3);
    - it ships a second serialized blob (`__SIGX_ISLANDS__`) with its own
      escaping/wire discipline next to `__SIGX_ASYNC__`;
    - its manifest option assumes a `@sigx/vite` islands plugin that does not
@@ -61,10 +80,12 @@ not require reading `examples/spa-ssr/server.ts`.
    `modulepreload` is the one deferred `ssr-next` item (`ssr-review.md`, F9
    remainder).
 4. **Request-level gaps.**
-   - A per-component server render error streams a hard-coded
-     `<div style="color:red;">Error loading component</div>` (`ssr.ts`) and
-     never reaches `DocumentOptions.onError` — only shell-phase and
-     stream-level failures do (`document.ts`).
+   - Error routing is split by path: a synchronous render error reaches
+     `SSRContextOptions.onComponentError` (or emits `<!--ssr-error:ID-->`),
+     but a **streamed** async component failure bypasses it and streams a
+     hard-coded `<div style="color:red;">Error loading component</div>`
+     (`ssr.ts`); neither path reaches `DocumentOptions.onError` — only
+     shell-phase and stream-level failures do (`document.ts`).
    - `errorScope` (#135) has no SSR semantics yet.
    - `ssr.ts` and `document.ts` import `node:stream` at module top, so even
      the Web-stream path drags Node builtins (the F8 dist breakage was this
@@ -87,6 +108,9 @@ interface SSRBoundary {
   //  stream: emit fallback + placeholder now, $SIGX_REPLACE later
   //  skip:   do not server-render at all (client:only — the #122 case)
   hydrate: 'load' | 'idle' | 'visible' | 'media' | 'interaction' | 'never';
+  //  'interaction' is the one new strategy; the rest ship in
+  //  @sigx/ssr-islands today as client:* directives
+  media?: string;                   // the media query — required when hydrate: 'media'
   fallback?: () => VNode;           // rendered while flush=stream is pending, or when flush=skip
   chunk?: string;                   // module ref for on-demand loading (lazy()/islands manifest)
   props?: Record<string, unknown>;  // serialized props — required whenever the boundary mounts
@@ -102,7 +126,7 @@ interface SSRBoundary {
 |---|---|
 | `<Defer fallback>` (#135) | boundary: `flush` per render mode, `hydrate` inherited from the app default |
 | island `client:visible` (etc.) | boundary: `flush: 'inline'`, `hydrate: 'visible'` |
-| island `client:only` | boundary: `flush: 'skip'`, `hydrate: 'load'` — finally expressible (#122) |
+| island `client:only` | boundary: `flush: 'skip'`, `hydrate: 'load'` — today's `suppressComponentRender` case (#122/#129) on the general model |
 | streaming placeholder + `$SIGX_REPLACE` | the `flush: 'stream'` rendering of any boundary |
 | full-page SPA-SSR hydration | one implicit root boundary, `hydrate: 'load'` |
 | islands page | root boundary `hydrate: 'never'`; components opt in via `client:*` |
@@ -129,7 +153,9 @@ Internally all three produce the same `SSRBoundary` record; there is no
 #### 1.1 The unified boundary table (blob)
 
 The server emits **one boundary table** per request — id → hydrate strategy,
-props snapshot, chunk ref — replacing `__SIGX_ISLANDS__`. `__SIGX_ASYNC__`
+props snapshot, captured signal-state snapshot (the #120 tracking→restoring
+signal transfer islands ships today), chunk ref — replacing
+`__SIGX_ISLANDS__` field for field. `__SIGX_ASYNC__`
 (data, keyed by user keys) is unchanged; the two concerns stay separately
 addressed (per `rfc-use-async.md` open question 4's resolution) but share
 **one serializer module**: one escaping discipline (`escapeJsonForScript`,
@@ -137,7 +163,10 @@ null-prototype targets, `DANGEROUS_KEYS`), one dev-mode serializability
 warning path, and one **pluggable type-handler registry** (needed twice
 already: the `@sigx/store` adapter spec'd in `rfc-use-async.md`, and the
 cache pack contract of #135 (rfc-async §7) for which `__SIGX_ASYNC__`
-becomes the seed). Whether the two blobs merge into one `__SIGX_SSR__` script is open
+becomes the seed). Registration follows the pattern the engine seam shipped
+in #196: a per-app DI provide from `sigx/internals`
+(`provideAsyncEngine`/`ASYNC_ENGINE_TOKEN`-style), installed by a plugin's
+`install(app)` — not a global registry. Whether the two blobs merge into one `__SIGX_SSR__` script is open
 question 1.
 
 #### 1.2 Selective hydration is the hydrator
@@ -161,19 +190,28 @@ resolveBoundary?(
 ): Partial<Pick<SSRBoundary, 'flush' | 'hydrate' | 'fallback'>> | undefined;
 ```
 
-First plugin to return wins (same convention as `handleAsyncSetup`). Core
-consults it before touching `vnode.type.__setup`, which is precisely the seam
-#122 asks for: a pack returning `{ flush: 'skip', fallback }` suppresses the
-server render and records the boundary for client-side mounting.
+First plugin to return wins (the existing convention shared by
+`handleAsyncSetup` and `suppressComponentRender`). Core consults it before
+touching `vnode.type.__setup`: a pack returning `{ flush: 'skip', fallback }`
+suppresses the server render and records the boundary for client-side
+mounting.
 
-This **supersedes `handleAsyncSetup`** (`'block' | 'stream' | 'skip'`) — it is
-the same decision, currently made too late (at async-setup time, after setup
-has been captured) and with only the flush axis. Folding it in rather than
-adding a second hook keeps one decision point; this is the single deliberate
-break to the frozen plugin-hook contract, taken pre-1.0 under the no-compat
-stance. Marker formats (`<!--$c:ID-->`, `<!--t-->`, `<!---->`), the remaining
-hook order, and `afterRenderComponent`'s `''`-for-streamed convention stay
-frozen. (Keeping both hooks instead is open question 2.)
+This **supersedes two hooks**:
+
+- `handleAsyncSetup` (`'block' | 'stream' | 'skip'`) — the same decision,
+  currently made too late (at async-setup time, after setup has been
+  captured) and with only the flush axis;
+- `suppressComponentRender` — the pre-setup hook #129 added to fix #122. It
+  is the `skip` case of this seam, single-purpose: it proved the pre-setup
+  position right, but left the flush decision in a different hook at a
+  different time.
+
+Folding both into one hook keeps one decision point at one position; this is
+the single deliberate break to the frozen plugin-hook contract, taken pre-1.0
+under the no-compat stance. Marker formats (`<!--$c:ID-->`, `<!--t-->`,
+`<!---->`), the remaining hook order, and `afterRenderComponent`'s
+`''`-for-streamed convention stay frozen. (Keeping the old hooks instead is
+open question 2.)
 
 ### 2. The request-lifecycle contract
 
@@ -205,7 +243,10 @@ promise result. The router SSR contract (§3.2) feeds this — a route miss sets
   `info: { componentId, boundaryId?, phase: 'shell' | 'stream' }`. The
   rendered HTML for the failure is a configurable
   `renderError(err, info) => string` — default: dev renders a diagnostic box,
-  prod renders an empty boundary comment. The hard-coded red div is deleted.
+  prod renders an empty boundary comment. This generalizes today's
+  `onComponentError` seam (which only the synchronous path honors) to cover
+  the streamed path too, folding the two callbacks into one; the hard-coded
+  red div is deleted.
 - **`errorScope` on the server.** A server-side throw below a scope renders
   that scope's `fallback(e, retry)` HTML in place — same visual contract as
   the client. The boundary is marked in the boundary table so the client
@@ -299,7 +340,8 @@ file-system routing, no conventions beyond the seams in this RFC.
 - `__SIGX_ASYNC__` wire format unchanged; `__SIGX_ISLANDS__` is replaced by
   the boundary table (pre-1.0; islands is an external companion until #119
   lands, so the blast radius is one pack we own).
-- One plugin-surface break: `handleAsyncSetup` → `resolveBoundary` (§1.3).
+- One plugin-surface break: `handleAsyncSetup` + `suppressComponentRender` →
+  `resolveBoundary` (§1.3).
 - `renderToString` / `renderToStream` / `renderToNodeStream` / `createSSR` /
   document APIs: additive only, except `renderToNodeStream` and
   `renderDocumentToNodeStream` moving to the `./node` entry (§2.3).
@@ -308,7 +350,7 @@ file-system routing, no conventions beyond the seams in this RFC.
 
 - **Phase 0:** this document.
 - **Phase 1 — Boundary model:** `SSRBoundary` + `resolveBoundary` seam
-  (supersedes `handleAsyncSetup`; resolves #122); unified boundary table +
+  (supersedes `handleAsyncSetup` + `suppressComponentRender`); unified boundary table +
   shared pluggable serializer; islands refactored onto the model (after
   #119); per-boundary selective hydration as the hydrator (root-walk fast
   path preserved).
@@ -330,9 +372,10 @@ worktree → PR → Copilot review → merge.
 1. **Blob layout** — boundary table as its own `__SIGX_BOUNDARIES__` script
    beside `__SIGX_ASYNC__` (proposed: concerns stay independently versioned),
    or one merged `__SIGX_SSR__` blob with sections?
-2. **`resolveBoundary` supersedes `handleAsyncSetup`** (proposed: one
-   decision point, one deliberate break) — or keep `handleAsyncSetup` as a
-   deprecated alias for one release even pre-1.0?
+2. **`resolveBoundary` supersedes `handleAsyncSetup` and
+   `suppressComponentRender`** (proposed: one decision point, one deliberate
+   break) — or keep the old hooks as deprecated aliases for one release even
+   pre-1.0?
 3. **Hydrate-strategy authoring** — `client:*` directives as the only
    per-component surface (proposed), or also a `hydrate` prop on `<Defer>`
    (`<Defer hydrate="visible">`)? The prop reads well but creates two
