@@ -157,7 +157,8 @@ export async function createDevRequestHandler(
     // provides. When the family IS externalized, the runner resolves to
     // Node's instances anyway, so this is consistent in both setups.
     async function loadHandlerFactory(): Promise<typeof import('@sigx/server-renderer/node')> {
-        return (await vite.ssrLoadModule('@sigx/server-renderer/node')) as never;
+        return (await vite.ssrLoadModule('@sigx/server-renderer/node')) as unknown as
+            typeof import('@sigx/server-renderer/node');
     }
     // Fail fast at startup if the peer is missing.
     await loadHandlerFactory();
