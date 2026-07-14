@@ -48,6 +48,21 @@ router.beforeEach((to) => {
 
 The context applies only to the **synchronous** portion of the callback — after an `await`, re-enter with another `runWithContext` call. Nested calls restore the previous context. Plugins receive the app in `install()` and can capture it to wrap their own callbacks.
 
+### Writing plugins
+
+A plugin is a function or an object with `install(app, options?)`, registered with `app.use()`. Inside `install`, `app._context` is the supported surface for wiring app-wide services — pass it to seam provide-helpers or use `app.defineProvide` for injectables. The underscore marks it as an advanced surface, not a private one; no cast is needed:
+
+```tsx
+export const myPlugin: Plugin = {
+  name: 'my-plugin',
+  install(app) {
+    app.defineProvide(useMyService, () => createMyService());
+    provideMySeam(app._context, { /* seam config */ });
+    app._context.disposables.add(() => teardown());
+  }
+};
+```
+
 > **Note:** Most users should install [`sigx`](https://www.npmjs.com/package/sigx) instead, which bundles this package with a DOM renderer and the reactivity system.
 
 ## 📚 Documentation

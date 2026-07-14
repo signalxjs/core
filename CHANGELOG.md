@@ -25,6 +25,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- **`@sigx/runtime-core`**: `app._context` (and `_rootComponent`) are no longer `@internal` — they are documented as the stable plugin-author surface: inside `install(app)`, pass `app._context` to seam provide-helpers or use its `provides`/`disposables` directly. `@sigx/ssr-islands` and `@sigx/server-renderer`'s client plugin drop their `(app as any)` casts accordingly; the runtime-core README gains a "Writing plugins" section. No runtime change. (#218)
 - **`@sigx/server-renderer`** (breaking, pre-1.0): ONE error seam (§2.2) — `SSRContextOptions.onError(error, info)` with `info: { phase: 'shell' | 'stream', componentId?, componentName?, boundaryId? }` receives per-component render failures on both the synchronous and the streamed path, plus request-level shell/stream failures (phase-only info); `renderError(error, info)` is the configurable failure HTML (default: the stable `<!--ssr-error:ID-->` comment, plus a visible diagnostic box in development). The hard-coded `<div style="color:red;">` streamed-failure markup is deleted. `DocumentOptions.onError`'s second parameter is now the info object instead of a bare phase string. (#202)
 - **`@sigx/server-renderer`** (hardening): head attribute escaping now covers `<`/`>` (was `&`/`"` only), and raw `innerHTML` content for script/style/noscript neutralizes closing-tag sequences (`</tag` → `<\/tag`) so a payload cannot terminate its element — script innerHTML was previously emitted fully raw. (#202)
 

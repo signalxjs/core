@@ -26,19 +26,26 @@ declare module '@sigx/runtime-core' {
     interface App<TContainer = any> {
         /**
          * Hydrate the app from server-rendered HTML.
-         * 
+         *
          * Unlike mount() which creates new DOM, hydrate() attaches to existing
          * server-rendered DOM, adding event handlers and establishing reactivity.
-         * 
+         *
+         * Optional on `App` because the method exists only after
+         * `app.use(ssrClientPlugin)` runs — TypeScript cannot narrow that, so
+         * the chained call carries a `!`: `app.use(ssrClientPlugin).hydrate!(…)`.
+         * (A required augmentation — or a `use` overload returning a
+         * hydrate-required shape — would force every `App` implementation to
+         * satisfy it, including core's, wherever these types load together.)
+         *
          * @example
          * ```tsx
          * import { defineApp } from 'sigx';
          * import { ssrClientPlugin } from '@sigx/server-renderer/client';
-         * 
+         *
          * const app = defineApp(<App />);
          * app.use(router)
          *    .use(ssrClientPlugin)
-         *    .hydrate(document.getElementById('app')!);
+         *    .hydrate!(document.getElementById('app')!);
          * ```
          */
         hydrate?(container: TContainer): App<TContainer>;
@@ -71,7 +78,7 @@ export const ssrClientPlugin: Plugin = {
 
     install(app: App) {
         // Add hydrate method to the app instance
-        (app as any).hydrate = function(container: Element | string): App {
+        app.hydrate = function(container: Element | string): App {
             // Resolve container if string selector
             const resolvedContainer = typeof container === 'string'
                 ? document.querySelector(container)
@@ -85,8 +92,8 @@ export const ssrClientPlugin: Plugin = {
             }
 
             // Get the root component from the app
-            const rootComponent = (app as any)._rootComponent;
-            
+            const rootComponent = app._rootComponent;
+
             if (!rootComponent) {
                 throw new Error(
                     '[ssrClientPlugin] No root component found on app. ' +
@@ -100,8 +107,8 @@ export const ssrClientPlugin: Plugin = {
                 (resolvedContainer.firstChild !== null && 
                  resolvedContainer.firstChild.nodeType !== Node.COMMENT_NODE);
 
-            // Get app context for passing to render (needed for inject() to work)
-            const appContext = (app as any)._context;
+            // Get app context for passing to render (needed for DI to work)
+            const appContext = app._context;
 
             if (hasSSRContent) {
                 // Perform hydration with app context for DI
