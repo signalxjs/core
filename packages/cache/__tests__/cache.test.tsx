@@ -404,6 +404,43 @@ describe('@sigx/cache', () => {
         expect(unsubscribe).toHaveBeenCalledTimes(1);
     });
 
+    it('a throwing revalidateTrigger neither crashes the mounting read nor bricks the store — reported, retried on the next opt-in', async () => {
+        const error = vi.spyOn(console, 'error').mockImplementation(() => { });
+        const trigger = vi.fn(() => {
+            throw new Error('trigger boom');
+        });
+        const show = signal({ second: false });
+        let a!: AsyncState<number>, b!: AsyncState<number>;
+
+        const A = component(() => {
+            a = useData('bad-trigger-a', async () => 1, { cache: { revalidateOnFocus: true, staleTime: 60_000 } });
+            return () => <div />;
+        });
+        const B = component(() => {
+            b = useData('bad-trigger-b', async () => 2, { cache: { revalidateOnFocus: true, staleTime: 60_000 } });
+            return () => <div />;
+        });
+        const Root = component(() => () => (
+            <div>
+                {jsx(A, {})}
+                {show.second ? jsx(B, {}) : null}
+            </div>
+        ));
+        mountWith(cachePlugin({ revalidateTrigger: trigger }), jsx(Root, {}));
+        await settle();
+
+        // The read is unharmed and the failure is surfaced.
+        expect(a.state).toBe('ready');
+        expect(a.value).toBe(1);
+        expect(error).toHaveBeenCalledWith(expect.stringContaining('revalidateTrigger threw'), expect.any(Error));
+
+        // Not permanently marked installed: the next opting-in read retries.
+        show.second = true;
+        await settle();
+        expect(b.state).toBe('ready');
+        expect(trigger).toHaveBeenCalledTimes(2);
+    });
+
     // ====================================================================
     // gcTime
     // ====================================================================

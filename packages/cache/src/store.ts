@@ -322,13 +322,20 @@ export class CacheStore {
     private ensureRevalidateTrigger(): void {
         if (this.triggerInstalled) return;
         this.triggerInstalled = true;
-        this.triggerUnsub =
-            this.revalidateTrigger(() => {
-                for (const entry of this.entries.values()) {
-                    if (!entry.revalidateOnFocus || entry.subscribers.size === 0 || !entry.fetcher) continue;
-                    void this.fetch(entry.key, entry.fetcher, entry.rawArg, true);
-                }
-            }) ?? null;
+        try {
+            this.triggerUnsub =
+                this.revalidateTrigger(() => {
+                    for (const entry of this.entries.values()) {
+                        if (!entry.revalidateOnFocus || entry.subscribers.size === 0 || !entry.fetcher) continue;
+                        void this.fetch(entry.key, entry.fetcher, entry.rawArg, true);
+                    }
+                }) ?? null;
+        } catch (e) {
+            // A broken trigger must not crash the mounting read. Surface it
+            // and clear the flag so a later opting-in read can retry.
+            this.triggerInstalled = false;
+            console.error('[sigx-cache] revalidateTrigger threw while subscribing:', e);
+        }
     }
 
     private ensureIntervalTimer(entry: CacheEntry): void {
