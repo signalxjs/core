@@ -35,6 +35,7 @@ export default defineConfig({
             '@sigx/reactivity': pkg('@sigx/reactivity'),
             '@sigx/server-renderer/server': pkg('@sigx/server-renderer', 'dist/server/index.js'),
             '@sigx/server-renderer/client': pkg('@sigx/server-renderer', 'dist/client/index.js'),
+            '@sigx/server-renderer/node': pkg('@sigx/server-renderer', 'dist/node.js'),
             '@sigx/server-renderer': pkg('@sigx/server-renderer')
         }
     },

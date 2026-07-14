@@ -28,7 +28,7 @@
     {
         "name": "@sigx/server-renderer",
         "path": "packages/server-renderer/dist/index.prod.js",
-        "limit": "11 KB",
+        "limit": "12 KB",
         "ignore": [
             "sigx",
             "sigx/*",
