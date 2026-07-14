@@ -58,8 +58,41 @@ sigx({
   // automatically. Explicit `server.hmr` settings in your Vite config always
   // take precedence.
   hmrPort: undefined,
+
+  // SSR mode: ONE `vite build --app` produces the client bundle (with its
+  // asset manifest) into dist/client AND the server entry into dist/server —
+  // the server bundle externalizes its dependencies so it shares one module
+  // graph with the production request handler.
+  ssr: { entry: 'src/entry-server.tsx' },
 })
 ```
+
+## SSR mode
+
+The dev server is `createServer` plus one handler; production is static
+assets plus one handler (`@sigx/server-renderer/node`). The entry contract:
+export `createApp(url)` returning a fresh per-request app
+(`docs/router-ssr-contract.md`).
+
+```ts
+// dev
+import { createDevRequestHandler } from '@sigx/vite/ssr';
+app.use(vite.middlewares);
+app.use(await createDevRequestHandler(vite, { entry: '/src/entry-server.tsx' }));
+
+// prod: resolve manifest entries into DocumentOptions.assets
+import { collectAssets } from '@sigx/vite/ssr';
+const assets = collectAssets(manifest, ['index.html']);
+```
+
+## Islands
+
+`sigxIslands()` (from `@sigx/vite/islands`) completes the
+`@sigx/ssr-islands` story: island modules (`*.island.tsx` or anything under
+`islands/`) get stable `__islandId` identities, `virtual:sigx-islands`
+registers a lazy code-split loader per island in the client entry, and the
+client build emits `.vite/sigx-islands-manifest.json` for
+`islandsPlugin({ manifest })` on the server.
 
 ## 📚 Documentation
 

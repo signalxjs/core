@@ -36,6 +36,23 @@ import App from './App';
 defineApp(<App />).use(ssrClientPlugin).hydrate('#root');
 ```
 
+## The request handler
+
+Production servers are static assets plus one handler over the public
+document API — crawlers get blocking documents, everyone else shell-first
+streaming, with useResponse's status/headers/redirect written before the
+first byte (the dev twin lives in `@sigx/vite/ssr`):
+
+```ts
+import { createRequestHandler } from '@sigx/server-renderer/node';
+
+app.use(createRequestHandler({
+    template,
+    app: (url) => createApp(url),   // fresh app per request
+    document: { assets }            // manifest preloads (collectAssets)
+}));
+```
+
 ## Runtime portability & request isolation
 
 The `.` and `./server` entries are **WinterCG-clean** — no Node builtins on
