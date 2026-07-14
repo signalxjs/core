@@ -17,6 +17,7 @@
 import type { ComponentSetupContext } from '../component-types.js';
 import type { AsyncFetcherContext, AsyncState } from './shared.js';
 import { createDataCell } from './cell.js';
+import { createToken, setProvided } from '../di/token.js';
 
 /**
  * One read call site: a stable state object plus the key feed. `setKey` is
@@ -53,7 +54,7 @@ export interface AsyncEngine {
 }
 
 /** DI token under which a pack provides its engine (app-level provide). @internal */
-export const ASYNC_ENGINE_TOKEN: unique symbol = Symbol('sigx:asyncEngine');
+export const ASYNC_ENGINE_TOKEN = createToken<AsyncEngine>('sigx:asyncEngine');
 
 /**
  * Register an engine on an app context (called by packs at install time).
@@ -65,7 +66,7 @@ export function provideAsyncEngine(
     appContext: { provides: Map<symbol, unknown> },
     engine: AsyncEngine
 ): void {
-    appContext.provides.set(ASYNC_ENGINE_TOKEN, engine);
+    setProvided(appContext.provides, ASYNC_ENGINE_TOKEN, engine);
 }
 
 /**
