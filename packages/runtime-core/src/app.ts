@@ -31,6 +31,7 @@ import type {
 import { getAppContextToken, setActiveAppContext, type Providable } from './di/injectable.js';
 import { ERROR_SCOPE_TOKEN, type ErrorScopeHandle } from './error-scope.js';
 import { isDirective } from './directives.js';
+import { isPromise } from './utils/index.js';
 import type { JSXElement } from './jsx-runtime.js';
 import { noMountFunctionError, provideInvalidInjectableError } from './errors.js';
 import { getDevtoolsHook } from './devtools-hook.js';
@@ -183,15 +184,14 @@ export function defineApp<TContainer = any>(rootComponent: JSXElement): App<TCon
                 const result = fn();
                 if (process.env.NODE_ENV !== 'production'
                     && !warnedAsyncRunWithContext
-                    && result !== null
-                    && (typeof result === 'object' || typeof result === 'function')
-                    && typeof (result as { then?: unknown }).then === 'function') {
+                    && isPromise(result)) {
                     warnedAsyncRunWithContext = true;
                     console.warn(
-                        'app.runWithContext(fn) got a callback that returned a Promise — the app ' +
-                        'context applies only to its synchronous portion and is restored before ' +
-                        'any awaited continuation runs. After an await, re-enter with another ' +
-                        'runWithContext call to resolve more dependencies.'
+                        'app.runWithContext(fn) got a callback that returned a Promise (or ' +
+                        'other thenable) — the app context applies only to its synchronous ' +
+                        'portion and is restored before any awaited continuation runs. After ' +
+                        'an await, re-enter with another runWithContext call to resolve more ' +
+                        'dependencies.'
                     );
                 }
                 return result;

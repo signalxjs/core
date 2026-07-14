@@ -46,7 +46,7 @@ router.beforeEach((to) => {
 });
 ```
 
-The context applies only to the **synchronous** portion of the callback — after an `await`, re-enter with another `runWithContext` call (dev builds warn once per app when the callback returns a Promise):
+The context applies only to the **synchronous** portion of the callback — after an `await`, re-enter with another `runWithContext` call (dev builds warn once per app when the callback returns a Promise or other thenable):
 
 ```tsx
 // ❌ Wrong — after the await, useSession() resolves a realm fallback, not the app's instance
