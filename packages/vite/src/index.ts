@@ -30,6 +30,23 @@ interface SigxPluginOptions {
      * config always take precedence over this option.
      */
     hmrPort?: number;
+
+    /**
+     * SSR mode (rfc-ssr-platform §3.1): orchestrate the client + server
+     * builds in ONE `vite build` via the environments/builder API — the
+     * client environment emits its manifest (`.vite/manifest.json`, feeding
+     * `collectAssets` → `DocumentOptions.assets`) into `clientOutDir`, and
+     * the ssr environment builds `entry` into `serverOutDir`. Replaces the
+     * hand-run `vite build && vite build --ssr …` double invocation.
+     */
+    ssr?: {
+        /** The SSR entry module, e.g. 'src/entry-server.tsx'. */
+        entry: string;
+        /** Client build output. Default: 'dist/client'. */
+        clientOutDir?: string;
+        /** Server build output. Default: 'dist/server'. */
+        serverOutDir?: string;
+    };
 }
 
 // ============================================================================
@@ -150,6 +167,7 @@ export function sigxPlugin(options: SigxPluginOptions = {}): Plugin {
     const {
         hmr = true,
         hmrPort,
+        ssr,
     } = options;
 
     let config: ResolvedConfig;
@@ -243,6 +261,28 @@ export function sigxPlugin(options: SigxPluginOptions = {}): Plugin {
                             },
                         },
                     },
+                    // SSR mode: one `vite build` builds both environments —
+                    // client (with its asset manifest, feeding collectAssets)
+                    // and server (the SSR entry).
+                    ...(ssr && {
+                        builder: {},
+                        environments: {
+                            client: {
+                                build: {
+                                    manifest: true,
+                                    outDir: ssr.clientOutDir ?? 'dist/client'
+                                }
+                            },
+                            ssr: {
+                                build: {
+                                    outDir: ssr.serverOutDir ?? 'dist/server',
+                                    rollupOptions: {
+                                        input: ssr.entry
+                                    }
+                                }
+                            }
+                        }
+                    })
                 };
             }
         },
