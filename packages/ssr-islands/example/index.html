@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SignalX islands</title>
+    <style>
+      * { box-sizing: border-box; }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        background: #fafafa;
+        color: #222;
+        margin: 0;
+        line-height: 1.5;
+      }
+      main { max-width: 760px; margin: 0 auto; padding: 2rem 1.5rem; }
+      h1 { margin: 0 0 0.5rem; }
+      .card {
+        background: white;
+        border: 1px solid #eee;
+        border-radius: 10px;
+        padding: 1.5rem;
+        margin-top: 1rem;
+      }
+      .card h3 { margin-top: 0; }
+      .hint { color: #555; font-size: 0.95em; }
+      .spacer {
+        height: 120vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #999;
+      }
+      button {
+        font: inherit;
+        padding: 0.4rem 0.85rem;
+        border: 1px solid #222;
+        background: #222;
+        color: white;
+        border-radius: 6px;
+        cursor: pointer;
+      }
+      button:hover { background: #000; }
+      input {
+        font: inherit;
+        padding: 0.4rem 0.6rem;
+        border: 1px solid #ccc;
+        border-radius: 6px;
+        background: white;
+      }
+      input:focus { outline: 2px solid #4a90e2; outline-offset: 1px; }
+      code {
+        background: #f3f3f3;
+        padding: 0.1rem 0.35rem;
+        border-radius: 4px;
+        font-size: 0.92em;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app"><!--ssr-outlet--></div>
+    <script type="module" src="/src/entry-client.tsx"></script>
+  </body>
+</html>
