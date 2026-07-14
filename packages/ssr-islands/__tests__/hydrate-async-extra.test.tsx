@@ -63,7 +63,7 @@ describe('hydrateLeftoverAsyncComponents — edge branches', () => {
         await nextTick();
         await nextTick();
 
-        expect(errorSpy.mock.calls.flat().join(' ')).toContain('No componentId');
+        expect(errorSpy.mock.calls.flat().join(' ')).toContain('No component name');
         const ph = container.querySelector('[data-async-placeholder="3"]')!;
         expect(ph.hasAttribute('data-hydrated')).toBe(false);
     });

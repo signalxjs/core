@@ -248,7 +248,7 @@ describe('hydrateIslands scheduling', () => {
         await nextTick();
 
         expect(observerConstructed).toBe(false);
-        expect(warnSpy.mock.calls.flat().join(' ')).toContain('No element found for island hydration');
+        expect(warnSpy.mock.calls.flat().join(' ')).toContain('No element found for boundary hydration');
 
         delete (globalThis as any).IntersectionObserver;
     });
@@ -288,7 +288,7 @@ describe('hydrateIslands scheduling', () => {
         hydrateIslands();
         await vi.advanceTimersByTimeAsync(50);
         await nextTick();
-        expect(warnSpy.mock.calls.flat().join(' ')).toContain('No element found for island hydration');
+        expect(warnSpy.mock.calls.flat().join(' ')).toContain('No element found for boundary hydration');
     });
 
     it('mounts a client:only island into a data-boundary placeholder (clearing SSR content)', async () => {

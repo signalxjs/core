@@ -19,7 +19,8 @@ export { hydrate, hydrateNode } from './hydrate-core';
 
 // Export component hydration (used by SSR strategy plugins)
 export { hydrateComponent } from './hydrate-component';
-export type { ComponentFactory } from './hydrate-component';
+// The registry's factory type extends hydrate-component's with __islandId.
+export type { ComponentFactory } from './registry';
 
 // Export context utilities for plugins
 export {
@@ -30,3 +31,37 @@ export {
     setCurrentAppContext
 } from './hydrate-context';
 export type { InternalVNode } from './hydrate-context';
+
+// Hydration defaults — the per-app DI seam packs provide from install(app)
+export { HYDRATE_DEFAULTS_TOKEN, provideHydrateDefaults, getHydrateDefaults } from './hydrate-defaults';
+export type { HydrateDefaults } from './hydrate-defaults';
+
+// The boundary hydrator (rfc-ssr-platform §1.2): table access, per-strategy
+// scheduling, walk interception, streamed-boundary hydration
+export {
+    getBoundaryTable,
+    getBoundaryRecord,
+    scheduleTableBoundaries,
+    scheduleWalkedBoundary,
+    scheduleByStrategy,
+    cleanupPendingHydrations,
+    invalidateMarkerIndex,
+    hydrateLeftoverBoundaries,
+    isSkipPlaceholder,
+    findComponentBoundaries,
+    parseMarkerId
+} from './boundary-hydrator';
+export { seedBoundaryState, consumeBoundaryState } from './boundary-state';
+
+// Component registry + chunk loading for on-demand boundary mounting
+export {
+    registerComponent,
+    registerComponents,
+    getComponent,
+    hasComponent,
+    resolveComponent,
+    __registerIslandChunk,
+    HydrationRegistry
+} from './registry';
+export type { LazyComponentLoader } from './registry';
+export { loadBoundaryComponent, prefetchBoundaryChunks } from './chunk-loader';

@@ -23,7 +23,8 @@
 import type { SSRPlugin, ResolvedBoundary } from '@sigx/server-renderer';
 import type { SSRContext } from '@sigx/server-renderer';
 import { serializeBoundaryProps, getTypeHandlers } from '@sigx/server-renderer/server';
-import type { VNode, ComponentSetupContext } from 'sigx';
+import { registerClientPlugin, provideHydrateDefaults } from '@sigx/server-renderer/client';
+import type { VNode, ComponentSetupContext, App } from 'sigx';
 import { signal } from 'sigx';
 import {
     getHydrationDirective,
@@ -32,8 +33,7 @@ import {
 
 import { createTrackingSignal, serializeSignalState } from './server/render-component';
 
-import { scheduleComponentHydration, consumePendingServerState } from './client/hydrate-islands';
-import { hydrateLeftoverAsyncComponents } from './client/hydrate-async';
+import { consumePendingServerState, scheduleComponentHydration } from './client/hydrate-islands';
 import { createRestoringSignal } from './client/restore-signal';
 
 // ─── Plugin Data Types ──────────────────────────────────────────
@@ -68,17 +68,31 @@ export interface IslandsPluginOptions {
 // ─── Plugin Implementation ──────────────────────────────────────
 
 /**
- * Create an islands SSR plugin.
+ * Create an islands plugin — dual-shaped:
  *
- * Server-side: intercepts components with `client:*` directives, tracks signal state,
- * records boundaries in the core __SIGX_BOUNDARIES__ table.
+ * - As an SSRPlugin (server: `createSSR().use(islandsPlugin())`): maps
+ *   `client:*` directives onto boundary records via `resolveBoundary`,
+ *   tracks signal state, and writes it into the core __SIGX_BOUNDARIES__
+ *   table.
+ * - As an app plugin (client: `app.use(islandsPlugin())`): declares islands
+ *   mode by providing `{ boundaries: 'explicit' }` hydration defaults (only
+ *   boundary-table entries hydrate — no root walk) and registers the
+ *   signal-state restore hook. `app.hydrate('#app')` then does the rest.
  *
- * Client-side: intercepts components with `client:*` during hydration walk,
- * schedules deferred hydration, and handles async component streaming.
+ * The standalone `hydrateIslands()` entry remains for app-less pages; pair
+ * it with `registerClientPlugin(islandsPlugin())` for state restoration.
  */
-export function islandsPlugin(options?: IslandsPluginOptions): SSRPlugin {
+export function islandsPlugin(options?: IslandsPluginOptions): SSRPlugin & { install(app: App): void } {
     return {
         name: PLUGIN_NAME,
+
+        install(app: App) {
+            // Islands mode is an app declaration, carried by the plugin —
+            // never implied by a package import (rfc-ssr-platform open
+            // question 5, resolved as plugin-provided via the DI seam).
+            provideHydrateDefaults((app as any)._context, { boundaries: 'explicit' });
+            registerClientPlugin(this as unknown as SSRPlugin);
+        },
 
         server: {
             setup(ctx: SSRContext) {
@@ -196,11 +210,11 @@ export function islandsPlugin(options?: IslandsPluginOptions): SSRPlugin {
                 _vnode: VNode,
                 componentCtx: ComponentSetupContext
             ): ComponentSetupContext | void {
-                // Restore the server-captured signal state staged just before this
-                // island's hydrateComponent call. Presence of pending state scopes
-                // this to islands — non-island components have none and are left
-                // untouched (mirrors the server hook guarding on the client:*
-                // directive).
+                // Restore the server-captured signal state staged by the core
+                // scheduler just before this island's hydrateComponent call.
+                // Presence of pending state scopes this to islands —
+                // non-island components have none and are left untouched
+                // (mirrors the server hook guarding on the client:* directive).
                 const state = consumePendingServerState();
                 if (!state) return;
 
@@ -213,16 +227,20 @@ export function islandsPlugin(options?: IslandsPluginOptions): SSRPlugin {
                 dom: Node | null,
                 parent: Node
             ): Node | null | undefined {
+                // Walk fallback for islands the boundary table did not record
+                // (a stripped blob, or markup rendered without the table):
+                // core's table interception claims recorded boundaries before
+                // this hook runs, so this only fires for directive-carrying
+                // components with no record.
                 const strategy = vnode.props ? getHydrationDirective(vnode.props) : null;
 
                 if (!strategy) return undefined; // Not an island — let core handle it
 
                 return scheduleComponentHydration(vnode, dom, parent, strategy);
-            },
-
-            afterHydrate(container: Element): void {
-                hydrateLeftoverAsyncComponents(container);
             }
+
+            // No afterHydrate hook anymore: the core hydrator runs the
+            // leftover streamed-boundary scan itself.
         }
     };
 }

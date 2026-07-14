@@ -15,6 +15,7 @@ export interface ClientDirectives {
     'client:idle'?: boolean;
     'client:visible'?: boolean;
     'client:media'?: string;
+    'client:interaction'?: boolean;
     'client:only'?: boolean;
 }
 
@@ -62,6 +63,7 @@ export function getHydrationDirective(props: Record<string, any>): HydrationDire
     if (props['client:load'] !== undefined) return { strategy: 'load' };
     if (props['client:idle'] !== undefined) return { strategy: 'idle' };
     if (props['client:visible'] !== undefined) return { strategy: 'visible' };
+    if (props['client:interaction'] !== undefined) return { strategy: 'interaction' };
     if (props['client:only'] !== undefined) return { strategy: 'only' };
     if (props['client:media'] !== undefined) {
         return { strategy: 'media', media: props['client:media'] };
