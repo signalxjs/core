@@ -128,6 +128,7 @@ async function prepareDocument(
     throwIfAborted(options.signal);
 
     const ctx = createSSRContext(options);
+    ctx._appContext = input.appContext;
     ctx._plugins = engine.plugins;
     for (const plugin of engine.plugins) {
         plugin.server?.setup?.(ctx);

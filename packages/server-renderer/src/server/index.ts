@@ -18,3 +18,12 @@ export { generateStreamingScript, generateReplacementScript, escapeJsonForScript
 export type { StreamCallbacks } from './types';
 export { stateSerializationPlugin } from './state-plugin';
 export { serializeAsyncScript, asyncAssignmentJs } from './state';
+export {
+    assignmentJs,
+    stringifyWithHandlers,
+    serializeBoundaryProps,
+    getTypeHandlers,
+    isSerializable,
+    DANGEROUS_KEYS
+} from './serialize';
+export type { SSRTypeHandler } from './serialize';

@@ -324,6 +324,7 @@ export function createSSR(): SSRInstance {
             // Single walk: fully-sync trees complete without suspending, async
             // trees suspend at their awaits — no sync-attempt/re-render fallback.
             const ctx = makeContext(options);
+            ctx._appContext = appContext;
             let result = await renderVNodeToString(element, ctx, appContext);
 
             // Collect injected HTML from all plugins
@@ -357,6 +358,7 @@ export function createSSR(): SSRInstance {
             const ctx = makeContext(options);
             ctx._streaming = true;
             const { element, appContext } = extractInput(input);
+            ctx._appContext = appContext;
 
             // Use pull-based ReadableStream backed by an async generator.
             // Push-based enqueueing is the worst case for WebStreams
@@ -423,6 +425,7 @@ export function createSSR(): SSRInstance {
             const ctx = makeContext(options);
             ctx._streaming = true;
             const { element, appContext } = extractInput(input);
+            ctx._appContext = appContext;
 
             async function* generate(): AsyncGenerator<string> {
                 // Enable head collection
@@ -469,6 +472,7 @@ export function createSSR(): SSRInstance {
             const ctx = makeContext(options);
             ctx._streaming = true;
             const { element, appContext } = extractInput(input);
+            ctx._appContext = appContext;
 
             try {
                 // Enable head collection

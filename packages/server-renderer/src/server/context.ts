@@ -6,7 +6,7 @@
  */
 
 import type { SSRPlugin } from '../plugin';
-import type { HeadConfig } from 'sigx';
+import type { HeadConfig, AppContext } from 'sigx';
 
 /**
  * Core-managed pending async component.
@@ -70,6 +70,14 @@ export interface SSRContext {
      * Registered SSR plugins
      */
     _plugins?: SSRPlugin[];
+
+    /**
+     * The app context of the render input (null when rendering a bare
+     * element). Set by the render entry points; the DI source for per-app
+     * serializer type handlers and other app-level provides read at request
+     * time.
+     */
+    _appContext: AppContext | null;
 
     /**
      * Plugin-specific data storage, keyed by plugin name.
@@ -174,6 +182,7 @@ export function createSSRContext(options: SSRContextOptions = {}): SSRContext {
         _head: head,
         _pluginData: pluginData,
         _onComponentError: options.onComponentError,
+        _appContext: null,
         _streaming: false,
         _pendingAsync: [],
         _headConfigs: [],
