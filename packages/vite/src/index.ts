@@ -251,7 +251,14 @@ export function sigxPlugin(options: SigxPluginOptions = {}): Plugin {
             config = resolvedConfig;
         },
 
-        transform(code, id) {
+        transform(code, id, transformOptions) {
+            // HMR is a browser concern: never inject into SSR transforms —
+            // ssrLoadModule'd component modules previously got the wrapper
+            // (and its registry side effects) on the server render path.
+            if (transformOptions?.ssr) {
+                return null;
+            }
+
             // Only process TypeScript/TSX source files (not pre-built JS)
             if (!/\.tsx?$/.test(id) && !id.endsWith('.jsx')) {
                 return null;

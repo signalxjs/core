@@ -17,6 +17,10 @@
         "./lib": {
             "types": "./dist/lib.d.ts",
             "import": "./dist/lib.js"
+        },
+        "./ssr": {
+            "types": "./dist/ssr.d.ts",
+            "import": "./dist/ssr.js"
         }
     },
     "bin": {
@@ -34,13 +38,15 @@
     },
     "peerDependencies": {
         "sigx": "*",
-        "vite": ">=8.0.0"
+        "vite": ">=8.0.0",
+        "@sigx/server-renderer": "*"
     },
     "devDependencies": {
         "@types/node": "^26.1.1",
         "sigx": "workspace:^",
         "typescript": "^7.0.2",
-        "vite": "^8.1.4"
+        "vite": "^8.1.4",
+        "@sigx/server-renderer": "workspace:^"
     },
     "keywords": [
         "SignalX"
@@ -58,5 +64,10 @@
     },
     "engines": {
         "node": "^20.19.0 || >=22.12.0"
+    },
+    "peerDependenciesMeta": {
+        "@sigx/server-renderer": {
+            "optional": true
+        }
     }
 }
