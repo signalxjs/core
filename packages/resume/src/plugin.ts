@@ -138,8 +138,10 @@ export function resumePlugin(options?: ResumePluginOptions): SSRPlugin & { insta
                 // pack's delegation wakes them (QRL replay for 'resume'
                 // components, full hydration for 'hydrate' ones via their
                 // wake attributes). flush is never set — content SSRs per
-                // core defaults, streaming included.
-                return { hydrate: 'never', chunk, props };
+                // core defaults, streaming included. `component` names the
+                // record (#259) — core's __islandId || __name derivation
+                // doesn't apply to resume stamps.
+                return { hydrate: 'never', chunk, component: resumeId, props };
             },
 
             transformComponentContext(
@@ -157,12 +159,6 @@ export function resumePlugin(options?: ResumePluginOptions): SSRPlugin & { insta
                 if (!data?.claimed.has(id)) return;
                 const record = ctx.getBoundary(id);
                 if (!record) return;
-                // Core derives record.component from __islandId || __name —
-                // resume components carry neither, and the client's
-                // loadBoundaryComponent refuses records with no name (found
-                // by the browser smoke; ResolvedBoundary can't express this,
-                // noted as a candidate core seam in #241).
-                record.component = (vnode.type as ResumeStamps).__resumeId;
 
                 const signalMap = new Map<string, any>();
                 data.signalMaps.set(id, signalMap);

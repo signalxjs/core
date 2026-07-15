@@ -13,9 +13,11 @@
  * (delegation saw a `data-sigx-wake` carrier): full hydration, no QRLs, no
  * write replay — there is nothing resumed to replay.
  *
- * The marker/container location replicates two small private core helpers
- * (`findBoundaryMarker` / `hydrateBoundaryInPlace`); #241 tracks exporting
- * them from @sigx/server-renderer/client (seam PR b).
+ * Marker location uses core's exported `findBoundaryMarker` (#260). The
+ * in-place hydration stays pack-owned: core's `hydrateTableBoundary` awaits
+ * the chunk load INSIDE its call, and the restore hook must only be armed
+ * around the synchronous `hydrateComponent` window (a concurrent boundary
+ * hydrating during that await would otherwise hit the hook).
  *
  * Note: the record's state is handed to the restoring factory through
  * `currentUpgradingScope`, NOT core's seed/consume staging — a co-installed
@@ -27,6 +29,8 @@ import {
     getBoundaryRecord,
     loadBoundaryComponent,
     hydrateComponent,
+    findBoundaryMarker,
+    invalidateMarkerIndex,
     registerClientPlugin,
     getClientPlugins
 } from '@sigx/server-renderer/client';
@@ -85,31 +89,6 @@ function ensureRestoreHook(): void {
 }
 
 /**
- * `<!--$c:id-->` trailing marker for a boundary (core's helper is private —
- * seam PR b). One document walk builds an index for ALL markers; entries are
- * verified live (`isConnected`) and the index rebuilds if streaming replaced
- * the node — upgrades stay O(1) after the first.
- */
-let markerIndex: Map<number, Comment> | null = null;
-
-function findBoundaryMarker(id: number): Comment | null {
-    const cached = markerIndex?.get(id);
-    if (cached?.isConnected) return cached;
-
-    markerIndex = new Map();
-    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_COMMENT);
-    let node: Node | null;
-    while ((node = walker.nextNode())) {
-        const text = (node as Comment).data;
-        if (text.startsWith('$c:')) {
-            const markerId = parseInt(text.slice(3), 10);
-            if (!isNaN(markerId) && !markerIndex.has(markerId)) markerIndex.set(markerId, node as Comment);
-        }
-    }
-    return markerIndex.get(id) ?? null;
-}
-
-/**
  * Load the boundary's component chunk and hydrate it in place.
  *
  * Every failure path (missing record/component/marker/container, a throwing
@@ -146,8 +125,14 @@ async function runUpgrade(scope: InternalScope): Promise<void> {
         return;
     }
 
-    const marker = findBoundaryMarker(scope._id);
-    if (!marker) {
+    let marker = findBoundaryMarker(scope._id);
+    if (marker && !marker.isConnected) {
+        // Core's marker index caches nodes; DOM surgery (streaming
+        // replacement, SPA teardown) can leave stale entries — rebuild once.
+        invalidateMarkerIndex();
+        marker = findBoundaryMarker(scope._id);
+    }
+    if (!marker || !marker.isConnected) {
         if (__DEV__) {
             console.warn(`[sigx resume] Cannot upgrade boundary ${scope._id}: trailing marker not found.`);
         }
