@@ -172,11 +172,14 @@ describe('resumePlugin — coexistence with islands', () => {
 
 describe('resumePlugin — state capture', () => {
     it('captures writes during setup, not just initials', async () => {
+        // Deliberately NO name option: real resume components carry only the
+        // transform's __resumeId, and the record must still be named (the
+        // client refuses anonymous records).
         const Warmup = component((ctx) => {
             const n = ((__sigxInit: number) => (ctx.signal as any)(__sigxInit, 'n'))(0);
             n.value = 42; // setup-time write must reach the record
             return () => <i>{n.value}</i>;
-        }, { name: 'Warmup' });
+        });
         (Warmup as any).__resumeId = 'Warmup';
         (Warmup as any).__resumeMode = 'resume';
 
@@ -185,6 +188,7 @@ describe('resumePlugin — state capture', () => {
 
         const record = Object.values(parseBoundaryTable(html))[0];
         expect(record.state).toEqual({ n: 42 });
+        expect(record.component).toBe('Warmup'); // from __resumeId, not __name
         expect(html).toContain('<i>42</i>');
     });
 
