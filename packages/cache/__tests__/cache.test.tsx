@@ -7,6 +7,7 @@
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { component, signal, jsx, defineApp, useData, useAction, type AsyncState, type App } from 'sigx';
+import { declareLiveClient } from '@sigx/runtime-core/internals';
 import '@sigx/runtime-dom'; // installs the default mount
 import { cachePlugin } from '@sigx/cache';
 import type { CachedAsyncState } from '@sigx/cache';
@@ -41,6 +42,8 @@ describe('@sigx/cache', () => {
         for (const app of apps.splice(0)) app.unmount();
         for (const c of containers.splice(0)) c.remove();
         delete (globalThis as any).__SIGX_ASYNC__;
+        // Restore the live-client default (happy-dom has a window ⇒ live).
+        declareLiveClient(true);
         vi.restoreAllMocks();
     });
 
@@ -744,5 +747,26 @@ describe('@sigx/cache', () => {
         await settle();
         expect(fetcher).toHaveBeenCalledTimes(2);
         expect(args[1]).toBe(latest);
+    });
+
+    it('on a non-live client a cached read subscribes but does NOT fetch — the cell parks at pending', async () => {
+        declareLiveClient(false); // e.g. an undeclared/server-side non-web runtime
+        const fetcher = vi.fn(async () => 'never');
+        let cell!: AsyncState<string>;
+
+        const Root = component(() => {
+            cell = useData('non-live-key', fetcher, { cache: { staleTime: 60_000 } });
+            return () => <div class="out">{cell.state}</div>;
+        });
+        const container = mountWith(cachePlugin(), jsx(Root, {}));
+        await settle();
+
+        // Entry is subscribed but empty (no fetch on a non-live client): the
+        // apply() fallthrough renders 'pending' with no value.
+        expect(cell.state).toBe('pending');
+        expect(cell.value).toBeNull();
+        expect(cell.error).toBeNull();
+        expect(fetcher).not.toHaveBeenCalled();
+        expect(container.querySelector('.out')?.textContent).toBe('pending');
     });
 });
