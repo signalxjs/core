@@ -352,8 +352,13 @@ export interface App<TContainer = any> {
     unmount(): void;
 
     /**
-     * Get the app context (for internal use by renderers)
-     * @internal
+     * The app's context — the stable surface for plugin authors.
+     *
+     * Inside `install(app)`, pass `app._context` to seam provide-helpers
+     * (`provideAsyncEngine`, `provideSSRSerializerHandlers`,
+     * `provideHydrateDefaults`, …) or read/write `app._context.provides`
+     * directly. The underscore marks this as an advanced surface, not a
+     * private one — no cast is needed.
      */
     _context: AppContext;
 
@@ -370,8 +375,9 @@ export interface App<TContainer = any> {
     _container: TContainer | null;
 
     /**
-     * The root component passed to defineApp()
-     * @internal
+     * The root component passed to defineApp(). Advanced surface for plugins
+     * that mount/hydrate the app themselves (e.g. the SSR client plugin) —
+     * same contract as `_context`.
      */
     _rootComponent: JSXElement;
 }

@@ -17,7 +17,8 @@ async function start() {
     // must hydrate against the real component. The route table owns the
     // route → chunk knowledge; no hardcoded paths here.
     await Promise.all(routeChunks(parseUrl(window.location.pathname)));
-    // hydrate() is installed by ssrClientPlugin (declared optional on App)
+    // hydrate() exists once ssrClientPlugin is installed; the augmentation
+    // keeps it optional on App, hence the `!` on the chained call.
     app.use(ssrClientPlugin).hydrate!('#app');
 }
 
