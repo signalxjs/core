@@ -82,9 +82,15 @@ export interface SSRPlugin {
         ): ComponentSetupContext | void;
 
         /**
-         * Called after a component renders. Receives the accumulated HTML string.
-         * Can transform it (e.g., wrap with markers, inject attributes).
-         * Return a string to replace, or void to pass through.
+         * Called after a component renders — APPEND-only. Output accumulates
+         * in one shared buffer (that is what makes streaming cheap), so there
+         * is no per-component HTML to intercept: the `html` argument is
+         * always `''`, and a returned string is appended between the
+         * component's content and its trailing `<!--$c:ID-->` marker. Typical
+         * use: capture per-boundary state into `ctx.getBoundary(id)` (see the
+         * islands/resume packs). To influence what a component RENDERS, use
+         * `transformComponentContext` instead — wrapping or rewriting the
+         * emitted markup is deliberately not supported (#253).
          */
         afterRenderComponent?(
             id: number,
