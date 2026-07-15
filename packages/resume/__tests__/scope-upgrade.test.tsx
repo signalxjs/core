@@ -222,3 +222,38 @@ describe('upgrade failure recovery', () => {
         expect(container.querySelector('button')!.textContent).toBe('3');
     });
 });
+
+describe('nested components inside an upgraded boundary', () => {
+    it('the restore hook applies to the boundary root only', async () => {
+        const Child = component((ctx) => {
+            // Same key name as the parent — a leaking restore would seed it
+            // with the parent's serialized 7 instead of its own initial 100.
+            const count = ((__sigxInit: number) => (ctx.signal as any)(__sigxInit, 'count'))(100);
+            return () => <em>{count.value}</em>;
+        }, { name: 'NestedChild' });
+
+        const Parent = component<{ initial?: number }>((ctx) => {
+            const count = ((__sigxInit: number) => (ctx.signal as any)(__sigxInit, 'count'))(ctx.props.initial ?? 0);
+            return () => (
+                <div {...({ 'data-sigx-b': (ctx as any).$sigxB } as any)}>
+                    <b>{count.value}</b>
+                    <Child />
+                </div>
+            );
+        }, { name: 'NestedParent' });
+        (Parent as any).__resumeId = 'NestedParent';
+        (Parent as any).__resumeMode = 'resume';
+
+        const { id, container } = await mount(<Parent initial={7} />);
+        registerComponent('NestedParent', Parent);
+
+        const scope = getScope(id) as any;
+        scope.signals.count.value = 8; // triggers upgrade
+        await tick();
+        await tick();
+
+        expect(scope._status).toBe('upgraded');
+        expect(container.querySelector('b')!.textContent).toBe('8');   // root replayed
+        expect(container.querySelector('em')!.textContent).toBe('100'); // child kept its own initial
+    });
+});
