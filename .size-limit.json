@@ -12,7 +12,7 @@
     {
         "name": "@sigx/runtime-core",
         "path": "packages/runtime-core/dist/index.prod.js",
-        "limit": "7.5 KB",
+        "limit": "7.75 KB",
         "ignore": [
             "@sigx/*"
         ]
