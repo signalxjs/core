@@ -157,8 +157,7 @@ export function resumePlugin(options?: ResumePluginOptions): SSRPlugin & { insta
                 const id = ctx._componentStack[ctx._componentStack.length - 1];
                 const data = ctx.getPluginData<ResumePluginData>(PLUGIN_NAME);
                 if (!data?.claimed.has(id)) return;
-                const record = ctx.getBoundary(id);
-                if (!record) return;
+                if (!ctx.getBoundary(id)) return;
 
                 const signalMap = new Map<string, any>();
                 data.signalMaps.set(id, signalMap);

@@ -126,9 +126,9 @@ async function runUpgrade(scope: InternalScope): Promise<void> {
     }
 
     let marker = findBoundaryMarker(scope._id);
-    if (marker && !marker.isConnected) {
-        // Core's marker index caches nodes; DOM surgery (streaming
-        // replacement, SPA teardown) can leave stale entries — rebuild once.
+    if (!marker || !marker.isConnected) {
+        // Core's marker index caches nodes AND misses markers inserted after
+        // it was built (streamed boundaries) — rebuild once for both cases.
         invalidateMarkerIndex();
         marker = findBoundaryMarker(scope._id);
     }
