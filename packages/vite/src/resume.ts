@@ -106,9 +106,9 @@ export function sigxResume(options: SigxResumeOptions = {}): Plugin {
         }
     }
 
-    /** Components worth stamping/registering: they own state or handlers. */
+    /** Components worth stamping/registering: they own state or handler sites. */
     const stampable = (extraction: ResumeExtraction) =>
-        extraction.components.filter((c) => c.handlerCount > 0 || c.signalCount > 0);
+        extraction.components.filter((c) => c.siteCount > 0 || c.signalCount > 0);
 
     return {
         name: 'sigx:resume',

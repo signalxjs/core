@@ -80,6 +80,7 @@ export const Stepper = component((ctx) => {
         );
         expect(result.code).toContain('Stepper.__resumeMode = "hydrate"');
         expect(result.code).not.toContain('data-sigx-on');
+        expect(result.code).toContain('data-sigx-wake:click=""');
         expect(warnings).toHaveLength(1);
         expect(warnings[0]).toContain('onclick of <Stepper>');
         expect(warnings[0]).toContain('interaction hydration');
