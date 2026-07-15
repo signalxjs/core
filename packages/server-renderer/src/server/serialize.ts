@@ -27,6 +27,22 @@ export function escapeJsonForScript(json: string): string {
 }
 
 /**
+ * Open a renderer-emitted `<script>` tag: plain `<script>` without a nonce
+ * (byte-identical to the historical output), `<script nonce="...">` when the
+ * request carries a CSP nonce. The nonce is server-generated, but it is
+ * attribute-escaped anyway — one discipline for every emitted attribute.
+ */
+export function scriptOpen(nonce?: string): string {
+    if (!nonce) return '<script>';
+    const escaped = nonce
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+    return `<script nonce="${escaped}">`;
+}
+
+/**
  * Keys interpreted specially by JS object machinery — rejected outright
  * rather than shipped (prototype-pollution guard).
  */
@@ -181,7 +197,7 @@ export function emitBoundaryTable(ctx: SSRContext): string {
     ctx._boundaries.forEach((record, id) => {
         table[id] = record;
     });
-    return `<script>${assignmentJs('__SIGX_BOUNDARIES__', table, getTypeHandlers(ctx))}</script>`;
+    return `${scriptOpen(ctx._nonce)}${assignmentJs('__SIGX_BOUNDARIES__', table, getTypeHandlers(ctx))}</script>`;
 }
 
 /**

@@ -8,7 +8,7 @@
  * Plugins (e.g., islands) can augment replacements via `onAsyncComponentResolved`.
  */
 
-import { escapeJsonForScript } from './serialize';
+import { escapeJsonForScript, scriptOpen } from './serialize';
 
 // Re-exported for existing import sites (this was its original home).
 export { escapeJsonForScript };
@@ -17,9 +17,9 @@ export { escapeJsonForScript };
  * Generate the streaming bootstrap script (injected once before any replacements).
  * Defines `window.$SIGX_REPLACE` which swaps async placeholders with rendered HTML.
  */
-export function generateStreamingScript(): string {
+export function generateStreamingScript(nonce?: string): string {
     return `
-<script>
+${scriptOpen(nonce)}
 window.$SIGX_REPLACE = function(id, html) {
     var placeholder = document.querySelector('[data-async-placeholder="' + id + '"]');
     if (placeholder) {
@@ -41,9 +41,9 @@ window.$SIGX_REPLACE = function(id, html) {
  * placeholder — XSS-safe by construction (no HTML parsing of streamed
  * tokens). Used by `useStream()` for LLM-token-style progressive content.
  */
-export function generateAppendBootstrap(): string {
+export function generateAppendBootstrap(nonce?: string): string {
     return `
-<script>
+${scriptOpen(nonce)}
 window.$SIGX_APPEND = function(id, text) {
     var placeholder = document.querySelector('[data-async-placeholder="' + id + '"]');
     if (placeholder) {
@@ -57,8 +57,8 @@ window.$SIGX_APPEND = function(id, text) {
  * Generate an append script for one progressive-text chunk.
  * The token travels as a JSON string and lands via createTextNode.
  */
-export function generateAppendScript(id: number, text: string): string {
-    return `<script>$SIGX_APPEND(${id}, ${escapeJsonForScript(JSON.stringify(text))});</script>`;
+export function generateAppendScript(id: number, text: string, nonce?: string): string {
+    return `${scriptOpen(nonce)}$SIGX_APPEND(${id}, ${escapeJsonForScript(JSON.stringify(text))});</script>`;
 }
 
 /**
@@ -67,10 +67,11 @@ export function generateAppendScript(id: number, text: string): string {
  * @param extraScript - raw JS appended AFTER the $SIGX_REPLACE call
  * @param preScript - raw JS prepended BEFORE the $SIGX_REPLACE call; runs
  *   before the replace dispatches `sigx:async-ready` (e.g. state install)
+ * @param nonce - CSP nonce for the emitted `<script>` tag
  */
-export function generateReplacementScript(id: number, html: string, extraScript?: string, preScript?: string): string {
+export function generateReplacementScript(id: number, html: string, extraScript?: string, preScript?: string, nonce?: string): string {
     const escapedHtml = escapeJsonForScript(JSON.stringify(html));
-    let script = `<script>`;
+    let script = scriptOpen(nonce);
     if (preScript) {
         script += preScript;
     }
