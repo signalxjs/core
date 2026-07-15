@@ -151,7 +151,9 @@ function childNodes(node: Node): Node[] {
             }
         }
     }
-    return out;
+    // Property enumeration order is an implementation detail — spans are
+    // authoritative for source order.
+    return out.sort((a, b) => a.start - b.start);
 }
 
 /** Collect binding names introduced by a declaration pattern. */
