@@ -85,9 +85,11 @@ export function sigxResume(options: SigxResumeOptions = {}): Plugin {
         let extraction: ResumeExtraction;
         try {
             extraction = extractResumeHandlers(code, file);
-        } catch {
-            // Unparsable source (mid-edit, syntax error) — keep the last good
-            // extraction; the real transform pipeline will surface the error.
+        } catch (error) {
+            // Unparsable source (mid-edit, syntax error) keeps the last good
+            // extraction — but say so: silence here would also hide real
+            // extraction bugs during discovery and builds.
+            console.warn(`[sigx:resume] extraction failed for ${relPath(file)}:`, error);
             return null;
         }
         if (extraction.components.length === 0) {
