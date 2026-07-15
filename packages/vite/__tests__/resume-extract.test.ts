@@ -41,7 +41,7 @@ describe('extractResumeHandlers — basics', () => {
         expect(result.code).not.toContain('data-sigx-pd');
 
         expect(result.components).toEqual([
-            { local: 'Counter', exported: 'Counter', mode: 'resume', handlerCount: 1, signalCount: 1 }
+            { local: 'Counter', exported: 'Counter', mode: 'resume', handlerCount: 1, siteCount: 1, signalCount: 1 }
         ]);
         expect(result.events).toEqual(['click']);
         expect(result.handlersModule).toContain(handler.exportSource);
@@ -362,6 +362,33 @@ export const PropsWrite = component((ctx) => {
         expect(reason).toContain('read-only');
     });
 
+    it('mixed eligibility is all-or-nothing: wake attributes only, no QRL exports', () => {
+        const result = extractResumeHandlers(`
+import { component } from 'sigx';
+const STEP = 2;
+export const Mixed = component((ctx) => {
+    const n = ctx.signal(0);
+    return () => <div>
+        <button onClick={(e) => { e.preventDefault(); n.value++; }}>fine</button>
+        <button onClick={() => { n.value += STEP; }}>ineligible</button>
+    </div>;
+});
+`, '/src/Mixed.resume.tsx');
+        // The eligible handler must NOT get a live QRL — the hydrated
+        // component's real listener would double-dispatch its events.
+        expect(result.handlers).toHaveLength(0);
+        expect(result.handlersModule).toBeNull();
+        expect(result.code).not.toContain('data-sigx-on:');
+        expect(result.code.split('data-sigx-wake:click=""').length - 1).toBe(2);
+        // pd analysis still applies to analyzable-but-unextracted handlers.
+        expect(result.code.split('data-sigx-pd:click=""').length - 1).toBe(1);
+        expect(result.code.split('data-sigx-b=').length - 1).toBe(2);
+        expect(result.events).toEqual(['click']);
+        expect(result.components[0]).toEqual({
+            local: 'Mixed', exported: 'Mixed', mode: 'hydrate', handlerCount: 0, siteCount: 2, signalCount: 1
+        });
+    });
+
     it('bails the whole component to hydrate mode when it consumes slots', () => {
         const result = extractResumeHandlers(`
 import { component } from 'sigx';
@@ -370,8 +397,11 @@ export const Wrapper = component((ctx) => {
     return () => <div onClick={() => { open.value = true; }}>{ctx.slots.default()}</div>;
 });
 `, '/src/Wrapper.resume.tsx');
-        // The handler itself extracts, but the component cannot data-remount.
-        expect(result.handlers).toHaveLength(1);
+        // The handler was analyzable, but a slots consumer cannot
+        // data-remount — all-or-nothing: wake attributes only.
+        expect(result.handlers).toHaveLength(0);
+        expect(result.code).toContain('data-sigx-wake:click=""');
+        expect(result.code).not.toContain('data-sigx-on:');
         expect(result.components[0].mode).toBe('hydrate');
     });
 
