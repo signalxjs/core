@@ -16,6 +16,7 @@
 
 import { signal } from '@sigx/reactivity';
 import { getCurrentInstance } from './component-lifecycle.js';
+import { hookOutsideSetupError } from './errors.js';
 import { peekRestored } from './async/restore.js';
 import { isLiveClient } from './async/environment.js';
 
@@ -25,7 +26,7 @@ export function useStream(
 ): { readonly value: string } {
     const instance = getCurrentInstance();
     if (!instance) {
-        throw new Error('useStream() must be called synchronously during component setup.');
+        throw hookOutsideSetupError('useStream');
     }
 
     if ((instance as any)._useStream) {

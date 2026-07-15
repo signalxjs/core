@@ -1,6 +1,7 @@
 import type { Subscription, Topic } from "../models/index.js";
 import { onUnmounted } from "../component.js";
 import { registerTopic, unregisterTopic } from "./registry.js";
+import { topicDestroyedError, topicGroupDestroyedError } from "../errors.js";
 
 export interface CreateTopicOptions {
     /** Tooling metadata; topics WITH a namespace register in the inspection registry. */
@@ -92,7 +93,7 @@ export function createTopic<T>(options?: CreateTopicOptions): Topic<T> {
 
         subscribe(handler: (data: T) => void): Subscription {
             if (disposed) {
-                throw new Error(`[sigx] Cannot subscribe to destroyed topic${label}.`);
+                throw topicDestroyedError(path);
             }
             subscribers.push(handler);
             if (subscribers.length === 1 && !active) {
@@ -176,7 +177,7 @@ export function createTopicGroup<EventMap extends Record<string, any>>(options?:
             let topic = created.get(key);
             if (!topic) {
                 if (disposed) {
-                    throw new Error(`[sigx] Cannot create topic "${key}" on a destroyed topic group.`);
+                    throw topicGroupDestroyedError(key);
                 }
                 topic = createTopic({ namespace: options?.namespace, name: key });
                 created.set(key, topic);

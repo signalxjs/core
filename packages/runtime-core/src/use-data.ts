@@ -21,6 +21,7 @@
 
 import { watch } from '@sigx/reactivity';
 import { getCurrentInstance } from './component-lifecycle.js';
+import { hookOutsideSetupError } from './errors.js';
 import {
     resolveKeyResult,
     assertKeyArgShape,
@@ -77,7 +78,7 @@ export function useData<T>(
 
     const instance = getCurrentInstance();
     if (!instance) {
-        throw new Error('useData() must be called synchronously during component setup.');
+        throw hookOutsideSetupError('useData');
     }
 
     const warns: KeyWarnFlags = {};
