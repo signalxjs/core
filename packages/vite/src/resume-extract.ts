@@ -424,7 +424,7 @@ interface ModuleScan {
     componentFactories: Set<string>;
     /** Module-level bindings that are NOT imports (capture ⇒ ineligible). */
     moduleLocals: Set<string>;
-    /** exported name → local binding, for component discovery. */
+    /** LOCAL binding → exported name, for component discovery. */
     exportsByLocal: Map<string, string>;
 }
 
@@ -571,7 +571,10 @@ function findComponents(program: Node, scan: ModuleScan): ComponentInfo[] {
     return components;
 }
 
-/** Any `<ctx>.slots` access — data-driven upgrade can't rebuild slots. */
+/**
+ * Any `<ctx>.slots` access — data-driven upgrade can't rebuild slots. Also
+ * catches destructuring consumption (`const { slots } = ctx`).
+ */
 function usesCtxSlots(node: Node, ctxName: string): boolean {
     if (
         node.type === 'MemberExpression' &&
@@ -579,6 +582,16 @@ function usesCtxSlots(node: Node, ctxName: string): boolean {
         ((node.object as Node).name as string) === ctxName &&
         isNode(node.property) &&
         ((node.property as Node).name as string) === 'slots'
+    ) {
+        return true;
+    }
+    if (
+        node.type === 'VariableDeclarator' &&
+        (node.id as Node).type === 'ObjectPattern' &&
+        isNode(node.init) &&
+        (node.init as Node).type === 'Identifier' &&
+        ((node.init as Node).name as string) === ctxName &&
+        patternNames(node.id as Node).includes('slots')
     ) {
         return true;
     }

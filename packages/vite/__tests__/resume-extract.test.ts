@@ -544,3 +544,18 @@ export const UsesEnum = component((ctx) => {
         expect(result.ineligible[0].reason).toContain('module-scope');
     });
 });
+
+describe('destructured slots consumption', () => {
+    it('bails to hydrate mode for `const { slots } = ctx` too', () => {
+        const result = extractResumeHandlers(`
+import { component } from 'sigx';
+export const Destructured = component((ctx) => {
+    const { slots } = ctx;
+    const open = ctx.signal(false);
+    return () => <div onClick={() => { open.value = true; }}>{slots.default()}</div>;
+});
+`, '/src/Destructured.resume.tsx');
+        expect(result.components[0].mode).toBe('hydrate');
+        expect(result.code).not.toContain('data-sigx-on:');
+    });
+});
