@@ -85,9 +85,11 @@ export function sigxResume(options: SigxResumeOptions = {}): Plugin {
         let extraction: ResumeExtraction;
         try {
             extraction = extractResumeHandlers(code, file);
-        } catch {
-            // Unparsable source (mid-edit, syntax error) — keep the last good
-            // extraction; the real transform pipeline will surface the error.
+        } catch (error) {
+            // Unparsable source (mid-edit, syntax error) keeps the last good
+            // extraction — but say so: silence here would also hide real
+            // extraction bugs during discovery and builds.
+            console.warn(`[sigx:resume] extraction failed for ${relPath(file)}:`, error);
             return null;
         }
         if (extraction.components.length === 0) {
@@ -122,14 +124,20 @@ export function sigxResume(options: SigxResumeOptions = {}): Plugin {
      * other's upgrade loaders — first file wins, the rest warn and are
      * skipped from registration and the manifest.
      */
+    const warnedDuplicates = new Set<string>();
     function ownedBy(name: string, file: string): boolean {
         for (const [otherFile, extraction] of extractions) {
             if (otherFile === file) return true;
             if (extraction.components.some((c) => c.exported === name)) {
-                console.warn(
-                    `[sigx:resume] duplicate resume component name "${name}" ` +
-                    `(${otherFile} vs ${file}) — component names must be unique; keeping the first.`
-                );
+                // Called from load() AND generateBundle() — warn once per pair.
+                const key = `${name}\0${file}`;
+                if (!warnedDuplicates.has(key)) {
+                    warnedDuplicates.add(key);
+                    console.warn(
+                        `[sigx:resume] duplicate resume component name "${name}" ` +
+                        `(${otherFile} vs ${file}) — component names must be unique; keeping the first.`
+                    );
+                }
                 return false;
             }
         }

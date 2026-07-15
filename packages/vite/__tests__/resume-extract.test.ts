@@ -514,3 +514,33 @@ export const Gen = component((ctx) => {
         expect(result.handlers[0].exportSource).toContain('$scope.signals.state.value');
     });
 });
+
+describe('module-binding edge cases', () => {
+    it('re-exports bind nothing locally', () => {
+        const result = extractResumeHandlers(`
+import { component } from 'sigx';
+export { Foo } from './other';
+export const Own = component((ctx) => {
+    const n = ctx.signal(0);
+    return () => <button onClick={() => { n.value++; }}>x</button>;
+});
+`, '/src/Reexport.resume.tsx');
+        // Only Own is a component of THIS module; Foo is not misregistered.
+        expect(result.components.map((c) => c.exported)).toEqual(['Own']);
+        expect(result.handlers).toHaveLength(1);
+    });
+
+    it('enum/namespace captures are module-local, not globals', () => {
+        const result = extractResumeHandlers(`
+import { component } from 'sigx';
+enum Mode { A, B }
+export const UsesEnum = component((ctx) => {
+    const n = ctx.signal(0);
+    return () => <button onClick={() => { n.value = Mode.A; }}>x</button>;
+});
+`, '/src/Enum.resume.tsx');
+        expect(result.handlers).toHaveLength(0);
+        expect(result.ineligible[0].reason).toContain('"Mode"');
+        expect(result.ineligible[0].reason).toContain('module-scope');
+    });
+});

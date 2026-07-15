@@ -78,19 +78,50 @@ function ensureRestoreHook(): void {
     if (!getClientPlugins().includes(RESTORE_HOOK)) registerClientPlugin(RESTORE_HOOK);
 }
 
-/** `<!--$c:id-->` trailing marker for a boundary (core's helper is private). */
+/**
+ * `<!--$c:id-->` trailing marker for a boundary (core's helper is private —
+ * seam PR b). One document walk builds an index for ALL markers; entries are
+ * verified live (`isConnected`) and the index rebuilds if streaming replaced
+ * the node — upgrades stay O(1) after the first.
+ */
+let markerIndex: Map<number, Comment> | null = null;
+
 function findBoundaryMarker(id: number): Comment | null {
+    const cached = markerIndex?.get(id);
+    if (cached?.isConnected) return cached;
+
+    markerIndex = new Map();
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_COMMENT);
-    const want = `$c:${id}`;
     let node: Node | null;
     while ((node = walker.nextNode())) {
-        if ((node as Comment).data === want) return node as Comment;
+        const text = (node as Comment).data;
+        if (text.startsWith('$c:')) {
+            const markerId = parseInt(text.slice(3), 10);
+            if (!isNaN(markerId) && !markerIndex.has(markerId)) markerIndex.set(markerId, node as Comment);
+        }
     }
-    return null;
+    return markerIndex.get(id) ?? null;
 }
 
-/** Load the boundary's component chunk and hydrate it in place. */
+/**
+ * Load the boundary's component chunk and hydrate it in place.
+ *
+ * Every failure path (missing record/component/marker/container, a throwing
+ * hydration) resets the scope to 'resumed' so later interactions can retry —
+ * a permanently 'upgrading' scope would silently eat all future writes.
+ */
 export async function scheduleUpgrade(scope: InternalScope): Promise<void> {
+    try {
+        await runUpgrade(scope);
+    } finally {
+        if (scope._status !== 'upgraded') {
+            scope._status = 'resumed';
+            scope._live = null;
+        }
+    }
+}
+
+async function runUpgrade(scope: InternalScope): Promise<void> {
     // Late table installs can fill a record the scope missed at creation —
     // pin it on the scope so the restore hook seeds from the SAME record.
     if (!scope._record) scope._record = getBoundaryRecord(scope._id) ?? null;
@@ -103,7 +134,7 @@ export async function scheduleUpgrade(scope: InternalScope): Promise<void> {
             console.warn(
                 `[sigx resume] Cannot upgrade boundary ${scope._id}: component ` +
                 `"${record.component ?? '?'}" is neither registered nor chunk-addressable. ` +
-                `Writes keep buffering; the DOM will not update.`
+                `The scope stays resumed; the next write retries.`
             );
         }
         return;
