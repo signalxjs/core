@@ -43,6 +43,7 @@ packages/
 | Run tests in watch mode | `pnpm test:watch` |
 | Lint | `pnpm lint` |
 | Edge smoke test (after `pnpm build`) | `pnpm test:edge` |
+| SSR benchmarks (after `pnpm build`) | `pnpm bench:ssr:quick` (quick + regression table) / `pnpm bench:ssr` (vs Vue, React, Preact) |
 | Try a runnable example | `pnpm --filter @sigx/spa-example dev` |
 
 ## Pre-push checklist

@@ -10,15 +10,16 @@
  * retention, focus/interval revalidation, and `mutate()` write-through.
  */
 
-import { signal, batch, untrack } from 'sigx';
-import type { AsyncFetcherContext, AsyncState, MatchArms } from 'sigx';
+import { signal, batch, untrack } from '@sigx/reactivity';
+import type { AsyncFetcherContext, AsyncState, MatchArms } from '@sigx/runtime-core';
 import {
     matchAsyncState,
     makeUnhandledReporter,
     defaultAsyncEngine,
+    isLiveClient,
     type AsyncEngine,
     type AsyncReadHandle,
-} from 'sigx/internals';
+} from '@sigx/runtime-core/internals';
 import { CacheStore, type CacheEntry, type EntrySubscriber } from './store.js';
 import type { CacheOptions, CacheActionOptions } from './options.js';
 
@@ -129,7 +130,7 @@ function createCachedRead<T>(
             entry.fetcher = fetcher;
             entry.rawArg = raw;
 
-            if (!store.isFresh(entry, staleTime) && typeof window !== 'undefined') {
+            if (!store.isFresh(entry, staleTime) && isLiveClient()) {
                 // Stale (or empty): revalidate. apply() below renders the
                 // cached value as 'refreshing' while it runs, or 'pending'
                 // when there is nothing to show.

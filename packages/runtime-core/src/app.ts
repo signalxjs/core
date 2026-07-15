@@ -29,7 +29,8 @@ import type {
 } from './app-types.js';
 
 import { getAppContextToken, setActiveAppContext, type Providable } from './di/injectable.js';
-import { ERROR_SCOPE_TOKEN, type ErrorScopeHandle } from './error-scope.js';
+import { ERROR_SCOPE_TOKEN } from './error-scope.js';
+import { getProvided } from './di/token.js';
 import { isDirective } from './directives.js';
 import { isPromise } from './utils/index.js';
 import type { JSXElement } from './jsx-runtime.js';
@@ -451,7 +452,7 @@ export function handleComponentError(
     // layer. A scope that declines (already errored) lets the walk continue.
     let node = instance?.ctx as { provides?: Map<symbol, unknown>; parent?: unknown } | null | undefined;
     while (node) {
-        const scope = node.provides?.get(ERROR_SCOPE_TOKEN) as ErrorScopeHandle | undefined;
+        const scope = getProvided(node.provides, ERROR_SCOPE_TOKEN);
         if (scope && scope.handle(err, instance, info) === true) return true;
         node = node.parent as typeof node;
     }

@@ -23,6 +23,7 @@
 
 import { signal, batch } from '@sigx/reactivity';
 import { getCurrentInstance } from './component-lifecycle.js';
+import { createToken } from './di/token.js';
 import { jsx, Fragment, type JSXElement } from './jsx-runtime.js';
 import type { ViewFn } from './component-types.js';
 import type { ComponentInstance } from './app-types.js';
@@ -36,7 +37,7 @@ export interface ErrorScopeOptions {
 }
 
 /** DI token under which a scope's handle lives on the owning ctx. @internal */
-export const ERROR_SCOPE_TOKEN: unique symbol = Symbol('sigx:errorScope');
+export const ERROR_SCOPE_TOKEN = createToken<ErrorScopeHandle>('sigx:errorScope');
 
 /**
  * Server-rendered error staged for the NEXT errorScope() call — the SSR

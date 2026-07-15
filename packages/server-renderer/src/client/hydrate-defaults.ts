@@ -10,6 +10,8 @@
  * is deliberately DOM-free so `install(app)` can run in any bundle.
  */
 
+import { createToken, getProvided, setProvided } from 'sigx/internals';
+
 export interface HydrateDefaults {
     /**
      * 'auto' (default): the root walk hydrates everything; boundary-table
@@ -24,7 +26,7 @@ export interface HydrateDefaults {
  * DI token under which hydration defaults are provided at app level.
  * @internal
  */
-export const HYDRATE_DEFAULTS_TOKEN: unique symbol = Symbol('sigx:hydrateDefaults');
+export const HYDRATE_DEFAULTS_TOKEN = createToken<HydrateDefaults>('sigx:hydrateDefaults');
 
 /**
  * Declare hydration defaults on an app context at install time. Later
@@ -40,13 +42,13 @@ export function provideHydrateDefaults(
     appContext: { provides: Map<symbol, unknown> },
     defaults: HydrateDefaults
 ): void {
-    const existing = appContext.provides.get(HYDRATE_DEFAULTS_TOKEN) as HydrateDefaults | undefined;
-    appContext.provides.set(HYDRATE_DEFAULTS_TOKEN, { ...existing, ...defaults });
+    const existing = getProvided(appContext.provides, HYDRATE_DEFAULTS_TOKEN);
+    setProvided(appContext.provides, HYDRATE_DEFAULTS_TOKEN, { ...existing, ...defaults });
 }
 
 /** Resolve the provided defaults off an app context (empty without one). */
 export function getHydrateDefaults(
     appContext: { provides: Map<symbol, unknown> } | null | undefined
 ): HydrateDefaults {
-    return (appContext?.provides.get(HYDRATE_DEFAULTS_TOKEN) as HydrateDefaults | undefined) ?? {};
+    return getProvided(appContext?.provides, HYDRATE_DEFAULTS_TOKEN) ?? {};
 }

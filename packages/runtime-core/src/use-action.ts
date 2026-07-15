@@ -16,7 +16,7 @@
 
 import { signal, batch, untrack } from '@sigx/reactivity';
 import { getCurrentInstance } from './component-lifecycle.js';
-import { ASYNC_ENGINE_TOKEN, type AsyncEngine } from './async/engine.js';
+import { ASYNC_ENGINE_TOKEN } from './async/engine.js';
 import { lookupProvided } from './di/injectable.js';
 import {
     matchAsyncState,
@@ -75,7 +75,7 @@ export function useAction<T, In = void>(fn: Fetcher<T, In>, opts?: ActionOptions
     // An app-provided engine (§7 pack) may wrap the action — optimistic
     // apply, cache-aware invalidation. Its declared option keys silence the
     // unknown-option warning via registerHandledAsyncOptionKeys.
-    const engine = lookupProvided(ASYNC_ENGINE_TOKEN) as AsyncEngine | undefined;
+    const engine = lookupProvided(ASYNC_ENGINE_TOKEN);
 
     if (process.env.NODE_ENV !== 'production') {
         warnUnknownOptions('useAction', opts, handledActionOptionKeys);

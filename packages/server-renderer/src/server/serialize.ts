@@ -9,7 +9,7 @@
  * serialization site resolves the chain through `getTypeHandlers`.
  */
 
-import { SSR_SERIALIZER_TOKEN, type SSRTypeHandler } from 'sigx/internals';
+import { SSR_SERIALIZER_TOKEN, getProvided, type SSRTypeHandler } from 'sigx/internals';
 import type { SSRContext } from './context';
 
 export type { SSRTypeHandler };
@@ -206,8 +206,6 @@ const NO_HANDLERS: readonly SSRTypeHandler[] = [];
  * render input carried no app or no pack registered handlers.
  */
 export function getTypeHandlers(ctx: SSRContext): readonly SSRTypeHandler[] {
-    const provided = ctx._appContext?.provides.get(SSR_SERIALIZER_TOKEN) as
-        | SSRTypeHandler[]
-        | undefined;
+    const provided = getProvided(ctx._appContext?.provides, SSR_SERIALIZER_TOKEN);
     return provided ?? NO_HANDLERS;
 }
