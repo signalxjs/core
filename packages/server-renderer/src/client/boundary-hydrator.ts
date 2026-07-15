@@ -130,37 +130,47 @@ export function findBoundaryMarker(id: number): Comment | null {
  * record, marker, or component cannot be resolved.
  */
 export async function hydrateTableBoundary(id: number): Promise<boolean> {
-    const record = getBoundaryRecord(id);
-    if (!record) return false;
-    const marker = findBoundaryMarker(id);
-    if (!marker || !marker.isConnected) return false;
-    // The element before the marker is the content root. Its absence means
-    // there is nothing to hydrate — return false instead of letting the
-    // in-place step warn-and-noop (the boolean contract must be honest).
-    let prev: Node | null = marker.previousSibling;
-    while (prev && prev.nodeType !== Node.ELEMENT_NODE) prev = prev.previousSibling;
-    if (!prev) return false;
-    // A still-pending streamed boundary shows its ASYNC placeholder — the
-    // real content hasn't arrived yet (sigx:async-ready will hydrate it).
-    // Regardless of flush: skip boundaries use the data-boundary placeholder,
-    // never this one.
-    if ((prev as Element).hasAttribute?.('data-async-placeholder')) {
-        return false;
+    // One retry: a mid-stream patch can replace the record while the chunk
+    // loads; the second pass re-validates everything against the new record.
+    for (let attempt = 0; attempt < 2; attempt++) {
+        const record = getBoundaryRecord(id);
+        if (!record) return false;
+        const marker = findBoundaryMarker(id);
+        if (!marker || !marker.isConnected) return false;
+        // The element before the marker is the content root. Its absence
+        // means there is nothing to hydrate — return false instead of
+        // letting the in-place step warn-and-noop.
+        let prev: Node | null = marker.previousSibling;
+        while (prev && prev.nodeType !== Node.ELEMENT_NODE) prev = prev.previousSibling;
+        if (!prev) return false;
+        // A still-pending streamed boundary shows its ASYNC placeholder —
+        // the real content hasn't arrived yet (sigx:async-ready will hydrate
+        // it). Regardless of flush: skip boundaries use the data-boundary
+        // placeholder, never this one.
+        if ((prev as Element).hasAttribute?.('data-async-placeholder')) {
+            return false;
+        }
+        const component = await loadBoundaryComponent(record);
+        if (!component) return false;
+        // Post-await re-validation: the table and the DOM may both have
+        // changed while the chunk loaded.
+        const fresh = getBoundaryRecord(id);
+        if (!fresh) return false; // record removed mid-flight
+        if (fresh.component !== record.component || fresh.chunk?.url !== record.chunk?.url) {
+            continue; // record replaced — one full re-pass with the new one
+        }
+        const liveMarker = findBoundaryMarker(id);
+        if (!liveMarker || !liveMarker.isConnected) return false;
+        if (fresh.flush === 'skip') {
+            mountSkipBoundary(liveMarker, component, fresh);
+        } else {
+            hydrateBoundaryInPlace(liveMarker, component, fresh);
+        }
+        return true;
     }
-    const component = await loadBoundaryComponent(record);
-    if (!component) return false;
-    // Re-read after the await — a mid-stream patch may have replaced the
-    // table entry while the chunk loaded (same discipline as the scheduler);
-    // the DOM may have changed too, so re-verify the anchor.
-    const fresh = getBoundaryRecord(id) ?? record;
-    if (!marker.isConnected) return false;
-    if (fresh.flush === 'skip') {
-        mountSkipBoundary(marker, component, fresh);
-    } else {
-        hydrateBoundaryInPlace(marker, component, fresh);
-    }
-    return true;
+    return false;
 }
+
 
 /**
  * Is this element the skip-SSR placeholder emitted by core's flush:'skip'

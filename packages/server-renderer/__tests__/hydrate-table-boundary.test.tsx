@@ -11,7 +11,8 @@ import {
     hydrateTableBoundary,
     findBoundaryMarker,
     invalidateMarkerIndex,
-    registerComponent
+    registerComponent,
+    __registerIslandChunk
 } from '../src/client/index';
 import { createSSR } from '../src/ssr';
 import type { SSRPlugin } from '../src/plugin';
@@ -111,5 +112,36 @@ describe('streamed boundaries still showing their placeholder', () => {
 
         expect(await hydrateTableBoundary(6)).toBe(false);
         expect(container.textContent).toContain('loading…');
+    });
+});
+
+describe('mid-flight table changes', () => {
+    it('returns false when the record disappears while the chunk loads', async () => {
+        const Counter = makeCounter('Vanishing');
+        const id = await mount(<Counter initial={1} />);
+        __registerIslandChunk('Vanishing', async () => {
+            delete (window as any).__SIGX_BOUNDARIES__[id]; // patch removes it
+            return Counter;
+        });
+
+        expect(await hydrateTableBoundary(id)).toBe(false);
+        expect(container.querySelector('button')!.textContent).toBe('1'); // untouched
+    });
+
+    it('re-passes once when the record is replaced while the chunk loads', async () => {
+        const Counter = makeCounter('SwappedFrom');
+        const Replacement = makeCounter('SwappedTo');
+        registerComponent('SwappedTo', Replacement);
+        const id = await mount(<Counter initial={2} />);
+        __registerIslandChunk('SwappedFrom', async () => {
+            (window as any).__SIGX_BOUNDARIES__[id] = { hydrate: 'never', component: 'SwappedTo', props: { initial: 2 } };
+            return Counter;
+        });
+
+        expect(await hydrateTableBoundary(id)).toBe(true);
+        const button = container.querySelector('button')!;
+        button.dispatchEvent(new Event('click', { bubbles: true }));
+        await new Promise((r) => setTimeout(r, 0));
+        expect(button.textContent).toBe('3'); // hydrated with the NEW record's component
     });
 });
