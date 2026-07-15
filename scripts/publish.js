@@ -42,6 +42,7 @@ const PACKAGES = [
     'packages/sigx',
     'packages/server-renderer',
     'packages/ssr-islands',
+    'packages/cache',
     'packages/vite',
 ];
 
