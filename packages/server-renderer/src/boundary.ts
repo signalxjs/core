@@ -41,10 +41,11 @@ export interface SSRBoundary {
     /** Module ref for boundaries that load their component on demand. */
     chunk?: { url: string; export?: string };
     /**
-     * Registry name for on-demand loading (`record.component`). Packs with
-     * their own stamp vocabulary set it here; when omitted, core derives it
-     * from `__islandId || __name` (#255 — anonymous records are refused by
-     * the client chunk loader).
+     * The record's registry name (`record.component`) — how the client
+     * resolves the component (eager registry, lazy registry, then the chunk
+     * URL, in that order). Packs with their own stamp vocabulary set it
+     * here; when omitted, core derives it from `__islandId || __name`
+     * (#255 — anonymous records are refused by the client loader).
      */
     component?: string;
     /** Props snapshot for client-side mounting. */
