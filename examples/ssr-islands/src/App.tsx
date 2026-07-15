@@ -58,7 +58,7 @@ export const App = component(() => {
             <div class="card">
                 <h3>state transfer, visibly — dice rolled during the server render</h3>
                 <ServerDice client:visible />
-                <p class="hint">Setup is nondeterministic — if hydration re-ran it, these numbers would change the moment this card scrolled into view. They don't: the signal is keyed "dice" automatically from its declaration, captured on the server, and restored on the client.</p>
+                <p class="hint">Setup is nondeterministic and runs again at hydration — it even rolls again. But the signal is keyed "dice" automatically from its declaration, so the client seeds it from the server-captured state and discards its own roll: the numbers never change when this card scrolls into view.</p>
             </div>
         </main>
     );
