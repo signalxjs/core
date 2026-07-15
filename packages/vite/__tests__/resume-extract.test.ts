@@ -476,13 +476,41 @@ export default Hidden;
         expect(result.components).toHaveLength(0);
         expect(result.handlers).toHaveLength(0);
     });
+
+    it('skips `export { Local as default }` components', () => {
+        const result = extractResumeHandlers(`
+import { component } from 'sigx';
+const Local = component((ctx) => {
+    const n = ctx.signal(0);
+    return () => <button onClick={() => { n.value++; }}>x</button>;
+});
+export { Local as default };
+`, '/src/Aliased.resume.tsx');
+        expect(result.components).toHaveLength(0);
+        expect(result.handlers).toHaveLength(0);
+    });
 });
 
 describe('offsetToLoc', () => {
-    it('maps byte offsets to 1-based line/column', () => {
+    it('maps UTF-16 string indices to 1-based line/column', () => {
         const code = 'ab\ncd\nef';
         expect(offsetToLoc(code, 0)).toEqual({ line: 1, column: 1 });
         expect(offsetToLoc(code, 4)).toEqual({ line: 2, column: 2 });
         expect(offsetToLoc(code, 6)).toEqual({ line: 3, column: 1 });
+    });
+});
+
+describe('generic signal declarations', () => {
+    it('recognizes ctx.signal<T>(…) as a named signal', () => {
+        const result = extractResumeHandlers(`
+import { component } from 'sigx';
+export const Gen = component((ctx) => {
+    const state = ctx.signal<{ a: number }>({ a: 1 });
+    return () => <button onClick={() => { state.value = { a: 2 }; }}>x</button>;
+});
+`, '/src/Gen.resume.tsx');
+        expect(result.components[0].signalCount).toBe(1);
+        expect(result.handlers).toHaveLength(1);
+        expect(result.handlers[0].exportSource).toContain('$scope.signals.state.value');
     });
 });

@@ -58,7 +58,7 @@ export interface ExtractedHandler {
 export interface IneligibleHandler {
     component: string;
     event: string;
-    /** Byte offset of the handler expression in the original source. */
+    /** UTF-16 string index of the handler expression in the original source. */
     offset: number;
     reason: string;
 }
@@ -519,7 +519,9 @@ function findComponents(program: Node, scan: ModuleScan): ComponentInfo[] {
             if (!setupFn || !FUNCTION_TYPES.has(setupFn.type)) continue;
             const local = (declarator.id as Node).name as string;
             const exported = scan.exportsByLocal.get(local);
-            if (!exported) continue; // only named exports are resumable components
+            // Only NAMED exports are resumable ids — this also skips
+            // `export { Local as default }` (exported === 'default').
+            if (!exported || exported === 'default') continue;
 
             const firstParam = (setupFn.params as Node[])[0];
             const ctxName = firstParam && firstParam.type === 'Identifier' ? (firstParam.name as string) : null;
