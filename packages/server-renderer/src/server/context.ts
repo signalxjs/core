@@ -57,6 +57,13 @@ export interface SSRContextOptions {
      * in development.
      */
     renderError?: (error: Error, info: SSRErrorInfo) => string;
+
+    /**
+     * CSP nonce applied to every `<script>` tag the renderer emits — the
+     * boundary table, state blobs, streaming protocol + replacement scripts,
+     * and the completion script. Apps pass their per-request CSP nonce.
+     */
+    nonce?: string;
 }
 
 export interface RenderOptions {
@@ -92,6 +99,12 @@ export interface SSRContext {
      * Failure-HTML hook — what renders in place of a failed component.
      */
     _renderError?: (error: Error, info: SSRErrorInfo) => string;
+
+    /**
+     * The request's CSP nonce — stamped on every renderer-emitted `<script>`
+     * tag (see SSRContextOptions.nonce). Undefined → plain `<script>`.
+     */
+    _nonce?: string;
 
     /**
      * Which request phase the walk is in: 'shell' until the shell has been
@@ -246,6 +259,7 @@ export function createSSRContext(options: SSRContextOptions = {}): SSRContext {
         _pluginData: pluginData,
         _onError: options.onError,
         _renderError: options.renderError,
+        _nonce: options.nonce,
         _phase: 'shell',
         _appContext: null,
         _streaming: false,
