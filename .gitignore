@@ -12,7 +12,7 @@ docs/dist/
 !packages/runtime-core/src/jsx-types.d.ts
 !packages/ssr-islands/src/jsx.d.ts
 !packages/*/src/env.d.ts
-!packages/*/example/src/*.d.ts
+!examples/*/src/*.d.ts
 *.js
 *.js.map
 

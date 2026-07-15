@@ -146,6 +146,49 @@ importers:
         specifier: ^8.1.4
         version: 8.1.4(@types/node@26.1.1)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.1)
 
+  examples/ssr-islands:
+    dependencies:
+      '@sigx/reactivity':
+        specifier: workspace:^
+        version: link:../../packages/reactivity
+      '@sigx/runtime-core':
+        specifier: workspace:^
+        version: link:../../packages/runtime-core
+      '@sigx/runtime-dom':
+        specifier: workspace:^
+        version: link:../../packages/runtime-dom
+      '@sigx/server-renderer':
+        specifier: workspace:^
+        version: link:../../packages/server-renderer
+      '@sigx/ssr-islands':
+        specifier: workspace:^
+        version: link:../../packages/ssr-islands
+      express:
+        specifier: ^5.2.1
+        version: 5.2.1
+      sigx:
+        specifier: workspace:^
+        version: link:../../packages/sigx
+    devDependencies:
+      '@sigx/vite':
+        specifier: workspace:^
+        version: link:../../packages/vite
+      '@types/express':
+        specifier: ^5.0.6
+        version: 5.0.6
+      '@types/node':
+        specifier: ^26.1.1
+        version: 26.1.1
+      cross-env:
+        specifier: ^10.1.0
+        version: 10.1.0
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+      vite:
+        specifier: ^8.1.4
+        version: 8.1.4(@types/node@26.1.1)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.1)
+
   packages/cache:
     dependencies:
       '@sigx/reactivity':
@@ -289,49 +332,6 @@ importers:
       '@types/node':
         specifier: ^26.1.1
         version: 26.1.1
-      typescript:
-        specifier: ^7.0.2
-        version: 7.0.2
-      vite:
-        specifier: ^8.1.4
-        version: 8.1.4(@types/node@26.1.1)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.1)
-
-  packages/ssr-islands/example:
-    dependencies:
-      '@sigx/reactivity':
-        specifier: workspace:^
-        version: link:../../reactivity
-      '@sigx/runtime-core':
-        specifier: workspace:^
-        version: link:../../runtime-core
-      '@sigx/runtime-dom':
-        specifier: workspace:^
-        version: link:../../runtime-dom
-      '@sigx/server-renderer':
-        specifier: workspace:^
-        version: link:../../server-renderer
-      '@sigx/ssr-islands':
-        specifier: workspace:^
-        version: link:..
-      express:
-        specifier: ^5.2.1
-        version: 5.2.1
-      sigx:
-        specifier: workspace:^
-        version: link:../../sigx
-    devDependencies:
-      '@sigx/vite':
-        specifier: workspace:^
-        version: link:../../vite
-      '@types/express':
-        specifier: ^5.0.6
-        version: 5.0.6
-      '@types/node':
-        specifier: ^26.1.1
-        version: 26.1.1
-      cross-env:
-        specifier: ^10.1.0
-        version: 10.1.0
       typescript:
         specifier: ^7.0.2
         version: 7.0.2

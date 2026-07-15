@@ -69,7 +69,7 @@ See the [docs](https://sigx.dev/server/) for the Vite plugin setup and the full 
 
 ## Run the example
 
-A runnable reference app lives in [`example/`](./example) — one server-rendered page with an island per strategy, the `sigxIslands()` Vite plugin, and the dev/prod request handlers:
+A runnable reference app lives in [`examples/ssr-islands/`](../../examples/ssr-islands) — one server-rendered page with an island per strategy, the `sigxIslands()` Vite plugin, and the dev/prod request handlers:
 
 ```bash
 pnpm --filter @sigx/ssr-islands-example dev     # dev: Vite middleware + createDevRequestHandler

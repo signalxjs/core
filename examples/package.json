@@ -7,7 +7,8 @@
     "workspaces": [
         "hello",
         "spa",
-        "spa-ssr"
+        "spa-ssr",
+        "ssr-islands"
     ],
     "scripts": {
         "dev:hello": "npm run dev -w hello",
@@ -16,7 +17,10 @@
         "build:spa": "npm run build -w spa",
         "dev:spa-ssr": "npm run dev -w spa-ssr",
         "build:spa-ssr": "npm run build -w spa-ssr",
-        "start:spa-ssr": "npm run start -w spa-ssr"
+        "start:spa-ssr": "npm run start -w spa-ssr",
+        "dev:ssr-islands": "npm run dev -w ssr-islands",
+        "build:ssr-islands": "npm run build -w ssr-islands",
+        "start:ssr-islands": "npm run start -w ssr-islands"
     },
     "devDependencies": {}
 }
