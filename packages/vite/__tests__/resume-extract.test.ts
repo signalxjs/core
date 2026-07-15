@@ -559,3 +559,32 @@ export const Destructured = component((ctx) => {
         expect(result.code).not.toContain('data-sigx-on:');
     });
 });
+
+describe('param-expression captures and aliased slots', () => {
+    it('captures in default parameter initializers disqualify like body captures', () => {
+        const result = extractResumeHandlers(`
+import { component } from 'sigx';
+export const ParamCapture = component((ctx) => {
+    const n = ctx.signal(0);
+    const helper = () => 1;
+    return () => <button onClick={(e, step = helper()) => { n.value += step; }}>x</button>;
+});
+`, '/src/ParamCapture.resume.tsx');
+        expect(result.handlers).toHaveLength(0);
+        expect(result.ineligible[0].reason).toContain('"helper"');
+    });
+
+    it('aliased and rest destructuring of slots bail to hydrate mode', () => {
+        for (const decl of ['const { slots: s } = ctx;', 'const { ...rest } = ctx;']) {
+            const result = extractResumeHandlers(`
+import { component } from 'sigx';
+export const Aliased = component((ctx) => {
+    ${decl}
+    const open = ctx.signal(false);
+    return () => <div onClick={() => { open.value = true; }}>x</div>;
+});
+`, '/src/Aliased.resume.tsx');
+            expect(result.components[0].mode).toBe('hydrate');
+        }
+    });
+});

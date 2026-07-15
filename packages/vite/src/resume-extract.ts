@@ -390,6 +390,10 @@ function scanHandler(fn: Node): HandlerScan {
     // extracted export is an arrow even when the source was a function
     // expression, so handler-level `this`/`arguments` must disqualify.
     pushScope(ownScopeBindings(fn), fn.type !== 'ArrowFunctionExpression');
+    // Params carry expressions too — default initializers and computed
+    // destructuring keys capture like any body code. Param NAMES are already
+    // bound in the root scope, so visiting them is reference-safe.
+    for (const param of fn.params as Node[]) visit(param, fn, 'params', false);
     const body = fn.body as Node;
     visit(body, fn, 'body', false);
     return result;
@@ -591,11 +595,27 @@ function usesCtxSlots(node: Node, ctxName: string): boolean {
         isNode(node.init) &&
         (node.init as Node).type === 'Identifier' &&
         ((node.init as Node).name as string) === ctxName &&
-        patternNames(node.id as Node).includes('slots')
+        patternTakesSlots(node.id as Node)
     ) {
         return true;
     }
     return childNodes(node).some((child) => usesCtxSlots(child, ctxName));
+}
+
+/**
+ * Does a destructuring pattern over ctx take `slots` — by PROPERTY KEY
+ * (`{ slots }`, `{ slots: s }`) or via a rest element (`{ ...rest }`, which
+ * reaches everything)?
+ */
+function patternTakesSlots(pattern: Node): boolean {
+    for (const prop of (pattern.properties as Node[]) ?? []) {
+        if (prop.type === 'RestElement') return true;
+        if (prop.type !== 'Property') continue;
+        const key = prop.key as Node;
+        if (prop.computed !== true && key.type === 'Identifier' && (key.name as string) === 'slots') return true;
+        if (key.type === 'Literal' && key.value === 'slots') return true;
+    }
+    return false;
 }
 
 /* ------------------------------------------------------------------------ */
