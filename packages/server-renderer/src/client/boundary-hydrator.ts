@@ -105,11 +105,40 @@ export function invalidateMarkerIndex(): void {
     _markerIndex = null;
 }
 
-function findBoundaryMarker(id: number): Comment | null {
+/**
+ * The `<!--$c:ID-->` trailing marker for a boundary, via the cached marker
+ * index (invalidate with {@link invalidateMarkerIndex} after DOM surgery).
+ * Exported for packs that hydrate boundaries on their own schedule (#254 —
+ * resumability's upgrade-on-write replicated this walk).
+ */
+export function findBoundaryMarker(id: number): Comment | null {
     if (!_markerIndex) {
         _markerIndex = buildMarkerIndex();
     }
     return _markerIndex.get(id) ?? null;
+}
+
+/**
+ * Load a table boundary's component and hydrate it in place, right now —
+ * the one-shot form of the strategy scheduler, for packs that own their own
+ * wake-up (#254). Uses the CURRENT table record (mid-stream patches
+ * included), core's chunk/registry resolution, and the same skip-placeholder
+ * vs in-place dispatch as scheduled hydrations. Returns false when the
+ * record, marker, or component cannot be resolved.
+ */
+export async function hydrateTableBoundary(id: number): Promise<boolean> {
+    const record = getBoundaryRecord(id);
+    if (!record) return false;
+    const marker = findBoundaryMarker(id);
+    if (!marker) return false;
+    const component = await loadBoundaryComponent(record);
+    if (!component) return false;
+    if (record.flush === 'skip') {
+        mountSkipBoundary(marker, component, record);
+    } else {
+        hydrateBoundaryInPlace(marker, component, record);
+    }
+    return true;
 }
 
 /**
