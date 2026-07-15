@@ -62,9 +62,10 @@ export function initResume(
     if (!state) {
         state = { listeners: new Map(), loadRegistry, loadRuntime, ready: null };
     } else {
+        // Update the lazy references for FUTURE loads but keep an already
+        // loaded (or loading) runtime — re-init must not force a reload.
         state.loadRegistry = loadRegistry;
         state.loadRuntime = loadRuntime;
-        state.ready = null;
     }
     for (const type of events) {
         if (state.listeners.has(type)) continue;
@@ -107,14 +108,26 @@ function dispatch(type: string, ev: Event): void {
     }
     if (chain.length === 0 && wakeIds.length === 0) return;
 
-    if (!state.ready) {
-        // First interaction: load runtime + registry together, once.
-        const { loadRegistry, loadRuntime } = state;
-        state.ready = Promise.all([loadRuntime(), loadRegistry()]).then(([runtime]) => runtime);
+    let ready = state.ready;
+    if (!ready) {
+        // First interaction: load runtime + registry together, once. A
+        // failed load clears the cache so the NEXT interaction retries
+        // instead of failing forever on a rejected promise.
+        const current = state;
+        ready = Promise.all([current.loadRuntime(), current.loadRegistry()]).then(
+            ([runtime]) => runtime,
+            (error) => {
+                if (current.ready === ready) current.ready = null;
+                throw error;
+            }
+        );
+        current.ready = ready;
     }
-    void state.ready.then((runtime) => {
+    ready.then((runtime) => {
         for (const id of wakeIds) void runtime.wake(id);
         return replay(runtime, type, ev, chain);
+    }).catch((error) => {
+        console.error('[sigx resume] failed to load the resume runtime:', error);
     });
 }
 

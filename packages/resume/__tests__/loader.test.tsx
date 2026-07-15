@@ -203,3 +203,44 @@ describe('QRL registry', () => {
         warn.mockRestore();
     });
 });
+
+describe('loader resilience', () => {
+    afterEach(() => resetResumeDelegation());
+
+    it('re-init keeps an already-loaded runtime (no forced reload)', async () => {
+        const rt = makeRuntime();
+        initResume(['click'], rt.loadRegistry, rt.loadRuntime);
+        container.innerHTML = `<button data-sigx-on:click="Sym">x</button>`;
+        const button = container.querySelector('button')!;
+        button.dispatchEvent(new Event('click', { bubbles: true }));
+        await tick();
+        expect(rt.loads()).toBe(1);
+
+        initResume(['click'], rt.loadRegistry, rt.loadRuntime); // e.g. SPA re-entry
+        button.dispatchEvent(new Event('click', { bubbles: true }));
+        await tick();
+        expect(rt.loads()).toBe(1);
+        expect(rt.invocations).toHaveLength(2);
+    });
+
+    it('a failed load retries on the next interaction', async () => {
+        const rt = makeRuntime();
+        const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+        let fail = true;
+        const flaky = vi.fn(() => (fail ? Promise.reject(new Error('offline')) : rt.loadRuntime()));
+        initResume(['click'], rt.loadRegistry, flaky);
+
+        container.innerHTML = `<button data-sigx-on:click="Sym">x</button>`;
+        const button = container.querySelector('button')!;
+        button.dispatchEvent(new Event('click', { bubbles: true }));
+        await tick();
+        expect(rt.invocations).toHaveLength(0);
+        expect(err).toHaveBeenCalled();
+
+        fail = false;
+        button.dispatchEvent(new Event('click', { bubbles: true }));
+        await tick();
+        expect(rt.invocations).toHaveLength(1);
+        err.mockRestore();
+    });
+});
