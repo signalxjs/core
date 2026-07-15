@@ -34,9 +34,17 @@ import { isSerializable } from './serialize';
 /** Matches core `signal()`'s primitive constraint. */
 type Primitive = string | number | boolean | bigint | symbol | null | undefined;
 
+/** Literal widening, mirroring core's `PrimitiveSignal` (`signal(0).value` is `number`, not `0`). */
+type Widen<T> =
+    T extends number ? number :
+    T extends string ? string :
+    T extends boolean ? boolean :
+    T extends bigint ? bigint :
+    T;
+
 export interface StateSignalFn {
-    /** Keyed primitive (transform-injected): the `{ value: T }` proxy. */
-    <T extends Primitive>(initial: T, name: string): { value: T };
+    /** Keyed primitive (transform-injected): the `{ value }` proxy. */
+    <T extends Primitive>(initial: T, name: string): { value: Widen<T> };
     /**
      * Keyed object: the object's own reactive shape; the wrapper's `.value`
      * passes through to the OBJECT'S OWN `value` property (undefined unless
@@ -47,7 +55,7 @@ export interface StateSignalFn {
      * Unkeyed: the plain core signal — primitives wrap as `{ value: T }`,
      * objects become a reactive proxy of the object's own shape (no `.value`).
      */
-    <T>(initial: T): { value: T } | (T & object);
+    <T>(initial: T): { value: Widen<T> } | (T & object);
 }
 
 /**
