@@ -34,8 +34,11 @@ function makeRuntime() {
     return { invocations, wakes, runtime, loadRuntime, loadRegistry, loads: () => loads };
 }
 
-/** Flush the loader's Promise.all chain. */
-const tick = () => new Promise((r) => setTimeout(r, 0));
+/**
+ * Flush the loader's chain: ready promise (microtask) + the deliberate
+ * macrotask hop (#266) + the replay's own awaits — two timer turns cover it.
+ */
+const tick = () => new Promise((r) => setTimeout(() => setTimeout(r, 0), 0));
 
 let container: HTMLElement;
 
