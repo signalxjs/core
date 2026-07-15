@@ -263,8 +263,6 @@ function scanHandler(fn: Node): HandlerScan {
     }
 
     function visit(node: Node, parent: Node, key: string): void {
-        if (RESERVED_NAMES.has((node.name as string) ?? '')) result.usesReservedName = true;
-
         if (node.type === 'ThisExpression') {
             // `this` inside a nested non-arrow function is that function's own.
             if (!scopes.some((s) => s.isFunction)) result.contextual = 'this';
@@ -282,6 +280,12 @@ function scanHandler(fn: Node): HandlerScan {
             }
             if (!isValueReference(node, parent, key)) return;
             if (parent.type === 'Property' && parent.shorthand === true && key === 'key') return;
+            // Reserved names only matter as value references (or bindings,
+            // checked in pushScope) — `obj.$scope` / `{ $scope: 1 }` are fine.
+            if (RESERVED_NAMES.has(name)) {
+                result.usesReservedName = true;
+                return;
+            }
             if (isBound(name)) return;
             result.freeRefs.push({
                 name,
@@ -817,10 +821,12 @@ export function extractResumeHandlers(code: string, id: string): ResumeExtractio
     /** Resolve an identifier handler to a setup/view-level const fn declarator. */
     function resolveLocalFunction(comp: ComponentInfo, site: HandlerSite, name: string): Node | null {
         // Only setup-body top-level `const name = <fn>` is supported; view/loop
-        // scopes would need per-instance closures the scope model can't express.
+        // scopes would need per-instance closures the scope model can't
+        // express — so any intermediate binding shadows the setup one and
+        // makes the reference unresolvable.
         const body = comp.setupFn.body as Node;
         if (body.type !== 'BlockStatement') return null;
-        if (site.intermediateScopes.slice(1).some((s) => s.has(name))) return null;
+        if (site.intermediateScopes.some((s) => s.has(name))) return null;
         for (const stmt of body.body as Node[]) {
             if (stmt.type !== 'VariableDeclaration' || stmt.kind !== 'const') continue;
             for (const decl of stmt.declarations as Node[]) {
