@@ -984,7 +984,9 @@ function* renderNode(
             if (boundary.hydrate !== undefined) record.hydrate = boundary.hydrate;
             if (boundary.media !== undefined) record.media = boundary.media;
             if (boundary.chunk !== undefined) record.chunk = boundary.chunk;
-            const registryName = (vnode.type as any).__islandId || (vnode.type as any).__name;
+            // The winner names its boundary; core derivation is the fallback.
+            const registryName =
+                boundary.component || (vnode.type as any).__islandId || (vnode.type as any).__name;
             if (registryName) record.component = registryName;
             // A present `props` key wins even when undefined ("no props") —
             // packs pass their filtered snapshot explicitly so the core
