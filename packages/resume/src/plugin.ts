@@ -50,10 +50,15 @@ interface ResumePluginData {
 
 const PLUGIN_NAME = 'resume';
 
-/** The transform's component stamps (private transform↔runtime contract). */
+/**
+ * The transform's component stamp (private transform↔runtime contract).
+ * `__resumeMode` also exists on stamped factories but is a TRANSFORM-side
+ * concept: it decides which attributes a component's elements carry (QRLs
+ * vs `data-sigx-wake:*`). The plugin records `hydrate: 'never'` either way —
+ * the pack's delegation owns all waking — so it never reads the mode.
+ */
 interface ResumeStamps {
     __resumeId?: string;
-    __resumeMode?: 'resume' | 'hydrate';
 }
 
 /**

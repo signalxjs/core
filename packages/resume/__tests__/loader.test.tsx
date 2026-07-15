@@ -244,3 +244,20 @@ describe('loader resilience', () => {
         err.mockRestore();
     });
 });
+
+describe('QRL registry concurrency', () => {
+    afterEach(() => resetResumeQrls());
+
+    it('concurrent resolveQrl calls share one loader invocation', async () => {
+        const handler = vi.fn();
+        let loads = 0;
+        __registerResumeQrl('Sym_conc', () => {
+            loads++;
+            return new Promise((r) => setTimeout(() => r(handler), 5));
+        });
+        const [a, b] = await Promise.all([resolveQrl('Sym_conc'), resolveQrl('Sym_conc')]);
+        expect(a).toBe(handler);
+        expect(b).toBe(handler);
+        expect(loads).toBe(1);
+    });
+});
