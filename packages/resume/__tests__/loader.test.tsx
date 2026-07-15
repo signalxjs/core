@@ -16,9 +16,13 @@ interface Invocation {
 
 function makeRuntime() {
     const invocations: Invocation[] = [];
+    const wakes: number[] = [];
     const runtime: ResumeRuntime = {
         invoke(symbol, event, element) {
             invocations.push({ symbol, event, element });
+        },
+        wake(id) {
+            wakes.push(id);
         }
     };
     let loads = 0;
@@ -27,7 +31,7 @@ function makeRuntime() {
         return Promise.resolve(runtime);
     });
     const loadRegistry = vi.fn(() => Promise.resolve({}));
-    return { invocations, runtime, loadRuntime, loadRegistry, loads: () => loads };
+    return { invocations, wakes, runtime, loadRuntime, loadRegistry, loads: () => loads };
 }
 
 /** Flush the loader's Promise.all chain. */
@@ -138,6 +142,23 @@ describe('initResume — delegation', () => {
         container.querySelector('button')!.dispatchEvent(new Event('click', { bubbles: true }));
         await tick();
         expect(rt.invocations.filter((i) => i.symbol === 'Sym_once')).toHaveLength(1);
+    });
+
+    it('wakes hydrate-mode boundaries via data-sigx-wake (no replay), deduped per boundary', async () => {
+        const rt = makeRuntime();
+        initResume(['click'], rt.loadRegistry, rt.loadRuntime);
+
+        container.innerHTML =
+            `<div data-sigx-wake:click="" data-sigx-b="7">` +
+            `<button data-sigx-wake:click="" data-sigx-pd:click="" data-sigx-b="7">x</button>` +
+            `</div>`;
+        const ev = new Event('click', { bubbles: true, cancelable: true });
+        container.querySelector('button')!.dispatchEvent(ev);
+        expect(ev.defaultPrevented).toBe(true); // pd applies to wake carriers too
+        await tick();
+
+        expect(rt.wakes).toEqual([7]); // one wake per boundary, not per element
+        expect(rt.invocations).toHaveLength(0); // no QRL replay for wake carriers
     });
 
     it('resetResumeDelegation removes listeners', async () => {

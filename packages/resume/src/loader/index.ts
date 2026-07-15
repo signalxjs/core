@@ -27,10 +27,18 @@
 export interface ResumeRuntime {
     /** Resolve a QRL symbol and run its handler for this event/element. */
     invoke(symbol: string, event: Event, element: Element): void | Promise<void>;
+    /**
+     * Fully hydrate a boundary (`__resumeMode: 'hydrate'` components carry
+     * `data-sigx-wake:*` instead of QRLs). The triggering event is NOT
+     * replayed — its listener only exists after hydration.
+     */
+    wake(boundaryId: number): void | Promise<void>;
 }
 
 const ON_PREFIX = 'data-sigx-on:';
+const WAKE_PREFIX = 'data-sigx-wake:';
 const PD_PREFIX = 'data-sigx-pd:';
+const BOUNDARY_ATTR = 'data-sigx-b';
 
 interface LoaderState {
     listeners: Map<string, (ev: Event) => void>;
@@ -80,25 +88,34 @@ export function resetResumeDelegation(): void {
 
 function dispatch(type: string, ev: Event): void {
     if (!state) return;
-    // Collect QRL carriers target → root (the synthetic bubble order), and
-    // apply preventDefault SYNCHRONOUSLY — it cannot wait for the import.
+    // Collect QRL and wake carriers target → root (the synthetic bubble
+    // order), applying preventDefault SYNCHRONOUSLY — it cannot wait for the
+    // import.
     const chain: Element[] = [];
+    const wakeIds: number[] = [];
     let node: Element | null = ev.target instanceof Element ? ev.target : null;
     while (node) {
         if (node.hasAttribute(ON_PREFIX + type)) {
             chain.push(node);
             if (node.hasAttribute(PD_PREFIX + type)) ev.preventDefault();
+        } else if (node.hasAttribute(WAKE_PREFIX + type)) {
+            const id = parseInt(node.getAttribute(BOUNDARY_ATTR) || '', 10);
+            if (!isNaN(id) && wakeIds.indexOf(id) < 0) wakeIds.push(id);
+            if (node.hasAttribute(PD_PREFIX + type)) ev.preventDefault();
         }
         node = node.parentElement;
     }
-    if (chain.length === 0) return;
+    if (chain.length === 0 && wakeIds.length === 0) return;
 
     if (!state.ready) {
         // First interaction: load runtime + registry together, once.
         const { loadRegistry, loadRuntime } = state;
         state.ready = Promise.all([loadRuntime(), loadRegistry()]).then(([runtime]) => runtime);
     }
-    void state.ready.then((runtime) => replay(runtime, type, ev, chain));
+    void state.ready.then((runtime) => {
+        for (const id of wakeIds) void runtime.wake(id);
+        return replay(runtime, type, ev, chain);
+    });
 }
 
 async function replay(runtime: ResumeRuntime, type: string, ev: Event, chain: Element[]): Promise<void> {
