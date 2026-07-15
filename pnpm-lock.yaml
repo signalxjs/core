@@ -347,6 +347,9 @@ importers:
         specifier: workspace:^
         version: link:../sigx
     devDependencies:
+      '@sigx/resume':
+        specifier: workspace:^
+        version: link:../resume
       '@sigx/vite':
         specifier: workspace:^
         version: link:../vite
