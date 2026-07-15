@@ -12,11 +12,28 @@ import { createSSR, type SSRBoundaryRecord } from '@sigx/server-renderer';
 import { resumePlugin } from '../src/plugin';
 
 function parseAllBoundaryPatches(html: string): Record<string, SSRBoundaryRecord>[] {
-    // Patch scripts inline $SIGX_REPLACE after the assignment, so anchor on
-    // the JSON's own closing `});`, not on `</script>`.
+    // Patch scripts inline $SIGX_REPLACE after the assignment, and record
+    // values can nest (or even contain `});` inside strings) — count braces
+    // instead of trusting a regex boundary.
     const out: Record<string, SSRBoundaryRecord>[] = [];
-    const re = /window\.__SIGX_BOUNDARIES__=Object\.assign\(Object\.create\(null\),window\.__SIGX_BOUNDARIES__,(\{[\s\S]*?\})\);/g;
-    for (const match of html.matchAll(re)) out.push(JSON.parse(match[1]));
+    const HEAD = 'window.__SIGX_BOUNDARIES__=Object.assign(Object.create(null),window.__SIGX_BOUNDARIES__,';
+    for (let at = html.indexOf(HEAD); at >= 0; at = html.indexOf(HEAD, at + 1)) {
+        const start = at + HEAD.length;
+        let depth = 0;
+        let inString = false;
+        for (let i = start; i < html.length; i++) {
+            const ch = html[i];
+            if (inString) {
+                if (ch === '\\') i++;
+                else if (ch === '"') inString = false;
+            } else if (ch === '"') inString = true;
+            else if (ch === '{') depth++;
+            else if (ch === '}' && --depth === 0) {
+                out.push(JSON.parse(html.slice(start, i + 1)));
+                break;
+            }
+        }
+    }
     return out;
 }
 
