@@ -86,7 +86,11 @@ export interface ResumeExtraction {
     events: string[];
 }
 
-/** 1-based line/column for a byte offset — for dev warnings. */
+/**
+ * 1-based line/column for a source offset — for dev warnings. Offsets are
+ * UTF-16 string indices, matching oxc's ESTree spans (verified: spans index
+ * the JS string directly, not UTF-8 bytes).
+ */
 export function offsetToLoc(code: string, offset: number): { line: number; column: number } {
     let line = 1;
     let last = 0;
@@ -114,17 +118,31 @@ function isNode(value: unknown): value is Node {
     return typeof value === 'object' && value !== null && typeof (value as Node).type === 'string';
 }
 
-/** Child nodes in source order, skipping TS type-space subtrees entirely. */
+/**
+ * TS wrappers whose children include VALUE expressions (`x as T`, `x!`,
+ * `x satisfies T`, `<T>x`, `f<T>`): the walk must descend through them,
+ * unlike pure type-space nodes.
+ */
+const TS_VALUE_WRAPPERS = new Set([
+    'TSAsExpression',
+    'TSNonNullExpression',
+    'TSSatisfiesExpression',
+    'TSTypeAssertion',
+    'TSInstantiationExpression'
+]);
+
+/** Child nodes in source order, skipping TS type-space subtrees. */
 function childNodes(node: Node): Node[] {
     const out: Node[] = [];
+    const keep = (value: Node): boolean => !value.type.startsWith('TS') || TS_VALUE_WRAPPERS.has(value.type);
     for (const key of Object.keys(node)) {
         if (key === 'type') continue;
         const value = node[key];
         if (isNode(value)) {
-            if (!value.type.startsWith('TS')) out.push(value);
+            if (keep(value)) out.push(value);
         } else if (Array.isArray(value)) {
             for (const item of value) {
-                if (isNode(item) && !item.type.startsWith('TS')) out.push(item);
+                if (isNode(item) && keep(item)) out.push(item);
             }
         }
     }
@@ -199,7 +217,10 @@ function ownScopeBindings(node: Node): Set<string> {
 interface FreeRef {
     name: string;
     node: Node;
-    /** The identifier is the root target of an assignment or ++/--. */
+    /**
+     * The identifier itself is (re)assigned: direct assignment target,
+     * ++/--, or a binding position inside a destructuring-assignment pattern.
+     */
     rootWrite: boolean;
     /** Nearest enclosing MemberExpression where this id is the object. */
     memberParent: Node | null;
@@ -262,10 +283,11 @@ function scanHandler(fn: Node): HandlerScan {
         scopes.push({ bindings, isFunction });
     }
 
-    function visit(node: Node, parent: Node, key: string): void {
+    function visit(node: Node, parent: Node, key: string, inAssignPattern: boolean): void {
         if (node.type === 'ThisExpression') {
-            // `this` inside a nested non-arrow function is that function's own.
-            if (!scopes.some((s) => s.isFunction)) result.contextual = 'this';
+            // The handler is re-emitted as an arrow, so it never owns `this` —
+            // only NESTED non-arrow functions do (scopes[0] is excluded below).
+            if (!scopes.some((s, i) => i > 0 && s.isFunction)) result.contextual = 'this';
             return;
         }
         if (node.type === 'MetaProperty') {
@@ -274,7 +296,7 @@ function scanHandler(fn: Node): HandlerScan {
         }
         if (node.type === 'Identifier') {
             const name = node.name as string;
-            if (name === 'arguments' && !scopes.some((s) => s.isFunction)) {
+            if (name === 'arguments' && !scopes.some((s, i) => i > 0 && s.isFunction)) {
                 result.contextual = 'arguments';
                 return;
             }
@@ -287,13 +309,19 @@ function scanHandler(fn: Node): HandlerScan {
                 return;
             }
             if (isBound(name)) return;
+            const isMemberObject = parent.type === 'MemberExpression' && key === 'object';
             result.freeRefs.push({
                 name,
                 node,
                 rootWrite:
                     (parent.type === 'AssignmentExpression' && key === 'left') ||
-                    (parent.type === 'UpdateExpression' && key === 'argument'),
-                memberParent: parent.type === 'MemberExpression' && key === 'object' ? parent : null
+                    (parent.type === 'UpdateExpression' && key === 'argument') ||
+                    // `({ a: count } = obj)` / `[count] = arr` — a binding
+                    // position in a destructuring-assignment target. Member
+                    // chains inside the pattern (`[obj.a] = x`) stay member
+                    // writes on the object, not root writes.
+                    (inAssignPattern && !isMemberObject),
+                memberParent: isMemberObject ? parent : null
             });
             return;
         }
@@ -312,14 +340,34 @@ function scanHandler(fn: Node): HandlerScan {
         const opensFunction = node.type === 'FunctionExpression' || node.type === 'FunctionDeclaration';
         const pushes = scope.size > 0 || FUNCTION_TYPES.has(node.type) || opensFunction;
         if (pushes) pushScope(scope, opensFunction);
-        for (const child of childNodes(node)) visit(child, node, keyOf(node, child));
+        for (const child of childNodes(node)) {
+            const childKey = keyOf(node, child);
+            visit(child, node, childKey, childInAssignPattern(node, child, childKey, inAssignPattern));
+        }
         if (pushes) scopes.pop();
     }
 
-    // The handler's own params are its root scope.
+    /** Whether `child` sits in a destructuring-ASSIGNMENT target position. */
+    function childInAssignPattern(node: Node, child: Node, key: string, current: boolean): boolean {
+        const isPattern = child.type === 'ObjectPattern' || child.type === 'ArrayPattern';
+        if (node.type === 'AssignmentExpression' && key === 'left') return isPattern;
+        if ((node.type === 'ForInStatement' || node.type === 'ForOfStatement') && key === 'left') return isPattern;
+        if (!current) return false;
+        // Inside a pattern: defaults and computed keys are reads, member
+        // chains are member writes, everything else stays a binding position.
+        if (node.type === 'AssignmentPattern') return key === 'left';
+        if (node.type === 'Property') return key === 'value';
+        if (node.type === 'MemberExpression') return false;
+        return true;
+    }
+
+    // The handler's own params are its root scope. It is NEVER a `this` /
+    // `arguments` owner (index 0 is excluded from the ownership checks): the
+    // extracted export is an arrow even when the source was a function
+    // expression, so handler-level `this`/`arguments` must disqualify.
     pushScope(ownScopeBindings(fn), fn.type !== 'ArrowFunctionExpression');
     const body = fn.body as Node;
-    visit(body, fn, 'body');
+    visit(body, fn, 'body', false);
     return result;
 }
 
