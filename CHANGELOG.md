@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.10.0] — 2026-07-15
+
 ### Changed
 
 - **`@sigx/vite/islands`**: `sigxIslands()` now auto-keys island signal state — `const state = ctx.signal(…)` declarations in island modules are rewritten so the call carries the declaration identifier as its state-serialization key (the key is a transform↔runtime contract, not component API). Keys are namespaced per island boundary record, so reusing common names like `state` across components is safe; signals not bound to a plain declaration stay local-only. Pairs with `@sigx/ssr-islands`' new named-=-transferred state model (see its changelog). (#235)
@@ -343,7 +345,8 @@ Initial public release of the SignalX (`sigx`) ecosystem on npm. Six packages pu
 - Node `^20.19.0 || >=22.12.0`
 - `@sigx/vite` peer-depends on `vite >=8.0.0`
 
-[Unreleased]: https://github.com/signalxjs/core/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/signalxjs/core/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/signalxjs/core/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/signalxjs/core/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/signalxjs/core/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/signalxjs/core/compare/v0.6.3...v0.7.0

@@ -7,10 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-07-15
+
 The runnable example app moved from in-package (`packages/ssr-islands/example/`)
 to the repo's shared examples folder: `examples/ssr-islands/`. The package name
 (`@sigx/ssr-islands-example`) and the `pnpm --filter` commands are unchanged.
-(#237)
+Existing checkouts: delete the leftover `packages/ssr-islands/example/`
+folder — git can't remove it because its ignored `node_modules/` stays behind
+(and on Windows a running dev server can lock files mid-pull, leaving a
+half-deleted tree whose stale `server.mjs` fails with ENOENT on
+`index.html`) — then re-run `pnpm install`. (#237)
 
 **Island signal state is now keyed automatically — named = transferred.**
 Signal state keys are derived from the declaration identifier by the
