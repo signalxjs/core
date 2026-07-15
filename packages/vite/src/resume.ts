@@ -37,8 +37,8 @@ import type { Plugin } from 'vite';
 import { createFilter } from 'vite';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { extractResumeHandlers, offsetToLoc, type ResumeExtraction } from './resume-extract';
-import { injectSignalNames, walkFiles } from './islands';
+import { extractResumeHandlers, offsetToLoc, type ResumeExtraction } from './resume-extract.js';
+import { injectSignalNames, walkFiles } from './islands.js';
 
 export interface SigxResumeOptions {
     /**
@@ -94,7 +94,13 @@ export function sigxResume(options: SigxResumeOptions = {}): Plugin {
             extractions.delete(file);
             return extraction;
         }
-        extractions.set(file, extraction);
+        // Rolldown can run the transform more than once per module (scan +
+        // build phases), the later pass over our OWN output — where the
+        // idempotency skip reports zero sites. Never clobber an informative
+        // extraction with that empty echo.
+        const cached = extractions.get(file);
+        const informative = !cached || extraction.components.some((c) => c.siteCount > 0 || c.signalCount > 0);
+        if (informative) extractions.set(file, extraction);
         return extraction;
     }
 
@@ -132,6 +138,10 @@ export function sigxResume(options: SigxResumeOptions = {}): Plugin {
 
     return {
         name: 'sigx:resume',
+        // The extraction needs RAW TSX: rolldown's full-bundle mode compiles
+        // JSX natively before normal-phase transforms run (sigxIslands'
+        // regexes tolerate compiled output; AST handler discovery cannot).
+        enforce: 'pre',
 
         configResolved(config) {
             root = config.root;
