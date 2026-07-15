@@ -1,6 +1,7 @@
 import type { Lifetime, guid } from "../models/index.js";
 import { onUnmounted } from "../component.js";
 import { lookupProvidedEntry, NOT_PROVIDED, useAppContext, type InjectableFunction } from "./injectable.js";
+import { factoryInvalidReturnError } from "../errors.js";
 
 export class SubscriptionHandler {
     private unsubs: (() => void)[] = [];
@@ -98,8 +99,7 @@ export function defineFactory<InferReturnSetup>(
         // disposed-instance detection the caches rely on — reject them loudly.
         const attachable = result !== null && (typeof result === 'object' || typeof result === 'function');
         if (!attachable) {
-            throw new Error('[sigx] defineFactory setup must return an object or function, got ' +
-                (result === null ? 'null' : typeof result) + '.');
+            throw factoryInvalidReturnError(result === null ? 'null' : typeof result);
         }
 
         // Capture a user-supplied dispose BEFORE attaching our own, so the

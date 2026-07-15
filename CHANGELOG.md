@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- **`@sigx/runtime-core`**: production builds now throw compact coded errors — `SIGX### <detail> — see https://sigx.dev/errors/SIGX###/` — while dev builds keep the full message and `suggestion` (dev text unchanged). `error.code` is identical in both modes; only the prod `message`/`suggestion` shape changed. The previously uncoded runtime throws now use `SigxError` with new codes: `SIGX203` (defineFactory setup return type), `SIGX300` (`useData`/`useAction`/`useStream` outside setup), `SIGX400`/`SIGX401` (destroyed topic / topic group) — these were plain `Error`s before. Saves ~0.9 KB brotli across the framework. (#230)
+
 ### Added
 
 - **`@sigx/vite`**: `defineLibConfig` now defines the `__DEV__` compile-time flag in both build passes — `false` in the prod-dist pass (dev-only blocks are minifier-stripped, as NODE_ENV guards were), and the runtime `process.env.NODE_ENV !== 'production'` expression in the dev pass (emitted dist is unchanged). Package sources use `__DEV__` for dev-only guards; emitted dists are byte-identical to the NODE_ENV-guard form. (#232)

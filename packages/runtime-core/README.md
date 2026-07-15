@@ -35,7 +35,7 @@ const Timer = component(() => {
 
 `defineInjectable(factory)` gives an injectable a zero-config fallback: used without a provider, it lazily creates a module-global singleton. That is right for optional services, and wrong for per-app services like a router — on the server, a forgotten provide would silently share one instance across every request (dev builds warn when this happens during SSR).
 
-Declare those services **required** by passing a name instead of a factory. There is no fallback; using it unprovided throws a structured error (`SIGX202`) naming the injectable:
+Declare those services **required** by passing a name instead of a factory. There is no fallback; using it unprovided throws a structured error (`SIGX202`) naming the injectable. (In production builds, runtime errors carry the `SIGX###` code, any runtime detail, and a link to <https://sigx.dev/errors/> — the full message and fix suggestion appear in dev builds; `error.code` is the same in both.)
 
 ```tsx
 export const useRouter = defineInjectable<Router>('Router');

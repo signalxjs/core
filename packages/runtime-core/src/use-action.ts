@@ -16,6 +16,7 @@
 
 import { signal, batch, untrack } from '@sigx/reactivity';
 import { getCurrentInstance } from './component-lifecycle.js';
+import { hookOutsideSetupError } from './errors.js';
 import { ASYNC_ENGINE_TOKEN } from './async/engine.js';
 import { lookupProvided } from './di/injectable.js';
 import {
@@ -69,7 +70,7 @@ const handledActionOptionKeys: ReadonlySet<string> = new Set();
 export function useAction<T, In = void>(fn: Fetcher<T, In>, opts?: ActionOptions): AsyncAction<T, In> {
     const instance = getCurrentInstance();
     if (!instance) {
-        throw new Error('useAction() must be called synchronously during component setup.');
+        throw hookOutsideSetupError('useAction');
     }
 
     // An app-provided engine (§7 pack) may wrap the action — optimistic
