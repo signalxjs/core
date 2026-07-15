@@ -130,6 +130,10 @@ describe('resumePlugin — coexistence with islands', () => {
         // resolveBoundary is winner-take-all, islands is consulted first —
         // resume is never asked, so no warning fires.
         expect(record.hydrate).toBe('visible');
+        // And islands' tracking signal owns the state capture — resume's
+        // transform hook (which runs for every plugin) must step aside on
+        // client:* usage sites rather than overwrite it.
+        expect(record.state).toEqual({ count: 3 });
     });
 
     it('declines directive-carrying components even when consulted first', async () => {

@@ -119,6 +119,11 @@ export function resumePlugin(options?: ResumePluginOptions): SSRPlugin {
                 componentCtx: ComponentSetupContext
             ): ComponentSetupContext | void {
                 if (!(vnode.type as ResumeStamps).__resumeId) return; // Not resumable — don't touch
+                // Transform hooks run for EVERY plugin — a record's existence
+                // does not mean resume owns it. Mirror resolveBoundary's
+                // decline: a client:* usage site belongs to islands, whose
+                // own tracking signal must not be overwritten here.
+                if (Object.keys(vnode.props || {}).some((key) => key.startsWith('client:'))) return;
 
                 // The boundary record exists before this hook runs. No record
                 // means another plugin won the consult (or resume declined) —
