@@ -30,6 +30,7 @@ packages/
   sigx/            → sigx                 (umbrella package)
   server-renderer/ → @sigx/server-renderer (SSR + hydration)
   ssr-islands/     → @sigx/ssr-islands    (islands architecture strategy pack)
+  resume/          → @sigx/resume         (resumability strategy pack)
   cache/           → @sigx/cache          (async cache policy pack)
   vite/            → @sigx/vite           (Vite plugin)
 ```
