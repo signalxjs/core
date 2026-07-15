@@ -25,11 +25,11 @@ const claimAll: SSRPlugin = {
     }
 };
 
-function makeCounter(): any {
+function makeCounter(name = 'TableCounter'): any {
     const Counter = component<{ initial?: number }>((ctx) => {
         const n = ctx.signal(ctx.props.initial ?? 0);
         return () => <button onClick={() => n.value++}>{n.value}</button>;
-    }, { name: 'TableCounter' });
+    }, { name });
     (Counter as any).__testStamp = true;
     return Counter;
 }
@@ -76,12 +76,26 @@ describe('hydrateTableBoundary', () => {
     it('returns false for missing records, markers, or components', async () => {
         expect(await hydrateTableBoundary(999)).toBe(false); // no record
 
-        const Unresolvable = makeCounter();
-        (Unresolvable as any).__name = 'NeverRegistered';
+        const Unresolvable = makeCounter('NeverRegistered');
         const id = await mount(<Unresolvable />);
         expect(await hydrateTableBoundary(id)).toBe(false); // no component
 
         (window as any).__SIGX_BOUNDARIES__ = { 777: { hydrate: 'never', component: 'X' } };
         expect(await hydrateTableBoundary(777)).toBe(false); // no marker
+    });
+});
+
+describe('streamed boundaries still showing their placeholder', () => {
+    it('returns false instead of hydrating placeholder content', async () => {
+        const Counter = makeCounter('PendingStream');
+        registerComponent('PendingStream', Counter);
+        // Simulate a pending streamed boundary: placeholder + marker, table entry.
+        container.innerHTML =
+            `<div data-async-placeholder="5" style="display:contents;">loading…</div><!--$c:5-->`;
+        (window as any).__SIGX_BOUNDARIES__ = { 5: { hydrate: 'never', component: 'PendingStream' } };
+        invalidateMarkerIndex();
+
+        expect(await hydrateTableBoundary(5)).toBe(false);
+        expect(container.textContent).toContain('loading…'); // untouched
     });
 });

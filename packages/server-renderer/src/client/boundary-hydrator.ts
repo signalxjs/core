@@ -134,6 +134,18 @@ export async function hydrateTableBoundary(id: number): Promise<boolean> {
     if (!record) return false;
     const marker = findBoundaryMarker(id);
     if (!marker) return false;
+    // A still-pending streamed boundary shows its async placeholder — the
+    // real content hasn't arrived, so there is nothing to hydrate yet (the
+    // scheduler bails the same way; sigx:async-ready will hydrate it).
+    let prev: Node | null = marker.previousSibling;
+    while (prev && prev.nodeType !== Node.ELEMENT_NODE) prev = prev.previousSibling;
+    if (
+        prev &&
+        (prev as Element).hasAttribute?.('data-async-placeholder') &&
+        record.flush !== 'skip'
+    ) {
+        return false;
+    }
     const component = await loadBoundaryComponent(record);
     if (!component) return false;
     // Re-read after the await — a mid-stream patch may have replaced the
