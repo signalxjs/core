@@ -178,7 +178,7 @@ export function hydrateComponent(vnode: VNode, dom: Node | null, parent: Node, t
             renderFn = applyErrorScope(componentCtx, renderFn);
         }
     } catch (err) {
-        if (process.env.NODE_ENV !== 'production') {
+        if (__DEV__) {
             console.error(`Error hydrating component ${componentName}:`, err);
         }
     } finally {
@@ -295,7 +295,7 @@ export function hydrateComponent(vnode: VNode, dom: Node | null, parent: Node, t
                         // its place. The range is bounded by the component's
                         // trailing marker (or wrapper), so this removes exactly
                         // this component's content and nothing a sibling owns.
-                        if (process.env.NODE_ENV !== 'production') {
+                        if (__DEV__) {
                             console.warn(
                                 `[Hydrate] Structural mismatch hydrating <${componentName}>; ` +
                                 'discarding server-rendered subtree and re-rendering on the client. ' +

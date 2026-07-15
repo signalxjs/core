@@ -84,7 +84,7 @@ export function queueJob(job: SchedulerJob): void {
         setFlushHandler(flushJobs);
     }
     if (job.queued) return;
-    if (process.env.NODE_ENV !== 'production' && isFlushing) {
+    if (__DEV__ && isFlushing) {
         // Runaway guard, ping-pong shape (see the guard docs above).
         const n = (requeueCounts.get(job) ?? 0) + 1;
         requeueCounts.set(job, n);
@@ -121,7 +121,7 @@ export function flushJobs(): void {
     isFlushing = true;
     try {
         for (flushIndex = 0; flushIndex < queue.length; flushIndex++) {
-            if (process.env.NODE_ENV !== 'production' && flushIndex >= MAX_FLUSH_JOBS) {
+            if (__DEV__ && flushIndex >= MAX_FLUSH_JOBS) {
                 // Runaway guard, fresh-mount shape (see the guard docs above).
                 throw new Error(
                     `Unbounded render flush: a single flush executed more than ` +
@@ -142,6 +142,6 @@ export function flushJobs(): void {
         queue.length = 0;
         flushIndex = -1;
         isFlushing = false;
-        if (process.env.NODE_ENV !== 'production') requeueCounts.clear();
+        if (__DEV__) requeueCounts.clear();
     }
 }

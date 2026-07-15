@@ -244,7 +244,7 @@ export function defineInjectable<T>(factoryOrName: (() => T) | string): Injectab
         }
 
         // Fallback to global singleton
-        if (process.env.NODE_ENV !== 'production') {
+        if (__DEV__) {
             warnSSRGlobalFallback(token);
         }
         if (!globalInstances.has(token)) {

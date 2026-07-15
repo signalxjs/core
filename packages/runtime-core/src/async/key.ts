@@ -38,7 +38,7 @@ export function resolveKeyResult(raw: KeyValue | Falsy, warns?: KeyWarnFlags): s
     if (raw === null || raw === undefined || raw === false) return null;
 
     if (raw === '') {
-        if (process.env.NODE_ENV !== 'production' && warns && !warns.emptyString) {
+        if (__DEV__ && warns && !warns.emptyString) {
             warns.emptyString = true;
             console.warn(
                 '[useData] key resolved to an empty string — treated as a skip (state \'idle\'). ' +
@@ -52,7 +52,7 @@ export function resolveKeyResult(raw: KeyValue | Falsy, warns?: KeyWarnFlags): s
 
     if (Array.isArray(raw)) {
         if (raw.length === 0) {
-            if (process.env.NODE_ENV !== 'production' && warns && !warns.emptyTuple) {
+            if (__DEV__ && warns && !warns.emptyTuple) {
                 warns.emptyTuple = true;
                 console.warn(
                     '[useData] key resolved to an empty tuple — treated as a skip (state \'idle\').'
@@ -60,7 +60,7 @@ export function resolveKeyResult(raw: KeyValue | Falsy, warns?: KeyWarnFlags): s
             }
             return null;
         }
-        if (process.env.NODE_ENV !== 'production') {
+        if (__DEV__) {
             for (const el of raw) {
                 const t = typeof el;
                 if (el !== null && t !== 'string' && t !== 'number' && t !== 'boolean') {
@@ -85,7 +85,7 @@ export function resolveKeyResult(raw: KeyValue | Falsy, warns?: KeyWarnFlags): s
     }
 
     // Not representable as a key — a type error at the call site.
-    if (process.env.NODE_ENV !== 'production') {
+    if (__DEV__) {
         throw new TypeError(`[useData] key must resolve to a string or a tuple; got ${typeof raw}.`);
     }
     return String(raw);
@@ -99,7 +99,7 @@ export function resolveKeyResult(raw: KeyValue | Falsy, warns?: KeyWarnFlags): s
 export function assertKeyArgShape(first: unknown): 'static' | 'getter' {
     if (typeof first === 'string') return 'static';
     if (typeof first === 'function') return 'getter';
-    if (process.env.NODE_ENV !== 'production') {
+    if (__DEV__) {
         if (Array.isArray(first)) {
             throw new TypeError(
                 "[useData] a tuple key must be a getter: useData(() => ['user', id.value] as const, fetcher). " +

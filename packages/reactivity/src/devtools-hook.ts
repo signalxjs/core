@@ -65,7 +65,7 @@ declare global {
 
 /** Get the installed devtools hook, or `null` if none is present. */
 export function getDevtoolsHook(): DevtoolsHook | null {
-    if (process.env.NODE_ENV === 'production') return null;
+    if (!__DEV__) return null;
     if (typeof globalThis === 'undefined') return null;
     return globalThis[DEVTOOLS_HOOK_KEY] ?? null;
 }
@@ -83,7 +83,7 @@ export function getDevtoolsHook(): DevtoolsHook | null {
  * No-op when no hook is installed.
  */
 export function withoutOwnerTracking<T>(fn: () => T): T {
-    if (process.env.NODE_ENV === 'production') return fn();
+    if (!__DEV__) return fn();
     const hook = getDevtoolsHook();
     if (!hook) return fn();
     const prev = hook.currentOwner;
@@ -109,7 +109,7 @@ export function withoutOwnerTracking<T>(fn: () => T): T {
  * leave invisible (matching the rest of the surface).
  */
 export function notifySignalUpdated(signalId: number | null, key: string | symbol): void {
-    if (process.env.NODE_ENV === 'production' || signalId === null) return;
+    if (!__DEV__ || signalId === null) return;
     const hook = getDevtoolsHook();
     if (!hook) return;
     hook.emit({

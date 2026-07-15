@@ -455,7 +455,7 @@ function serverUseStream(this: any, key: string, source: () => AsyncIterable<str
     // so keys must be UNIQUE per request — unlike useAsync, where sharing a
     // key is the dedupe feature. Duplicates would race on the serialized
     // final text (last finisher wins).
-    if (process.env.NODE_ENV !== 'production') {
+    if (__DEV__) {
         const seen: Set<string> = ((ctx as any)._streamKeys ??= new Set());
         if (seen.has(key)) {
             console.warn(
@@ -549,7 +549,7 @@ function findEnclosingScope(componentCtx: ComponentSetupContext | null): ServerE
  */
 export function defaultRenderError(error: Error, info: SSRErrorInfo): string {
     const marker = info.componentId != null ? `<!--ssr-error:${info.componentId}-->` : '';
-    if (process.env.NODE_ENV === 'production') {
+    if (!__DEV__) {
         return marker;
     }
     const label = escapeHtml(`[SSR] <${info.componentName ?? 'Anonymous'}> failed during ${info.phase}: ${error.message}`);
@@ -575,12 +575,12 @@ function componentErrorFallback(e: unknown, ctx: SSRContext, componentName: stri
     try {
         ctx._onError?.(error, info);
     } catch (hookErr) {
-        if (process.env.NODE_ENV !== 'production') {
+        if (__DEV__) {
             console.error('Error in onError callback:', hookErr);
         }
     }
 
-    if (process.env.NODE_ENV !== 'production') {
+    if (__DEV__) {
         console.error(`Error rendering component ${componentName}:`, e);
     }
 
@@ -1222,7 +1222,7 @@ function* renderNode(
                     ctx.popComponent();
                 }
 
-                if (process.env.NODE_ENV !== 'production') {
+                if (__DEV__) {
                     console.error(`[errorScope] server render failed below <${componentName}>:`, raw);
                 }
 

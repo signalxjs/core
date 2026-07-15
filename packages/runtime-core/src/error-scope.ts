@@ -76,7 +76,7 @@ export function errorScope(options: ErrorScopeOptions): void {
 
     const node = ctx as unknown as { provides?: Map<symbol, unknown>; __errorScope?: InternalErrorScope };
     if (node.__errorScope) {
-        if (process.env.NODE_ENV !== 'production') {
+        if (__DEV__) {
             console.warn('[errorScope] called twice in one component setup — the second call is ignored.');
         }
         return;

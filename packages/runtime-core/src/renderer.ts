@@ -182,7 +182,7 @@ function getSequence(arr: number[]): number[] {
  * Check for duplicate keys in an array of VNodes and warn in development.
  */
 function checkDuplicateKeys(children: VNode[]): void {
-    if (process.env.NODE_ENV === 'production') return;
+    if (!__DEV__) return;
 
     const seenKeys = new Set<string>();
     for (const child of children) {
@@ -825,7 +825,7 @@ export function createRenderer<HostNode = any, HostElement = any>(
      */
     function reconcileChildrenArray(parent: HostElement, oldChildren: VNode[], newChildren: VNode[], parentIsSVG: boolean = false, fallbackAnchor: HostNode | null = null) {
         // Check for duplicate keys in development
-        if (process.env.NODE_ENV !== 'production') {
+        if (__DEV__) {
             checkDuplicateKeys(newChildren);
         }
 

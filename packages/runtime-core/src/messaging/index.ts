@@ -34,7 +34,7 @@ export function createTopic<T>(options?: CreateTopicOptions): Topic<T> {
         try {
             onActivate?.();
         } catch (err) {
-            if (process.env.NODE_ENV !== 'production') {
+            if (__DEV__) {
                 console.error(`[sigx] Error in topic onActivate${label}:`, err);
             } else {
                 console.error(err);
@@ -46,7 +46,7 @@ export function createTopic<T>(options?: CreateTopicOptions): Topic<T> {
         try {
             onDeactivate?.();
         } catch (err) {
-            if (process.env.NODE_ENV !== 'production') {
+            if (__DEV__) {
                 console.error(`[sigx] Error in topic onDeactivate${label}:`, err);
             } else {
                 console.error(err);
@@ -81,7 +81,7 @@ export function createTopic<T>(options?: CreateTopicOptions): Topic<T> {
                 } catch (err) {
                     // Isolate subscriber errors: a bad observer must not break
                     // the publisher or the remaining subscribers.
-                    if (process.env.NODE_ENV !== 'production') {
+                    if (__DEV__) {
                         console.error(`[sigx] Error in topic subscriber${label}:`, err);
                     } else {
                         console.error(err);

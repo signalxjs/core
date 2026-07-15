@@ -236,11 +236,19 @@ export function defineLibConfig(options: LibBuildOptions): UserConfigFnObject {
                 alias: resolvedAliases
             },
 
-            ...(prodDist && {
-                define: {
+            // `__DEV__` is the compile-time dev flag used in package sources.
+            // The prod pass pins it to `false` so the minifier strips guarded
+            // blocks; the dev pass re-emits the runtime NODE_ENV check so the
+            // dev dist behaves exactly as before (the consumer's bundler or
+            // Node decides at their build/run time).
+            define: {
+                __DEV__: prodDist
+                    ? 'false'
+                    : "(process.env.NODE_ENV !== 'production')",
+                ...(prodDist && {
                     'process.env.NODE_ENV': JSON.stringify('production')
-                }
-            }),
+                })
+            },
 
             build: {
                 outDir,

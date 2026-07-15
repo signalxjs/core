@@ -45,7 +45,7 @@ export function isSerializable(key: string, value: unknown, what = 'useAsync'): 
         ? ' The client will refetch.'
         : ' It will be missing on the client.';
     if (DANGEROUS_KEYS.has(key)) {
-        if (process.env.NODE_ENV !== 'production') {
+        if (__DEV__) {
             const label = what === 'useAsync' ? 'useAsync/useStream key' : `${what} key`;
             console.warn(
                 `[SSR] ${label} "${key}" is not allowed ` +
@@ -55,7 +55,7 @@ export function isSerializable(key: string, value: unknown, what = 'useAsync'): 
         return false;
     }
     if (typeof value === 'function' || typeof value === 'bigint' || value === undefined) {
-        if (process.env.NODE_ENV !== 'production') {
+        if (__DEV__) {
             console.warn(
                 `[SSR] ${what}("${key}") resolved to a ${typeof value} — not ` +
                 `JSON-serializable, skipped.${consequence}`
@@ -67,7 +67,7 @@ export function isSerializable(key: string, value: unknown, what = 'useAsync'): 
         // stringify can also RETURN undefined (symbols, toJSON() returning
         // undefined) — the key would silently vanish from the blob.
         if (JSON.stringify(value) === undefined) {
-            if (process.env.NODE_ENV !== 'production') {
+            if (__DEV__) {
                 console.warn(
                     `[SSR] ${what}("${key}") resolved to a value JSON cannot ` +
                     `represent (symbol / toJSON returning undefined), skipped.${consequence}`
@@ -77,7 +77,7 @@ export function isSerializable(key: string, value: unknown, what = 'useAsync'): 
         }
         return true;
     } catch {
-        if (process.env.NODE_ENV !== 'production') {
+        if (__DEV__) {
             console.warn(
                 `[SSR] ${what}("${key}") resolved to a non-JSON-serializable ` +
                 `value (circular?), skipped.${consequence}`

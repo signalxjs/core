@@ -108,7 +108,7 @@ function normalizeChild(c: JSXChild): VNode {
  * property read. Production uses the lean {@link detectAccess} path.
  */
 function detectModelBinding(selector: () => any): [any, string | symbol] | null {
-    if (process.env.NODE_ENV !== 'production') {
+    if (__DEV__) {
         const { access, looksTransformed } = detectAccessDev(selector);
         if (access && looksTransformed) {
             console.warn(
@@ -295,7 +295,7 @@ export function jsx(
                                 break;
                             }
                         }
-                        if (process.env.NODE_ENV !== 'production' && props.modelModifiers) {
+                        if (__DEV__ && props.modelModifiers) {
                             warnNoOpModifiers(type, props, stateObj, stateKey, props.modelModifiers);
                         }
                     }
@@ -372,7 +372,7 @@ export function jsx(
                         };
                     }
 
-                    if (process.env.NODE_ENV !== 'production' && typeof type === "string" && props.modelModifiers) {
+                    if (__DEV__ && typeof type === "string" && props.modelModifiers) {
                         warnNoOpModifiers(type, props, stateObj, stateKey, props.modelModifiers);
                     }
 

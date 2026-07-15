@@ -11,6 +11,9 @@ export default defineConfig({
     },
     test: {
         environment: 'happy-dom',
+        // Defines the __DEV__ global sources rely on (see the file's comment
+        // for why it's a runtime getter, not a `define`).
+        setupFiles: ['./vitest.setup.ts'],
         include: ['packages/**/__tests__/**/*.test.{ts,tsx}'],
         globals: true,
         benchmark: {

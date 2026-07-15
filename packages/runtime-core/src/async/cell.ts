@@ -111,7 +111,7 @@ export function createDataCell<T>(
                     p = Promise.reject(err);
                 }
             };
-            if (process.env.NODE_ENV !== 'production') {
+            if (__DEV__) {
                 // Fetchers run untracked — a signal read inside one will not
                 // re-run anything. Catch the (synchronous) case in dev.
                 const access = detectAccess(invoke);

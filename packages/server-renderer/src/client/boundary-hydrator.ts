@@ -332,7 +332,7 @@ function hydrateBoundaryInPlace(marker: Comment, component: ComponentFactory, re
     }
 
     if (!container || container.nodeType !== Node.ELEMENT_NODE) {
-        if (process.env.NODE_ENV !== 'production') {
+        if (__DEV__) {
             console.warn('No element found for boundary hydration');
         }
         return;
@@ -399,7 +399,7 @@ function scheduleTableBoundary(id: number, record: SSRBoundaryRecord): void {
 
     const marker = findBoundaryMarker(id);
     if (!marker) {
-        if (process.env.NODE_ENV !== 'production') {
+        if (__DEV__) {
             console.warn(`Boundary marker not found for id ${id}`);
         }
         return;
@@ -421,7 +421,7 @@ function scheduleTableBoundary(id: number, record: SSRBoundaryRecord): void {
     }
 
     const doHydrate = async () => {
-        if (process.env.NODE_ENV !== 'production') {
+        if (__DEV__) {
             console.log(`%c[Hydrate] 🎯 Strategy "${strategy}" fired for "${record.component}" — loading component...`, 'color: #673ab7; font-weight: bold');
         }
         // Re-read the record at fire time — a mid-stream patch may have
@@ -429,7 +429,7 @@ function scheduleTableBoundary(id: number, record: SSRBoundaryRecord): void {
         const fresh = getBoundaryRecord(id) ?? record;
         const component = await loadBoundaryComponent(fresh);
         if (!component) {
-            if (process.env.NODE_ENV !== 'production') {
+            if (__DEV__) {
                 console.warn(`Component "${fresh.component}" could not be resolved for hydration`);
             }
             return;
@@ -537,7 +537,7 @@ export function scheduleWalkedBoundary(
 // ============= Streamed-boundary hydration (sigx:async-ready) =============
 
 function reportAsyncHydrateError(err: unknown): void {
-    if (process.env.NODE_ENV !== 'production') {
+    if (__DEV__) {
         console.error('[Hydrate] Failed to hydrate streamed async boundary:', err);
     }
 }
@@ -552,7 +552,7 @@ async function hydrateAsyncBoundary(container: Element, record: SSRBoundaryRecor
         return;
     }
     if (!record.component) {
-        if (process.env.NODE_ENV !== 'production') {
+        if (__DEV__) {
             console.error(`[Hydrate] No component name in boundary record`);
         }
         return;
@@ -568,7 +568,7 @@ async function hydrateAsyncBoundary(container: Element, record: SSRBoundaryRecor
 
     const component = await loadBoundaryComponent(record);
     if (!component) {
-        if (process.env.NODE_ENV !== 'production') {
+        if (__DEV__) {
             console.error(`[Hydrate] Component "${record.component}" could not be resolved`);
         }
         return;
@@ -625,7 +625,7 @@ function ensureAsyncHydrationListener(): void {
 
         const placeholder = document.querySelector(`[data-async-placeholder="${id}"]`);
         if (!placeholder) {
-            if (process.env.NODE_ENV !== 'production') {
+            if (__DEV__) {
                 console.warn(`[Hydrate] Could not find placeholder for async boundary ${id}`);
             }
             return;
@@ -635,7 +635,7 @@ function ensureAsyncHydrationListener(): void {
         // global read observes the freshest record.
         const record = getBoundaryRecord(Number(id));
         if (!record) {
-            if (process.env.NODE_ENV !== 'production') {
+            if (__DEV__) {
                 console.warn(`[Hydrate] No boundary record for async component ${id}`);
             }
             return;

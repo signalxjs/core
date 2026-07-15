@@ -144,11 +144,11 @@ async function* streamAllAsyncChunks(
             try {
                 ctx._onError?.(err, info);
             } catch (hookErr) {
-                if (process.env.NODE_ENV !== 'production') {
+                if (__DEV__) {
                     console.error('Error in onError callback:', hookErr);
                 }
             }
-            if (process.env.NODE_ENV !== 'production') {
+            if (__DEV__) {
                 console.error(`Error streaming async component ${pending.id}:`, error);
             }
             const html = ctx._renderError ? ctx._renderError(err, info) : defaultRenderError(err, info);
