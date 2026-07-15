@@ -32,12 +32,14 @@ import type { JSXElement, AppContext } from 'sigx';
 import type { SSRPlugin } from '../plugin';
 import { createSSRContext, type SSRContext, type SSRContextOptions } from './context';
 import { renderToChunks } from './render-core';
-import { emitBoundaryTable } from './serialize';
+import { emitBoundaryTable, scriptOpen } from './serialize';
 import { renderHeadToString, collectRootAttrs, mergeAttrsIntoTag } from '../head';
 import { responseSummary, type SSRResponse } from '../response';
 
 /** Same completion signal the plain streaming APIs emit. */
-const COMPLETION_SCRIPT = `<script>window.__SIGX_STREAMING_COMPLETE__=true;window.dispatchEvent(new Event('sigx:ready'));</script>`;
+function completionScript(nonce?: string): string {
+    return `${scriptOpen(nonce)}window.__SIGX_STREAMING_COMPLETE__=true;window.dispatchEvent(new Event('sigx:ready'));</script>`;
+}
 
 export interface DocumentOptions extends SSRContextOptions {
     /** Full HTML template containing the outlet marker. */
@@ -294,7 +296,7 @@ async function* documentChunks(
         // document is by definition complete when delivered. The inline
         // script executes during parse, before deferred module scripts, so
         // the entry's flag check always sees it.
-        yield COMPLETION_SCRIPT;
+        yield completionScript(p.ctx._nonce);
     } catch (e) {
         options.onError?.(toError(e), { phase: 'stream' });
         return; // end without the closing tail — visibly truncated
