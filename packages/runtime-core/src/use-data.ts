@@ -29,7 +29,7 @@ import {
     type KeyWarnFlags,
 } from './async/key.js';
 import { INERT_IDLE_CELL } from './async/cell.js';
-import { ASYNC_ENGINE_TOKEN, defaultAsyncEngine, type AsyncEngine } from './async/engine.js';
+import { ASYNC_ENGINE_TOKEN, defaultAsyncEngine } from './async/engine.js';
 import { lookupProvided } from './di/injectable.js';
 import {
     warnUnknownOptions,
@@ -99,7 +99,7 @@ export function useData<T>(
     // ── Client semantics: an app-provided engine (a cache pack installed
     // via app.use(...)) or the default engine. Core keeps the key machinery
     // either way — the engine sees resolved canonical keys. ──
-    const engine = (lookupProvided(ASYNC_ENGINE_TOKEN) as AsyncEngine | undefined) ?? defaultAsyncEngine;
+    const engine = lookupProvided(ASYNC_ENGINE_TOKEN) ?? defaultAsyncEngine;
 
     // The warning consults the shared handled-keys registry, so an installed
     // pack's own options stay quiet (it registered them at install) while

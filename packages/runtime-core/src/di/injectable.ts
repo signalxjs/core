@@ -5,6 +5,7 @@ import {
     provideInvalidInjectableError,
     requiredInjectableNotProvidedError,
 } from "../errors.js";
+import type { InjectionToken } from "./token.js";
 
 // ============================================================================
 // Internal helpers
@@ -99,8 +100,11 @@ export function lookupProvidedEntry(token: symbol): unknown {
  * Like `lookupProvidedEntry`, but conflates "not provided" with a provided
  * `undefined`. Exported for the factory system's scoped-lifetime resolution
  * and internal seam reads that never provide `undefined`.
+ * The `InjectionToken` overload infers the value type from the token.
  * @internal
  */
+export function lookupProvided<T>(token: InjectionToken<T>): T | undefined;
+export function lookupProvided<T>(token: symbol): T | undefined;
 export function lookupProvided<T>(token: symbol): T | undefined {
     const entry = lookupProvidedEntry(token);
     return entry === NOT_PROVIDED ? undefined : entry as T;

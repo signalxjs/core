@@ -7,6 +7,7 @@
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { component, signal, jsx, defineApp, useData, useAction, type AsyncState, type App } from 'sigx';
+import { declareLiveClient } from '@sigx/runtime-core/internals';
 import '@sigx/runtime-dom'; // installs the default mount
 import { cachePlugin } from '@sigx/cache';
 import type { CachedAsyncState } from '@sigx/cache';
@@ -41,6 +42,8 @@ describe('@sigx/cache', () => {
         for (const app of apps.splice(0)) app.unmount();
         for (const c of containers.splice(0)) c.remove();
         delete (globalThis as any).__SIGX_ASYNC__;
+        // Restore the live-client default (happy-dom has a window ⇒ live).
+        declareLiveClient(true);
         vi.restoreAllMocks();
     });
 
@@ -369,6 +372,78 @@ describe('@sigx/cache', () => {
         await vi.waitFor(() => expect(calls).toBeGreaterThanOrEqual(2), { timeout: 2000 });
     });
 
+    it('a custom revalidateTrigger replaces the DOM listener; its unsubscribe runs on app teardown', async () => {
+        let calls = 0;
+        const fetcher = vi.fn(async () => ++calls);
+        let fire: (() => void) | null = null;
+        const unsubscribe = vi.fn(() => { fire = null; });
+        const trigger = vi.fn((revalidate: () => void) => {
+            fire = revalidate;
+            return unsubscribe;
+        });
+        let cell!: AsyncState<number>;
+
+        const Root = component(() => {
+            cell = useData('trigger-key', fetcher, { cache: { revalidateOnFocus: true } });
+            return () => <div />;
+        });
+        mountWith(cachePlugin({ revalidateTrigger: trigger }), jsx(Root, {}));
+        await settle();
+        expect(calls).toBe(1);
+        expect(trigger).toHaveBeenCalledTimes(1);
+
+        // The platform's attention event fires ⇒ flagged reads revalidate…
+        fire!();
+        await settle();
+        expect(calls).toBe(2);
+        expect(cell.value).toBe(2);
+
+        // …and the DOM default was NOT installed alongside it.
+        window.dispatchEvent(new Event('focus'));
+        await settle();
+        expect(calls).toBe(2);
+
+        apps.pop()!.unmount();
+        expect(unsubscribe).toHaveBeenCalledTimes(1);
+    });
+
+    it('a throwing revalidateTrigger neither crashes the mounting read nor bricks the store — reported, retried on the next opt-in', async () => {
+        const error = vi.spyOn(console, 'error').mockImplementation(() => { });
+        const trigger = vi.fn(() => {
+            throw new Error('trigger boom');
+        });
+        const show = signal({ second: false });
+        let a!: AsyncState<number>, b!: AsyncState<number>;
+
+        const A = component(() => {
+            a = useData('bad-trigger-a', async () => 1, { cache: { revalidateOnFocus: true, staleTime: 60_000 } });
+            return () => <div />;
+        });
+        const B = component(() => {
+            b = useData('bad-trigger-b', async () => 2, { cache: { revalidateOnFocus: true, staleTime: 60_000 } });
+            return () => <div />;
+        });
+        const Root = component(() => () => (
+            <div>
+                {jsx(A, {})}
+                {show.second ? jsx(B, {}) : null}
+            </div>
+        ));
+        mountWith(cachePlugin({ revalidateTrigger: trigger }), jsx(Root, {}));
+        await settle();
+
+        // The read is unharmed and the failure is surfaced.
+        expect(a.state).toBe('ready');
+        expect(a.value).toBe(1);
+        expect(error).toHaveBeenCalledWith(expect.stringContaining('revalidateTrigger threw'), expect.any(Error));
+
+        // Not permanently marked installed: the next opting-in read retries.
+        show.second = true;
+        await settle();
+        expect(b.state).toBe('ready');
+        expect(trigger).toHaveBeenCalledTimes(2);
+    });
+
     // ====================================================================
     // gcTime
     // ====================================================================
@@ -672,5 +747,26 @@ describe('@sigx/cache', () => {
         await settle();
         expect(fetcher).toHaveBeenCalledTimes(2);
         expect(args[1]).toBe(latest);
+    });
+
+    it('on a non-live client a cached read subscribes but does NOT fetch — the cell parks at pending', async () => {
+        declareLiveClient(false); // e.g. an undeclared/server-side non-web runtime
+        const fetcher = vi.fn(async () => 'never');
+        let cell!: AsyncState<string>;
+
+        const Root = component(() => {
+            cell = useData('non-live-key', fetcher, { cache: { staleTime: 60_000 } });
+            return () => <div class="out">{cell.state}</div>;
+        });
+        const container = mountWith(cachePlugin(), jsx(Root, {}));
+        await settle();
+
+        // Entry is subscribed but empty (no fetch on a non-live client): the
+        // apply() fallthrough renders 'pending' with no value.
+        expect(cell.state).toBe('pending');
+        expect(cell.value).toBeNull();
+        expect(cell.error).toBeNull();
+        expect(fetcher).not.toHaveBeenCalled();
+        expect(container.querySelector('.out')?.textContent).toBe('pending');
     });
 });

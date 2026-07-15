@@ -29,8 +29,10 @@ import type {
 } from './app-types.js';
 
 import { getAppContextToken, setActiveAppContext, type Providable } from './di/injectable.js';
-import { ERROR_SCOPE_TOKEN, type ErrorScopeHandle } from './error-scope.js';
+import { ERROR_SCOPE_TOKEN } from './error-scope.js';
+import { getProvided } from './di/token.js';
 import { isDirective } from './directives.js';
+import { isPromise } from './utils/index.js';
 import type { JSXElement } from './jsx-runtime.js';
 import { noMountFunctionError, provideInvalidInjectableError } from './errors.js';
 import { getDevtoolsHook } from './devtools-hook.js';
@@ -111,6 +113,8 @@ export function defineApp<TContainer = any>(rootComponent: JSXElement): App<TCon
     let isMounted = false;
     let container: TContainer | null = null;
     let unmountFn: (() => void) | null = null;
+    // Dev-only: warn once per app when runWithContext gets an async callback.
+    let warnedAsyncRunWithContext = false;
 
     const app: App<TContainer> = {
         config: context.config,
@@ -172,10 +176,33 @@ export function defineApp<TContainer = any>(rootComponent: JSXElement): App<TCon
             // outside components (router guards, socket handlers, entry-scope
             // code). Synchronous only: restored in finally, so the context
             // never leaks past the first await of an async fn. Nested calls
-            // restore the previous context.
+            // restore the previous context. (Async continuation support via
+            // AsyncLocalStorage was considered and deferred: browsers have no
+            // ALS, so it would silently split state client-side — revisit
+            // when TC39 AsyncContext is available cross-platform.)
             const prev = setActiveAppContext(context);
             try {
-                return fn();
+                const result = fn();
+                if (process.env.NODE_ENV !== 'production' && !warnedAsyncRunWithContext) {
+                    // The probe must never alter behavior: a hostile `then`
+                    // getter (Proxy trap) could throw, so swallow probe errors
+                    // and pass the value through regardless.
+                    let thenable = false;
+                    try {
+                        thenable = isPromise(result);
+                    } catch { /* probe only — never affect the return value */ }
+                    if (thenable) {
+                        warnedAsyncRunWithContext = true;
+                        console.warn(
+                            'app.runWithContext(fn) got a callback that returned a Promise (or ' +
+                            'other thenable) — the app context applies only to its synchronous ' +
+                            'portion and is restored before any awaited continuation runs. After ' +
+                            'an await, re-enter with another runWithContext call to resolve more ' +
+                            'dependencies.'
+                        );
+                    }
+                }
+                return result;
             } finally {
                 setActiveAppContext(prev);
             }
@@ -425,7 +452,7 @@ export function handleComponentError(
     // layer. A scope that declines (already errored) lets the walk continue.
     let node = instance?.ctx as { provides?: Map<symbol, unknown>; parent?: unknown } | null | undefined;
     while (node) {
-        const scope = node.provides?.get(ERROR_SCOPE_TOKEN) as ErrorScopeHandle | undefined;
+        const scope = getProvided(node.provides, ERROR_SCOPE_TOKEN);
         if (scope && scope.handle(err, instance, info) === true) return true;
         node = node.parent as typeof node;
     }

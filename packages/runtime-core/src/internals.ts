@@ -64,6 +64,10 @@ export { getComponentPlugins, applyContextExtensions, registerComponentPlugin, r
 
 // DI internals
 export { getAppContextToken, provideAppContext } from './di/injectable.js';
+// Typed seam tokens: create + read/write helpers that carry the value type,
+// so seam reads need no `as X | undefined` casts
+export { createToken, getProvided, setProvided } from './di/token.js';
+export type { InjectionToken } from './di/token.js';
 
 // Async engine internals (for server renderers and cache packs)
 export { matchAsyncState, registerHandledAsyncOptionKeys, makeUnhandledReporter, normalizeError, makeAbortController, inertAbortSignal } from './async/shared.js';

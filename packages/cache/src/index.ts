@@ -22,8 +22,8 @@
  * untouched (the SSR provider seam takes precedence over any engine).
  */
 
-import type { Plugin } from 'sigx';
-import { provideAsyncEngine, registerHandledAsyncOptionKeys } from 'sigx/internals';
+import type { Plugin } from '@sigx/runtime-core';
+import { provideAsyncEngine, registerHandledAsyncOptionKeys } from '@sigx/runtime-core/internals';
 import { CacheStore } from './store.js';
 import { createCacheEngine } from './engine.js';
 import type { CacheDefaults } from './options.js';
@@ -32,8 +32,11 @@ export type { CacheOptions, CacheActionOptions, CacheDefaults } from './options.
 export type { CachedAsyncState } from './engine.js';
 
 // ─── §7 obligation 2: the pack's options exist exactly when it's installed ──
+// Augment the DECLARING module (@sigx/runtime-core) — the merge reaches
+// `sigx` consumers through its `export *`, and stays valid for non-web
+// renderers that never install the umbrella.
 
-declare module 'sigx' {
+declare module '@sigx/runtime-core' {
     interface AsyncOptions {
         /** Cache policy for this read — provided by @sigx/cache (app.use(cachePlugin())). */
         cache?: import('./options.js').CacheOptions;

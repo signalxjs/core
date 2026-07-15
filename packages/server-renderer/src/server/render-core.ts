@@ -37,8 +37,8 @@ import {
     resolveBuiltInDirective,
     matchAsyncState,
     ERROR_SCOPE_TOKEN,
+    getProvided,
 } from 'sigx/internals';
-import type { ErrorScopeHandle } from 'sigx/internals';
 import type { SSRContext, SSRErrorInfo } from './context';
 import type { ResolvedBoundary, SSRBoundaryRecord } from '../boundary';
 import { generateAppendScript } from './streaming';
@@ -1228,7 +1228,7 @@ function* renderNode(
 
                 // Notify the scope exactly like the client's error walk would
                 // (fires the scope's onError observer, marks it errored).
-                const handle = (componentCtx as any).provides?.get(ERROR_SCOPE_TOKEN) as ErrorScopeHandle | undefined;
+                const handle = getProvided((componentCtx as { provides?: Map<symbol, unknown> }).provides, ERROR_SCOPE_TOKEN);
                 handle?.handle(raw, null, 'ssr render');
 
                 if (ownScopeNow.fallback) {

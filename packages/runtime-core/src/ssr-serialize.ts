@@ -12,6 +12,8 @@
  * the cache-seed work (rfc-async §7).
  */
 
+import { createToken, getProvided, setProvided } from './di/token.js';
+
 /** One pluggable serializer for a non-JSON-representable type. */
 export interface SSRTypeHandler {
     /** Identifies the handler (dev warnings, dedupe by consumers). */
@@ -26,7 +28,7 @@ export interface SSRTypeHandler {
  * DI token under which serializer handlers are provided at app level.
  * @internal
  */
-export const SSR_SERIALIZER_TOKEN: unique symbol = Symbol('sigx:ssrSerializer');
+export const SSR_SERIALIZER_TOKEN = createToken<SSRTypeHandler[]>('sigx:ssrSerializer');
 
 /**
  * Append serializer handlers on an app context at install time.
@@ -45,8 +47,9 @@ export function provideSSRSerializerHandlers(
     appContext: { provides: Map<symbol, unknown> },
     handlers: SSRTypeHandler[]
 ): void {
-    const existing = appContext.provides.get(SSR_SERIALIZER_TOKEN) as SSRTypeHandler[] | undefined;
-    appContext.provides.set(
+    const existing = getProvided(appContext.provides, SSR_SERIALIZER_TOKEN);
+    setProvided(
+        appContext.provides,
         SSR_SERIALIZER_TOKEN,
         existing ? [...existing, ...handlers] : [...handlers]
     );

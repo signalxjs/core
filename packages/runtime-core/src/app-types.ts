@@ -272,7 +272,13 @@ export interface App<TContainer = any> {
      * restored before any awaited continuation runs. After an `await`,
      * re-enter with another `runWithContext` call if you need to resolve more
      * dependencies. Nested calls are supported; the previous context is
-     * restored when `fn` returns (or throws).
+     * restored when `fn` returns (or throws). Dev builds warn (once per app)
+     * when the callback returns a Promise or other thenable, since that
+     * usually means DI lookups after the first `await` silently fell back to
+     * realm instances.
+     * (Async continuations via AsyncLocalStorage were considered and
+     * deferred: browsers have no ALS, so the behavior would silently diverge
+     * client-side — revisit when TC39 AsyncContext lands cross-platform.)
      *
      * @example
      * ```typescript
