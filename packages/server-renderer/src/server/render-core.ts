@@ -485,7 +485,7 @@ function serverUseStream(this: any, key: string, source: () => AsyncIterable<str
             try {
                 for await (const token of source()) {
                     acc += token;
-                    yield generateAppendScript(id, token);
+                    yield generateAppendScript(id, token, ctx._nonce);
                 }
                 finish(acc);
                 resolveDone();

@@ -15,7 +15,7 @@
  * serializer module (`./serialize`) — one discipline for every blob.
  */
 
-import { assignmentJs, isSerializable, DANGEROUS_KEYS, type SSRTypeHandler } from './serialize';
+import { assignmentJs, isSerializable, scriptOpen, DANGEROUS_KEYS, type SSRTypeHandler } from './serialize';
 
 export { isSerializable, DANGEROUS_KEYS };
 
@@ -34,7 +34,8 @@ export function asyncAssignmentJs(
 /** Full `<script>` tag emitting values — flushed with the shell. */
 export function serializeAsyncScript(
     values: Record<string, unknown>,
-    handlers: readonly SSRTypeHandler[] = []
+    handlers: readonly SSRTypeHandler[] = [],
+    nonce?: string
 ): string {
-    return `<script>${asyncAssignmentJs(values, handlers)}</script>`;
+    return `${scriptOpen(nonce)}${asyncAssignmentJs(values, handlers)}</script>`;
 }
