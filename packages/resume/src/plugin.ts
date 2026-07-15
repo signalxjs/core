@@ -136,6 +136,14 @@ export function resumePlugin(options?: ResumePluginOptions): SSRPlugin {
                 const id = ctx._componentStack[ctx._componentStack.length - 1];
                 if (!ctx.getBoundary(id)) return;
 
+                const record = ctx.getBoundary(id)!;
+                // Core derives record.component from __islandId || __name —
+                // resume components carry neither, and the client's
+                // loadBoundaryComponent refuses records with no name (found
+                // by the browser smoke; ResolvedBoundary can't express this,
+                // noted as a candidate core seam in #241).
+                record.component = (vnode.type as ResumeStamps).__resumeId;
+
                 const data = ctx.getPluginData<ResumePluginData>(PLUGIN_NAME)!;
                 const signalMap = new Map<string, any>();
                 data.signalMaps.set(id, signalMap);
