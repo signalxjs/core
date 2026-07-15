@@ -62,11 +62,17 @@ setup helpers, `ctx.emit`, …) makes the whole component fall back to
 wake-on-interaction — first interaction hydrates it, with a build-time
 warning naming the capture.
 
-## Status
+## Verification
 
-Part of the #241 program. This package currently ships the server half
-(`resumePlugin`); the client entry (`@sigx/resume/client`) and the delegation
-loader (`@sigx/resume/loader`) land with the follow-up PRs.
+The full ladder is verified in a real browser: `examples/resume/smoke.mjs`
+asserts (via JS coverage — execution, not fetches) that only the loader
+executes on load, the first click replays through its QRL and upgrades on
+write, read-only handlers never execute their component chunk, and
+wake-on-interaction hydrates without replay. The server half is
+WinterCG-clean: after `pnpm build`, `pnpm test:edge` renders a resumable
+boundary from the prod dist with `node:` imports forbidden.
+
+Platform findings from building this pack: `docs/resume-stress-test-findings.md`.
 
 ## Credits
 

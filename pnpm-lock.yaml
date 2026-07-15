@@ -347,6 +347,9 @@ importers:
         specifier: workspace:^
         version: link:../sigx
     devDependencies:
+      '@sigx/resume':
+        specifier: workspace:^
+        version: link:../resume
       '@sigx/vite':
         specifier: workspace:^
         version: link:../vite
@@ -409,6 +412,9 @@ importers:
 
   packages/vite:
     dependencies:
+      '@sigx/resume':
+        specifier: '*'
+        version: link:../resume
       '@sigx/ssr-islands':
         specifier: '*'
         version: link:../ssr-islands
