@@ -41,6 +41,8 @@ export default defineConfig({
             '@sigx/server-renderer/client': resolve(__dirname, 'packages/server-renderer/src/client/index.ts'),
             '@sigx/server-renderer': resolve(__dirname, 'packages/server-renderer/src/index.ts'),
             '@sigx/resume/server': resolve(__dirname, 'packages/resume/src/server/index.ts'),
+            '@sigx/resume/client': resolve(__dirname, 'packages/resume/src/client/index.ts'),
+            '@sigx/resume/loader': resolve(__dirname, 'packages/resume/src/loader/index.ts'),
             '@sigx/resume': resolve(__dirname, 'packages/resume/src/index.ts'),
             '@sigx/ssr-islands/server': resolve(__dirname, 'packages/ssr-islands/src/server/index.ts'),
             '@sigx/ssr-islands/client': resolve(__dirname, 'packages/ssr-islands/src/client/index.ts'),
