@@ -109,6 +109,14 @@ export const Saver = component((ctx) => {
         expect(result.components[0].mode).toBe('resume');
     });
 
+    it('is idempotent — already-stamped events are not extracted again', () => {
+        const first = extractResumeHandlers(COUNTER, '/src/Counter.resume.tsx');
+        const second = extractResumeHandlers(first.code, '/src/Counter.resume.tsx');
+        expect(second.code).toBe(first.code);
+        expect(second.handlers).toHaveLength(0);
+        expect(second.ineligible).toHaveLength(0);
+    });
+
     it('dedupes identical handlers to one symbol', () => {
         const code = `
 import { component } from 'sigx';

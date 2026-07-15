@@ -543,10 +543,21 @@ function findHandlerSites(setupFn: Node): HandlerSite[] {
             const tag = node.name as Node;
             const isHost = tag.type === 'JSXIdentifier' && /^[a-z]/.test(tag.name as string);
             if (isHost) {
+                // Idempotency: events already carrying a QRL attribute (a
+                // previous pass over this source) are not extracted again.
+                const alreadyStamped = new Set<string>();
+                for (const attr of node.attributes as Node[]) {
+                    if (attr.type !== 'JSXAttribute') continue;
+                    const name = attr.name as Node;
+                    if (name.type === 'JSXNamespacedName') {
+                        const ns = ((name.namespace as Node).name as string) ?? '';
+                        if (ns === 'data-sigx-on') alreadyStamped.add(((name.name as Node).name as string) ?? '');
+                    }
+                }
                 for (const attr of node.attributes as Node[]) {
                     if (attr.type !== 'JSXAttribute') continue;
                     const event = eventOf(attr);
-                    if (!event || !isNode(attr.value)) continue;
+                    if (!event || alreadyStamped.has(event) || !isNode(attr.value)) continue;
                     const container = attr.value as Node;
                     if (container.type !== 'JSXExpressionContainer') continue;
                     sites.push({
