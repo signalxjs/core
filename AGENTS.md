@@ -144,6 +144,12 @@ free port automatically).
   riding `@sigx/server-renderer`'s public plugin API; a drop-in equal of any
   third-party pack, with no privileged access to core. Its runnable example app
   lives at `examples/ssr-islands/` (private workspace package).
+- `packages/resume` → `@sigx/resume` — Qwik-style resumability (QRL event
+  handlers via `data-sigx-on:*` attributes, zero-JS pages, upgrade-on-write
+  hydration). The second first-party strategy pack riding
+  `@sigx/server-renderer`'s public plugin API — a drop-in equal of any
+  third-party pack, no privileged access to core. Its Vite transform lives at
+  `@sigx/vite/resume`.
 - `packages/cache` → `@sigx/cache` — cache policy for value-first async
   (staleTime/gcTime, revalidation, `invalidate()`, optimistic `mutate()`). The
   first-party pack on the rfc-async §7 engine seam — a drop-in equal of any
