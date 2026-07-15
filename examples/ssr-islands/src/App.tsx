@@ -4,6 +4,7 @@ import { Clock } from './islands/Clock';
 import { Echo } from './islands/Echo';
 import { BrowserInfo } from './islands/BrowserInfo';
 import { WideBadge } from './islands/WideBadge';
+import { ServerDice } from './islands/ServerDice';
 
 /**
  * The page itself is a server-only component: everything outside the
@@ -52,6 +53,12 @@ export const App = component(() => {
                 <h3><code>client:visible</code> — hydrate when scrolled into view</h3>
                 <Counter client:visible label="woke up when you scrolled here" initial={100} />
                 <p class="hint">The chunk may arrive early (the document modulepreloads island chunks to warm the cache) — what the strategy gates is execution: nothing runs until this scrolls into view.</p>
+            </div>
+
+            <div class="card">
+                <h3>state transfer, visibly — dice rolled during the server render</h3>
+                <ServerDice client:visible />
+                <p class="hint">Setup is nondeterministic and runs again at hydration — it even rolls again. But the signal is keyed "dice" automatically from its declaration, so the client seeds it from the server-captured state and discards its own roll: the numbers never change when this card scrolls into view.</p>
             </div>
         </main>
     );
