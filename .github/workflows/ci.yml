@@ -145,3 +145,10 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./coverage/coverage-final.json
           fail_ci_if_error: false
+          # Tell codecov which PR this upload belongs to. On a pull_request event
+          # checkout leaves a detached merge ref the CLI cannot derive the PR from,
+          # so uploads landed with pullid: null — no PR, no base, hence no patch
+          # diff and no codecov/patch status, which is a REQUIRED check: every PR
+          # deadlocked on "Expected — Waiting for status to be reported" (#227).
+          # Empty on push events, so main's diff-against-parent path is unchanged.
+          override_pr: ${{ github.event.pull_request.number }}
