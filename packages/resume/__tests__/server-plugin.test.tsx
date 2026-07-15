@@ -72,14 +72,17 @@ describe('resumePlugin — boundary records', () => {
         expect(parseBoundaryTable(html)[boundaryId]).toBeTruthy();
     });
 
-    it('degrades __resumeMode:"hydrate" components to interaction hydration', async () => {
+    it('records hydrate:never for __resumeMode:"hydrate" components too (pack-owned waking)', async () => {
         const Counter = makeCounter();
         Counter.__resumeMode = 'hydrate';
         const ssr = createSSR().use(resumePlugin());
         const html = await ssr.render(<Counter />);
 
+        // Core must never schedule resume boundaries — a resumable page has
+        // no upfront runtime to install core interaction listeners; the
+        // pack's delegation hydrates these via their wake attributes.
         const record = Object.values(parseBoundaryTable(html))[0];
-        expect(record.hydrate).toBe('interaction');
+        expect(record.hydrate).toBe('never');
     });
 
     it('attaches the upgrade chunk from the manifest', async () => {

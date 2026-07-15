@@ -8,8 +8,11 @@
  *   become boundaries with `hydrate: 'never'` — core schedules nothing for
  *   them; the pack's delegation loader wakes them from serialized state.
  * - Components the transform could not fully extract
- *   (`__resumeMode: 'hydrate'`) degrade to island-style
- *   `hydrate: 'interaction'` — core's boundary hydrator handles them.
+ *   (`__resumeMode: 'hydrate'`) also record `hydrate: 'never'` but carry
+ *   `data-sigx-wake:*` attributes instead of QRLs — the pack's delegation
+ *   fully hydrates them on first interaction. Core never schedules resume
+ *   boundaries: a resumable page ships no upfront runtime that could
+ *   install core's interaction listeners.
  * - Named-signal state is captured during server setup (tracking signal) and
  *   shipped in the component's `__SIGX_BOUNDARIES__` record, where the
  *   client rebuilds the handler scope (`$scope.signals.<name>`) without
@@ -102,13 +105,12 @@ export function resumePlugin(options?: ResumePluginOptions): SSRPlugin {
                 const { children: _children, slots: _slots, $models: _models, ...propsData } = allProps;
                 const props = serializeBoundaryProps(propsData, getTypeHandlers(ctx));
 
-                // Fully-extracted components opt out of core scheduling
-                // entirely; partially-extracted ones ride core's interaction
-                // strategy. flush is never set — content SSRs per core
-                // defaults, streaming included.
-                return stamps.__resumeMode === 'hydrate'
-                    ? { hydrate: 'interaction', chunk, props }
-                    : { hydrate: 'never', chunk, props };
+                // ALL resume boundaries opt out of core scheduling — the
+                // pack's delegation wakes them (QRL replay for 'resume'
+                // components, full hydration for 'hydrate' ones via their
+                // wake attributes). flush is never set — content SSRs per
+                // core defaults, streaming included.
+                return { hydrate: 'never', chunk, props };
             },
 
             transformComponentContext(
