@@ -42,7 +42,9 @@ export function resolveQrl(symbol: string): Promise<((...args: unknown[]) => unk
         return Promise.resolve(null);
     }
 
-    resolution = Promise.resolve(loader()).then(
+    // Promise.resolve().then defers a synchronously-throwing loader into a
+    // rejection instead of throwing through resolveQrl itself.
+    resolution = Promise.resolve().then(loader).then(
         (handler) => {
             if (typeof handler !== 'function') {
                 if (__DEV__) {
