@@ -87,8 +87,8 @@ export interface SSRPlugin {
          * is no per-component HTML to intercept: the `html` argument is
          * always `''`, and a returned string is appended between the
          * component's content and its trailing `<!--$c:ID-->` marker. Typical
-         * use: capture per-boundary state into `ctx.getBoundary(id)` (see the
-         * plugin in `@sigx/ssr-islands`). To influence what a component RENDERS, use
+         * use: capture per-boundary state into `ctx.getBoundary(id)`, the way
+         * the islands pack's plugin does. To influence what a component RENDERS, use
          * `transformComponentContext` instead — wrapping or rewriting the
          * emitted markup is deliberately not supported (#253).
          */
