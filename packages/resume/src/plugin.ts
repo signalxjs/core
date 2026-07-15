@@ -37,7 +37,8 @@
 
 import type { SSRPlugin, ResolvedBoundary, SSRContext } from '@sigx/server-renderer';
 import { serializeBoundaryProps, getTypeHandlers } from '@sigx/server-renderer/server';
-import type { VNode, ComponentSetupContext } from 'sigx';
+import { provideHydrateDefaults } from '@sigx/server-renderer/client';
+import type { VNode, ComponentSetupContext, App } from 'sigx';
 import { signal } from 'sigx';
 import type { ResumePluginOptions } from './types';
 import { createTrackingSignal, serializeSignalState } from './server/track-signal';
@@ -56,15 +57,26 @@ interface ResumeStamps {
 }
 
 /**
- * Create a resume plugin for `createSSR().use(...)`.
+ * Create a resume plugin — dual-shaped like the islands sibling:
  *
- * Claims components carrying the transform's `__resumeId` stamp — unless the
- * usage site also carries a `client:*` islands directive, which islands owns
- * (register `islandsPlugin()` first when combining the packs).
+ * - As an SSRPlugin (server: `createSSR().use(resumePlugin())`): claims
+ *   components carrying the transform's `__resumeId` stamp — unless the
+ *   usage site also carries a `client:*` islands directive, which islands
+ *   owns (register `islandsPlugin()` first when combining the packs).
+ * - As an app plugin (client, coexist mode: `app.use(resumePlugin())`):
+ *   declares explicit-boundaries mode. The upgrade restore hook is NOT
+ *   registered here — `client/upgrade.ts` registers it lazily on first
+ *   upgrade, so app-less resumable pages (whose whole bootstrap is the
+ *   generated loader entry) get it for free and this module stays free of
+ *   client-runtime imports.
  */
-export function resumePlugin(options?: ResumePluginOptions): SSRPlugin {
+export function resumePlugin(options?: ResumePluginOptions): SSRPlugin & { install(app: App): void } {
     return {
         name: PLUGIN_NAME,
+
+        install(app: App) {
+            provideHydrateDefaults(app._context, { boundaries: 'explicit' });
+        },
 
         server: {
             setup(ctx: SSRContext) {
