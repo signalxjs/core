@@ -7,7 +7,7 @@
  */
 
 import { resolveQrl } from './qrl-registry';
-import { getScope } from './scope';
+import { getScope, getDetachedScope } from './scope';
 
 export { __registerResumeQrl, resolveQrl, resetResumeQrls } from './qrl-registry';
 export type { QrlLoader } from './qrl-registry';
@@ -37,7 +37,7 @@ export async function invoke(symbol: string, event: Event, element: Element): Pr
                 `running against a detached scope.`
             );
         }
-        await handler(getScope(-1), event, element);
+        await handler(getDetachedScope(), event, element);
         return;
     }
 
