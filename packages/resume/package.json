@@ -17,6 +17,18 @@
             "development": "./dist/server/index.js",
             "production": "./dist/server/index.prod.js",
             "import": "./dist/server/index.js"
+        },
+        "./client": {
+            "types": "./dist/client/index.d.ts",
+            "development": "./dist/client/index.js",
+            "production": "./dist/client/index.prod.js",
+            "import": "./dist/client/index.js"
+        },
+        "./loader": {
+            "types": "./dist/loader/index.d.ts",
+            "development": "./dist/loader/index.js",
+            "production": "./dist/loader/index.prod.js",
+            "import": "./dist/loader/index.js"
         }
     },
     "files": [
