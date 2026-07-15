@@ -115,6 +115,15 @@ pnpm lint:fix
 pnpm size        # size-limit bundle-size check (.size-limit.json)
 pnpm verify:pack # verify npm pack output is sane
 pnpm test:edge   # WinterCG smoke: stream a document from the prod dist with node: imports forbidden (after pnpm build)
+pnpm bench:ssr:quick   # sigx-only quick SSR bench + regression table vs the committed baseline (after pnpm build)
+pnpm bench:ssr         # full comparative SSR bench: equivalence check, then sigx vs Vue/React/Preact
+                       # CI runs `verify` + the quick suite (bench-smoke job) as a CORRECTNESS gate: it catches
+                       # adapter rot and output divergence, never timing (CI logs the delta table without
+                       # --enforce, so its slower-hardware numbers are informational). Enforce locally with
+                       # `pnpm --filter @sigx/benchmarks bench:quick:enforce`, and re-baseline on YOUR machine
+                       # with `pnpm bench:ssr:baseline` (check-regression refuses to enforce across machines).
+                       # Every bench script runs node --conditions production: sigx picks its dev/prod dist at
+                       # module resolution, so a bare `node` measures the dev build (see benchmarks/README.md).
 pnpm dev:sigx    # watch-build the sigx package
 pnpm dev:vite    # watch-build the vite plugin
 ```

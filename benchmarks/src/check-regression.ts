@@ -153,7 +153,9 @@ function main(): void {
     // Noise filter: re-run the whole quick suite once and re-compare before failing.
     console.log(`\nenforce: ${failing.length} bench(es) worse than +${threshold}% — re-running the quick suite once to filter out noise...\n`);
     const quickScript = fileURLToPath(new URL('./quick.ts', import.meta.url));
-    const rerun = spawnSync(process.execPath, [quickScript], { stdio: 'inherit' });
+    // Forward execArgv (--conditions production etc.) — a bare re-run would
+    // resolve sigx's dev dist and skew the enforcement decision.
+    const rerun = spawnSync(process.execPath, [...process.execArgv, quickScript], { stdio: 'inherit' });
     if (rerun.status !== 0) {
         console.error('[check-regression] quick suite re-run failed.');
         process.exit(1);

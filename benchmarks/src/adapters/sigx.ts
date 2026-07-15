@@ -4,7 +4,8 @@
  */
 import { jsx } from 'sigx/jsx-runtime';
 import { component, type JSXElement } from 'sigx';
-import { renderToString, renderToNodeStream } from '@sigx/server-renderer/server';
+import { renderToString } from '@sigx/server-renderer/server';
+import { renderToNodeStream } from '@sigx/server-renderer/node';
 import type { FrameworkAdapter, ScenarioName } from './types.ts';
 import { measureReadable } from './measure.ts';
 import {
