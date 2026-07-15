@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+**Island signal state is now keyed automatically — named = transferred.**
+Signal state keys are derived from the declaration identifier by the
+`sigxIslands()` Vite transform (`const count = ctx.signal(0)` → key
+`"count"`) and injected into generated code; they are no longer component
+API. Only keyed signals are captured on the server and restored on the
+client — a signal without a key is plain local state, created fresh on the
+client. **Breaking:** the positional `$<index>` fallback and the
+unnamed-signal dev warning are removed; unkeyed signals no longer transfer.
+This aligns islands with the rest of the family — state identity is explicit
+or there is no transfer (`useData`'s required key, `defineStore(name)`) —
+and makes any server/client asymmetry degrade to "not transferred" instead
+of silently restoring wrong values. Keys are namespaced per island boundary
+record, so name reuse across components (every island calling its signal
+`state`) is safe; a duplicate key *within* one island keeps the first signal
+and leaves later ones local-only, with a dev warning. (#235)
+
 Rebuilt as the reference pack on the SSR boundary model (rfc-ssr-platform §1,
 signalxjs/core#199, shipped in signalxjs/core#200). The plugin is now a mapping
 from `client:*` directives to `SSRBoundary` records via the new pre-setup

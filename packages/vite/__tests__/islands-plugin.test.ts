@@ -10,7 +10,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync, existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { sigxIslands, scanIslandExports } from '../src/islands';
+import { sigxIslands, scanIslandExports, injectSignalNames } from '../src/islands';
 
 describe('scanIslandExports', () => {
     it('finds const/function/braced exports incl. aliases', () => {
@@ -28,6 +28,43 @@ describe('scanIslandExports', () => {
             { local: 'Inner', exported: 'Inner' },
             { local: 'Widget', exported: 'Widget' }
         ]);
+    });
+});
+
+describe('injectSignalNames', () => {
+    it('keys a declared signal by its declaration identifier', () => {
+        const out = injectSignalNames(`const count = ctx.signal(props.initial ?? 0);`);
+        expect(out).toBe(`const count = ((__sigxInit) => ctx.signal(__sigxInit, "count"))(props.initial ?? 0);`);
+    });
+
+    it('handles let/var, any context identifier, and multiline declarations', () => {
+        const out = injectSignalNames(`let state =\n    c.signal({ a: 1 });`);
+        expect(out).toContain(`let state =\n    ((__sigxInit) => c.signal(__sigxInit, "state"))({ a: 1 });`);
+    });
+
+    it('preserves generic call arguments', () => {
+        const out = injectSignalNames(`const state = ctx.signal<{ a: number }>({ a: 1 });`);
+        expect(out).toContain(`((__sigxInit) => ctx.signal<{ a: number }>(__sigxInit, "state"))({ a: 1 })`);
+    });
+
+    it('leaves non-declaration call sites untouched (they stay local-only)', () => {
+        const code = `return { a: ctx.signal(0) };\nlist.push(ctx.signal(1));\ncount = ctx.signal(2);`;
+        expect(injectSignalNames(code)).toBe(code);
+    });
+
+    it('is idempotent — rewritten output no longer matches', () => {
+        const once = injectSignalNames(`const count = ctx.signal(0);`);
+        expect(injectSignalNames(once)).toBe(once);
+    });
+});
+
+describe('transform — signal keys', () => {
+    it('injects keys in island modules alongside the __islandId stamp', () => {
+        const plugin = sigxIslands() as any;
+        const code = `export const Counter = component((ctx) => {\n    const count = ctx.signal(0);\n    return () => null;\n});`;
+        const result = plugin.transform.call({}, code, '/proj/src/islands/Counter.tsx');
+        expect(result.code).toContain(`ctx.signal(__sigxInit, "count")`);
+        expect(result.code).toContain('Counter.__islandId = "Counter"');
     });
 });
 

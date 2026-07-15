@@ -362,27 +362,27 @@ describe('signal state serialization', () => {
         expect(island.state.age).toBe(30);
     });
 
-    it('should use auto-indexed keys when name not specified', async () => {
-        const AutoIndex = component((ctx) => {
+    it('should not serialize unkeyed signals (local-only, named = transferred)', async () => {
+        const Unkeyed = component((ctx) => {
+            // No key injected (in real apps the vite transform derives one from
+            // the declaration) → local state, never captured.
             const a = ctx.signal(1);
             const b = ctx.signal(2);
-            useData('auto-index', async () => {
+            useData('unkeyed', async () => {
                 a.value = 10;
                 b.value = 20;
                 return null;
             });
             return () => <div>{a.value},{b.value}</div>;
-        }, { name: 'AutoIndex' });
+        }, { name: 'Unkeyed' });
 
         const ssr = createSSR().use(islandsPlugin());
-        const html = await ssr.render(<AutoIndex client:load />);
+        const html = await ssr.render(<Unkeyed client:load />);
 
         const islandData = parseIslandData(html);
         const island = Object.values(islandData)[0] as any;
-        expect(island.state).toBeDefined();
-        // Auto-indexed: $0, $1
-        expect(island.state['$0']).toBe(10);
-        expect(island.state['$1']).toBe(20);
+        // Signals still worked during render, but nothing transfers.
+        expect(island.state).toBeUndefined();
     });
 
     it('should skip non-serializable signal values', async () => {

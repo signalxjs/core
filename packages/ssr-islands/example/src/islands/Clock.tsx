@@ -6,6 +6,8 @@ import { component, onMounted, onUnmounted } from 'sigx';
  * better to do), the clock starts ticking.
  */
 export const Clock = component((ctx) => {
+    // Auto-keyed as "state" — the frozen server time survives hydration
+    // (restored, not recomputed) until the first client tick replaces it.
     const state = ctx.signal({ now: new Date().toLocaleTimeString() });
     // Mount hooks never run during SSR, so only the browser ticks — and the
     // timer is cleared on unmount (dev/HMR remounts don't leak intervals).

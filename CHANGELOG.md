@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- **`@sigx/vite/islands`**: `sigxIslands()` now auto-keys island signal state — `const state = ctx.signal(…)` declarations in island modules are rewritten so the call carries the declaration identifier as its state-serialization key (the key is a transform↔runtime contract, not component API). Keys are namespaced per island boundary record, so reusing common names like `state` across components is safe; signals not bound to a plain declaration stay local-only. Pairs with `@sigx/ssr-islands`' new named-=-transferred state model (see its changelog). (#235)
+
 - **`@sigx/runtime-core`**: production builds now throw compact coded errors — `SIGX### <detail> — see https://sigx.dev/errors/SIGX###/` — while dev builds keep the full message and `suggestion` (dev text unchanged). `error.code` is identical in both modes; only the prod `message`/`suggestion` shape changed. The previously uncoded runtime throws now use `SigxError` with new codes: `SIGX203` (defineFactory setup return type), `SIGX300` (`useData`/`useAction`/`useStream` outside setup), `SIGX400`/`SIGX401` (destroyed topic / topic group) — these were plain `Error`s before. Saves ~0.9 KB brotli across the framework. (#230)
 
 ### Added

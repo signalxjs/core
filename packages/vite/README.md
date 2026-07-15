@@ -89,7 +89,9 @@ const assets = collectAssets(manifest, ['index.html']);
 
 `sigxIslands()` (from `@sigx/vite/islands`) completes the
 `@sigx/ssr-islands` story: island modules (`*.island.tsx` or anything under
-`islands/`) get stable `__islandId` identities, `virtual:sigx-islands`
+`islands/`) get stable `__islandId` identities and automatic signal state
+keys (`const state = ctx.signal(…)` is keyed `"state"` from the declaration —
+named = transferred, per island instance), `virtual:sigx-islands`
 registers a lazy code-split loader per island in the client entry, and the
 client build emits `.vite/sigx-islands-manifest.json` for
 `islandsPlugin({ manifest })` on the server.
