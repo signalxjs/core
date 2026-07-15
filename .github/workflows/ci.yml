@@ -93,9 +93,11 @@ jobs:
     # import broke in #202 and nobody noticed until #214. This job is a
     # correctness gate, not a timing gate — `verify` proves every framework
     # adapter still builds an equivalent tree, and the quick suite proves the
-    # adapters load and render. check-regression prints its delta table but
-    # skips enforcement here (the committed baseline's machine fingerprint
-    # never matches a CI runner), so runner noise can't fail the build.
+    # adapters load and render. bench:ssr:quick does NOT pass --enforce, so
+    # check-regression only prints its delta table (expect "worse than +25%"
+    # notes: a CI runner is slower than whatever machine recorded the
+    # baseline). Timing enforcement stays local — and even under --enforce,
+    # check-regression skips it on a machine-fingerprint mismatch.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
