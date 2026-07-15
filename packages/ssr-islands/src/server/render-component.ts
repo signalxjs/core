@@ -52,7 +52,7 @@ export function createTrackingSignal(signalMap: Map<string, any>): SSRSignalFn {
         const key = generateSignalKey(name, signalIndex++);
 
         // Dev warning: positional keys are fragile in islands
-        if (process.env.NODE_ENV !== 'production' && !name && !hasWarnedPositional) {
+        if (__DEV__ && !name && !hasWarnedPositional) {
             hasWarnedPositional = true;
             // Guard the hint: `initial` may hold circular references, and an
             // unguarded JSON.stringify here would throw and break SSR in dev.

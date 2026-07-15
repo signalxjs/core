@@ -117,7 +117,7 @@ export function makeUnhandledReporter(
     let warned = false;
     let reported: Error | null = null;
     return (e) => {
-        if (process.env.NODE_ENV !== 'production' && !warned) {
+        if (__DEV__ && !warned) {
             warned = true;
             console.warn(
                 `[${label}] a data error had no \`error\` arm in match() — it bubbled to the nearest ` +
@@ -163,7 +163,7 @@ export function warnUnknownOptions(
     options: object | undefined,
     coreKeys: ReadonlySet<string>
 ): void {
-    if (process.env.NODE_ENV === 'production' || !options) return;
+    if (!__DEV__ || !options) return;
     for (const k of Object.keys(options)) {
         if (coreKeys.has(k) || packHandledOptionKeys.has(k) || warnedUnknownOptions.has(k)) continue;
         warnedUnknownOptions.add(k);

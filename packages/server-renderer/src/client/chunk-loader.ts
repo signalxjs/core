@@ -36,14 +36,14 @@ export async function loadBoundaryComponent(record: SSRBoundaryRecord): Promise<
     // 1. Sync lookup — zero-cost if already loaded
     const eager = getComponent(name);
     if (eager) {
-        if (process.env.NODE_ENV !== 'production') {
+        if (__DEV__) {
             console.log(`%c[Islands] ⚡ "${name}" resolved from eager registry (already loaded)`, 'color: #9e9e9e');
         }
         return eager;
     }
 
     // 2. Lazy registry (populated by Vite plugin transform)
-    if (process.env.NODE_ENV !== 'production') {
+    if (__DEV__) {
         console.log(`%c[Islands] 📦 Loading chunk for "${name}"...`, 'color: #2196f3; font-weight: bold');
         const t0 = performance.now();
         const lazy = await resolveComponent(name);
@@ -59,7 +59,7 @@ export async function loadBoundaryComponent(record: SSRBoundaryRecord): Promise<
 
     // 3. Direct chunk URL (from SSR manifest)
     if (record.chunk?.url) {
-        if (process.env.NODE_ENV !== 'production') {
+        if (__DEV__) {
             console.log(`%c[Islands] 🌐 Loading "${name}" from chunk URL: ${record.chunk.url}`, 'color: #ff9800');
         }
         return loadFromChunkUrl(record.chunk.url, record.chunk.export || 'default', name);
@@ -85,13 +85,13 @@ async function loadFromChunkUrl(
             return mod[exportName] as ComponentFactory;
         }
         const component = unwrapComponentModule(mod as any, name);
-        if (!component && process.env.NODE_ENV !== 'production') {
+        if (!component && __DEV__) {
             console.warn(`[Islands] No component found in chunk: ${url}`);
         }
         return component;
     }).catch((err) => {
         chunkLoadCache.delete(url);
-        if (process.env.NODE_ENV !== 'production') {
+        if (__DEV__) {
             console.error(`[Islands] Failed to load chunk ${url}:`, err);
         }
         return undefined;

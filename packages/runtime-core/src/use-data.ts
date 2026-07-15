@@ -104,7 +104,7 @@ export function useData<T>(
     // The warning consults the shared handled-keys registry, so an installed
     // pack's own options stay quiet (it registered them at install) while
     // typos keep warning even with an engine present.
-    if (process.env.NODE_ENV !== 'production') {
+    if (__DEV__) {
         warnUnknownOptions('useData', options, handledReadOptionKeys);
     }
 

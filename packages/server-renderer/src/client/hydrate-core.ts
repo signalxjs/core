@@ -252,7 +252,7 @@ export function hydrateNode(vnode: VNode, dom: Node | null, parent: Node): Node 
                 scan = scan.nextSibling;
             }
             if (scan) {
-                if (process.env.NODE_ENV !== 'production' && scan !== dom) {
+                if (__DEV__ && scan !== dom) {
                     // Skipped over orphan siblings on the way to a matching
                     // element. Surface SSR drift instead of silently papering
                     // over it — the skipped nodes stay in the DOM as visible
@@ -267,7 +267,7 @@ export function hydrateNode(vnode: VNode, dom: Node | null, parent: Node): Node 
                 // branches above. Without this, a later reactive patch with
                 // an undefined vnode.dom would mount fresh at the end of the
                 // parent and produce a duplicate.
-                if (process.env.NODE_ENV !== 'production') {
+                if (__DEV__) {
                     const cls = vnode.props?.class || '';
                     console.warn('[Hydrate] Expected element but got:', dom, '| tag:', vnode.type, '| class:', cls, '| parent:', parent?.nodeName);
                 }

@@ -77,7 +77,7 @@ export function useAction<T, In = void>(fn: Fetcher<T, In>, opts?: ActionOptions
     // unknown-option warning via registerHandledAsyncOptionKeys.
     const engine = lookupProvided(ASYNC_ENGINE_TOKEN);
 
-    if (process.env.NODE_ENV !== 'production') {
+    if (__DEV__) {
         warnUnknownOptions('useAction', opts, handledActionOptionKeys);
     }
 

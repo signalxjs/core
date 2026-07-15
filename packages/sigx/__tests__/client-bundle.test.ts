@@ -54,7 +54,7 @@ async function bundleClientApp(entrySource: string, options: { minifySyntax?: bo
                 });
             }
         }],
-        define: { 'process.env.NODE_ENV': '"production"' },
+        define: { 'process.env.NODE_ENV': '"production"', __DEV__: 'false' },
         logLevel: 'silent'
     });
     return result.outputFiles[0].text;

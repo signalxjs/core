@@ -87,7 +87,7 @@ export async function resolveComponent(name: string): Promise<ComponentFactory |
         return component;
     }).catch(err => {
         pendingResolutions.delete(name);
-        if (process.env.NODE_ENV !== 'production') {
+        if (__DEV__) {
             console.error(`[Islands] Failed to load island chunk for "${name}":`, err);
         }
         return undefined;
@@ -128,7 +128,7 @@ export function unwrapComponentModule(
         }
     }
 
-    if (process.env.NODE_ENV !== 'production') {
+    if (__DEV__) {
         console.warn(`[Islands] Could not find component factory in module for "${name}"`);
     }
     return undefined;

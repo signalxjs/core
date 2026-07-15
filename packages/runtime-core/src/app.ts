@@ -122,7 +122,7 @@ export function defineApp<TContainer = any>(rootComponent: JSXElement): App<TCon
         use(plugin, options) {
             if (installedPlugins.has(plugin)) {
                 // Plugin already installed, skip
-                if (process.env.NODE_ENV !== 'production') {
+                if (__DEV__) {
                     console.warn(`Plugin ${(plugin as Plugin).name || 'anonymous'} is already installed.`);
                 }
                 return app;
@@ -136,7 +136,7 @@ export function defineApp<TContainer = any>(rootComponent: JSXElement): App<TCon
             } else if (plugin && typeof plugin.install === 'function') {
                 // Object-style plugin
                 plugin.install(app, options);
-            } else if (process.env.NODE_ENV !== 'production') {
+            } else if (__DEV__) {
                 console.warn('Invalid plugin: must be a function or have an install() method.');
             }
 
@@ -183,7 +183,7 @@ export function defineApp<TContainer = any>(rootComponent: JSXElement): App<TCon
             const prev = setActiveAppContext(context);
             try {
                 const result = fn();
-                if (process.env.NODE_ENV !== 'production' && !warnedAsyncRunWithContext) {
+                if (__DEV__ && !warnedAsyncRunWithContext) {
                     // The probe must never alter behavior: a hostile `then`
                     // getter (Proxy trap) could throw, so swallow probe errors
                     // and pass the value through regardless.
@@ -214,7 +214,7 @@ export function defineApp<TContainer = any>(rootComponent: JSXElement): App<TCon
         },
 
         onError(handler) {
-            if (process.env.NODE_ENV !== 'production' && context.config.onError) {
+            if (__DEV__ && context.config.onError) {
                 console.warn(
                     'app.onError() replaces the previous handler — for multiple observers use ' +
                     'app.hook({ onComponentError }).'
@@ -226,7 +226,7 @@ export function defineApp<TContainer = any>(rootComponent: JSXElement): App<TCon
 
         directive(name: string, definition?: any): any {
             if (definition !== undefined) {
-                if (process.env.NODE_ENV !== 'production' && !isDirective(definition)) {
+                if (__DEV__ && !isDirective(definition)) {
                     console.warn(
                         `[sigx] app.directive('${name}', ...) received a value that is not a valid directive definition. ` +
                         `Use defineDirective() to create directive definitions.`
@@ -240,7 +240,7 @@ export function defineApp<TContainer = any>(rootComponent: JSXElement): App<TCon
 
         mount(target, renderFn?) {
             if (isMounted) {
-                if (process.env.NODE_ENV !== 'production') {
+                if (__DEV__) {
                     console.warn('App is already mounted. Call app.unmount() first.');
                 }
                 return app;
@@ -256,7 +256,7 @@ export function defineApp<TContainer = any>(rootComponent: JSXElement): App<TCon
             container = target;
             isMounted = true;
 
-            if (process.env.NODE_ENV !== 'production') {
+            if (__DEV__) {
                 const devtools = getDevtoolsHook();
                 if (devtools) {
                     devtools.apps.add(context);
@@ -276,7 +276,7 @@ export function defineApp<TContainer = any>(rootComponent: JSXElement): App<TCon
 
         unmount() {
             if (!isMounted) {
-                if (process.env.NODE_ENV !== 'production') {
+                if (__DEV__) {
                     console.warn('App is not mounted.');
                 }
                 return;
@@ -286,7 +286,7 @@ export function defineApp<TContainer = any>(rootComponent: JSXElement): App<TCon
                 unmountFn();
             }
 
-            if (process.env.NODE_ENV !== 'production') {
+            if (__DEV__) {
                 const devtools = getDevtoolsHook();
                 if (devtools) {
                     devtools.emit({ type: 'app:unmount', app: context });
@@ -357,7 +357,7 @@ export function notifyComponentCreated(context: AppContext | null, instance: Com
             handleHookError(context, err as Error, instance, 'onComponentCreated');
         }
     }
-    if (process.env.NODE_ENV !== 'production') {
+    if (__DEV__) {
         const devtools = getDevtoolsHook();
         if (devtools) devtools.emit({
             type: 'component:created',
@@ -382,7 +382,7 @@ export function notifyComponentMounted(context: AppContext | null, instance: Com
             handleHookError(context, err as Error, instance, 'onComponentMounted');
         }
     }
-    if (process.env.NODE_ENV !== 'production') {
+    if (__DEV__) {
         const devtools = getDevtoolsHook();
         if (devtools) devtools.emit({ type: 'component:mounted', app: context, instance, instanceId: getInstanceId(instance.ctx) });
     }
@@ -401,7 +401,7 @@ export function notifyComponentUnmounted(context: AppContext | null, instance: C
             handleHookError(context, err as Error, instance, 'onComponentUnmounted');
         }
     }
-    if (process.env.NODE_ENV !== 'production') {
+    if (__DEV__) {
         const devtools = getDevtoolsHook();
         if (devtools) devtools.emit({ type: 'component:unmounted', app: context, instance, instanceId: getInstanceId(instance.ctx) });
     }
@@ -420,7 +420,7 @@ export function notifyComponentUpdated(context: AppContext | null, instance: Com
             handleHookError(context, err as Error, instance, 'onComponentUpdated');
         }
     }
-    if (process.env.NODE_ENV !== 'production') {
+    if (__DEV__) {
         const devtools = getDevtoolsHook();
         if (devtools) devtools.emit({ type: 'component:updated', app: context, instance, instanceId: getInstanceId(instance.ctx) });
     }
@@ -441,7 +441,7 @@ export function handleComponentError(
     instance: ComponentInstance | null,
     info: string
 ): boolean {
-    if (context && process.env.NODE_ENV !== 'production') {
+    if (context && __DEV__) {
         const devtools = getDevtoolsHook();
         if (devtools) devtools.emit({ type: 'component:error', app: context, instance, instanceId: getInstanceId(instance?.ctx ?? null), error: err, info });
     }

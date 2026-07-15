@@ -241,7 +241,7 @@ export function createRequestHandler(options: RequestHandlerOptions): NodeReques
                     // Mid-stream failure after the head was sent: the document
                     // generator already routed it to onError; end the response
                     // visibly truncated.
-                    if (process.env.NODE_ENV !== 'production') {
+                    if (__DEV__) {
                         console.error('[createRequestHandler] stream error:', err);
                     }
                     res.end();
