@@ -6,7 +6,7 @@
  * modules, and relative-import resolution for extracted handlers.
  */
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -186,5 +186,24 @@ describe('sigxResume — virtual modules', () => {
         expect(entry).toContain('initResume(["click"]');
         expect(entry).toContain("() => import(\"virtual:sigx-resume\")");
         expect(entry).toContain("() => import('@sigx/resume/client')");
+    });
+});
+
+describe('sigxResume — duplicate component names', () => {
+    it('keeps the first file and warns for registry and manifest', () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const { plugin, root } = makeProject({
+            'src/resume/a.tsx': COUNTER.replace('../analytics', '../../analytics'),
+            'src/resume/b/dupe.tsx': COUNTER
+        });
+        try {
+            const registry = plugin.load.call({}, '\0virtual:sigx-resume');
+            const registrations = registry.split('\n').filter((l: string) => l.includes('__registerIslandChunk("Counter"'));
+            expect(registrations).toHaveLength(1);
+            expect(warn).toHaveBeenCalledWith(expect.stringContaining('duplicate resume component name "Counter"'));
+        } finally {
+            warn.mockRestore();
+            rmSync(root, { recursive: true, force: true });
+        }
     });
 });

@@ -110,6 +110,26 @@ export function sigxResume(options: SigxResumeOptions = {}): Plugin {
     const stampable = (extraction: ResumeExtraction) =>
         extraction.components.filter((c) => c.siteCount > 0 || c.signalCount > 0);
 
+    /**
+     * Component export names are app-wide registry/manifest keys (like island
+     * names). Duplicates across resume modules would silently overwrite each
+     * other's upgrade loaders — first file wins, the rest warn and are
+     * skipped from registration and the manifest.
+     */
+    function ownedBy(name: string, file: string): boolean {
+        for (const [otherFile, extraction] of extractions) {
+            if (otherFile === file) return true;
+            if (extraction.components.some((c) => c.exported === name)) {
+                console.warn(
+                    `[sigx:resume] duplicate resume component name "${name}" ` +
+                    `(${otherFile} vs ${file}) — component names must be unique; keeping the first.`
+                );
+                return false;
+            }
+        }
+        return true;
+    }
+
     return {
         name: 'sigx:resume',
 
@@ -145,6 +165,7 @@ export function sigxResume(options: SigxResumeOptions = {}): Plugin {
                     }
                     const moduleSpec = JSON.stringify('/' + relPath(file));
                     for (const comp of stampable(extraction)) {
+                        if (!ownedBy(comp.exported, file)) continue;
                         lines.push(
                             `__registerIslandChunk(${JSON.stringify(comp.exported)}, () => import(${moduleSpec}).then(m => m[${JSON.stringify(comp.exported)}]));`
                         );
@@ -231,6 +252,7 @@ export function sigxResume(options: SigxResumeOptions = {}): Plugin {
                     const componentChunk = byModule.get(file.replace(/\\/g, '/'));
                     if (componentChunk) {
                         for (const comp of stampable(extraction)) {
+                            if (!ownedBy(comp.exported, file)) continue;
                             manifest.components[comp.exported] = { chunkUrl: '/' + componentChunk, exportName: comp.exported };
                         }
                     }
