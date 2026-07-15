@@ -3,16 +3,20 @@
  * (rfc-ssr-platform §3.1; the plugin `IslandsPluginOptions.manifest` has
  * anticipated since #119).
  *
- * Three jobs, all keyed on the island file convention (configurable):
+ * Four jobs, all keyed on the island file convention (configurable):
  *
  * 1. **Stable identity** — stamps `__islandId` on every named component
  *    export of an island module (the field the boundary registry keys on,
  *    `vnode.type.__islandId || __name`).
- * 2. **Client registration** — provides `virtual:sigx-islands`: importing it
+ * 2. **State keys** — rewrites `const state = ctx.signal(…)` declarations so
+ *    the call carries the declaration identifier as its state-serialization
+ *    key (see `injectSignalNames`). Named = transferred: signals the
+ *    transform can't key stay local-only.
+ * 3. **Client registration** — provides `virtual:sigx-islands`: importing it
  *    from the client entry registers a lazy loader per island
  *    (`__registerIslandChunk(name, () => import(...))`), so island chunks
  *    code-split and load on demand when their hydration strategy fires.
- * 3. **Build manifest** — the client build emits
+ * 4. **Build manifest** — the client build emits
  *    `.vite/sigx-islands-manifest.json` mapping island names to
  *    `{ chunkUrl, exportName }`; feed it to the server:
  *    `islandsPlugin({ manifest })`.
@@ -80,6 +84,38 @@ export function scanIslandExports(code: string): IslandExport[] {
         }
     }
     return [...byExported.values()];
+}
+
+/**
+ * Matches a signal declared into a variable inside an island module:
+ *   const state = ctx.signal({ … })     (also let/var, any ctx identifier,
+ *   optional generic args on the call)
+ * Captures: 1 = declaration head up to `=`, 2 = the variable identifier,
+ * 3 = the callee (e.g. `ctx.signal` or `ctx.signal<Foo>`).
+ */
+const SIGNAL_DECL_RE =
+    /\b((const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*)([A-Za-z_$][\w$]*\.signal(?:<[^<>()]*>)?)\(/g;
+
+/**
+ * Inject island state keys: rewrite `const state = ctx.signal(…)` so the call
+ * carries the declaration identifier as its serialization key —
+ * `const state = ((__sigxInit) => ctx.signal(__sigxInit, "state"))(…)`.
+ *
+ * The key is the private contract between this transform and the islands
+ * runtime's tracking/restoring signal (named = transferred; keys are
+ * namespaced per island boundary, so name reuse across components is safe).
+ * Only the callee is rewritten — arguments are never parsed — and outside an
+ * island render the extra argument reaches the core `signal()`, which ignores
+ * it. Call sites not bound to a plain declaration are left alone and stay
+ * local-only; the rewritten form no longer matches the pattern, so the
+ * transform is idempotent.
+ */
+export function injectSignalNames(code: string): string {
+    return code.replace(
+        SIGNAL_DECL_RE,
+        (_m, head: string, _kw: string, id: string, callee: string) =>
+            `${head}((__sigxInit) => ${callee}(__sigxInit, ${JSON.stringify(id)}))(`
+    );
 }
 
 /** Walk a directory collecting files (bounded to the project tree). */
@@ -165,7 +201,7 @@ export function sigxIslands(options: SigxIslandsOptions = {}): Plugin {
                 .map(({ local, exported }) =>
                     `if (typeof ${local} === 'function' && ${local}.__setup) { ${local}.__islandId = ${JSON.stringify(exported)}; }`)
                 .join('\n');
-            return { code: `${code}\n;${stamps}\n`, map: null };
+            return { code: `${injectSignalNames(code)}\n;${stamps}\n`, map: null };
         },
 
         generateBundle: {

@@ -13,7 +13,17 @@ import { isSerializable } from '@sigx/server-renderer/server';
 /**
  * Signal factory used by island components on the server to declare reactive
  * state whose value is captured for client hydration. Mirrors the `signal()`
- * call shape with an optional stable `name` used as the serialization key.
+ * call shape with an optional trailing `name` used as the serialization key.
+ *
+ * The `name` is NOT public component API — it is injected into generated code
+ * by the `sigxIslands()` Vite transform, which derives it from the declaration
+ * identifier (`const state = ctx.signal(…)` → key `"state"`). Keys are
+ * namespaced per island boundary record, so reuse across components is safe.
+ *
+ * Named = transferred: a signal without a key is plain local state — created,
+ * never captured — and the client seeds it from the same initial. Any
+ * server/client asymmetry therefore degrades to "not transferred", never to
+ * restoring a wrong value.
  *
  * This is island-specific overhead — it used to live in `@sigx/server-renderer`
  * but was removed when the SSR layer moved to the `useAsync`/`useStream` +
@@ -27,48 +37,34 @@ import { isSerializable } from '@sigx/server-renderer/server';
 export type SSRSignalFn = <T>(initial: T, name?: string) => { value: T };
 
 /**
- * Generate a stable serialization key for a tracked island signal. Named
- * signals key by their name; unnamed signals fall back to a positional
- * `$<index>` key (fragile across server/client declaration-order drift —
- * `createTrackingSignal` warns in dev).
- *
- * Private helper — previously exported by `@sigx/server-renderer`, now local.
- */
-function generateSignalKey(name: string | undefined, index: number): string {
-    return name ?? `$${index}`;
-}
-
-/**
- * Creates a tracking signal function that records signal names and values.
+ * Creates a tracking signal function that records signal keys and values.
  * Used during async setup to capture state for client hydration.
  * Supports both primitive and object signals.
  */
 export function createTrackingSignal(signalMap: Map<string, any>): SSRSignalFn {
-    let signalIndex = 0;
-    let hasWarnedPositional = false;
-
     return function trackingSignal(initial: any, name?: string): any {
-        // Generate a stable key for this signal
-        const key = generateSignalKey(name, signalIndex++);
-
-        // Dev warning: positional keys are fragile in islands
-        if (__DEV__ && !name && !hasWarnedPositional) {
-            hasWarnedPositional = true;
-            // Guard the hint: `initial` may hold circular references, and an
-            // unguarded JSON.stringify here would throw and break SSR in dev.
-            let initialHint: string;
-            try {
-                initialHint = JSON.stringify(initial);
-            } catch {
-                initialHint = String(initial);
-            }
-            console.warn(
-                `[SSR Islands] Signal created without a name in an island component. ` +
-                `Positional keys ("${key}") are fragile — if signal declaration order differs ` +
-                `between server and client, state restoration will silently restore wrong values. ` +
-                `Consider using named signals: signal(${initialHint}, "mySignalName")`
-            );
+        // No key → local-only state: nothing to transfer under, so hand back a
+        // plain signal and never capture it.
+        if (!name) {
+            return signal(initial as any);
         }
+
+        // Duplicate key within one island (e.g. two declarations that resolve
+        // to the same identifier via a shared setup helper): first wins, later
+        // ones stay local so restoration can never mis-map values.
+        if (signalMap.has(name)) {
+            if (__DEV__) {
+                console.warn(
+                    `[SSR Islands] Duplicate island state key "${name}" — two signals in the same ` +
+                    `island resolve to the same declaration name. The first keeps the key; this one ` +
+                    `stays local-only (not transferred). Declare each transferred signal with a ` +
+                    `distinct variable name.`
+                );
+            }
+            return signal(initial as any);
+        }
+
+        const key = name;
 
         // Create the real signal (handles both primitives and objects)
         const sig = signal(initial as any);

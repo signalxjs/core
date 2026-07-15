@@ -75,29 +75,35 @@ describe('createTrackingSignal', () => {
         expect(map.get('m')).toBe(0);
     });
 
-    it('warns once for an unnamed signal (fragile positional key) and uses a $index key', () => {
+    it('leaves an unkeyed signal local-only: live but never captured, no warning', () => {
         const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
         const map = new Map<string, any>();
         const ssrSignal = createTrackingSignal(map) as SSRSignalFn;
 
-        ssrSignal(1 as any); // unnamed → positional key "$0", warns
-        ssrSignal(2 as any); // unnamed again → "$1", but warns only once
+        const sig = ssrSignal(1 as any); // no key → plain local signal
+        expect(sig.value).toBe(1);
+        (sig as any).value = 2;
+        expect(sig.value).toBe(2);
 
-        expect(map.get('$0')).toBe(1);
-        expect(map.get('$1')).toBe(2);
-        expect(warnSpy).toHaveBeenCalledTimes(1);
+        expect(map.size).toBe(0);
+        expect(warnSpy).not.toHaveBeenCalled();
     });
 
-    it('falls back to String() in the dev hint when initial is circular', () => {
+    it('duplicate key: first wins, later ones stay local-only with a dev warning', () => {
         const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
         const map = new Map<string, any>();
         const ssrSignal = createTrackingSignal(map) as SSRSignalFn;
 
-        const circular: any = {};
-        circular.self = circular;
-        // Unnamed + circular initial → JSON.stringify in the hint throws and is
-        // caught, falling back to String(initial). Must not throw.
-        expect(() => ssrSignal(circular)).not.toThrow();
+        const first = ssrSignal(1 as any, 'n');
+        const second = ssrSignal(2 as any, 'n');
+
+        // Only the first occupies the key; the duplicate is live but untracked.
+        (first as any).value = 10;
+        (second as any).value = 20;
+        expect(map.get('n')).toBe(10);
+        expect(map.size).toBe(1);
+        expect(second.value).toBe(20);
         expect(warnSpy).toHaveBeenCalledTimes(1);
+        expect(warnSpy.mock.calls.flat().join(' ')).toContain('Duplicate island state key "n"');
     });
 });

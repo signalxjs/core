@@ -12,29 +12,44 @@ import { signal } from 'sigx';
 import type { SSRSignalFn } from '../server/render-component';
 
 /**
- * Generate the serialization key for a restored island signal. Must match
- * `generateSignalKey` in `server/render-component.ts`: named signals key by their
- * name, unnamed signals fall back to a positional `$<index>` key.
- */
-function generateSignalKey(name: string | undefined, index: number): string {
-    return name ?? `$${index}`;
-}
-
-/**
  * Create a signal factory that seeds island signals from server-captured state.
  *
- * Mirrors `createTrackingSignal`'s shape — a `{ value }` proxy that uniformly
- * exposes `.value` for both primitive and object signals — so island component
- * code reads the same interface on the client as it produced on the server. When
- * the serialization key is present in `state`, the signal starts from the restored
- * value; otherwise it falls back to the supplied `initial`.
+ * Must mirror `createTrackingSignal`'s keying: the key is the trailing `name`
+ * injected by the `sigxIslands()` Vite transform (never public component API);
+ * a signal without a key is plain local state and seeds from its own initial.
+ * Duplicate keys follow the server's first-wins rule — the first occurrence
+ * restores, later ones stay local — so the two sides can never mis-map values.
+ *
+ * Named signals keep `createTrackingSignal`'s shape — a `{ value }` proxy that
+ * uniformly exposes `.value` for both primitive and object signals — so island
+ * component code reads the same interface on the client as it produced on the
+ * server. When the key is present in `state`, the signal starts from the
+ * restored value; otherwise it falls back to the supplied `initial`.
  */
 export function createRestoringSignal(state: Record<string, any>): SSRSignalFn {
-    let signalIndex = 0;
+    const seen = new Set<string>();
 
     return function restoringSignal(initial: any, name?: string): any {
-        const key = generateSignalKey(name, signalIndex++);
+        // No key → local-only state, exactly as on the server.
+        if (!name) {
+            return signal(initial as any);
+        }
 
+        // Duplicate key → local-only, matching the server's first-wins rule.
+        if (seen.has(name)) {
+            if (__DEV__) {
+                console.warn(
+                    `[SSR Islands] Duplicate island state key "${name}" — two signals in the same ` +
+                    `island resolve to the same declaration name. The first keeps the key; this one ` +
+                    `stays local-only (not restored). Declare each transferred signal with a ` +
+                    `distinct variable name.`
+                );
+            }
+            return signal(initial as any);
+        }
+        seen.add(name);
+
+        const key = name;
         const seed = Object.prototype.hasOwnProperty.call(state, key) ? state[key] : initial;
 
         // Live signal — writes go straight through so client reactivity works.

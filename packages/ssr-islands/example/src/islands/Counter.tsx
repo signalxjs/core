@@ -7,6 +7,8 @@ import { component } from 'sigx';
  * decided per USE by the client:* directive, not by the component.
  */
 export const Counter = component<{ label: string; initial?: number }>((ctx) => {
+    // Island state transfers automatically: the vite transform keys this
+    // signal by its declaration name ("count"), per island instance.
     const count = ctx.signal(ctx.props.initial ?? 0);
     return () => (
         <p>

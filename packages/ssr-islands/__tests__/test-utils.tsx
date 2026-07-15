@@ -87,9 +87,11 @@ export function setBoundaryTable(records: Record<string, SSRBoundaryRecord>): vo
 }
 
 /**
- * Component with a named tracked signal for island state-restoration testing.
- * Moved here from server-renderer's test-utils. Uses the islands tracked-signal
- * mechanism (`ctx.signal as SSRSignalFn`), still wired by the islands plugin.
+ * Component with a keyed tracked signal for island state-restoration testing.
+ * Moved here from server-renderer's test-utils. The explicit 2-arg call
+ * (`ctx.signal as SSRSignalFn`) emulates what the `sigxIslands()` vite
+ * transform injects from the declaration identifier in real apps — the key is
+ * a transform↔runtime contract, not public component API.
  */
 export const TestAsyncCounter = component((ctx) => {
     const ssrSignal = ctx.signal as SSRSignalFn;
