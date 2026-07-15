@@ -17,7 +17,9 @@
  * - `stopPropagation` is scoped to the synthetic bubble (`cancelBubble`
  *   checked between handlers); native propagation has already happened —
  *   capture-at-document saw the event first, so nothing user-visible
- *   depends on it.
+ *   depends on it. `cancelBubble` set by NATIVE listeners during dispatch
+ *   also suppresses the replay — deliberate behavior parity: a hydrated
+ *   component's real listener would not have fired either.
  *
  * Delegation stays the permanent dispatch path — the pack never attaches
  * per-element listeners; repeat events resolve through settled promises.
