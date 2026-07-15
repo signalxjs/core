@@ -29,7 +29,7 @@
  * Unlike `injectSignalNames`, this is genuinely beyond a regex: finding the
  * end of an arbitrary handler expression and classifying its free variables
  * are parser problems. Vite 8 exports rolldown's oxc-backed `parseAst`
- * (ESTree-shaped, byte spans on every node), so no new dependency is needed.
+ * (ESTree-shaped, UTF-16 string-index spans on every node), so no new dependency is needed.
  *
  * Emitted handler modules may contain TypeScript (param annotations are kept
  * verbatim) — the plugin must serve them under a `.ts`-suffixed virtual id.
