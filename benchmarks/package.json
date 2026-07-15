@@ -5,12 +5,12 @@
     "type": "module",
     "description": "Comparative SSR benchmarks: sigx vs Vue vs React vs Preact",
     "scripts": {
-        "bench": "node src/verify-equivalence.ts && node src/run-all.ts",
-        "bench:stream": "node src/run-stream.ts",
-        "bench:quick": "node src/quick.ts && node src/check-regression.ts",
-        "bench:quick:enforce": "node src/quick.ts && node src/check-regression.ts --enforce",
-        "bench:baseline": "node src/run-all.ts --baseline && node src/run-stream.ts --baseline && node src/quick.ts --baseline",
-        "verify": "node src/verify-equivalence.ts"
+        "bench": "node --conditions production src/verify-equivalence.ts && node --conditions production src/run-all.ts",
+        "bench:stream": "node --conditions production src/run-stream.ts",
+        "bench:quick": "node --conditions production src/quick.ts && node --conditions production src/check-regression.ts",
+        "bench:quick:enforce": "node --conditions production src/quick.ts && node --conditions production src/check-regression.ts --enforce",
+        "bench:baseline": "node --conditions production src/run-all.ts --baseline && node --conditions production src/run-stream.ts --baseline && node --conditions production src/quick.ts --baseline",
+        "verify": "node --conditions production src/verify-equivalence.ts"
     },
     "devDependencies": {
         "@sigx/server-renderer": "workspace:*",
