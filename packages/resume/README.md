@@ -69,8 +69,8 @@ asserts (via JS coverage — execution, not fetches) that only the loader
 executes on load, the first click replays through its QRL and upgrades on
 write, read-only handlers never execute their component chunk, and
 wake-on-interaction hydrates without replay. The server half is
-WinterCG-clean (`pnpm test:edge` renders a resumable boundary from the prod
-dist with `node:` imports forbidden).
+WinterCG-clean: after `pnpm build`, `pnpm test:edge` renders a resumable
+boundary from the prod dist with `node:` imports forbidden.
 
 Platform findings from building this pack: `docs/resume-stress-test-findings.md`.
 

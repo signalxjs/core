@@ -17,7 +17,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 
-const PORT = 4173;
+const PORT = Number(process.env.PORT) || 4173;
 
 function assert(cond, message) {
     if (!cond) {
@@ -33,8 +33,20 @@ const server = spawn(process.execPath, ['--conditions', 'production', 'server.mj
     stdio: 'ignore'
 });
 
+async function waitForServer(url, timeoutMs = 15000) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+        try {
+            const res = await fetch(url);
+            if (res.ok) return;
+        } catch { /* not up yet */ }
+        await new Promise((r) => setTimeout(r, 200));
+    }
+    throw new Error(`❌ resume-smoke: server did not come up on ${url}`);
+}
+
 try {
-    await new Promise((r) => setTimeout(r, 1500));
+    await waitForServer(`http://localhost:${PORT}/`);
     const browser = await chromium.launch();
     const page = await browser.newPage();
     page.on('pageerror', (e) => console.error('[pageerror]', e.message));
