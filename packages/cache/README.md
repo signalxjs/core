@@ -64,6 +64,32 @@ const save = useAction(saveUser, {
 - Core's pinned rules hold: `loading === (state === 'pending')`, value/error
   mutual exclusion, `refresh()`/`run()` never reject, actions never aborted.
 
+## Renderer portability
+
+The pack depends on `@sigx/runtime-core` + `@sigx/reactivity` only — never
+the `sigx` umbrella — so it loads and works on any renderer (web,
+[lynx](https://github.com/signalxjs/lynx),
+[terminal](https://github.com/signalxjs/terminal)). Two platform notes:
+
+- Windowless client runtimes must declare themselves live clients once —
+  their platform module calls `declareLiveClient()` from
+  `@sigx/runtime-core/internals` (a renderer concern, not an app one; the
+  web needs nothing).
+- Focus revalidation's *event source* is pluggable: the default subscribes
+  to window focus + `visibilitychange` (installed only when a DOM is
+  present). Elsewhere, hand the plugin your platform's attention event:
+
+```ts
+app.use(cachePlugin({
+    revalidateTrigger: (revalidate) => {
+        const off = platform.onResume(revalidate); // lynx app-resume, terminal focus, …
+        return off;                                // runs on app teardown
+    },
+}));
+```
+
+Reads still opt in per call site via `revalidateOnFocus`.
+
 ## Typed views
 
 `useData(...)` keeps returning `AsyncState<T>`; the augmentation adds

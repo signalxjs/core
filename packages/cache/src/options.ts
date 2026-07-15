@@ -19,7 +19,11 @@ export interface CacheOptions {
      * default (5 minutes). 0 drops the entry immediately.
      */
     gcTime?: number;
-    /** Revalidate mounted reads when the window regains focus/visibility. */
+    /**
+     * Revalidate mounted reads on the platform's attention event — window
+     * focus/visibility on the web; whatever the app's `revalidateTrigger`
+     * (see CacheDefaults) subscribes to elsewhere.
+     */
     revalidateOnFocus?: boolean;
     /** Revalidate mounted reads every N ms. */
     revalidateOnInterval?: number;
@@ -55,4 +59,13 @@ export interface CacheActionOptions {
 export interface CacheDefaults {
     staleTime?: number;
     gcTime?: number;
+    /**
+     * Platform hook: subscribe the store's "revalidate now" callback to an
+     * attention event, returning an unsubscribe (run on app teardown). The
+     * default is the web's — window focus + visibilitychange, installed only
+     * when a DOM is present. Non-web runtimes (lynx, terminal) pass their
+     * own (app resume, terminal focus, …); reads still opt in per call site
+     * via `revalidateOnFocus`.
+     */
+    revalidateTrigger?: (revalidate: () => void) => (() => void) | void;
 }
