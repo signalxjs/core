@@ -190,7 +190,17 @@ function statementBindings(stmt: Node): string[] {
         for (const decl of stmt.declarations as Node[]) patternNames(decl.id as Node, names);
         return names;
     }
-    if ((stmt.type === 'FunctionDeclaration' || stmt.type === 'ClassDeclaration') && isNode(stmt.id)) {
+    if (
+        (stmt.type === 'FunctionDeclaration' ||
+            stmt.type === 'ClassDeclaration' ||
+            // Runtime TS declarations bind values too — a handler capturing
+            // an enum/namespace must chain to this module (⇒ ineligible),
+            // not be misread as a global.
+            stmt.type === 'TSEnumDeclaration' ||
+            stmt.type === 'TSModuleDeclaration') &&
+        isNode(stmt.id) &&
+        (stmt.id as Node).type === 'Identifier'
+    ) {
         return [(stmt.id as Node).name as string];
     }
     return [];
@@ -457,10 +467,14 @@ function scanModule(program: Node): ModuleScan {
         let decl: Node | null = null;
         if (stmt.type === 'ExportNamedDeclaration') {
             if (isNode(stmt.declaration)) decl = stmt.declaration as Node;
-            for (const spec of (stmt.specifiers as Node[]) ?? []) {
-                const local = ((spec.local as Node)?.name as string) ?? '';
-                const exported = ((spec.exported as Node)?.name as string) ?? '';
-                if (local && exported) scan.exportsByLocal.set(local, exported);
+            // Re-exports (`export { Foo } from './x'`) bind nothing locally —
+            // their "local" names are the other module's, not this one's.
+            if (!isNode(stmt.source)) {
+                for (const spec of (stmt.specifiers as Node[]) ?? []) {
+                    const local = ((spec.local as Node)?.name as string) ?? '';
+                    const exported = ((spec.exported as Node)?.name as string) ?? '';
+                    if (local && exported) scan.exportsByLocal.set(local, exported);
+                }
             }
         } else {
             decl = stmt;
