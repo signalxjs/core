@@ -35,7 +35,7 @@
 import type { SSRPlugin, ResolvedBoundary, SSRContext } from '@sigx/server-renderer';
 import { serializeBoundaryProps, getTypeHandlers } from '@sigx/server-renderer/server';
 import type { VNode, ComponentSetupContext } from 'sigx';
-import type { signal } from 'sigx';
+import { signal } from 'sigx';
 import type { ResumePluginOptions } from './types';
 import { createTrackingSignal, serializeSignalState } from './server/track-signal';
 

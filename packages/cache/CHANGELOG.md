@@ -5,6 +5,8 @@ repository-root `CHANGELOG.md`.
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-07-15
+
 Renderer portability (signalxjs/core#205): the pack now depends on
 `@sigx/runtime-core` + `@sigx/reactivity` instead of the `sigx` umbrella
 (no DOM renderer in its module graph), gates fetch-on-mount on core's
