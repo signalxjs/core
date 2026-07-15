@@ -31,6 +31,8 @@ export {
     boundaryPatchJs
 } from './serialize';
 export type { SSRTypeHandler } from './serialize';
+export { createTrackingSignal, serializeSignalState } from './state-signals';
+export type { StateSignalFn } from './state-signals';
 export type {
     SSRBoundary,
     SSRBoundaryRecord,

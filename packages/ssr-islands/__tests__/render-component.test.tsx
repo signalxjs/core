@@ -104,6 +104,6 @@ describe('createTrackingSignal', () => {
         expect(map.size).toBe(1);
         expect(second.value).toBe(20);
         expect(warnSpy).toHaveBeenCalledTimes(1);
-        expect(warnSpy.mock.calls.flat().join(' ')).toContain('Duplicate island state key "n"');
+        expect(warnSpy.mock.calls.flat().join(' ')).toContain('Duplicate state key "n"');
     });
 });
