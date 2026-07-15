@@ -140,20 +140,28 @@ function dispatch(type: string, ev: Event): void {
     // reproduce this — the browser smokes are the regression coverage.)
     ready.then((runtime) => new Promise<void>((resolve) => {
         setTimeout(async () => {
-            for (const id of wakeIds) {
-                // wake failures must not kill the QRL replay below (or vice
-                // versa) — surface them individually.
-                try {
-                    await runtime.wake(id);
-                } catch (error) {
-                    console.error(`[sigx resume] wake of boundary ${id} failed:`, error);
+            // Errors inside a timer callback escape every promise chain —
+            // contain them here and ALWAYS resolve, or a failed dispatch
+            // becomes an unhandled rejection.
+            try {
+                for (const id of wakeIds) {
+                    // wake failures must not kill the QRL replay below (or
+                    // vice versa) — surface them individually.
+                    try {
+                        await runtime.wake(id);
+                    } catch (error) {
+                        console.error(`[sigx resume] wake of boundary ${id} failed:`, error);
+                    }
                 }
+                await replay(runtime, type, ev, chain);
+            } catch (error) {
+                console.error('[sigx resume] resume dispatch failed:', error);
+            } finally {
+                resolve();
             }
-            await replay(runtime, type, ev, chain);
-            resolve();
         }, 0);
     })).catch((error) => {
-        console.error('[sigx resume] resume dispatch failed:', error);
+        console.error('[sigx resume] failed to load the resume runtime/registry:', error);
     });
 }
 
