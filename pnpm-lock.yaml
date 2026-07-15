@@ -238,6 +238,9 @@ importers:
         specifier: workspace:^
         version: link:../sigx
     devDependencies:
+      '@sigx/ssr-islands':
+        specifier: workspace:^
+        version: link:../ssr-islands
       '@sigx/vite':
         specifier: workspace:^
         version: link:../vite
@@ -365,7 +368,7 @@ importers:
     dependencies:
       '@sigx/ssr-islands':
         specifier: '*'
-        version: 0.10.0
+        version: link:../ssr-islands
     devDependencies:
       '@sigx/server-renderer':
         specifier: workspace:^
@@ -968,24 +971,6 @@ packages:
 
   '@rolldown/pluginutils@1.0.1':
     resolution: {integrity: sha512-2j9bGt5Jh8hj+vPtgzPtl72j0yRxHAyumoo6TNfAjsLB04UtpSvPbPcDcBMxz7n+9CYB0c1GxQFxYRg2jimqGw==}
-
-  '@sigx/reactivity@0.10.0':
-    resolution: {integrity: sha512-vjNxN3b4er4nB6ysB0JU0CVzqy++12zBhUcSmKhaMYHxW1/KL5EiN8ZoDIAtAIOpZAAMlZaATLDlUQFWET1kgQ==}
-    engines: {node: ^20.19.0 || >=22.12.0}
-
-  '@sigx/runtime-core@0.10.0':
-    resolution: {integrity: sha512-gwS+GAUXzianwxKDYXInN/Ju7zd9gS8zoeenBi5JPNOisn72YP1tNfDBx4kkc5DI7x2JhtsR3XFF70nlBSNtyg==}
-    engines: {node: ^20.19.0 || >=22.12.0}
-
-  '@sigx/runtime-dom@0.10.0':
-    resolution: {integrity: sha512-wc3qMyAzYE5vlgS3FzB+3lFyq2rTXpzVSbor6mfVHYBxcZfPLyDTn+HSaXWqq7cWvYSC541p72NO2MifJmK2bA==}
-    engines: {node: ^20.19.0 || >=22.12.0}
-
-  '@sigx/server-renderer@0.10.0':
-    resolution: {integrity: sha512-NljFHj3tiFFsSW0vP6j/aeYobbT8QvWkZCPsV07fA6ePFHGS0oakpy+eTn23jk3KUkPee/3jme9QXv77VRK2MQ==}
-
-  '@sigx/ssr-islands@0.10.0':
-    resolution: {integrity: sha512-0HQVDe3FtWJ2uCkVfBIKJZSmZub4ghR9eXZsnAuoouTApblLlLPgf7FsDeAJWIcyVvA0nWN7bBAmnl5YWOO9Rg==}
 
   '@size-limit/esbuild@11.2.0':
     resolution: {integrity: sha512-vSg9H0WxGQPRzDnBzeDyD9XT0Zdq0L+AI3+77/JhxznbSCMJMMr8ndaWVQRhOsixl97N0oD4pRFw2+R1Lcvi6A==}
@@ -1793,10 +1778,6 @@ packages:
   siginfo@2.0.0:
     resolution: {integrity: sha512-ybx0WO1/8bSBLEWXZvEd7gMW3Sn3JFlW3TvX1nREbDLRNQNaeNN8WK0meBwPdAaOI7TtRRRJn/Es1zhrrCHu7g==}
 
-  sigx@0.10.0:
-    resolution: {integrity: sha512-HOtqdZRc8/omp0heew0y/vfOVtXHsY/uUDZbexJeAIkNNQgUB2yzfrpWsNzFWACLF3gAj9MCsmnVPimx7dfBeg==}
-    engines: {node: ^20.19.0 || >=22.12.0}
-
   size-limit@11.2.0:
     resolution: {integrity: sha512-2kpQq2DD/pRpx3Tal/qRW1SYwcIeQ0iq8li5CJHQgOC+FtPn2BVmuDtzUCgNnpCrbgtfEHqh+iWzxK+Tq6C+RQ==}
     engines: {node: ^18.0.0 || >=20.0.0}
@@ -2308,26 +2289,6 @@ snapshots:
     optional: true
 
   '@rolldown/pluginutils@1.0.1': {}
-
-  '@sigx/reactivity@0.10.0': {}
-
-  '@sigx/runtime-core@0.10.0':
-    dependencies:
-      '@sigx/reactivity': 0.10.0
-
-  '@sigx/runtime-dom@0.10.0':
-    dependencies:
-      '@sigx/reactivity': 0.10.0
-      '@sigx/runtime-core': 0.10.0
-
-  '@sigx/server-renderer@0.10.0':
-    dependencies:
-      sigx: 0.10.0
-
-  '@sigx/ssr-islands@0.10.0':
-    dependencies:
-      '@sigx/server-renderer': 0.10.0
-      sigx: 0.10.0
 
   '@size-limit/esbuild@11.2.0(size-limit@11.2.0)':
     dependencies:
@@ -3176,12 +3137,6 @@ snapshots:
       side-channel-weakmap: 1.0.2
 
   siginfo@2.0.0: {}
-
-  sigx@0.10.0:
-    dependencies:
-      '@sigx/reactivity': 0.10.0
-      '@sigx/runtime-core': 0.10.0
-      '@sigx/runtime-dom': 0.10.0
 
   size-limit@11.2.0:
     dependencies:
