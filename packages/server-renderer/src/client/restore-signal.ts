@@ -34,7 +34,12 @@ import type { StateSignalFn } from '../server/state-signals';
  */
 export function createRestoringSignal(
     state: Record<string, any>,
-    report?: ((name: string, live: { value: any }) => void) | null
+    // The reported live signal is always the wrapper proxy, which intercepts
+    // `.value` for primitives AND objects — though for the object form the
+    // property starts undefined until first written (the object's own
+    // reactive fields carry the state). Hence `unknown`, not a lie-free
+    // primitive type.
+    report?: ((name: string, live: { value: unknown }) => void) | null
 ): StateSignalFn {
     const seen = new Set<string>();
 

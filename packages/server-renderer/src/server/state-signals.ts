@@ -27,12 +27,19 @@ import { isSerializable } from './serialize';
  * whose value is captured for client transfer. Mirrors the `signal()` call
  * shape with an optional trailing `name` used as the serialization key.
  */
-// The tracking signal deliberately normalizes to a uniform `{ value: T }`
-// interface (its Proxy intercepts `.value` for primitives AND objects), unlike
-// raw `signal()` whose object form exposes no `.value`. This shape is what
-// component code reads, so it is the correct type here — do not "narrow" it to
-// `ReturnType<typeof signal>`.
-export type StateSignalFn = <T>(initial: T, name?: string) => { value: T };
+// Honest overloads (#263 review): only KEYED calls get the tracking/restoring
+// proxy that uniformly exposes `{ value: T }` for primitives AND objects.
+// Unkeyed and duplicate-key calls fall back to the plain core `signal()`,
+// whose object form has NO `.value` — the type must not pretend otherwise.
+export interface StateSignalFn {
+    /** Keyed (transform-injected): the uniform `{ value: T }` proxy. */
+    <T>(initial: T, name: string): { value: T };
+    /**
+     * Unkeyed: the plain core signal — primitives wrap as `{ value: T }`,
+     * objects become a reactive proxy of the object's own shape (no `.value`).
+     */
+    <T>(initial: T): { value: T } | (T & object);
+}
 
 /**
  * Creates a tracking signal function that records signal keys and values.
