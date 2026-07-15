@@ -31,9 +31,18 @@ import { isSerializable } from './serialize';
 // proxy that uniformly exposes `{ value: T }` for primitives AND objects.
 // Unkeyed and duplicate-key calls fall back to the plain core `signal()`,
 // whose object form has NO `.value` — the type must not pretend otherwise.
+/** Matches core `signal()`'s primitive constraint. */
+type Primitive = string | number | boolean | bigint | symbol | null | undefined;
+
 export interface StateSignalFn {
-    /** Keyed (transform-injected): the uniform `{ value: T }` proxy. */
-    <T>(initial: T, name: string): { value: T };
+    /** Keyed primitive (transform-injected): the `{ value: T }` proxy. */
+    <T extends Primitive>(initial: T, name: string): { value: T };
+    /**
+     * Keyed object: the object's own reactive shape; the wrapper's `.value`
+     * passes through to the OBJECT'S OWN `value` property (undefined unless
+     * the object declares one) — it is not the whole object.
+     */
+    <T extends object>(initial: T, name: string): T & { value: unknown };
     /**
      * Unkeyed: the plain core signal — primitives wrap as `{ value: T }`,
      * objects become a reactive proxy of the object's own shape (no `.value`).
