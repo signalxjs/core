@@ -96,7 +96,12 @@ function dispatch(type: string, ev: Event): void {
     // import.
     const chain: Element[] = [];
     const wakeIds: number[] = [];
-    let node: Element | null = ev.target instanceof Element ? ev.target : null;
+    // event.target can be a Text node (clicking text inside a button).
+    const target = ev.target;
+    let node: Element | null =
+        target instanceof Element ? target
+        : target instanceof Node ? target.parentElement
+        : null;
     while (node) {
         if (node.hasAttribute(ON_PREFIX + type)) {
             chain.push(node);
@@ -145,6 +150,13 @@ async function replay(runtime: ResumeRuntime, type: string, ev: Event, chain: El
     for (const el of chain) {
         if (ev.cancelBubble) return; // handler called stopPropagation
         const symbol = el.getAttribute(ON_PREFIX + type);
-        if (symbol) await runtime.invoke(symbol, ev, el);
+        if (!symbol) continue;
+        // A throwing handler must not swallow the rest of the synthetic
+        // bubble — native dispatch keeps running other listeners too.
+        try {
+            await runtime.invoke(symbol, ev, el);
+        } catch (error) {
+            console.error(`[sigx resume] handler "${symbol}" failed:`, error);
+        }
     }
 }

@@ -28,6 +28,8 @@ export interface InternalScope extends ResumeScope {
     _id: number;
     _record: SSRBoundaryRecord | null;
     _status: 'resumed' | 'upgrading' | 'upgraded';
+    /** The upgrade's restore hook fired for the boundary ROOT already. */
+    _rootRestored: boolean;
     /** Facade backing store (record.state copy + buffered writes). */
     _values: Record<string, unknown>;
     /** Writes made before the live signals existed, in order. */
@@ -52,7 +54,9 @@ function makeFacade(scope: InternalScope, name: string): { value: unknown } {
             }
             scope._values[name] = next;
             scope._pendingWrites.push([name, next]);
-            if (scope._status === 'resumed') {
+            // Detached scopes (no boundary id) buffer but can never upgrade —
+            // don't schedule attempts that have nothing to hydrate.
+            if (scope._status === 'resumed' && scope._id >= 0) {
                 scope._status = 'upgrading';
                 scheduleUpgrade(scope).catch((error) => {
                     console.error(`[sigx resume] upgrade of boundary ${scope._id} failed:`, error);
@@ -68,6 +72,7 @@ function makeScope(id: number, record: SSRBoundaryRecord | null): InternalScope 
         _id: id,
         _record: record,
         _status: 'resumed',
+        _rootRestored: false,
         _values: { ...record?.state },
         _pendingWrites: [],
         _live: null,

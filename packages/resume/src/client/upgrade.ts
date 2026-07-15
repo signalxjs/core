@@ -60,6 +60,12 @@ const RESTORE_HOOK: SSRPlugin = {
         ): ComponentSetupContext | void {
             const upgrading = currentUpgradingScope;
             if (!upgrading) return;
+            // Boundary ROOT only: hydrateComponent recurses into children
+            // while currentUpgradingScope is still set, and the record's
+            // state belongs to the root — a child restoring from it (or
+            // reporting into _live) would cross-wire same-named signals.
+            if (upgrading._rootRestored) return;
+            upgrading._rootRestored = true;
             componentCtx.signal = createRestoringSignal(
                 (upgrading._record?.state as Record<string, unknown>) ?? {},
                 (name, live) => {
@@ -168,9 +174,10 @@ async function runUpgrade(scope: InternalScope): Promise<void> {
 
     // Hydrate with the ORIGINAL state — the DOM matches it. The restoring
     // factory reports each live named signal into scope._live via the
-    // restore hook.
+    // restore hook (root component only — _rootRestored gates children).
     ensureRestoreHook();
     scope._live = {};
+    scope._rootRestored = false;
     currentUpgradingScope = scope;
     try {
         hydrateComponent(vnode, container, container.parentNode, marker);
