@@ -161,7 +161,7 @@ function dispatch(type: string, ev: Event): void {
             }
         }, 0);
     })).catch((error) => {
-        console.error('[sigx resume] failed to load the resume runtime:', error);
+        console.error('[sigx resume] failed to load the resume runtime/registry:', error);
     });
 }
 
