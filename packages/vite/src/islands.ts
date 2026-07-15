@@ -90,8 +90,9 @@ export function scanIslandExports(code: string): IslandExport[] {
  * Matches a signal declared into a variable inside an island module:
  *   const state = ctx.signal({ … })     (also let/var, any ctx identifier,
  *   optional generic args on the call)
- * Captures: 1 = declaration head up to `=`, 2 = the variable identifier,
- * 3 = the callee (e.g. `ctx.signal` or `ctx.signal<Foo>`).
+ * Captures: 1 = declaration head up to `=`, 2 = the declaration keyword,
+ * 3 = the variable identifier, 4 = the callee (e.g. `ctx.signal` or
+ * `ctx.signal<Foo>`).
  */
 const SIGNAL_DECL_RE =
     /\b((const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*)([A-Za-z_$][\w$]*\.signal(?:<[^<>()]*>)?)\(/g;
