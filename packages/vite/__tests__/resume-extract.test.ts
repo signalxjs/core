@@ -1,0 +1,346 @@
+/**
+ * @vitest-environment node
+ *
+ * extractResumeHandlers() — the analysis half of sigxResume() (#241):
+ * QRL attribute injection, handler-module emission with capture rewrites,
+ * eligibility classification, and symbol determinism.
+ */
+
+import { describe, it, expect } from 'vitest';
+import { extractResumeHandlers, offsetToLoc } from '../src/resume-extract';
+
+const COUNTER = `
+import { component } from 'sigx';
+
+export const Counter = component<{ label: string }>((ctx) => {
+    const count = ctx.signal(0);
+    return () => (
+        <button onClick={(e) => { count.value++; }}>
+            {ctx.props.label}: {count.value}
+        </button>
+    );
+});
+`;
+
+describe('extractResumeHandlers — basics', () => {
+    it('extracts an inline arrow, rewrites signal captures, injects attributes', () => {
+        const result = extractResumeHandlers(COUNTER, '/src/Counter.resume.tsx');
+
+        expect(result.handlers).toHaveLength(1);
+        const handler = result.handlers[0];
+        expect(handler.event).toBe('click');
+        expect(handler.component).toBe('Counter');
+        expect(handler.symbol).toMatch(/^Counter_click_[0-9a-f]{8}$/);
+        expect(handler.exportSource).toBe(
+            `export const ${handler.symbol} = ($scope, e) => { $scope.signals.count.value++; };`
+        );
+
+        // Original onClick kept; QRL + boundary attributes appended after it.
+        expect(result.code).toContain(`onClick={(e) => { count.value++; }} data-sigx-on:click="${handler.symbol}"`);
+        expect(result.code).toContain('data-sigx-b={ctx.$sigxB}');
+        expect(result.code).not.toContain('data-sigx-pd');
+
+        expect(result.components).toEqual([
+            { local: 'Counter', exported: 'Counter', mode: 'resume', handlerCount: 1, signalCount: 1 }
+        ]);
+        expect(result.events).toEqual(['click']);
+        expect(result.handlersModule).toContain(handler.exportSource);
+    });
+
+    it('rewrites ctx.props reads and flags preventDefault', () => {
+        const code = `
+import { component } from 'sigx';
+export const Link = component<{ href: string }>((ctx) => {
+    return () => <a href="#" onClick={(e) => { e.preventDefault(); console.log(ctx.props.href); }}>go</a>;
+});
+`;
+        const result = extractResumeHandlers(code, '/src/Link.resume.tsx');
+        expect(result.handlers).toHaveLength(1);
+        expect(result.handlers[0].preventDefault).toBe(true);
+        expect(result.handlers[0].exportSource).toContain('console.log($scope.props.href)');
+        expect(result.code).toContain('data-sigx-pd:click=""');
+    });
+
+    it('replicates imports from other modules into the handlers module', () => {
+        const code = `
+import { component } from 'sigx';
+import { track, flush as flushNow } from './analytics';
+import logger from './logger';
+export const Button = component((ctx) => {
+    const hits = ctx.signal(0);
+    return () => <button onClick={() => { hits.value++; track('hit'); flushNow(); logger.info('x'); }}>go</button>;
+});
+`;
+        const result = extractResumeHandlers(code, '/src/Button.resume.tsx');
+        expect(result.handlers).toHaveLength(1);
+        expect(result.handlersModule).toContain(`import { track, flush as flushNow } from "./analytics";`);
+        expect(result.handlersModule).toContain(`import logger from "./logger";`);
+        expect(result.handlersModule).not.toContain('sigx');
+    });
+
+    it('wraps an imported-identifier handler', () => {
+        const code = `
+import { component } from 'sigx';
+import { onSubmit } from './form';
+export const Form = component((ctx) => {
+    const dirty = ctx.signal(false);
+    return () => <form onSubmit={onSubmit}>x</form>;
+});
+`;
+        const result = extractResumeHandlers(code, '/src/Form.resume.tsx');
+        expect(result.handlers).toHaveLength(1);
+        expect(result.handlers[0].exportSource).toContain('($scope, ...$args) => onSubmit(...$args)');
+        expect(result.handlersModule).toContain(`import { onSubmit } from "./form";`);
+    });
+
+    it('extracts a setup-scope const handler and async handlers', () => {
+        const code = `
+import { component } from 'sigx';
+export const Saver = component((ctx) => {
+    const saved = ctx.signal(false);
+    const save = async () => { await fetch('/save'); saved.value = true; };
+    return () => <button onClick={save}>save</button>;
+});
+`;
+        const result = extractResumeHandlers(code, '/src/Saver.resume.tsx');
+        expect(result.handlers).toHaveLength(1);
+        expect(result.handlers[0].exportSource).toContain('async ($scope)');
+        expect(result.handlers[0].exportSource).toContain('$scope.signals.saved.value = true');
+        expect(result.components[0].mode).toBe('resume');
+    });
+
+    it('dedupes identical handlers to one symbol', () => {
+        const code = `
+import { component } from 'sigx';
+export const Twins = component((ctx) => {
+    const n = ctx.signal(0);
+    return () => <div>
+        <button onClick={() => { n.value++; }}>a</button>
+        <button onClick={() => { n.value++; }}>b</button>
+    </div>;
+});
+`;
+        const result = extractResumeHandlers(code, '/src/Twins.resume.tsx');
+        expect(result.handlers).toHaveLength(1);
+        const occurrences = result.code.split(`data-sigx-on:click="${result.handlers[0].symbol}"`).length - 1;
+        expect(occurrences).toBe(2);
+    });
+
+    it('emits data-sigx-b once per element, even with two handled events', () => {
+        const code = `
+import { component } from 'sigx';
+export const Multi = component((ctx) => {
+    const n = ctx.signal(0);
+    return () => <input onFocus={() => { n.value++; }} onInput={() => { n.value--; }} />;
+});
+`;
+        const result = extractResumeHandlers(code, '/src/Multi.resume.tsx');
+        expect(result.handlers).toHaveLength(2);
+        expect(result.events).toEqual(['focus', 'input']);
+        expect(result.code.split('data-sigx-b=').length - 1).toBe(1);
+    });
+});
+
+describe('extractResumeHandlers — eligibility', () => {
+    function firstReason(code: string): string {
+        const result = extractResumeHandlers(code, '/src/X.resume.tsx');
+        expect(result.ineligible.length).toBeGreaterThan(0);
+        expect(result.components[0]?.mode).toBe('hydrate');
+        return result.ineligible[0].reason;
+    }
+
+    it('rejects view-scope captures (loop variables)', () => {
+        const reason = firstReason(`
+import { component } from 'sigx';
+export const List = component((ctx) => {
+    const sel = ctx.signal(0);
+    return () => <ul>{[1, 2].map((item) => <li onClick={() => { sel.value = item; }}>x</li>)}</ul>;
+});
+`);
+        expect(reason).toContain('"item"');
+        expect(reason).toContain('view-scope');
+    });
+
+    it('rejects same-file module-scope captures', () => {
+        const reason = firstReason(`
+import { component } from 'sigx';
+const STEP = 2;
+export const Stepper = component((ctx) => {
+    const n = ctx.signal(0);
+    return () => <button onClick={() => { n.value += STEP; }}>x</button>;
+});
+`);
+        expect(reason).toContain('"STEP"');
+        expect(reason).toContain('module-scope');
+    });
+
+    it('rejects ctx.emit and other non-props ctx use', () => {
+        const reason = firstReason(`
+import { component } from 'sigx';
+export const Emitter = component((ctx) => {
+    const n = ctx.signal(0);
+    return () => <button onClick={() => ctx.emit('picked', n.value)}>x</button>;
+});
+`);
+        expect(reason).toContain('ctx.emit');
+    });
+
+    it('rejects setup-scope locals that are not named signals', () => {
+        const reason = firstReason(`
+import { component } from 'sigx';
+export const Helper = component((ctx) => {
+    const n = ctx.signal(0);
+    const bump = (by) => { n.value += by; };
+    return () => <button onClick={() => bump(2)}>x</button>;
+});
+`);
+        expect(reason).toContain('"bump"');
+    });
+
+    it('rejects non-function handler expressions (.bind, calls)', () => {
+        const reason = firstReason(`
+import { component } from 'sigx';
+export const Bound = component((ctx) => {
+    const n = ctx.signal(0);
+    const f = function () { n.value++; };
+    return () => <button onClick={f.bind(null)}>x</button>;
+});
+`);
+        expect(reason).toContain('statically analyzable');
+    });
+
+    it('rejects reassignment of the signal binding itself', () => {
+        const reason = firstReason(`
+import { component } from 'sigx';
+export const Reassign = component((ctx) => {
+    let n = ctx.signal(0);
+    return () => <button onClick={() => { n = null; }}>x</button>;
+});
+`);
+        // `let n = ctx.signal(…)` is still a named signal per SIGNAL_DECL_RE.
+        expect(reason).toContain('reassigns');
+    });
+
+    it('rejects `this` in arrow handlers and reserved names', () => {
+        expect(firstReason(`
+import { component } from 'sigx';
+export const This = component((ctx) => {
+    const n = ctx.signal(0);
+    return () => <button onClick={() => { n.value = this.x; }}>x</button>;
+});
+`)).toContain('this');
+
+        expect(firstReason(`
+import { component } from 'sigx';
+export const Reserved = component((ctx) => {
+    const n = ctx.signal(0);
+    return () => <button onClick={($scope) => { n.value++; }}>x</button>;
+});
+`)).toContain('reserved');
+    });
+
+    it('rejects writes to ctx.props', () => {
+        const reason = firstReason(`
+import { component } from 'sigx';
+export const PropsWrite = component((ctx) => {
+    const n = ctx.signal(0);
+    return () => <button onClick={() => { ctx.props.count = n.value; }}>x</button>;
+});
+`);
+        expect(reason).toContain('read-only');
+    });
+
+    it('bails the whole component to hydrate mode when it consumes slots', () => {
+        const result = extractResumeHandlers(`
+import { component } from 'sigx';
+export const Wrapper = component((ctx) => {
+    const open = ctx.signal(false);
+    return () => <div onClick={() => { open.value = true; }}>{ctx.slots.default()}</div>;
+});
+`, '/src/Wrapper.resume.tsx');
+        // The handler itself extracts, but the component cannot data-remount.
+        expect(result.handlers).toHaveLength(1);
+        expect(result.components[0].mode).toBe('hydrate');
+    });
+
+    it('ignores component-tag props and namespaced on* attributes', () => {
+        const result = extractResumeHandlers(`
+import { component } from 'sigx';
+import { Child } from './child.island';
+export const Parent = component((ctx) => {
+    const n = ctx.signal(0);
+    return () => <div>
+        <Child onClick={() => { n.value++; }} />
+        <input onUpdate:modelValue={() => { n.value++; }} />
+    </div>;
+});
+`, '/src/Parent.resume.tsx');
+        expect(result.handlers).toHaveLength(0);
+        expect(result.ineligible).toHaveLength(0);
+        expect(result.components[0].mode).toBe('resume');
+    });
+});
+
+describe('extractResumeHandlers — determinism', () => {
+    const TWO = `
+import { component } from 'sigx';
+export const Two = component((ctx) => {
+    const a = ctx.signal(0);
+    const b = ctx.signal(0);
+    return () => <div>
+        <button onClick={() => { a.value++; }}>a</button>
+        <input onInput={() => { b.value++; }} />
+    </div>;
+});
+`;
+
+    it('produces identical symbols across independent runs (client vs ssr env)', () => {
+        const one = extractResumeHandlers(TWO, '/src/Two.resume.tsx');
+        const two = extractResumeHandlers(TWO, '/src/Two.resume.tsx');
+        expect(one.handlers.map((h) => h.symbol)).toEqual(two.handlers.map((h) => h.symbol));
+        expect(one.code).toBe(two.code);
+    });
+
+    it('editing one handler leaves the other symbol unchanged', () => {
+        const before = extractResumeHandlers(TWO, '/src/Two.resume.tsx');
+        const after = extractResumeHandlers(TWO.replace('b.value++', 'b.value--'), '/src/Two.resume.tsx');
+        const clickBefore = before.handlers.find((h) => h.event === 'click');
+        const clickAfter = after.handlers.find((h) => h.event === 'click');
+        const inputBefore = before.handlers.find((h) => h.event === 'input');
+        const inputAfter = after.handlers.find((h) => h.event === 'input');
+        expect(clickAfter!.symbol).toBe(clickBefore!.symbol);
+        expect(inputAfter!.symbol).not.toBe(inputBefore!.symbol);
+    });
+});
+
+describe('extractResumeHandlers — non-matches', () => {
+    it('returns the source untouched for files without sigx components', () => {
+        const code = `export const helper = () => 42;\n`;
+        const result = extractResumeHandlers(code, '/src/util.resume.ts');
+        expect(result.code).toBe(code);
+        expect(result.handlersModule).toBeNull();
+        expect(result.components).toHaveLength(0);
+    });
+
+    it('skips non-exported and default-exported components', () => {
+        const result = extractResumeHandlers(`
+import { component } from 'sigx';
+const Hidden = component((ctx) => {
+    const n = ctx.signal(0);
+    return () => <button onClick={() => { n.value++; }}>x</button>;
+});
+export default Hidden;
+`, '/src/Hidden.resume.tsx');
+        expect(result.components).toHaveLength(0);
+        expect(result.handlers).toHaveLength(0);
+    });
+});
+
+describe('offsetToLoc', () => {
+    it('maps byte offsets to 1-based line/column', () => {
+        const code = 'ab\ncd\nef';
+        expect(offsetToLoc(code, 0)).toEqual({ line: 1, column: 1 });
+        expect(offsetToLoc(code, 4)).toEqual({ line: 2, column: 2 });
+        expect(offsetToLoc(code, 6)).toEqual({ line: 3, column: 1 });
+    });
+});
