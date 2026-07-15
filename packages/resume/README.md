@@ -25,15 +25,17 @@ import { resumePlugin } from '@sigx/resume';
 import manifest from './dist/client/.vite/sigx-resume-manifest.json';
 
 const ssr = createSSR().use(resumePlugin({ manifest }));
-const html = await ssr.renderDocument(<App />);
+const html = await ssr.render(<App />);
 ```
 
 Components stamped by the transform (`__resumeId`) become boundaries with
-`hydrate: 'never'` — core schedules nothing; the pack wakes them itself.
-Components whose handlers could not all be extracted degrade to
-`hydrate: 'interaction'` (island-style). A component used with a `client:*`
-directive belongs to `@sigx/ssr-islands` — register `islandsPlugin()` first
-when combining the packs.
+`hydrate: 'never'` — core schedules nothing; the pack's delegation owns all
+waking. Fully-extracted components resume through their QRL attributes;
+components whose handlers could not all be extracted carry `data-sigx-wake:*`
+attributes instead, and the first interaction fully hydrates them (no
+replay). A component used with a `client:*` directive belongs to
+`@sigx/ssr-islands` — register `islandsPlugin()` first when combining the
+packs.
 
 ## Writing resumable components
 
@@ -56,8 +58,9 @@ transferred: signals declared as `const x = ctx.signal(…)` are keyed by their
 declaration name and serialized; anything else stays local. A handler is
 resumable when its captures can be expressed through the resumed scope (named
 signals, `ctx.props` reads, imports, globals); anything else (loop variables,
-setup helpers, `ctx.emit`, …) falls back to interaction hydration with a dev
-warning.
+setup helpers, `ctx.emit`, …) makes the whole component fall back to
+wake-on-interaction — first interaction hydrates it, with a build-time
+warning naming the capture.
 
 ## Status
 

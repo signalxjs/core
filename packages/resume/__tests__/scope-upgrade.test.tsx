@@ -191,3 +191,34 @@ describe('wake (hydrate-mode boundaries)', () => {
         expect(document.querySelectorAll('button')).toHaveLength(1);
     });
 });
+
+describe('upgrade failure recovery', () => {
+    it('a failed upgrade resets to resumed and the next write retries', async () => {
+        const Counter = makeCounter();
+        // Core's component registry has no reset API and 'Counter' leaks in
+        // from earlier tests — a unique name keeps this attempt unresolved.
+        Counter.__resumeId = 'RetryCounter';
+        const { id, container } = await mount(<Counter initial={1} />);
+        // NOT registered yet — the first upgrade attempt must fail.
+
+        __registerResumeQrl('Counter_click_test0001', () =>
+            Promise.resolve(($scope: any) => { $scope.signals.count.value++; })
+        );
+        const el = container.querySelector('button')!;
+        await invoke('Counter_click_test0001', new Event('click'), el);
+        await tick();
+
+        const scope = getScope(id) as any;
+        expect(scope._status).toBe('resumed'); // not stuck 'upgrading'
+        expect(container.querySelector('button')!.textContent).toBe('1');
+
+        // Now the component becomes available — the next write retries and
+        // BOTH buffered writes replay.
+        registerComponent('RetryCounter', Counter);
+        await invoke('Counter_click_test0001', new Event('click'), el);
+        await tick();
+        await tick();
+        expect(scope._status).toBe('upgraded');
+        expect(container.querySelector('button')!.textContent).toBe('3');
+    });
+});
