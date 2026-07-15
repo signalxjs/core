@@ -61,6 +61,38 @@ export const Link = component<{ href: string }>((ctx) => {
         expect(result.code).toContain('data-sigx-pd:click=""');
     });
 
+    it('flags preventDefault only on the event parameter', () => {
+        const result = extractResumeHandlers(`
+import { component } from 'sigx';
+import { controller } from './ctl';
+export const NotPd = component((ctx) => {
+    const n = ctx.signal(0);
+    return () => <div>
+        <button onClick={(e) => { controller.preventDefault(); n.value++; }}>a</button>
+        <button onClick={(ev) => { ev.preventDefault(); n.value++; }}>b</button>
+    </div>;
+});
+`, '/src/NotPd.resume.tsx');
+        expect(result.handlers).toHaveLength(2);
+        const bySymbolPd = result.handlers.map((h) => h.preventDefault);
+        expect(bySymbolPd).toEqual([false, true]);
+        expect(result.code.split('data-sigx-pd:click').length - 1).toBe(1);
+    });
+
+    it('replicates multiple default imports from one source as separate statements', () => {
+        const result = extractResumeHandlers(`
+import { component } from 'sigx';
+import foo from './x';
+import bar from './x';
+export const Multi = component((ctx) => {
+    const n = ctx.signal(0);
+    return () => <button onClick={() => { n.value = foo() + bar(); }}>x</button>;
+});
+`, '/src/Multi.resume.tsx');
+        expect(result.handlersModule).toContain(`import foo from "./x";`);
+        expect(result.handlersModule).toContain(`import bar from "./x";`);
+    });
+
     it('replicates imports from other modules into the handlers module', () => {
         const code = `
 import { component } from 'sigx';

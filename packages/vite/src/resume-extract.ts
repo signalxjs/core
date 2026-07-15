@@ -268,6 +268,10 @@ function scanHandler(fn: Node): HandlerScan {
     const result: HandlerScan = { freeRefs: [], callsPreventDefault: false, contextual: null, usesReservedName: false };
     // Scope stack rooted at the handler's own scope.
     const scopes: { bindings: Set<string>; isFunction: boolean }[] = [];
+    // `data-sigx-pd` must fire only for preventDefault on the EVENT param —
+    // `someController.preventDefault()` is not a browser-default concern.
+    const firstParam = (fn.params as Node[])[0];
+    const eventParam = firstParam?.type === 'Identifier' ? (firstParam.name as string) : null;
 
     function isBound(name: string): boolean {
         for (let i = scopes.length - 1; i >= 0; i--) {
@@ -332,7 +336,10 @@ function scanHandler(fn: Node): HandlerScan {
             isNode((node.callee as Node).property) &&
             (((node.callee as Node).property as Node).name as string) === 'preventDefault'
         ) {
-            result.callsPreventDefault = true;
+            const receiver = (node.callee as Node).object as Node;
+            if (eventParam !== null && receiver.type === 'Identifier' && (receiver.name as string) === eventParam) {
+                result.callsPreventDefault = true;
+            }
         }
 
         const scope = ownScopeBindings(node);
@@ -912,16 +919,14 @@ export function extractResumeHandlers(code: string, id: string): ResumeExtractio
         const importLines: string[] = [];
         for (const [source, clauses] of replicatedImports) {
             const named: string[] = [];
-            let defaultLocal: string | null = null;
-            let nsLocal: string | null = null;
             for (const clause of clauses) {
-                if (clause.startsWith('default:')) defaultLocal = clause.slice(8);
-                else if (clause.startsWith('ns:')) nsLocal = clause.slice(3);
+                // Multiple default/namespace locals for one source each get
+                // their own statement — merging would drop all but one.
+                if (clause.startsWith('default:')) importLines.push(`import ${clause.slice(8)} from ${JSON.stringify(source)};`);
+                else if (clause.startsWith('ns:')) importLines.push(`import * as ${clause.slice(3)} from ${JSON.stringify(source)};`);
                 else named.push(clause);
             }
-            if (nsLocal) importLines.push(`import * as ${nsLocal} from ${JSON.stringify(source)};`);
-            const head = [defaultLocal, named.length > 0 ? `{ ${named.join(', ')} }` : null].filter(Boolean).join(', ');
-            if (head) importLines.push(`import ${head} from ${JSON.stringify(source)};`);
+            if (named.length > 0) importLines.push(`import { ${named.join(', ')} } from ${JSON.stringify(source)};`);
         }
         handlersModule = [...importLines, ...handlerExports.values()].join('\n') + '\n';
     }
