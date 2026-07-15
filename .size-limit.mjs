@@ -70,4 +70,17 @@ export default [
     limit: '1 KB',
     ignore: ['sigx', 'sigx/*', '@sigx/*'],
   },
+  {
+    // The page's only initial script on a resumable page. NO ignore list —
+    // this entry doubles as the "loader imports nothing" guard.
+    name: '@sigx/resume/loader (delegation loader)',
+    path: 'packages/resume/dist/loader/index.prod.js',
+    limit: '1.5 KB',
+  },
+  {
+    name: '@sigx/resume/client (browser entry)',
+    path: 'packages/resume/dist/client/index.prod.js',
+    limit: '3 KB',
+    ignore: ['sigx', 'sigx/*', '@sigx/*'],
+  },
 ];

@@ -8,6 +8,7 @@
 // Run via:  pnpm test:edge   (after pnpm build)
 import { jsx, component, useData, useHead } from 'sigx';
 import { createSSR, useResponse } from '@sigx/server-renderer';
+import { resumePlugin } from '@sigx/resume/server';
 
 const Stats = component(() => {
     const stats = useData('edge:stats', async () => {
@@ -64,6 +65,22 @@ function assert(cond, message) {
     }
     assert(html.includes('<h1>edge</h1>'), 'web-stream document rendered');
     assert(html.includes('42'), 'web-stream carried the streamed data');
+}
+
+// 3) The resume pack's server half is WinterCG-clean too (#241): a stamped
+// component renders its QRL attributes and a hydrate:'never' record.
+{
+    const Res = component((ctx) => {
+        const n = ctx.signal(3, 'n');
+        return () => jsx('button', { 'data-sigx-on:click': 'Res_click_edge0001', 'data-sigx-b': ctx.$sigxB, children: [String(n.value)] });
+    }, { name: 'Res' });
+    Res.__resumeId = 'Res';
+
+    const ssr = createSSR().use(resumePlugin());
+    const html = await ssr.render(Res({}));
+    assert(html.includes('data-sigx-on:click="Res_click_edge0001"'), 'resume QRL attribute rendered');
+    assert(/data-sigx-b="\d+"/.test(html), 'resume boundary attribute rendered');
+    assert(html.includes('"hydrate":"never"') && html.includes('"n":3'), 'resume record + state in the table');
 }
 
 console.log('✅ edge-smoke: WinterCG-clean document streaming verified (no Node builtins imported)');
