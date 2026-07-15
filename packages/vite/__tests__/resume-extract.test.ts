@@ -278,6 +278,47 @@ export const Shadow = component((ctx) => {
         expect(result.components[0].mode).toBe('hydrate');
     });
 
+    it('rejects `this`/`arguments` even in function-expression handlers (re-emitted as arrows)', () => {
+        expect(firstReason(`
+import { component } from 'sigx';
+export const FnThis = component((ctx) => {
+    const n = ctx.signal(0);
+    return () => <button onClick={function () { n.value = (this as any).x; }}>x</button>;
+});
+`)).toContain('this');
+
+        expect(firstReason(`
+import { component } from 'sigx';
+export const FnArgs = component((ctx) => {
+    const n = ctx.signal(0);
+    return () => <button onClick={function () { n.value = arguments.length; }}>x</button>;
+});
+`)).toContain('arguments');
+    });
+
+    it('allows `this`/`arguments` owned by functions nested inside the handler', () => {
+        const result = extractResumeHandlers(`
+import { component } from 'sigx';
+export const Nested = component((ctx) => {
+    const n = ctx.signal(0);
+    return () => <button onClick={() => { const f = function () { return this; }; n.value++; }}>x</button>;
+});
+`, '/src/Nested.resume.tsx');
+        expect(result.ineligible).toHaveLength(0);
+        expect(result.handlers).toHaveLength(1);
+    });
+
+    it('rejects destructuring-assignment writes to captured bindings', () => {
+        const reason = firstReason(`
+import { component } from 'sigx';
+export const Destructure = component((ctx) => {
+    let n = ctx.signal(0);
+    return () => <button onClick={(e) => { ({ n } = e.target as any); }}>x</button>;
+});
+`);
+        expect(reason).toContain('reassigns');
+    });
+
     it('rejects writes to ctx.props', () => {
         const reason = firstReason(`
 import { component } from 'sigx';
