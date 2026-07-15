@@ -19,9 +19,12 @@
  *   defeat the chunk split); only third-party/shared imports are replicated.
  *
  * Handlers whose captures cannot be rewritten (view-scope locals, same-file
- * module bindings, `ctx.emit`, unkeyed signals, …) are reported ineligible and
- * left alone; a component with any ineligible handler degrades to
- * `__resumeMode: 'hydrate'` (island-style interaction hydration).
+ * module bindings, `ctx.emit`, unkeyed signals, …) are reported ineligible;
+ * their component degrades to `__resumeMode: 'hydrate'` and — all-or-nothing
+ * per component, to keep event dispatch single-owner — gets NO QRL attributes
+ * or handler exports. Instead every handler site gets
+ * `data-sigx-wake:<event>` so delegation fully hydrates the boundary on first
+ * interaction.
  *
  * Unlike `injectSignalNames`, this is genuinely beyond a regex: finding the
  * end of an arbitrary handler expression and classifying its free variables
@@ -68,8 +71,10 @@ export interface ResumeComponent {
     exported: string;
     /** 'resume' iff every handler extracted and the component uses no slots. */
     mode: 'resume' | 'hydrate';
-    /** Extracted handler count (0 + 0 named signals ⇒ not worth stamping). */
+    /** Extracted handler count (always 0 in 'hydrate' mode — all-or-nothing). */
     handlerCount: number;
+    /** Total handler sites (drives wake attributes; 0 + 0 signals ⇒ no stamp). */
+    siteCount: number;
     /** Named-signal declaration count (what `injectSignalNames` will key). */
     signalCount: number;
 }
@@ -268,6 +273,10 @@ function scanHandler(fn: Node): HandlerScan {
     const result: HandlerScan = { freeRefs: [], callsPreventDefault: false, contextual: null, usesReservedName: false };
     // Scope stack rooted at the handler's own scope.
     const scopes: { bindings: Set<string>; isFunction: boolean }[] = [];
+    // `data-sigx-pd` must fire only for preventDefault on the EVENT param —
+    // `someController.preventDefault()` is not a browser-default concern.
+    const firstParam = (fn.params as Node[])[0];
+    const eventParam = firstParam?.type === 'Identifier' ? (firstParam.name as string) : null;
 
     function isBound(name: string): boolean {
         for (let i = scopes.length - 1; i >= 0; i--) {
@@ -332,7 +341,10 @@ function scanHandler(fn: Node): HandlerScan {
             isNode((node.callee as Node).property) &&
             (((node.callee as Node).property as Node).name as string) === 'preventDefault'
         ) {
-            result.callsPreventDefault = true;
+            const receiver = (node.callee as Node).object as Node;
+            if (eventParam !== null && receiver.type === 'Identifier' && (receiver.name as string) === eventParam) {
+                result.callsPreventDefault = true;
+            }
         }
 
         const scope = ownScopeBindings(node);
@@ -595,15 +607,18 @@ function findHandlerSites(setupFn: Node): HandlerSite[] {
             const tag = node.name as Node;
             const isHost = tag.type === 'JSXIdentifier' && /^[a-z]/.test(tag.name as string);
             if (isHost) {
-                // Idempotency: events already carrying a QRL attribute (a
-                // previous pass over this source) are not extracted again.
+                // Idempotency: events already carrying a QRL or wake
+                // attribute (a previous pass over this source) are not
+                // extracted again.
                 const alreadyStamped = new Set<string>();
                 for (const attr of node.attributes as Node[]) {
                     if (attr.type !== 'JSXAttribute') continue;
                     const name = attr.name as Node;
                     if (name.type === 'JSXNamespacedName') {
                         const ns = ((name.namespace as Node).name as string) ?? '';
-                        if (ns === 'data-sigx-on') alreadyStamped.add(((name.name as Node).name as string) ?? '');
+                        if (ns === 'data-sigx-on' || ns === 'data-sigx-wake') {
+                            alreadyStamped.add(((name.name as Node).name as string) ?? '');
+                        }
                     }
                 }
                 for (const attr of node.attributes as Node[]) {
@@ -682,10 +697,25 @@ export function extractResumeHandlers(code: string, id: string): ResumeExtractio
     const events = new Set<string>();
 
     for (const comp of components) {
-        let extracted = 0;
         let anyIneligible = false;
         /** Elements that already got their `data-sigx-b` this pass. */
         const stampedElements = new Set<Node>();
+        /**
+         * Attribute emission is all-or-nothing per component: buffered until
+         * the mode is known. 'resume' emits QRL attributes + handler exports;
+         * 'hydrate' emits only wake attributes (delegation fully hydrates on
+         * first interaction — mixing live QRLs into a hydrating component
+         * would double-dispatch its events).
+         */
+        interface PendingHandler {
+            site: HandlerSite;
+            exportSrc: (symbol: string) => string;
+            hashSeed: string;
+            imports: ImportedBinding[];
+            preventDefault: boolean;
+        }
+        const pending: PendingHandler[] = [];
+        const allSites: { site: HandlerSite; preventDefault: boolean }[] = [];
 
         const fail = (site: HandlerSite, reason: string): void => {
             anyIneligible = true;
@@ -700,23 +730,32 @@ export function extractResumeHandlers(code: string, id: string): ResumeExtractio
                 const imported = moduleScan.imports.get(name);
                 if (imported && !imported.typeOnly) {
                     // Imported function: the handler module re-imports and wraps it.
-                    emitWrapped(site, name, imported);
-                    extracted++;
+                    allSites.push({ site, preventDefault: false });
+                    pending.push({
+                        site,
+                        exportSrc: (symbol) => `export const ${symbol} = ($scope, ...$args) => ${name}(...$args);`,
+                        hashSeed: `${name}:${imported.source}`,
+                        imports: [imported],
+                        preventDefault: false
+                    });
                     continue;
                 }
                 const local = resolveLocalFunction(comp, site, name);
                 if (!local) {
+                    allSites.push({ site, preventDefault: false });
                     fail(site, `handler "${name}" is not a statically analyzable const function`);
                     continue;
                 }
                 fn = local;
             }
             if (fn.type !== 'ArrowFunctionExpression' && fn.type !== 'FunctionExpression') {
+                allSites.push({ site, preventDefault: false });
                 fail(site, 'handler is not a statically analyzable function expression');
                 continue;
             }
 
             const scan = scanHandler(fn);
+            allSites.push({ site, preventDefault: scan.callsPreventDefault });
             if (scan.contextual) {
                 fail(site, `handler uses ${scan.contextual}`);
                 continue;
@@ -788,82 +827,88 @@ export function extractResumeHandlers(code: string, id: string): ResumeExtractio
                 continue;
             }
 
-            emitExtracted(site, fn, splices, neededImports, scan.callsPreventDefault);
-            extracted++;
-        }
-
-        componentResults.push({
-            local: comp.local,
-            exported: comp.exported,
-            mode: anyIneligible || comp.usesSlots ? 'hydrate' : 'resume',
-            handlerCount: extracted,
-            signalCount: comp.namedSignals.size
-        });
-
-        /** Emit attribute splices for one eligible handler. */
-        function emitExtracted(
-            site: HandlerSite,
-            fn: Node,
-            bodySplices: Splice[],
-            imports: ImportedBinding[],
-            preventDefault: boolean
-        ): void {
             // Rebuild `($scope, <original params>) => <rewritten body>`.
             const params = fn.params as Node[];
             const paramsSrc = params.length > 0
                 ? code.slice(params[0].start, params[params.length - 1].end)
                 : '';
             const body = fn.body as Node;
-            const relative = bodySplices.map((s) => ({ start: s.start - body.start, end: s.end - body.start, text: s.text }));
+            const relative = splices.map((s) => ({ start: s.start - body.start, end: s.end - body.start, text: s.text }));
             const bodySrc = applySplices(code.slice(body.start, body.end), relative);
             const asyncPrefix = fn.async === true ? 'async ' : '';
             const exportSrc = (symbol: string): string =>
                 `export const ${symbol} = ${asyncPrefix}($scope${paramsSrc ? ', ' + paramsSrc : ''}) => ${
                     body.type === 'BlockStatement' ? bodySrc : `(${bodySrc})`
                 };`;
-            const symbol = `${comp.exported}_${site.event}_${hash8(exportSrc('$'))}`;
-            finishHandler(site, symbol, exportSrc(symbol), imports, preventDefault);
+            pending.push({
+                site,
+                exportSrc,
+                hashSeed: exportSrc('$'),
+                imports: neededImports,
+                preventDefault: scan.callsPreventDefault
+            });
         }
 
-        /** Imported-identifier handler: wrap it so the signature matches. */
-        function emitWrapped(site: HandlerSite, name: string, imported: ImportedBinding): void {
-            const exportSrc = (symbol: string): string =>
-                `export const ${symbol} = ($scope, ...$args) => ${name}(...$args);`;
-            const symbol = `${comp.exported}_${site.event}_${hash8(name + ':' + imported.source)}`;
-            finishHandler(site, symbol, exportSrc(symbol), [imported], false);
+        const mode: 'resume' | 'hydrate' = anyIneligible || comp.usesSlots ? 'hydrate' : 'resume';
+
+        const stampBoundary = (site: HandlerSite): string => {
+            if (stampedElements.has(site.element) || !comp.ctxName) return '';
+            stampedElements.add(site.element);
+            return ` data-sigx-b={${comp.ctxName}.$sigxB}`;
+        };
+
+        if (mode === 'resume') {
+            for (const entry of pending) {
+                const symbol = `${comp.exported}_${entry.site.event}_${hash8(entry.hashSeed)}`;
+                if (!handlerExports.has(symbol)) {
+                    handlerExports.set(symbol, entry.exportSrc(symbol));
+                    handlers.push({
+                        symbol,
+                        event: entry.site.event,
+                        component: comp.exported,
+                        preventDefault: entry.preventDefault,
+                        exportSource: entry.exportSrc(symbol)
+                    });
+                }
+                for (const imp of entry.imports) {
+                    const clause =
+                        imp.kind === 'default' ? `default:${imp.local}`
+                        : imp.kind === 'namespace' ? `ns:${imp.local}`
+                        : imp.imported === imp.local ? imp.local
+                        : `${imp.imported} as ${imp.local}`;
+                    let set = replicatedImports.get(imp.source);
+                    if (!set) replicatedImports.set(imp.source, (set = new Set()));
+                    set.add(clause);
+                }
+                events.add(entry.site.event);
+
+                let attrs = ` data-sigx-on:${entry.site.event}="${symbol}"`;
+                if (entry.preventDefault) attrs += ` data-sigx-pd:${entry.site.event}=""`;
+                attrs += stampBoundary(entry.site);
+                componentSplices.push({ start: entry.site.attr.end, end: entry.site.attr.end, text: attrs });
+            }
+        } else {
+            // Hydrate mode: every handler site gets a wake attribute so the
+            // pack's delegation can fully hydrate the boundary on first
+            // interaction (no core scheduling — resumable pages ship no
+            // upfront runtime to install interaction listeners with).
+            for (const { site, preventDefault } of allSites) {
+                events.add(site.event);
+                let attrs = ` data-sigx-wake:${site.event}=""`;
+                if (preventDefault) attrs += ` data-sigx-pd:${site.event}=""`;
+                attrs += stampBoundary(site);
+                componentSplices.push({ start: site.attr.end, end: site.attr.end, text: attrs });
+            }
         }
 
-        function finishHandler(
-            site: HandlerSite,
-            symbol: string,
-            exportSource: string,
-            imports: ImportedBinding[],
-            preventDefault: boolean
-        ): void {
-            if (!handlerExports.has(symbol)) {
-                handlerExports.set(symbol, exportSource);
-                handlers.push({ symbol, event: site.event, component: comp.exported, preventDefault, exportSource });
-            }
-            for (const imp of imports) {
-                const clause =
-                    imp.kind === 'default' ? `default:${imp.local}`
-                    : imp.kind === 'namespace' ? `ns:${imp.local}`
-                    : imp.imported === imp.local ? imp.local
-                    : `${imp.imported} as ${imp.local}`;
-                let set = replicatedImports.get(imp.source);
-                if (!set) replicatedImports.set(imp.source, (set = new Set()));
-                set.add(clause);
-            }
-            events.add(site.event);
-
-            let attrs = ` data-sigx-on:${site.event}="${symbol}"`;
-            if (preventDefault) attrs += ` data-sigx-pd:${site.event}=""`;
-            if (!stampedElements.has(site.element) && comp.ctxName) {
-                stampedElements.add(site.element);
-                attrs += ` data-sigx-b={${comp.ctxName}.$sigxB}`;
-            }
-            componentSplices.push({ start: site.attr.end, end: site.attr.end, text: attrs });
-        }
+        componentResults.push({
+            local: comp.local,
+            exported: comp.exported,
+            mode,
+            handlerCount: mode === 'resume' ? pending.length : 0,
+            siteCount: allSites.length,
+            signalCount: comp.namedSignals.size
+        });
     }
 
     /** Resolve an identifier handler to a setup/view-level const fn declarator. */
@@ -912,16 +957,14 @@ export function extractResumeHandlers(code: string, id: string): ResumeExtractio
         const importLines: string[] = [];
         for (const [source, clauses] of replicatedImports) {
             const named: string[] = [];
-            let defaultLocal: string | null = null;
-            let nsLocal: string | null = null;
             for (const clause of clauses) {
-                if (clause.startsWith('default:')) defaultLocal = clause.slice(8);
-                else if (clause.startsWith('ns:')) nsLocal = clause.slice(3);
+                // Multiple default/namespace locals for one source each get
+                // their own statement — merging would drop all but one.
+                if (clause.startsWith('default:')) importLines.push(`import ${clause.slice(8)} from ${JSON.stringify(source)};`);
+                else if (clause.startsWith('ns:')) importLines.push(`import * as ${clause.slice(3)} from ${JSON.stringify(source)};`);
                 else named.push(clause);
             }
-            if (nsLocal) importLines.push(`import * as ${nsLocal} from ${JSON.stringify(source)};`);
-            const head = [defaultLocal, named.length > 0 ? `{ ${named.join(', ')} }` : null].filter(Boolean).join(', ');
-            if (head) importLines.push(`import ${head} from ${JSON.stringify(source)};`);
+            if (named.length > 0) importLines.push(`import { ${named.join(', ')} } from ${JSON.stringify(source)};`);
         }
         handlersModule = [...importLines, ...handlerExports.values()].join('\n') + '\n';
     }
