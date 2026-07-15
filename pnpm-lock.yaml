@@ -409,6 +409,9 @@ importers:
 
   packages/vite:
     dependencies:
+      '@sigx/resume':
+        specifier: '*'
+        version: link:../resume
       '@sigx/ssr-islands':
         specifier: '*'
         version: link:../ssr-islands

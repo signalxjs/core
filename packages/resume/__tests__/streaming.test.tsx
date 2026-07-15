@@ -8,8 +8,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { component, useData } from 'sigx';
-import type { SSRBoundaryRecord } from '@sigx/server-renderer';
-import { createSSR } from '../../server-renderer/src/ssr';
+import { createSSR, type SSRBoundaryRecord } from '@sigx/server-renderer';
 import { resumePlugin } from '../src/plugin';
 
 function parseAllBoundaryPatches(html: string): Record<string, SSRBoundaryRecord>[] {

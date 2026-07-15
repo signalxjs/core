@@ -14,6 +14,7 @@
 //   4. Legacy (wake-on-interaction): first click hydrates without replay,
 //      second click is live.
 import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 
 const PORT = 4173;
@@ -26,8 +27,8 @@ function assert(cond, message) {
     console.log(`✔ ${message}`);
 }
 
-const server = spawn('node', ['--conditions', 'production', 'server.mjs'], {
-    cwd: new URL('.', import.meta.url).pathname,
+const server = spawn(process.execPath, ['--conditions', 'production', 'server.mjs'], {
+    cwd: fileURLToPath(new URL('.', import.meta.url)),
     env: { ...process.env, NODE_ENV: 'production', PORT: String(PORT) },
     stdio: 'ignore'
 });
