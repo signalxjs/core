@@ -261,3 +261,35 @@ describe('QRL registry concurrency', () => {
         expect(loads).toBe(1);
     });
 });
+
+describe('dispatch robustness', () => {
+    afterEach(() => resetResumeDelegation());
+
+    it('walks up from Text-node targets', async () => {
+        const rt = makeRuntime();
+        initResume(['click'], rt.loadRegistry, rt.loadRuntime);
+        container.innerHTML = `<button data-sigx-on:click="Sym_text">label</button>`;
+        const text = container.querySelector('button')!.firstChild!;
+        const ev = new Event('click', { bubbles: true });
+        text.dispatchEvent(ev);
+        await tick();
+        expect(rt.invocations.map((i) => i.symbol)).toEqual(['Sym_text']);
+    });
+
+    it('a throwing handler does not swallow the rest of the bubble', async () => {
+        const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+        const rt = makeRuntime();
+        rt.runtime.invoke = (symbol) => {
+            rt.invocations.push({ symbol, event: null as any, element: null as any });
+            if (symbol === 'Inner') throw new Error('boom');
+        };
+        initResume(['click'], rt.loadRegistry, rt.loadRuntime);
+        container.innerHTML =
+            `<div data-sigx-on:click="Outer"><button data-sigx-on:click="Inner">x</button></div>`;
+        container.querySelector('button')!.dispatchEvent(new Event('click', { bubbles: true }));
+        await tick();
+        expect(rt.invocations.map((i) => i.symbol)).toEqual(['Inner', 'Outer']);
+        expect(err).toHaveBeenCalled();
+        err.mockRestore();
+    });
+});
