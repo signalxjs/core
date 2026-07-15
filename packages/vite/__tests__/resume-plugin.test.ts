@@ -1,0 +1,151 @@
+/**
+ * @vitest-environment node
+ *
+ * sigxResume() (#241): transform wiring (QRL attributes + signal keys +
+ * __resumeId/__resumeMode stamps), the virtual registry / handlers / entry
+ * modules, and relative-import resolution for extracted handlers.
+ */
+
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { sigxResume } from '../src/resume';
+
+const COUNTER = `
+import { component } from 'sigx';
+import { track } from '../analytics';
+
+export const Counter = component<{ label: string }>((ctx) => {
+    const count = ctx.signal(0);
+    return () => (
+        <button onClick={(e) => { count.value++; track('hit'); }}>
+            {ctx.props.label}: {count.value}
+        </button>
+    );
+});
+`;
+
+/** A configured plugin instance with discovery run against a tmp project. */
+function makeProject(files: Record<string, string>): { plugin: any; root: string } {
+    const root = mkdtempSync(join(tmpdir(), 'sigx-resume-'));
+    for (const [rel, content] of Object.entries(files)) {
+        mkdirSync(join(root, rel, '..'), { recursive: true });
+        writeFileSync(join(root, rel), content);
+    }
+    const plugin = sigxResume() as any;
+    plugin.configResolved({ root, command: 'build' });
+    return { plugin, root };
+}
+
+describe('sigxResume — transform', () => {
+    let plugin: any;
+    let root: string;
+
+    beforeAll(() => {
+        ({ plugin, root } = makeProject({ 'src/resume/Counter.tsx': COUNTER }));
+    });
+
+    afterAll(() => rmSync(root, { recursive: true, force: true }));
+
+    it('injects QRL attributes, signal keys, and resume stamps', () => {
+        const warnings: string[] = [];
+        const result = plugin.transform.call(
+            { warn: (msg: string) => warnings.push(msg) },
+            COUNTER,
+            join(root, 'src/resume/Counter.tsx')
+        );
+        expect(result.code).toMatch(/data-sigx-on:click="Counter_click_[0-9a-f]{8}"/);
+        expect(result.code).toContain('data-sigx-b={ctx.$sigxB}');
+        expect(result.code).toContain('ctx.signal(__sigxInit, "count")');
+        expect(result.code).toContain('Counter.__resumeId = "Counter"');
+        expect(result.code).toContain('Counter.__resumeMode = "resume"');
+        expect(warnings).toHaveLength(0);
+    });
+
+    it('stamps hydrate mode and warns when a handler is ineligible', () => {
+        const code = `
+import { component } from 'sigx';
+const STEP = 2;
+export const Stepper = component((ctx) => {
+    const n = ctx.signal(0);
+    return () => <button onClick={() => { n.value += STEP; }}>x</button>;
+});
+`;
+        const warnings: string[] = [];
+        const result = plugin.transform.call(
+            { warn: (msg: string) => warnings.push(msg) },
+            code,
+            join(root, 'src/resume/Stepper.tsx')
+        );
+        expect(result.code).toContain('Stepper.__resumeMode = "hydrate"');
+        expect(result.code).not.toContain('data-sigx-on');
+        expect(warnings).toHaveLength(1);
+        expect(warnings[0]).toContain('onclick of <Stepper>');
+        expect(warnings[0]).toContain('interaction hydration');
+    });
+
+    it('ignores non-matching files and files without components', () => {
+        expect(plugin.transform.call({}, COUNTER, join(root, 'src/Page.tsx'))).toBeNull();
+        expect(
+            plugin.transform.call({}, 'export const x = 1;', join(root, 'src/resume/util.ts'))
+        ).toBeNull();
+    });
+});
+
+describe('sigxResume — virtual modules', () => {
+    let plugin: any;
+    let root: string;
+
+    beforeAll(() => {
+        ({ plugin, root } = makeProject({
+            'src/resume/Counter.tsx': COUNTER,
+            'src/analytics.ts': `export const track = (x: string) => {};`
+        }));
+    });
+
+    afterAll(() => rmSync(root, { recursive: true, force: true }));
+
+    it('resolves and loads the registry with QRL + upgrade-chunk loaders', () => {
+        const resolved = plugin.resolveId.call({}, 'virtual:sigx-resume', undefined);
+        expect(resolved).toBe('\0virtual:sigx-resume');
+        const registry = plugin.load.call({}, resolved);
+        expect(registry).toContain("import { __registerResumeQrl } from '@sigx/resume/client';");
+        expect(registry).toContain("import { __registerIslandChunk } from '@sigx/server-renderer/client';");
+        expect(registry).toMatch(
+            /__registerResumeQrl\("Counter_click_[0-9a-f]{8}", \(\) => import\("virtual:sigx-resume:src\/resume\/Counter\.tsx\.handlers\.ts"\)/
+        );
+        expect(registry).toContain('__registerIslandChunk("Counter", () => import("/src/resume/Counter.tsx")');
+    });
+
+    it('loads the per-file handlers module with replicated imports', () => {
+        const resolved = plugin.resolveId.call({}, 'virtual:sigx-resume:src/resume/Counter.tsx.handlers.ts', undefined);
+        const handlers = plugin.load.call({}, resolved);
+        expect(handlers).toContain('import { track } from "../analytics";');
+        expect(handlers).toMatch(/export const Counter_click_[0-9a-f]{8} = \(\$scope, e\) =>/);
+        expect(handlers).toContain('$scope.signals.count.value++');
+        expect(handlers).not.toContain('sigx');
+    });
+
+    it('resolves a handlers module relative import against the source file', async () => {
+        const importer = '\0virtual:sigx-resume:src/resume/Counter.tsx.handlers.ts';
+        let resolvedAgainst: string | undefined;
+        const ctx = {
+            resolve(source: string, from: string) {
+                resolvedAgainst = from;
+                return Promise.resolve({ id: join(root, 'src/analytics.ts') });
+            }
+        };
+        await plugin.resolveId.call(ctx, '../analytics', importer);
+        expect(resolvedAgainst).toBe(join(root, 'src/resume/Counter.tsx'));
+    });
+
+    it('loads the entry with the discovered event union', () => {
+        const resolved = plugin.resolveId.call({}, 'virtual:sigx-resume/entry', undefined);
+        const entry = plugin.load.call({}, resolved);
+        expect(entry).toContain("import { initResume } from '@sigx/resume/loader';");
+        expect(entry).toContain('initResume(["click"]');
+        expect(entry).toContain("() => import(\"virtual:sigx-resume\")");
+        expect(entry).toContain("() => import('@sigx/resume/client')");
+    });
+});

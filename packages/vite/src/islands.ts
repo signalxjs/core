@@ -120,7 +120,7 @@ export function injectSignalNames(code: string): string {
 }
 
 /** Walk a directory collecting files (bounded to the project tree). */
-function walkFiles(dir: string, out: string[] = []): string[] {
+export function walkFiles(dir: string, out: string[] = []): string[] {
     let entries: fs.Dirent[];
     try {
         entries = fs.readdirSync(dir, { withFileTypes: true });
