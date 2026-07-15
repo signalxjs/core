@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+The runnable example app moved from in-package (`packages/ssr-islands/example/`)
+to the repo's shared examples folder: `examples/ssr-islands/`. The package name
+(`@sigx/ssr-islands-example`) and the `pnpm --filter` commands are unchanged.
+(#237)
+
 **Island signal state is now keyed automatically — named = transferred.**
 Signal state keys are derived from the declaration identifier by the
 `sigxIslands()` Vite transform (`const count = ctx.signal(0)` → key

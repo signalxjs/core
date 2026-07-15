@@ -143,14 +143,13 @@ free port automatically).
   hydration via `client:*` directives). The first-party *reference* strategy pack
   riding `@sigx/server-renderer`'s public plugin API; a drop-in equal of any
   third-party pack, with no privileged access to core. Its runnable example app
-  lives in-package at `packages/ssr-islands/example/` (private workspace
-  package, excluded from the npm pack).
+  lives at `examples/ssr-islands/` (private workspace package).
 - `packages/cache` → `@sigx/cache` — cache policy for value-first async
   (staleTime/gcTime, revalidation, `invalidate()`, optimistic `mutate()`). The
   first-party pack on the rfc-async §7 engine seam — a drop-in equal of any
   third-party pack, no privileged access to core.
 - `packages/vite` → `@sigx/vite` — Vite plugin for dev/build/HMR.
-- `examples/` — runnable apps (`hello`, `spa`, `spa-ssr`).
+- `examples/` — runnable apps (`hello`, `spa`, `spa-ssr`, `ssr-islands`).
 
 Path aliases: `tsconfig.json` and `vitest.config.ts` map `@sigx/*` and `sigx` to
 `packages/*/src`, so tests and typecheck run against source, not dist.
