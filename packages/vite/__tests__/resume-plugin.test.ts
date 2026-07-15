@@ -140,6 +140,44 @@ describe('sigxResume — virtual modules', () => {
         expect(resolvedAgainst).toBe(join(root, 'src/resume/Counter.tsx'));
     });
 
+    it('emits the manifest with components and handlers sections', () => {
+        const emitted: any[] = [];
+        const ctx = {
+            environment: { name: 'client' },
+            emitFile: (asset: any) => emitted.push(asset)
+        };
+        const counterPath = join(root, 'src/resume/Counter.tsx').replace(/\\/g, '/');
+        const bundle = {
+            'assets/Counter-abc.js': {
+                type: 'chunk',
+                facadeModuleId: counterPath,
+                fileName: 'assets/Counter-abc.js'
+            },
+            'assets/Counter.handlers-def.js': {
+                type: 'chunk',
+                facadeModuleId: '\0virtual:sigx-resume:src/resume/Counter.tsx.handlers.ts',
+                fileName: 'assets/Counter.handlers-def.js'
+            }
+        };
+        plugin.generateBundle.handler.call(ctx, {}, bundle);
+
+        expect(emitted).toHaveLength(1);
+        expect(emitted[0].fileName).toBe('.vite/sigx-resume-manifest.json');
+        const manifest = JSON.parse(emitted[0].source);
+        expect(manifest.components.Counter).toEqual({ chunkUrl: '/assets/Counter-abc.js', exportName: 'Counter' });
+        const symbols = Object.keys(manifest.handlers);
+        expect(symbols).toHaveLength(1);
+        expect(symbols[0]).toMatch(/^Counter_click_[0-9a-f]{8}$/);
+        expect(manifest.handlers[symbols[0]].chunkUrl).toBe('/assets/Counter.handlers-def.js');
+    });
+
+    it('emits no manifest outside the client environment', () => {
+        const emitted: any[] = [];
+        const ctx = { environment: { name: 'ssr' }, emitFile: (asset: any) => emitted.push(asset) };
+        plugin.generateBundle.handler.call(ctx, {}, {});
+        expect(emitted).toHaveLength(0);
+    });
+
     it('loads the entry with the discovered event union', () => {
         const resolved = plugin.resolveId.call({}, 'virtual:sigx-resume/entry', undefined);
         const entry = plugin.load.call({}, resolved);

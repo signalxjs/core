@@ -204,17 +204,15 @@ export function sigxResume(options: SigxResumeOptions = {}): Plugin {
             return { code: `${injectSignalNames(extraction.code)}\n;${stamps}\n`, map: null };
         },
 
-        hotUpdate({ type, file, read }) {
+        async hotUpdate({ type, file, read }) {
             if (!filter(file)) return;
-            void (async () => {
-                if (type === 'delete') extractions.delete(file);
-                else extractInto(file, await read());
-                const graph = this.environment.moduleGraph;
-                for (const vid of [RESOLVED_VIRTUAL_ID, RESOLVED_ENTRY_ID, RESOLVED_HANDLERS_PREFIX + relPath(file) + HANDLERS_SUFFIX]) {
-                    const mod = graph.getModuleById(vid);
-                    if (mod) graph.invalidateModule(mod);
-                }
-            })();
+            if (type === 'delete') extractions.delete(file);
+            else extractInto(file, await read());
+            const graph = this.environment.moduleGraph;
+            for (const vid of [RESOLVED_VIRTUAL_ID, RESOLVED_ENTRY_ID, RESOLVED_HANDLERS_PREFIX + relPath(file) + HANDLERS_SUFFIX]) {
+                const mod = graph.getModuleById(vid);
+                if (mod) graph.invalidateModule(mod);
+            }
         },
 
         generateBundle: {
