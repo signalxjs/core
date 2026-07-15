@@ -247,6 +247,37 @@ export const Reserved = component((ctx) => {
 `)).toContain('reserved');
     });
 
+    it('allows reserved names in non-reference positions (keys, member props)', () => {
+        const result = extractResumeHandlers(`
+import { component } from 'sigx';
+export const Keys = component((ctx) => {
+    const n = ctx.signal(0);
+    return () => <button onClick={(e) => { n.value = ({ $scope: 1 }).$scope + (e.target as any).$el; }}>x</button>;
+});
+`, '/src/Keys.resume.tsx');
+        expect(result.ineligible).toHaveLength(0);
+        expect(result.handlers).toHaveLength(1);
+    });
+
+    it('does not resolve a setup const through a shadowing view-scope binding', () => {
+        const result = extractResumeHandlers(`
+import { component } from 'sigx';
+export const Shadow = component((ctx) => {
+    const n = ctx.signal(0);
+    const save = () => { n.value++; };
+    return () => {
+        const save = () => { window.name = 'view-closure'; };
+        return <button onClick={save}>x</button>;
+    };
+});
+`, '/src/Shadow.resume.tsx');
+        // The identifier refers to the VIEW-scope `save`; resolving it to the
+        // setup const would extract the wrong function.
+        expect(result.handlers).toHaveLength(0);
+        expect(result.ineligible).toHaveLength(1);
+        expect(result.components[0].mode).toBe('hydrate');
+    });
+
     it('rejects writes to ctx.props', () => {
         const reason = firstReason(`
 import { component } from 'sigx';
