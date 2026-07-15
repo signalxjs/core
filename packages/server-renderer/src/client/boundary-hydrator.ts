@@ -112,6 +112,9 @@ export function invalidateMarkerIndex(): void {
  * resumability's upgrade-on-write replicated this walk).
  */
 export function findBoundaryMarker(id: number): Comment | null {
+    // Public entry: honest null in non-DOM / pre-body environments instead
+    // of throwing from the index build.
+    if (typeof document === 'undefined' || !document.body) return null;
     if (!_markerIndex) {
         _markerIndex = buildMarkerIndex();
     }
@@ -133,10 +136,13 @@ export async function hydrateTableBoundary(id: number): Promise<boolean> {
     if (!marker) return false;
     const component = await loadBoundaryComponent(record);
     if (!component) return false;
-    if (record.flush === 'skip') {
-        mountSkipBoundary(marker, component, record);
+    // Re-read after the await — a mid-stream patch may have replaced the
+    // table entry while the chunk loaded (same discipline as the scheduler).
+    const fresh = getBoundaryRecord(id) ?? record;
+    if (fresh.flush === 'skip') {
+        mountSkipBoundary(marker, component, fresh);
     } else {
-        hydrateBoundaryInPlace(marker, component, record);
+        hydrateBoundaryInPlace(marker, component, fresh);
     }
     return true;
 }
