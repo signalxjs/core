@@ -49,9 +49,11 @@ export const App = component(() => {
 
             <p class="tagline">
                 ~48 interactive product cards, one interactive form, one deal
-                widget — and the only JavaScript this page executes on load is
-                a sub-kilobyte delegation loader plus the two deliberate
-                islands you can see (cart badge, HUD). Rendered {rendered}.
+                widget — and in a production build, the only JavaScript this
+                page executes on load is a sub-kilobyte delegation loader plus
+                the two deliberate islands you can see (cart badge, HUD). Dev
+                mode serves unbundled modules — run <code>build</code> +{' '}
+                <code>start</code> to measure the real payload. Rendered {rendered}.
             </p>
 
             <DealOfTheDay />

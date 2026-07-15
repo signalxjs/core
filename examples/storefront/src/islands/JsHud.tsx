@@ -8,15 +8,24 @@ import { component } from 'sigx';
  * (the shared handlers chunk, then that card's component on the write).
  */
 export const JsHud = component((ctx) => {
-    const chunks = ctx.signal<{ list: string[] }>({ list: [] });
+    const chunks = ctx.signal<{ list: { key: string; label: string }[] }>({ list: [] });
 
     ctx.onMounted(() => {
         const seen = new Set<string>();
+        // Dev serves UNBUNDLED modules (no /assets/ chunks) — count what the
+        // mode actually loads, and label it, or the HUD lies in dev (#269).
+        const isChunk = (url: string) => import.meta.env.DEV
+            ? /\.m?[jt]sx?(\?|$)/.test(url) || url.includes('/@id/') || url.includes('/@fs/')
+            : url.includes('/assets/') && url.includes('.js');
         const push = (entry: PerformanceEntry) => {
             const url = entry.name;
-            if (!url.includes('/assets/') || !url.includes('.js') || seen.has(url)) return;
+            if (!isChunk(url) || seen.has(url)) return;
             seen.add(url);
-            chunks.$set({ list: [...chunks.list, url.slice(url.lastIndexOf('/') + 1)] });
+            const label = (url.includes('/@id/') ? url.slice(url.indexOf('/@id/') + 5)
+                : url.slice(url.lastIndexOf('/') + 1)).split('?')[0];
+            // Key by the full URL — dev labels collide (every dist entry is
+            // an index.js) and duplicate keys break list reconciliation.
+            chunks.$set({ list: [...chunks.list, { key: url, label }] });
         };
         performance.getEntriesByType('resource').forEach(push);
         const observer = new PerformanceObserver((entries) => entries.getEntries().forEach(push));
@@ -26,9 +35,13 @@ export const JsHud = component((ctx) => {
 
     return () => (
         <details class="hud" open>
-            <summary>JS chunks fetched: {chunks.list.length}</summary>
+            <summary>
+                {import.meta.env.DEV
+                    ? `dev modules fetched: ${chunks.list.length} (unbundled — judge payload in prod)`
+                    : `JS chunks fetched: ${chunks.list.length}`}
+            </summary>
             <ol>
-                {chunks.list.map((name) => <li key={name}>{name}</li>)}
+                {chunks.list.map((entry) => <li key={entry.key}>{entry.label}</li>)}
             </ol>
         </details>
     );
