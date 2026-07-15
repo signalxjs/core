@@ -105,12 +105,72 @@ export function invalidateMarkerIndex(): void {
     _markerIndex = null;
 }
 
-function findBoundaryMarker(id: number): Comment | null {
+/**
+ * The `<!--$c:ID-->` trailing marker for a boundary, via the cached marker
+ * index (invalidate with {@link invalidateMarkerIndex} after DOM surgery).
+ * Exported for packs that hydrate boundaries on their own schedule (#254 —
+ * resumability's upgrade-on-write replicated this walk).
+ */
+export function findBoundaryMarker(id: number): Comment | null {
+    // Public entry: honest null in non-DOM / pre-body environments instead
+    // of throwing from the index build.
+    if (typeof document === 'undefined' || !document.body) return null;
     if (!_markerIndex) {
         _markerIndex = buildMarkerIndex();
     }
     return _markerIndex.get(id) ?? null;
 }
+
+/**
+ * Load a table boundary's component and hydrate it in place, right now —
+ * the one-shot form of the strategy scheduler, for packs that own their own
+ * wake-up (#254). Uses the CURRENT table record (mid-stream patches
+ * included), core's chunk/registry resolution, and the same skip-placeholder
+ * vs in-place dispatch as scheduled hydrations. Returns false when the
+ * record, marker, or component cannot be resolved.
+ */
+export async function hydrateTableBoundary(id: number): Promise<boolean> {
+    // One retry: a mid-stream patch can replace the record while the chunk
+    // loads; the second pass re-validates everything against the new record.
+    for (let attempt = 0; attempt < 2; attempt++) {
+        const record = getBoundaryRecord(id);
+        if (!record) return false;
+        const marker = findBoundaryMarker(id);
+        if (!marker || !marker.isConnected) return false;
+        // The element before the marker is the content root. Its absence
+        // means there is nothing to hydrate — return false instead of
+        // letting the in-place step warn-and-noop.
+        let prev: Node | null = marker.previousSibling;
+        while (prev && prev.nodeType !== Node.ELEMENT_NODE) prev = prev.previousSibling;
+        if (!prev) return false;
+        // A still-pending streamed boundary shows its ASYNC placeholder —
+        // the real content hasn't arrived yet (sigx:async-ready will hydrate
+        // it). Regardless of flush: skip boundaries use the data-boundary
+        // placeholder, never this one.
+        if ((prev as Element).hasAttribute?.('data-async-placeholder')) {
+            return false;
+        }
+        const component = await loadBoundaryComponent(record);
+        if (!component) return false;
+        // Post-await re-validation: the table and the DOM may both have
+        // changed while the chunk loaded.
+        const fresh = getBoundaryRecord(id);
+        if (!fresh) return false; // record removed mid-flight
+        if (fresh.component !== record.component || fresh.chunk?.url !== record.chunk?.url) {
+            continue; // record replaced — one full re-pass with the new one
+        }
+        const liveMarker = findBoundaryMarker(id);
+        if (!liveMarker || !liveMarker.isConnected) return false;
+        if (fresh.flush === 'skip') {
+            mountSkipBoundary(liveMarker, component, fresh);
+        } else {
+            hydrateBoundaryInPlace(liveMarker, component, fresh);
+        }
+        return true;
+    }
+    return false;
+}
+
 
 /**
  * Is this element the skip-SSR placeholder emitted by core's flush:'skip'

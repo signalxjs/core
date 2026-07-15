@@ -41,6 +41,8 @@ export type { HydrateDefaults } from './hydrate-defaults';
 export {
     getBoundaryTable,
     getBoundaryRecord,
+    findBoundaryMarker,
+    hydrateTableBoundary,
     scheduleTableBoundaries,
     scheduleWalkedBoundary,
     scheduleByStrategy,
