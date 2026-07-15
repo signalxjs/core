@@ -210,6 +210,11 @@ export function resumePlugin(options?: ResumePluginOptions): SSRPlugin {
                     const state = serializeSignalState(signalMap);
                     if (state) {
                         record.state = state;
+                    } else if (record.state) {
+                        // The async phase made every key unserializable —
+                        // stale pre-async state must not ship (the resumed
+                        // scope would show values the DOM no longer matches).
+                        delete record.state;
                     }
                 }
             }
