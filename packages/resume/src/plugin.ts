@@ -45,6 +45,12 @@ import { createTrackingSignal, serializeSignalState } from './server/track-signa
 interface ResumePluginData {
     /** Per-component signal maps, keyed by component ID. */
     signalMaps: Map<number, Map<string, any>>;
+    /**
+     * Boundary ids resume actually claimed in resolveBoundary. Later hooks
+     * guard on THIS, not on `ctx.getBoundary(id)` — a record's existence
+     * only proves that SOME plugin won the consult.
+     */
+    claimed: Set<number>;
 }
 
 const PLUGIN_NAME = 'resume';
@@ -74,7 +80,8 @@ export function resumePlugin(options?: ResumePluginOptions): SSRPlugin {
         server: {
             setup(ctx: SSRContext) {
                 ctx.setPluginData<ResumePluginData>(PLUGIN_NAME, {
-                    signalMaps: new Map()
+                    signalMaps: new Map(),
+                    claimed: new Set()
                 });
             },
 
@@ -110,6 +117,11 @@ export function resumePlugin(options?: ResumePluginOptions): SSRPlugin {
                 const { children: _children, slots: _slots, $models: _models, ...propsData } = allProps;
                 const props = serializeBoundaryProps(propsData, getTypeHandlers(ctx));
 
+                // Remember the claim — the component id is already at the
+                // stack top when resolveBoundary runs.
+                const id = ctx._componentStack[ctx._componentStack.length - 1];
+                ctx.getPluginData<ResumePluginData>(PLUGIN_NAME)?.claimed.add(id);
+
                 // ALL resume boundaries opt out of core scheduling — the
                 // pack's delegation wakes them (QRL replay for 'resume'
                 // components, full hydration for 'hydrate' ones via their
@@ -124,19 +136,15 @@ export function resumePlugin(options?: ResumePluginOptions): SSRPlugin {
                 componentCtx: ComponentSetupContext
             ): ComponentSetupContext | void {
                 if (!(vnode.type as ResumeStamps).__resumeId) return; // Not resumable — don't touch
-                // Transform hooks run for EVERY plugin — a record's existence
-                // does not mean resume owns it. Mirror resolveBoundary's
-                // decline: a client:* usage site belongs to islands, whose
-                // own tracking signal must not be overwritten here.
-                if (Object.keys(vnode.props || {}).some((key) => key.startsWith('client:'))) return;
 
-                // The boundary record exists before this hook runs. No record
-                // means another plugin won the consult (or resume declined) —
-                // leave the context alone.
+                // Transform hooks run for EVERY plugin — only boundaries
+                // resume itself claimed in resolveBoundary are touched
+                // (declined client:* sites and other packs' wins are not).
                 const id = ctx._componentStack[ctx._componentStack.length - 1];
-                if (!ctx.getBoundary(id)) return;
-
-                const record = ctx.getBoundary(id)!;
+                const data = ctx.getPluginData<ResumePluginData>(PLUGIN_NAME);
+                if (!data?.claimed.has(id)) return;
+                const record = ctx.getBoundary(id);
+                if (!record) return;
                 // Core derives record.component from __islandId || __name —
                 // resume components carry neither, and the client's
                 // loadBoundaryComponent refuses records with no name (found
@@ -144,7 +152,6 @@ export function resumePlugin(options?: ResumePluginOptions): SSRPlugin {
                 // noted as a candidate core seam in #241).
                 record.component = (vnode.type as ResumeStamps).__resumeId;
 
-                const data = ctx.getPluginData<ResumePluginData>(PLUGIN_NAME)!;
                 const signalMap = new Map<string, any>();
                 data.signalMaps.set(id, signalMap);
 
@@ -167,12 +174,14 @@ export function resumePlugin(options?: ResumePluginOptions): SSRPlugin {
             ): string | void {
                 // Capture signal state into the core boundary record — the
                 // table ships it to the client, where it becomes the resumed
-                // scope (and the upgrade's restore seed).
+                // scope (and the upgrade's restore seed). Guard on resume's
+                // own claim — this hook fires for every recorded boundary.
+                const data = ctx.getPluginData<ResumePluginData>(PLUGIN_NAME);
+                if (!data?.claimed.has(id)) return;
                 const record = ctx.getBoundary(id);
                 if (!record) return;
 
-                const data = ctx.getPluginData<ResumePluginData>(PLUGIN_NAME);
-                const signalMap = data?.signalMaps.get(id);
+                const signalMap = data.signalMaps.get(id);
                 if (signalMap && signalMap.size > 0) {
                     const state = serializeSignalState(signalMap);
                     if (state) {
@@ -189,11 +198,14 @@ export function resumePlugin(options?: ResumePluginOptions): SSRPlugin {
                 // Re-capture after async data resolved — core re-emits the
                 // mutated record as the __SIGX_BOUNDARIES__ preScript patch,
                 // so delegation over streamed content resumes current state.
+                // Same claim guard: streamed boundaries of other packs pass
+                // through here too.
+                const data = ctx.getPluginData<ResumePluginData>(PLUGIN_NAME);
+                if (!data?.claimed.has(id)) return;
                 const record = ctx.getBoundary(id);
                 if (!record) return;
 
-                const data = ctx.getPluginData<ResumePluginData>(PLUGIN_NAME);
-                const signalMap = data?.signalMaps.get(id);
+                const signalMap = data.signalMaps.get(id);
                 if (signalMap && signalMap.size > 0) {
                     const state = serializeSignalState(signalMap);
                     if (state) {
