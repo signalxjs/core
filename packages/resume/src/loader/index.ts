@@ -123,11 +123,19 @@ function dispatch(type: string, ev: Event): void {
         );
         current.ready = ready;
     }
-    ready.then((runtime) => {
-        for (const id of wakeIds) void runtime.wake(id);
+    ready.then(async (runtime) => {
+        for (const id of wakeIds) {
+            // wake failures must not kill the QRL replay below (or vice
+            // versa) — surface them individually.
+            try {
+                await runtime.wake(id);
+            } catch (error) {
+                console.error(`[sigx resume] wake of boundary ${id} failed:`, error);
+            }
+        }
         return replay(runtime, type, ev, chain);
     }).catch((error) => {
-        console.error('[sigx resume] failed to load the resume runtime:', error);
+        console.error('[sigx resume] resume dispatch failed:', error);
     });
 }
 
