@@ -54,7 +54,9 @@ function makeFacade(scope: InternalScope, name: string): { value: unknown } {
             scope._pendingWrites.push([name, next]);
             if (scope._status === 'resumed') {
                 scope._status = 'upgrading';
-                void scheduleUpgrade(scope);
+                scheduleUpgrade(scope).catch((error) => {
+                    console.error(`[sigx resume] upgrade of boundary ${scope._id} failed:`, error);
+                });
             }
         }
     };
@@ -101,6 +103,18 @@ export function getScope(id: number): InternalScope {
         }
         scopes.set(id, (scope = makeScope(id, record)));
     }
+    return scope;
+}
+
+/**
+ * A scope with no boundary at all (element carried no usable data-sigx-b):
+ * global-only handlers still run; nothing resumes, nothing upgrades. The
+ * missing-record warning is skipped — the caller has already warned about
+ * the missing id.
+ */
+export function getDetachedScope(): InternalScope {
+    let scope = scopes.get(-1);
+    if (!scope) scopes.set(-1, (scope = makeScope(-1, null)));
     return scope;
 }
 

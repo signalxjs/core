@@ -31,7 +31,7 @@ import {
     getClientPlugins
 } from '@sigx/server-renderer/client';
 import type { SSRPlugin } from '@sigx/server-renderer';
-import type { VNode, ComponentSetupContext, signal } from 'sigx';
+import type { VNode, ComponentSetupContext } from 'sigx';
 import type { InternalScope } from './scope';
 import { getScope } from './scope';
 import { createRestoringSignal } from './restore-signal';
@@ -65,7 +65,7 @@ const RESTORE_HOOK: SSRPlugin = {
                 (name, live) => {
                     upgrading._live![name] = live;
                 }
-            ) as typeof signal;
+            ) as ComponentSetupContext['signal'];
             (componentCtx as ComponentSetupContext & { $sigxB?: string }).$sigxB = String(upgrading._id);
             return componentCtx;
         }
@@ -91,7 +91,10 @@ function findBoundaryMarker(id: number): Comment | null {
 
 /** Load the boundary's component chunk and hydrate it in place. */
 export async function scheduleUpgrade(scope: InternalScope): Promise<void> {
-    const record = scope._record ?? getBoundaryRecord(scope._id);
+    // Late table installs can fill a record the scope missed at creation —
+    // pin it on the scope so the restore hook seeds from the SAME record.
+    if (!scope._record) scope._record = getBoundaryRecord(scope._id) ?? null;
+    const record = scope._record;
     if (!record) return; // detached scope — nothing to upgrade
 
     const component = await loadBoundaryComponent(record);

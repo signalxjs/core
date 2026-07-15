@@ -15,7 +15,9 @@
 export type QrlLoader = () => Promise<(...args: any[]) => unknown>;
 
 const loaders = new Map<string, QrlLoader>();
-const resolved = new Map<string, (...args: unknown[]) => unknown>();
+// In-flight promises double as the settled cache — concurrent resolveQrl
+// calls for one symbol must share a single loader() invocation.
+const resolutions = new Map<string, Promise<((...args: unknown[]) => unknown) | null>>();
 
 /** Register a lazy loader for a QRL symbol (first registration wins). */
 export function __registerResumeQrl(symbol: string, loader: QrlLoader): void {
@@ -23,9 +25,9 @@ export function __registerResumeQrl(symbol: string, loader: QrlLoader): void {
 }
 
 /** Resolve a QRL symbol to its handler function, importing on first use. */
-export async function resolveQrl(symbol: string): Promise<((...args: unknown[]) => unknown) | null> {
-    const cached = resolved.get(symbol);
-    if (cached) return cached;
+export function resolveQrl(symbol: string): Promise<((...args: unknown[]) => unknown) | null> {
+    let resolution = resolutions.get(symbol);
+    if (resolution) return resolution;
 
     const loader = loaders.get(symbol);
     if (!loader) {
@@ -36,25 +38,35 @@ export async function resolveQrl(symbol: string): Promise<((...args: unknown[]) 
                 `server-rendered HTML?`
             );
         }
-        return null;
+        // Not cached: a late-registering registry can still succeed later.
+        return Promise.resolve(null);
     }
 
-    const handler = await loader();
-    if (typeof handler !== 'function') {
-        if (__DEV__) {
-            console.warn(
-                `[sigx resume] QRL "${symbol}" resolved to ${typeof handler} — expected the ` +
-                `handler function exported from its handlers module.`
-            );
+    resolution = Promise.resolve(loader()).then(
+        (handler) => {
+            if (typeof handler !== 'function') {
+                if (__DEV__) {
+                    console.warn(
+                        `[sigx resume] QRL "${symbol}" resolved to ${typeof handler} — expected the ` +
+                        `handler function exported from its handlers module.`
+                    );
+                }
+                return null;
+            }
+            return handler as (...args: unknown[]) => unknown;
+        },
+        (error) => {
+            // Failed imports retry on the next interaction.
+            resolutions.delete(symbol);
+            throw error;
         }
-        return null;
-    }
-    resolved.set(symbol, handler as (...args: unknown[]) => unknown);
-    return resolved.get(symbol)!;
+    );
+    resolutions.set(symbol, resolution);
+    return resolution;
 }
 
-/** Drop all registrations and cached handlers — SPA navigation and tests. */
+/** Drop all registrations and cached/in-flight handlers — SPA nav and tests. */
 export function resetResumeQrls(): void {
     loaders.clear();
-    resolved.clear();
+    resolutions.clear();
 }

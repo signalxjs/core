@@ -140,9 +140,6 @@ describe('scope resume', () => {
         const Counter = makeCounter();
         const { id, container } = await mount(<Counter initial={0} />);
 
-        // Component resolution is gated so the upgrade stays in flight.
-        let releaseLoad!: () => void;
-        const gate = new Promise<void>((r) => { releaseLoad = r; });
         registerComponent('Counter', Counter);
         const scope = getScope(id) as any;
 
@@ -151,10 +148,12 @@ describe('scope resume', () => {
         );
         const el = container.querySelector('button')!;
 
-        // Two rapid interactions before the chunk resolves.
+        // Two rapid interactions: the first write flips the scope to
+        // 'upgrading' and the upgrade awaits the component load (async), so
+        // the second handler still runs against facades and its write joins
+        // the buffer — both replay in order after hydration.
         const first = invoke('Counter_click_test0001', new Event('click'), el);
         const second = invoke('Counter_click_test0001', new Event('click'), el);
-        releaseLoad();
         await Promise.all([first, second]);
         await tick();
         await tick();
