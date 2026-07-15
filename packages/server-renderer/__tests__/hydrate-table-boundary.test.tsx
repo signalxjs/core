@@ -98,4 +98,18 @@ describe('streamed boundaries still showing their placeholder', () => {
         expect(await hydrateTableBoundary(5)).toBe(false);
         expect(container.textContent).toContain('loading…'); // untouched
     });
+
+    it("returns false for pending streams even when the record says flush:'skip'", async () => {
+        const Counter = makeCounter('PendingSkip');
+        registerComponent('PendingSkip', Counter);
+        // data-async-placeholder ALWAYS means the stream hasn't landed —
+        // skip boundaries use the data-boundary placeholder, never this one.
+        container.innerHTML =
+            `<div data-async-placeholder="6" style="display:contents;">loading…</div><!--$c:6-->`;
+        (window as any).__SIGX_BOUNDARIES__ = { 6: { flush: 'skip', hydrate: 'never', component: 'PendingSkip' } };
+        invalidateMarkerIndex();
+
+        expect(await hydrateTableBoundary(6)).toBe(false);
+        expect(container.textContent).toContain('loading…');
+    });
 });

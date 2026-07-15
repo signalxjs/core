@@ -140,13 +140,11 @@ export async function hydrateTableBoundary(id: number): Promise<boolean> {
     let prev: Node | null = marker.previousSibling;
     while (prev && prev.nodeType !== Node.ELEMENT_NODE) prev = prev.previousSibling;
     if (!prev) return false;
-    // A still-pending streamed boundary shows its async placeholder — the
+    // A still-pending streamed boundary shows its ASYNC placeholder — the
     // real content hasn't arrived yet (sigx:async-ready will hydrate it).
-    // Skip boundaries mount INTO their placeholder, so they proceed.
-    if (
-        (prev as Element).hasAttribute?.('data-async-placeholder') &&
-        record.flush !== 'skip'
-    ) {
+    // Regardless of flush: skip boundaries use the data-boundary placeholder,
+    // never this one.
+    if ((prev as Element).hasAttribute?.('data-async-placeholder')) {
         return false;
     }
     const component = await loadBoundaryComponent(record);
