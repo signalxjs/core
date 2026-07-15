@@ -155,7 +155,8 @@ free port automatically).
   first-party pack on the rfc-async §7 engine seam — a drop-in equal of any
   third-party pack, no privileged access to core.
 - `packages/vite` → `@sigx/vite` — Vite plugin for dev/build/HMR.
-- `examples/` — runnable apps (`hello`, `spa`, `spa-ssr`, `ssr-islands`).
+- `examples/` — runnable apps (`hello`, `spa`, `spa-ssr`, `ssr-islands`,
+  `resume`, `storefront` — the resumability showcase).
 
 Path aliases: `tsconfig.json` and `vitest.config.ts` map `@sigx/*` and `sigx` to
 `packages/*/src`, so tests and typecheck run against source, not dist.
