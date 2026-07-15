@@ -1,6 +1,6 @@
 # @sigx/resume
 
-Qwik-style **resumability** for SignalX SSR — the second first-party strategy
+**Resumability** for SignalX SSR — the second first-party strategy
 pack riding `@sigx/server-renderer`'s public plugin API.
 
 Server pages render fully; the browser ships only a tiny delegation loader.
@@ -64,3 +64,10 @@ warning.
 Part of the #241 program. This package currently ships the server half
 (`resumePlugin`); the client entry (`@sigx/resume/client`) and the delegation
 loader (`@sigx/resume/loader`) land with the follow-up PRs.
+
+## Credits
+
+The resumability model — serialized handler references, global event
+delegation with replay, and no client re-execution of component setup — was
+pioneered by [Qwik](https://qwik.dev/). This pack adapts it to sigx signals
+and the `@sigx/server-renderer` plugin platform.

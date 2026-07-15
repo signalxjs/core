@@ -2,7 +2,7 @@
  * Resume SSR Plugin (#241)
  *
  * The second first-party strategy pack on @sigx/server-renderer's public
- * plugin API — Qwik-style resumability:
+ * plugin API — resumability:
  *
  * - Components stamped by the `sigxResume()` Vite transform (`__resumeId`)
  *   become boundaries with `hydrate: 'never'` — core schedules nothing for

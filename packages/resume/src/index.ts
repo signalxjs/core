@@ -1,7 +1,7 @@
 /**
  * @sigx/resume
  *
- * Qwik-style resumability for SignalX SSR — the second first-party strategy
+ * Resumability for SignalX SSR — the second first-party strategy
  * pack on @sigx/server-renderer's public plugin API (#241).
  *
  * Server pages render fully; the browser ships only a tiny delegation
