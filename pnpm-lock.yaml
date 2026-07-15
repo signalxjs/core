@@ -148,9 +148,12 @@ importers:
 
   packages/cache:
     dependencies:
-      sigx:
+      '@sigx/reactivity':
         specifier: workspace:^
-        version: link:../sigx
+        version: link:../reactivity
+      '@sigx/runtime-core':
+        specifier: workspace:^
+        version: link:../runtime-core
     devDependencies:
       '@sigx/vite':
         specifier: workspace:^
@@ -158,6 +161,9 @@ importers:
       '@types/node':
         specifier: ^26.1.1
         version: 26.1.1
+      esbuild:
+        specifier: ^0.28.1
+        version: 0.28.1
       typescript:
         specifier: ^7.0.2
         version: 7.0.2
