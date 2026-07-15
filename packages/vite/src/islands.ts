@@ -119,11 +119,15 @@ export function injectSignalNames(code: string): string {
     );
 }
 
-/** Walk a directory collecting files (bounded to the project tree). */
+/**
+ * Walk a directory collecting files (bounded to the project tree). Sorted —
+ * readdir order varies across filesystems, and discovery order decides
+ * first-wins duplicate resolution, which must not depend on the machine.
+ */
 export function walkFiles(dir: string, out: string[] = []): string[] {
     let entries: fs.Dirent[];
     try {
-        entries = fs.readdirSync(dir, { withFileTypes: true });
+        entries = fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name));
     } catch {
         return out;
     }
