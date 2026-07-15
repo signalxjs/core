@@ -20,6 +20,7 @@
  */
 
 import { signal } from 'sigx';
+import type { PrimitiveSignal, Signal, Primitive } from 'sigx';
 import { isSerializable } from './serialize';
 
 /**
@@ -31,31 +32,22 @@ import { isSerializable } from './serialize';
 // proxy that uniformly exposes `{ value: T }` for primitives AND objects.
 // Unkeyed and duplicate-key calls fall back to the plain core `signal()`,
 // whose object form has NO `.value` — the type must not pretend otherwise.
-/** Matches core `signal()`'s primitive constraint. */
-type Primitive = string | number | boolean | bigint | symbol | null | undefined;
-
-/** Literal widening, mirroring core's `PrimitiveSignal` (`signal(0).value` is `number`, not `0`). */
-type Widen<T> =
-    T extends number ? number :
-    T extends string ? string :
-    T extends boolean ? boolean :
-    T extends bigint ? bigint :
-    T;
-
+// The overloads reference CORE's own signal types rather than re-describing
+// them (#263 review): keyed calls add the wrapper proxy's `.value`
+// interception on top; unkeyed calls are exactly `signal()`.
 export interface StateSignalFn {
-    /** Keyed primitive (transform-injected): the `{ value }` proxy. */
-    <T extends Primitive>(initial: T, name: string): { value: Widen<T> };
+    /** Keyed primitive (transform-injected): the `{ value }` wrapper proxy. */
+    <T extends Primitive>(initial: T, name: string): PrimitiveSignal<T>;
     /**
-     * Keyed object: the object's own reactive shape; the wrapper's `.value`
-     * passes through to the OBJECT'S OWN `value` property (undefined unless
-     * the object declares one) — it is not the whole object.
+     * Keyed object: the object's reactive shape (incl. `$set`) passes
+     * through; the wrapper's `.value` reads/writes the OBJECT'S OWN `value`
+     * property (undefined unless the object declares one).
      */
-    <T extends object>(initial: T, name: string): T & { value: unknown };
-    /**
-     * Unkeyed: the plain core signal — primitives wrap as `{ value: T }`,
-     * objects become a reactive proxy of the object's own shape (no `.value`).
-     */
-    <T>(initial: T): { value: Widen<T> } | (T & object);
+    <T extends object>(initial: T, name: string): Signal<T> & { value: unknown };
+    /** Unkeyed primitive: exactly the core signal. */
+    <T extends Primitive>(initial: T): PrimitiveSignal<T>;
+    /** Unkeyed object: exactly the core signal — NO `.value` wrapper. */
+    <T extends object>(initial: T): Signal<T>;
 }
 
 /**
