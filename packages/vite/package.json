@@ -25,6 +25,10 @@
         "./islands": {
             "types": "./dist/islands.d.ts",
             "import": "./dist/islands.js"
+        },
+        "./resume": {
+            "types": "./dist/resume.d.ts",
+            "import": "./dist/resume.js"
         }
     },
     "bin": {
@@ -44,7 +48,8 @@
         "sigx": "*",
         "vite": ">=8.0.0",
         "@sigx/server-renderer": "*",
-        "@sigx/ssr-islands": "*"
+        "@sigx/ssr-islands": "*",
+        "@sigx/resume": "*"
     },
     "devDependencies": {
         "@types/node": "^26.1.1",
@@ -75,6 +80,9 @@
             "optional": true
         },
         "@sigx/ssr-islands": {
+            "optional": true
+        },
+        "@sigx/resume": {
             "optional": true
         }
     }
