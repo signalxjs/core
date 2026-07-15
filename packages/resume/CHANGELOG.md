@@ -4,7 +4,7 @@
 
 ### Added
 
-- `@sigx/resume/loader` — the delegation loader (~500 B brotlied), the only
+- `@sigx/resume/loader` — the delegation loader (~500 B brotli-compressed), the only
   script a resumable page ships: capture-phase delegation, first-event
   replay, synchronous `preventDefault`, wake dispatch for hydrate-mode
   boundaries (#241).
