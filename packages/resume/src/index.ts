@@ -19,8 +19,10 @@
  * const ssr = createSSR().use(resumePlugin({ manifest }));
  * ```
  *
- * The client entry (`@sigx/resume/client`) and the delegation loader
- * (`@sigx/resume/loader`) land with the follow-up #241 PRs.
+ * The client entry is `@sigx/resume/client` (lazy-loaded on first
+ * interaction) and the delegation loader is `@sigx/resume/loader` — the
+ * generated `virtual:sigx-resume/entry` wires them up; apps rarely import
+ * either directly.
  */
 
 export { resumePlugin } from './plugin';

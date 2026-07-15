@@ -22,8 +22,9 @@
  *   interactive element's boundary resolution inline (lexical ownership; no
  *   DOM-ancestry search).
  *
- * The client half (delegation loader, scope resume, upgrade-on-write) lands
- * with the later #241 PRs; this module is WinterCG-clean server territory.
+ * The client half lives in `@sigx/resume/loader` (the delegation loader —
+ * the page's only script) and `@sigx/resume/client` (scope resume,
+ * upgrade-on-write); this module is WinterCG-clean server territory.
  *
  * @example
  * ```ts
