@@ -5,7 +5,10 @@
 // prod dists through each package's exports map. (Checks whose `@sigx/*`
 // imports are `ignore`d never resolve them, so only the umbrella needs it.)
 function resolveProdDists(config) {
-  config.conditions = ['production'];
+  // Custom `conditions` keep esbuild's import/require/default but drop the
+  // implicit `module` condition — list it explicitly so dual-format deps
+  // that rely on it keep resolving.
+  config.conditions = ['production', 'module'];
   config.tsconfigRaw = '{}';
   return config;
 }
@@ -27,6 +30,8 @@ export default [
     name: '@sigx/runtime-core (incl. renderer internals)',
     path: 'scripts/size/runtime-core-with-internals.mjs',
     limit: '13.5 KB',
+    // Not redundant: the fixture's imports are relative, but the dist files
+    // themselves import @sigx/reactivity as bare specifiers.
     ignore: ['@sigx/*'],
   },
   {
