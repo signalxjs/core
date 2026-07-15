@@ -34,7 +34,7 @@
  */
 
 import type { Plugin } from 'vite';
-import { createFilter } from 'vite';
+import { createFilter, transformWithOxc } from 'vite';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { extractResumeHandlers, offsetToLoc, type ResumeExtraction } from './resume-extract.js';
@@ -203,7 +203,13 @@ export function sigxResume(options: SigxResumeOptions = {}): Plugin {
             }
             if (id.startsWith(RESOLVED_HANDLERS_PREFIX)) {
                 const extraction = extractions.get(fileOfHandlersId(id));
-                return extraction?.handlersModule ?? 'export {};';
+                const source = extraction?.handlersModule;
+                if (!source) return 'export {};';
+                // Handlers preserve the source's TS annotations, and Vite's
+                // own transform pipeline skips \0-prefixed ids in dev (#270)
+                // — the .ts suffix alone never strips them. Strip here so
+                // the module is plain JS in every mode.
+                return transformWithOxc(source, id.slice(1), { lang: 'ts' });
             }
         },
 
