@@ -82,6 +82,45 @@ describe('app.runWithContext integration', () => {
         expect(warn).toHaveBeenCalledTimes(2);
     });
 
+    it('asyncAdvice string replaces the remediation sentence, keeping the diagnosis', () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const app = defineApp(jsx('div', {}));
+
+        void app.runWithContext(async () => 'value', {
+            asyncAdvice: '(from lib) resolve dependencies before the first await.'
+        });
+
+        expect(warn).toHaveBeenCalledTimes(1);
+        const message = warn.mock.calls[0][0] as string;
+        expect(message).toContain('synchronous portion');
+        expect(message).toContain('(from lib) resolve dependencies before the first await.');
+        expect(message).not.toContain('re-enter with another runWithContext');
+    });
+
+    it('asyncAdvice: false suppresses without consuming the once-per-app slot', () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const app = defineApp(jsx('div', {}));
+
+        void app.runWithContext(async () => 'deliberate', { asyncAdvice: false });
+        expect(warn).not.toHaveBeenCalled();
+
+        // A later unmarked async callback on the same app still warns.
+        void app.runWithContext(async () => 'misuse');
+        expect(warn).toHaveBeenCalledTimes(1);
+        expect(warn.mock.calls[0][0]).toContain('re-enter with another runWithContext');
+    });
+
+    it('warns once per app across default and asyncAdvice variants', () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const app = defineApp(jsx('div', {}));
+
+        void app.runWithContext(async () => 'first');
+        void app.runWithContext(async () => 'second', { asyncAdvice: '(from lib) advice.' });
+
+        expect(warn).toHaveBeenCalledTimes(1);
+        expect(warn.mock.calls[0][0]).toContain('re-enter with another runWithContext');
+    });
+
     it('stays silent for synchronous callbacks', () => {
         const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
         const app = defineApp(jsx('div', {}));

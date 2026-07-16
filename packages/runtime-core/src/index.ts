@@ -34,6 +34,7 @@ export type {
     PluginInstallFn,
     MountFn,
     UnmountFn,
+    RunWithContextOptions,
     App
 } from './app.js';
 
