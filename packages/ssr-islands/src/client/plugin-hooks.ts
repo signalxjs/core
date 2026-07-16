@@ -14,7 +14,6 @@ import type { SSRPlugin } from '@sigx/server-renderer';
 import type { SSRBoundaryRecord } from '@sigx/server-renderer';
 import { scheduleWalkedBoundary, consumeBoundaryState } from '@sigx/server-renderer/client';
 import type { VNode, ComponentSetupContext } from 'sigx';
-import type { signal } from 'sigx';
 import { createRestoringSignal } from './restore-signal';
 import { getHydrationDirective, filterClientDirectives, CLIENT_DIRECTIVE_PREFIX } from '../client-directives';
 import type { HydrationStrategy } from '../types';
@@ -77,7 +76,7 @@ export const islandsClientHooks: SSRPlugin = {
             const state = consumeBoundaryState();
             if (!state) return;
 
-            componentCtx.signal = createRestoringSignal(state) as typeof signal;
+            componentCtx.signal = createRestoringSignal(state) as ComponentSetupContext['signal'];
             return componentCtx;
         },
 

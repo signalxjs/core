@@ -25,7 +25,6 @@ import type { SSRContext } from '@sigx/server-renderer';
 import { serializeBoundaryProps, getTypeHandlers } from '@sigx/server-renderer/server';
 import { registerClientPlugin, provideHydrateDefaults } from '@sigx/server-renderer/client';
 import type { VNode, ComponentSetupContext, App } from 'sigx';
-import type { signal } from 'sigx';
 import {
     getHydrationDirective,
     filterClientDirectives,
@@ -93,7 +92,11 @@ function normalizeManifest(manifest: IslandsPluginOptions['manifest']): {
     runtimePreload: string[];
 } {
     if (!manifest) return { islands: {}, runtimePreload: [] };
-    if ('islands' in manifest && typeof manifest.islands === 'object') {
+    // Discriminate on the version TAG, not shape: a legacy flat map could
+    // legitimately contain an island named "islands" (its entry is an
+    // object too), and an island named "version" maps to an object — never
+    // the literal 2.
+    if ((manifest as IslandsManifestV2).version === 2) {
         const v2 = manifest as IslandsManifestV2;
         return { islands: v2.islands ?? {}, runtimePreload: v2.runtimePreload ?? [] };
     }
@@ -190,7 +193,7 @@ export function islandsPlugin(options?: IslandsPluginOptions): SSRPlugin & { ins
                 data.signalMaps.set(id, signalMap);
 
                 // Swap signal function with tracking variant
-                componentCtx.signal = createTrackingSignal(signalMap) as typeof signal;
+                componentCtx.signal = createTrackingSignal(signalMap) as ComponentSetupContext['signal'];
 
                 return componentCtx;
             },
