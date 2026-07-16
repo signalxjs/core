@@ -27,6 +27,8 @@ import {
     queueJob,
     nextJobId,
     applyErrorScope,
+    collectSetupScope,
+    takeSetupDisposers,
 } from 'sigx/internals';
 import type { SchedulerJob } from 'sigx/internals';
 import {
@@ -163,12 +165,18 @@ export function hydrateComponent(vnode: VNode, dom: Node | null, parent: Node, t
 
     const prev = setCurrentInstance(componentCtx);
     let renderFn: (() => any) | undefined;
+    // Disposers for effect()/watch() the setup creates directly, run on
+    // unmount (#288). Null until setup creates one — reaction-less setups
+    // allocate nothing.
+    let setupDisposers: (() => void)[] | null = null;
 
     try {
         // Untracked for the same reason as runtime-core's mountComponent
         // (#111): hydration mounts descendants inside an ancestor's render
         // effect — setup reads must not become ancestor dependencies.
-        renderFn = untrack(() => setup(componentCtx));
+        // collectSetupScope ties the setup's reactions to unmount (#288).
+        renderFn = collectSetupScope(() => untrack(() => setup(componentCtx)));
+        setupDisposers = takeSetupDisposers();
         // errorScope: render through the scope wrapper (fallback while
         // errored, generation-keyed subtree otherwise) — the same wrapping
         // runtime-core's mountComponent applies. A hydrator-seeded server
@@ -363,6 +371,12 @@ export function hydrateComponent(vnode: VNode, dom: Node | null, parent: Node, t
     // Store cleanup
     vnode.cleanup = () => {
         unmountHooks.forEach(hook => hook(mountCtx));
+        // Dispose setup effect()/watch() AFTER onUnmounted hooks (#288).
+        if (setupDisposers) {
+            const disposers = setupDisposers;
+            setupDisposers = null;
+            for (let i = 0, len = disposers.length; i < len; i++) disposers[i]();
+        }
     };
 
     // With trailing markers, the anchor IS the end - return next sibling

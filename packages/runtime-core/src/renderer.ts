@@ -1,6 +1,6 @@
 import { VNode, Fragment, JSXElement, Text, Comment, EMPTY_PROPS } from './jsx-runtime.js';
 import { effect, signal, untrack } from '@sigx/reactivity';
-import { withoutOwnerTracking } from '@sigx/reactivity/internals';
+import { withoutOwnerTracking, collectSetupScope, takeSetupDisposers } from '@sigx/reactivity/internals';
 import { ComponentSetupContext, setCurrentInstance, getCurrentInstance, MountContext, ViewFn, SetupFn } from './component.js';
 import { createPropsAccessor } from './utils/props-accessor.js';
 import { createSlots } from './utils/slots.js';
@@ -991,6 +991,11 @@ export function createRenderer<HostNode = any, HostElement = any>(
         let updatedHooks: (() => void)[] | null = null;
         let unmountHooks: ((ctx: MountContext) => void)[] | null = null;
 
+        // Disposers for effect()/watch() the setup body creates directly, tied
+        // to this component's lifetime (run on unmount). Null until setup
+        // actually creates one — reaction-less setups allocate nothing (#288).
+        let setupDisposers: (() => void)[] | null = null;
+
         // Capture the parent component context BEFORE creating the new one
         // This is crucial for Provide/Inject to work
         const parentInstance = getCurrentInstance();
@@ -1049,7 +1054,12 @@ export function createRenderer<HostNode = any, HostElement = any>(
             // such signal re-renders the parent, remounts descendants, and
             // the flush can re-queue itself forever (#111). Reactivity in
             // setup belongs to explicit watch/computed/render scopes only.
-            const setupResult = untrack(() => setup(ctx));
+            //
+            // collectSetupScope: capture effect()/watch() the setup creates so
+            // they're disposed on unmount (#288). Composes with untrack (one
+            // guards deps, the other collects disposers).
+            const setupResult = collectSetupScope(() => untrack(() => setup(ctx)));
+            setupDisposers = takeSetupDisposers();
             // Async setup is only supported on server - check for promise
             if (setupResult && typeof (setupResult as any).then === 'function') {
                 throw asyncSetupClientError(componentName ?? 'anonymous');
@@ -1184,16 +1194,24 @@ export function createRenderer<HostNode = any, HostElement = any>(
                         });
                     }
                     // 2. Clear every hook list — the re-run repopulates them,
-                    //    so hooks no longer accumulate across hot updates.
+                    //    so hooks no longer accumulate across hot updates. Also
+                    //    dispose the previous run's setup effect()/watch() (#288).
                     createdHooks = mountHooks = updatedHooks = unmountHooks = null;
+                    if (setupDisposers) {
+                        const disposers = setupDisposers;
+                        setupDisposers = null;
+                        for (let i = 0, len = disposers.length; i < len; i++) disposers[i]();
+                    }
 
                     // 3. Re-run the new setup exactly like mount: untracked
                     //    (no parent-dep capture, #111), instance current so
-                    //    module-level hooks register here (#105), then rewrap
-                    //    with the error scope and fire the new created hooks.
+                    //    module-level hooks register here (#105), collect its
+                    //    setup reactions (#288), then rewrap with the error
+                    //    scope and fire the new created hooks.
                     const prevInstance = setCurrentInstance(ctx);
                     try {
-                        const setupResult = untrack(() => newSetup(ctx));
+                        const setupResult = collectSetupScope(() => untrack(() => newSetup(ctx)));
+                        setupDisposers = takeSetupDisposers();
                         if (setupResult && typeof (setupResult as any).then === 'function') {
                             throw asyncSetupClientError(componentName ?? 'anonymous');
                         }
@@ -1244,6 +1262,13 @@ export function createRenderer<HostNode = any, HostElement = any>(
             if (unmountHooks) {
                 const hooks: ((ctx: MountContext) => void)[] = unmountHooks;
                 for (let i = 0, len = hooks.length; i < len; i++) hooks[i](mountCtx as MountContext);
+            }
+            // Dispose effect()/watch() the setup created — AFTER onUnmounted so
+            // user cleanup still sees live reactives (#288).
+            if (setupDisposers) {
+                const disposers = setupDisposers;
+                setupDisposers = null;
+                for (let i = 0, len = disposers.length; i < len; i++) disposers[i]();
             }
         };
     }

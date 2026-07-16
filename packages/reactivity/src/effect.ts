@@ -483,10 +483,18 @@ export function rawEffect(fn: EffectFn): EffectRunner {
 
 /**
  * Register a disposer with the currently-active effect scope, if any.
+ *
+ * When a `collectSetupScope()` region is active (component setup), the disposer
+ * is captured into a lazily-allocated array instead — so a setup that creates
+ * no reactions allocates nothing.
  * @internal
  */
 export function registerWithActiveScope(dispose: () => void): void {
-    activeScopeCleanups?.push(dispose);
+    if (collectingScope) {
+        (collectedDisposers ??= []).push(dispose);
+    } else {
+        activeScopeCleanups?.push(dispose);
+    }
 }
 
 /**
@@ -515,6 +523,54 @@ export function untrack<T>(fn: () => T): T {
 // so they are disposed with their parent (unless created detached).
 let activeScopeCleanups: (() => void)[] | null = null;
 
+// Lazy component-setup collector state (see collectSetupScope). When
+// `collectingScope` is true, registrations route into `collectedDisposers`,
+// which is allocated only on the first reaction — so a setup that creates no
+// effect()/watch() costs nothing.
+let collectingScope = false;
+let collectedDisposers: (() => void)[] | null = null;
+let pendingSetupDisposers: (() => void)[] | null = null;
+
+/**
+ * Run `fn` (a component's setup) capturing every `effect()`, `watch()`, and
+ * non-detached `effectScope()` it creates synchronously. The collected
+ * disposers are retrievable via {@link takeSetupDisposers} immediately after —
+ * the renderer stores them and runs them on unmount, tying setup reactions to
+ * the component's lifetime.
+ *
+ * Zero-allocation for reaction-less setups: the backing array is created only
+ * on the first registration. The region is detached — it owns its reactions
+ * regardless of any outer effect scope active at mount time.
+ * @internal
+ */
+export function collectSetupScope<T>(fn: () => T): T {
+    const prevCollecting = collectingScope;
+    const prevCollected = collectedDisposers;
+    const prevScope = activeScopeCleanups;
+    collectingScope = true;
+    collectedDisposers = null;
+    activeScopeCleanups = null;
+    try {
+        return fn();
+    } finally {
+        pendingSetupDisposers = collectedDisposers;
+        collectingScope = prevCollecting;
+        collectedDisposers = prevCollected;
+        activeScopeCleanups = prevScope;
+    }
+}
+
+/**
+ * Retrieve (and clear) the disposers collected by the most recent
+ * {@link collectSetupScope} call, or `null` if it created no reactions.
+ * @internal
+ */
+export function takeSetupDisposers(): (() => void)[] | null {
+    const disposers = pendingSetupDisposers;
+    pendingSetupDisposers = null;
+    return disposers;
+}
+
 /**
  * Create an effect scope that collects reactive effects for bulk disposal.
  * Effects and watchers created synchronously inside `run()` are disposed by
@@ -542,11 +598,16 @@ export function effectScope(detached?: boolean): {
         run<T>(fn: () => T): T | undefined {
             if (!active) return undefined;
             const prev = activeScopeCleanups;
+            const prevCollecting = collectingScope;
             activeScopeCleanups = cleanups;
+            // An explicit scope takes precedence over an enclosing setup
+            // collector: effects created in this run() belong to THIS scope.
+            collectingScope = false;
             try {
                 return fn();
             } finally {
                 activeScopeCleanups = prev;
+                collectingScope = prevCollecting;
             }
         },
         stop() {
@@ -569,8 +630,11 @@ export function effectScope(detached?: boolean): {
         }
     };
 
-    if (!detached && activeScopeCleanups) {
-        activeScopeCleanups.push(() => scope.stop());
+    // Register this scope's stop with the enclosing scope (or the setup
+    // collector, if one is active) so a non-detached scope created in a
+    // component's setup is disposed with the component.
+    if (!detached) {
+        registerWithActiveScope(() => scope.stop());
     }
 
     return scope;
