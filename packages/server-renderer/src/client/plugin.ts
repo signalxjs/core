@@ -6,7 +6,8 @@
  */
 
 import type { Plugin, App, AppContext } from '@sigx/runtime-core';
-import { render } from 'sigx';
+import { render, SigxError } from 'sigx';
+import { prodError } from 'sigx/internals';
 import { hydrate as hydrateImpl } from './hydrate-core';
 
 // ============================================================================
@@ -85,20 +86,28 @@ export const ssrClientPlugin: Plugin = {
                 : container;
 
             if (!resolvedContainer) {
-                throw new Error(
-                    `[ssrClientPlugin] Cannot find container: ${container}. ` +
-                    'Make sure the element exists in the DOM before calling hydrate().'
-                );
+                if (__DEV__) {
+                    throw new SigxError(
+                        `[ssrClientPlugin] Cannot find container: ${container}. ` +
+                        'Make sure the element exists in the DOM before calling hydrate().',
+                        { code: 'SIGX600' }
+                    );
+                }
+                throw prodError('SIGX600', String(container));
             }
 
             // Get the root component from the app
             const rootComponent = app._rootComponent;
 
             if (!rootComponent) {
-                throw new Error(
-                    '[ssrClientPlugin] No root component found on app. ' +
-                    'Make sure you created the app with defineApp(<Component />).'
-                );
+                if (__DEV__) {
+                    throw new SigxError(
+                        '[ssrClientPlugin] No root component found on app. ' +
+                        'Make sure you created the app with defineApp(<Component />).',
+                        { code: 'SIGX601' }
+                    );
+                }
+                throw prodError('SIGX601');
             }
 
             // Check if there's actual SSR content to hydrate

@@ -78,10 +78,14 @@ export const SigxErrorCode = {
  * `suggestion` strings are dev-only (the `__DEV__` branches fold away, so
  * their literals never reach the prod dist). The docs base is the single URL
  * literal that ships in prod.
+ *
+ * `prodError` is exposed via `@sigx/runtime-core/internals` so first-party packs
+ * that throw coded errors (e.g. `@sigx/server-renderer`) build the same coded
+ * prod message without copying the `SIGX### … — see <url>` scaffolding.
  */
 const ERRORS_URL = 'https://sigx.dev/errors/';
 
-function prodError(code: string, detail?: string): SigxError {
+export function prodError(code: string, detail?: string): SigxError {
     return new SigxError(
         `${code}${detail ? ` ${detail}` : ''} — see ${ERRORS_URL}${code}/`,
         { code }

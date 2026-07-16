@@ -1,4 +1,4 @@
-import { describe, it, expect, expectTypeOf, vi } from 'vitest';
+import { describe, it, expect, expectTypeOf, vi, afterEach } from 'vitest';
 import { signal, effect, watch, toSignal, toSignals, type PropertySignal } from '../src/index';
 
 describe('toSignal', () => {
@@ -57,6 +57,30 @@ describe('toSignal', () => {
 
         count.value = count.value + 1;
         expect(state.count).toBe(11);
+    });
+
+    describe('rejected (read-only) writes', () => {
+        afterEach(() => vi.unstubAllEnvs());
+
+        it('dev: throws the full message naming the key', () => {
+            const frozen = Object.freeze({ count: 1 as number });
+            const count = toSignal(frozen, 'count');
+            expect(() => { count.value = 2; }).toThrow(
+                /cannot write to read-only property "count"/
+            );
+        });
+
+        it('prod: throws the compact SIGX500 code + docs URL, not the full message', () => {
+            vi.stubEnv('NODE_ENV', 'production');
+            const frozen = Object.freeze({ count: 1 as number });
+            const count = toSignal(frozen, 'count');
+            let err: Error | undefined;
+            try { count.value = 2; } catch (e) { err = e as Error; }
+            expect(err).toBeInstanceOf(Error);
+            expect(err!.message).toContain('SIGX500');
+            expect(err!.message).toContain('https://sigx.dev/errors/SIGX500/');
+            expect(err!.message).not.toContain('read-only property');
+        });
     });
 });
 

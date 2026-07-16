@@ -5,6 +5,14 @@ repository-root `CHANGELOG.md`.
 
 ## [Unreleased]
 
+### Changed
+
+- Production builds now log a compact coded error when the focus-revalidation
+  trigger throws while subscribing — `SIGX700 — see https://sigx.dev/errors/SIGX700/`
+  instead of the full message, which is kept dev-only (`__DEV__`-stripped from the
+  prod dist). Extends the runtime-core prod-error-code pattern (core#230) to this
+  pack. (#289)
+
 ## [0.10.0] - 2026-07-15
 
 Renderer portability (signalxjs/core#205): the pack now depends on

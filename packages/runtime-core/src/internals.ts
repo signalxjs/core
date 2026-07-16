@@ -96,6 +96,11 @@ export { __DIRECTIVE__ } from './directives.js';
 // Component-setup helpers shared with the client hydrator
 export { createEmit, splitComponentProps } from './utils/component-props.js';
 
+// Prod error-code helper: build a `SIGX### — see <url>` SigxError for first-party
+// packs that throw coded errors (used by @sigx/server-renderer). Packs whose site
+// isn't a throw, or that can't depend on runtime-core, inline the code instead.
+export { prodError } from './errors.js';
+
 // Async context (for SSR isolation)
 export { runInRequestScope, hasRequestIsolation } from './async-context.js';
 

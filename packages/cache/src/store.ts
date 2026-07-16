@@ -334,7 +334,14 @@ export class CacheStore {
             // A broken trigger must not crash the mounting read. Surface it
             // and clear the flag so a later opting-in read can retry.
             this.triggerInstalled = false;
-            console.error('[sigx-cache] revalidateTrigger threw while subscribing:', e);
+            // Prod ships the bare code + docs pointer; the full message is
+            // dev-only (the __DEV__ branch folds away in the prod dist).
+            console.error(
+                __DEV__
+                    ? '[sigx-cache] revalidateTrigger threw while subscribing:'
+                    : 'SIGX700 — see https://sigx.dev/errors/SIGX700/',
+                e
+            );
         }
     }
 
