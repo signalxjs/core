@@ -1,13 +1,13 @@
 /**
  * The __SIGX_ASYNC__ contract suite — server-side capture of keyed
- * useAsync/useStream values by the state serialization plugin, the
+ * useData/useStream values by the state serialization plugin, the
  * request-global key-indexed wire format, streaming preScript ordering,
  * XSS safety, request-level dedupe, and the consume-once client pickup
  * during hydration.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { component, useAsync } from 'sigx';
+import { component, useData } from 'sigx';
 import { createSSR, stateSerializationPlugin, renderToString } from '../src/index';
 import { hydrateComponent } from '../src/client/hydrate-component';
 import { createSSRContainer, cleanupContainer, nextTick } from './test-utils';
@@ -21,7 +21,7 @@ function makeUserComponent(key: string, loaded: any = { name: 'Ada', role: 'admi
         return loaded;
     });
     const User = component(() => {
-        const user = useAsync(key, fetcher);
+        const user = useData(key, fetcher);
         return () => <div class="user">{user.value ? (user.value as any).name : 'loading'}</div>;
     }, { name: 'User' });
     return { User, fetcher };
@@ -39,14 +39,14 @@ async function collectStream(stream: ReadableStream<string>): Promise<string> {
 }
 
 describe('stateSerializationPlugin — server capture', () => {
-    it('emits a __SIGX_ASYNC__ blob for blocked keyed useAsync (string mode)', async () => {
+    it('emits a __SIGX_ASYNC__ blob for blocked keyed useData (string mode)', async () => {
         const { User } = makeUserComponent('blob-user');
         const ssr = createSSR().use(stateSerializationPlugin());
         const html = await ssr.render((User as any)({}));
 
         expect(html).toContain('>Ada<');
         expect(html).toContain('window.__SIGX_ASYNC__=Object.assign(Object.create(null),window.__SIGX_ASYNC__,');
-        // Keyed by the explicit useAsync key — never by component id
+        // Keyed by the explicit useData key — never by component id
         expect(html).toContain('"blob-user":{"name":"Ada","role":"admin"}');
     });
 
@@ -57,17 +57,19 @@ describe('stateSerializationPlugin — server capture', () => {
         expect(html).not.toContain('__SIGX_ASYNC__');
     });
 
-    it('does not emit a blob for unkeyed useAsync calls', async () => {
+    it('does not emit a blob for idle (falsy reactive-key) useData calls', async () => {
         const fetcher = vi.fn(async () => 'never-on-server');
         const Plain = component(() => {
-            const data = useAsync(fetcher);
-            return () => <span>{data.value ?? 'loading'}</span>;
+            // A reactive key resolving falsy skips the fetch: state 'idle'.
+            // (useData has no unkeyed form — every read has an identity.)
+            const data = useData(() => null, fetcher);
+            return () => <span>{data.value ?? data.state}</span>;
         }, { name: 'Plain' });
 
         const ssr = createSSR().use(stateSerializationPlugin());
         const html = await ssr.render((Plain as any)({}));
-        // Unkeyed: never runs on the server — SSR renders the loading branch
-        expect(html).toContain('<span>loading</span>');
+        // Falsy key: the fetcher never runs on the server — SSR renders idle
+        expect(html).toContain('<span>idle</span>');
         expect(fetcher).not.toHaveBeenCalled();
         expect(html).not.toContain('__SIGX_ASYNC__');
     });
@@ -85,8 +87,8 @@ describe('stateSerializationPlugin — server capture', () => {
     it('skips non-serializable values with a dev warning', async () => {
         const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
         const Bad = component(() => {
-            useAsync('callback', async () => () => 'not serializable');
-            useAsync('good-data', async () => 'fine');
+            useData('callback', async () => () => 'not serializable');
+            useData('good-data', async () => 'fine');
             return () => <div>x</div>;
         }, { name: 'Bad' });
 
@@ -104,7 +106,7 @@ describe('non-representable values', () => {
     it('skips values JSON.stringify cannot represent (symbol) with a warning', async () => {
         const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
         const Sym = component(() => {
-            const data = useAsync('sym-key', async () => Symbol('nope') as any);
+            const data = useData('sym-key', async () => Symbol('nope') as any);
             return () => <div>{data.loading ? 'loading' : 'done'}</div>;
         }, { name: 'Sym' });
 
@@ -121,7 +123,7 @@ describe('prototype-pollution guards', () => {
     it('rejects dangerous keys with a dev warning', async () => {
         const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
         const Bad = component(() => {
-            const data = useAsync('__proto__', async () => ({ polluted: true }));
+            const data = useData('__proto__', async () => ({ polluted: true }));
             return () => <div>{data.value ? 'loaded' : 'loading'}</div>;
         }, { name: 'Bad' });
 
@@ -135,7 +137,7 @@ describe('prototype-pollution guards', () => {
 
     it('emits a null-prototype assign target in the blob script', async () => {
         const Page = component(() => {
-            const data = useAsync('safe-key', async () => 'v');
+            const data = useData('safe-key', async () => 'v');
             return () => <div>{data.value ?? 'loading'}</div>;
         }, { name: 'Page' });
 
@@ -171,7 +173,7 @@ describe('request-level dedupe', () => {
     it('shares one fetch between two components with the same key and emits the key once', async () => {
         const fetcher = vi.fn(async () => 'shared-value');
         const makeCard = (cls: string) => component(() => {
-            const data = useAsync('dedupe-shared', fetcher);
+            const data = useData('dedupe-shared', fetcher);
             return () => <i class={cls}>{data.value}</i>;
         }, { name: 'Card' });
         const A = makeCard('a');
@@ -226,7 +228,7 @@ describe('server → client round trip', () => {
 
         const clientFetch = vi.fn(async () => ({ name: 'WRONG', role: 'nope' }));
         const ClientUser = component(() => {
-            const user = useAsync('rt-user', clientFetch);
+            const user = useData('rt-user', clientFetch);
             return () => <div class="user">{user.value ? (user.value as any).name : 'loading'}</div>;
         }, { name: 'User' });
 

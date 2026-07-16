@@ -4,7 +4,11 @@
  * hydration (#120) while staying a normal live signal afterwards.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+
+afterEach(() => {
+    vi.restoreAllMocks();
+});
 import { effect } from 'sigx';
 import { createRestoringSignal } from '../src/client/restore-signal';
 import type { SSRSignalFn } from '../src/server/render-component';
@@ -23,12 +27,20 @@ describe('createRestoringSignal', () => {
         expect(count.value).toBe(42);
     });
 
-    it('uses positional $index keys for unnamed signals (matches server)', () => {
-        const restore = createRestoringSignal({ $0: 'a', $1: 'b' }) as SSRSignalFn;
-        const first = restore('x');
-        const second = restore('y');
-        expect(first.value).toBe('a');
-        expect(second.value).toBe('b');
+    it('leaves an unkeyed signal local-only: seeds from its own initial (matches server)', () => {
+        const restore = createRestoringSignal({ count: 7 }) as SSRSignalFn;
+        const local = restore('x');
+        expect(local.value).toBe('x');
+    });
+
+    it('duplicate key: first restores, later ones stay local-only (matches server first-wins)', () => {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const restore = createRestoringSignal({ n: 10 }) as SSRSignalFn;
+        const first = restore(0, 'n');
+        const second = restore(1, 'n');
+        expect(first.value).toBe(10);   // restored
+        expect(second.value).toBe(1);   // its own initial — never state['n']
+        expect(warnSpy.mock.calls.flat().join(' ')).toContain('Duplicate state key "n"');
     });
 
     it('restores object-form signals via the .value convention', () => {

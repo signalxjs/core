@@ -64,6 +64,63 @@ jobs:
       - name: Verify pack
         run: pnpm verify:pack
 
+  edge-smoke:
+    # rfc-ssr-platform §2.3: the production dist must stream a document
+    # through the Web-stream path with every Node builtin import forbidden
+    # (the module-graph property WinterCG runtimes enforce for real).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+
+      - name: Edge smoke test
+        run: pnpm test:edge
+
+  bench-smoke:
+    # The benchmark suite rots silently when it isn't run: the sigx adapter's
+    # import broke in #202 and nobody noticed until #214. This job is a
+    # correctness gate, not a timing gate — `verify` proves every framework
+    # adapter still builds an equivalent tree, and the quick suite proves the
+    # adapters load and render. bench:ssr:quick does NOT pass --enforce, so
+    # check-regression only prints its delta table (expect "worse than +25%"
+    # notes: a CI runner is slower than whatever machine recorded the
+    # baseline). Timing enforcement stays local — and even under --enforce,
+    # check-regression skips it on a machine-fingerprint mismatch.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+
+      - name: Verify cross-framework output equivalence
+        run: pnpm --filter @sigx/benchmarks verify
+
+      - name: Quick benchmark suite
+        run: pnpm bench:ssr:quick
+
   coverage:
     runs-on: ubuntu-latest
     steps:

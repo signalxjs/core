@@ -1,0 +1,148 @@
+/**
+ * The shared serializer module — one escaping/key-safety/dev-warning
+ * discipline for every state blob, plus the per-app type-handler seam
+ * (SSR_SERIALIZER_TOKEN / provideSSRSerializerHandlers from sigx/internals).
+ */
+
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import {
+    escapeJsonForScript,
+    assignmentJs,
+    stringifyWithHandlers,
+    serializeBoundaryProps,
+    getTypeHandlers,
+    type SSRTypeHandler
+} from '../src/server/serialize';
+import { asyncAssignmentJs } from '../src/server/state';
+import { createSSRContext } from '../src/server/context';
+import { provideSSRSerializerHandlers, SSR_SERIALIZER_TOKEN } from 'sigx/internals';
+
+afterEach(() => {
+    vi.restoreAllMocks();
+});
+
+const dateHandler: SSRTypeHandler = {
+    name: 'date',
+    test: (v) => v instanceof Date,
+    serialize: (v) => ({ $date: (v as Date).getTime() })
+};
+
+describe('assignmentJs — the one blob discipline', () => {
+    it('emits the null-prototype Object.assign statement for any global', () => {
+        const js = assignmentJs('__SIGX_BOUNDARIES__', { 3: { hydrate: 'visible' } });
+        expect(js).toBe(
+            'window.__SIGX_BOUNDARIES__=Object.assign(Object.create(null),window.__SIGX_BOUNDARIES__,' +
+            '{"3":{"hydrate":"visible"}});'
+        );
+    });
+
+    it('asyncAssignmentJs is byte-identical to the pre-refactor wire format', () => {
+        expect(asyncAssignmentJs({ stats: { n: 1 } })).toBe(
+            'window.__SIGX_ASYNC__=Object.assign(Object.create(null),window.__SIGX_ASYNC__,{"stats":{"n":1}});'
+        );
+    });
+
+    it('escapes script-breaking characters in values', () => {
+        const js = assignmentJs('__SIGX_ASYNC__', { x: '</script><script>alert(1)</script>' });
+        expect(js).not.toContain('</script>');
+        expect(js).toContain('\\u003c/script\\u003e');
+        expect(escapeJsonForScript(JSON.stringify('\u2028\u2029'))).toBe('"\\u2028\\u2029"');
+    });
+});
+
+describe('stringifyWithHandlers — type-handler chain', () => {
+    it('hands the RAW value to handlers (before toJSON — Date is matchable)', () => {
+        const d = new Date(1720000000000);
+        expect(stringifyWithHandlers({ at: d }, [dateHandler]))
+            .toBe('{"at":{"$date":1720000000000}}');
+    });
+
+    it('matches at the top level and inside arrays', () => {
+        const d = new Date(5);
+        expect(stringifyWithHandlers(d, [dateHandler])).toBe('{"$date":5}');
+        expect(stringifyWithHandlers([d], [dateHandler])).toBe('[{"$date":5}]');
+    });
+
+    it('first matching handler wins; unmatched values pass through', () => {
+        const loud: SSRTypeHandler = { name: 'loud', test: (v) => v instanceof Date, serialize: () => 'LOUD' };
+        expect(stringifyWithHandlers({ at: new Date(5), n: 1 }, [dateHandler, loud]))
+            .toBe('{"at":{"$date":5},"n":1}');
+    });
+
+    it('is plain JSON.stringify with no handlers', () => {
+        expect(stringifyWithHandlers({ a: 1 }, [])).toBe('{"a":1}');
+    });
+});
+
+describe('serializeBoundaryProps', () => {
+    it('keeps data props, silently drops internals / functions / handlers / undefined', () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        expect(serializeBoundaryProps({
+            start: 5,
+            label: 'x',
+            children: ['nested'],
+            key: 'k',
+            ref: {},
+            slots: {},
+            $models: {},
+            onClick: () => {},
+            handler: () => {},
+            sym: Symbol('s'),
+            missing: undefined
+        })).toEqual({ start: 5, label: 'x' });
+        expect(warn).not.toHaveBeenCalled();
+    });
+
+    it('returns undefined when nothing survives', () => {
+        expect(serializeBoundaryProps({ onClick: () => {} })).toBeUndefined();
+        expect(serializeBoundaryProps(null)).toBeUndefined();
+        expect(serializeBoundaryProps({})).toBeUndefined();
+    });
+
+    it('dev-warns on circular values and dangerous keys, dropping them', () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const circular: any = {};
+        circular.self = circular;
+        expect(serializeBoundaryProps({ circular, ok: 1, __proto__valid: 2 })).toEqual({ ok: 1, __proto__valid: 2 });
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining('boundary prop("circular")'));
+
+        warn.mockClear();
+        const props = Object.create(null);
+        props.constructor = { evil: true };
+        props.ok = 1;
+        expect(serializeBoundaryProps(props)).toEqual({ ok: 1 });
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining('"constructor"'));
+    });
+
+    it('a type handler claiming a value bypasses the JSON check', () => {
+        const bigintHandler: SSRTypeHandler = {
+            name: 'bigint',
+            test: (v) => typeof v === 'bigint',
+            serialize: (v) => ({ $bigint: String(v) })
+        };
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        expect(serializeBoundaryProps({ big: 10n }, [bigintHandler])).toEqual({ big: 10n });
+        expect(warn).not.toHaveBeenCalled();
+    });
+});
+
+describe('provideSSRSerializerHandlers — per-app seam', () => {
+    it('accumulates handlers across installs, earlier first', () => {
+        const provides = new Map<symbol, unknown>();
+        const a: SSRTypeHandler = { name: 'a', test: () => false, serialize: (v) => v };
+        const b: SSRTypeHandler = { name: 'b', test: () => false, serialize: (v) => v };
+        provideSSRSerializerHandlers({ provides }, [a]);
+        provideSSRSerializerHandlers({ provides }, [b]);
+        expect((provides.get(SSR_SERIALIZER_TOKEN) as SSRTypeHandler[]).map(h => h.name)).toEqual(['a', 'b']);
+    });
+
+    it('getTypeHandlers resolves through ctx._appContext, empty without an app', () => {
+        const ctx = createSSRContext();
+        expect(getTypeHandlers(ctx)).toEqual([]);
+
+        const provides = new Map<symbol, unknown>();
+        provideSSRSerializerHandlers({ provides }, [dateHandler]);
+        ctx._appContext = { provides } as any;
+        expect(getTypeHandlers(ctx).map(h => h.name)).toEqual(['date']);
+    });
+});

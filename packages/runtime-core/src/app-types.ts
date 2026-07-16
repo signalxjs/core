@@ -36,10 +36,12 @@ export interface ComponentInstance {
  */
 export interface AppConfig {
     /**
-     * Global error handler for component errors.
-     * Return true to suppress the error from propagating.
+     * App-level error handler — the last stop for component errors (setup,
+     * render, reactive re-renders), DOM event-handler throws, and unhandled
+     * async data errors that no errorScope took. Return true to suppress
+     * the error from propagating. Usually set via `app.onError(fn)`.
      */
-    errorHandler?: (err: Error, instance: ComponentInstance | null, info: string) => boolean | void;
+    onError?: (err: Error, instance: ComponentInstance | null, info: string) => boolean | void;
 
     /**
      * Global warning handler (dev mode).
@@ -270,7 +272,13 @@ export interface App<TContainer = any> {
      * restored before any awaited continuation runs. After an `await`,
      * re-enter with another `runWithContext` call if you need to resolve more
      * dependencies. Nested calls are supported; the previous context is
-     * restored when `fn` returns (or throws).
+     * restored when `fn` returns (or throws). Dev builds warn (once per app)
+     * when the callback returns a Promise or other thenable, since that
+     * usually means DI lookups after the first `await` silently fell back to
+     * realm instances.
+     * (Async continuations via AsyncLocalStorage were considered and
+     * deferred: browsers have no ALS, so the behavior would silently diverge
+     * client-side — revisit when TC39 AsyncContext lands cross-platform.)
      *
      * @example
      * ```typescript
@@ -291,6 +299,22 @@ export interface App<TContainer = any> {
      * Register lifecycle hooks to observe all components
      */
     hook(hooks: AppLifecycleHooks): App<TContainer>;
+
+    /**
+     * Set the app-level error handler (single slot — the last stop after
+     * every errorScope declined). Return true from the handler to suppress
+     * the error from propagating. For multiple observers, use
+     * `app.hook({ onComponentError })`.
+     *
+     * @example
+     * ```ts
+     * app.onError((err, instance, info) => {
+     *     telemetry.report(err, { component: instance?.name, info });
+     *     return true;
+     * });
+     * ```
+     */
+    onError(handler: (err: Error, instance: ComponentInstance | null, info: string) => boolean | void): App<TContainer>;
 
     /**
      * Register a global directive, or retrieve a registered one.
@@ -334,8 +358,13 @@ export interface App<TContainer = any> {
     unmount(): void;
 
     /**
-     * Get the app context (for internal use by renderers)
-     * @internal
+     * The app's context — the stable surface for plugin authors.
+     *
+     * Inside `install(app)`, pass `app._context` to seam provide-helpers
+     * (`provideAsyncEngine`, `provideSSRSerializerHandlers`,
+     * `provideHydrateDefaults`, …) or read/write `app._context.provides`
+     * directly. The underscore marks this as an advanced surface, not a
+     * private one — no cast is needed.
      */
     _context: AppContext;
 
@@ -352,8 +381,9 @@ export interface App<TContainer = any> {
     _container: TContainer | null;
 
     /**
-     * The root component passed to defineApp()
-     * @internal
+     * The root component passed to defineApp(). Advanced surface for plugins
+     * that mount/hydrate the app themselves (e.g. the SSR client plugin) —
+     * same contract as `_context`.
      */
     _rootComponent: JSXElement;
 }

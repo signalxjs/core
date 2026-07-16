@@ -6,14 +6,14 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { component, useAsync } from 'sigx';
+import { component, useData } from 'sigx';
 import { useHead } from 'sigx';
 import {
     createSSR,
     renderDocument,
-    renderDocumentToNodeStream,
     renderDocumentToWebStream
 } from '../src/index';
+import { renderDocumentToNodeStream } from '../src/node';
 import type { Readable } from 'node:stream';
 
 const TEMPLATE = `<!doctype html>
@@ -30,7 +30,7 @@ const TEMPLATE = `<!doctype html>
 function makePage(title: string, loadedText = 'loaded-data') {
     return component(() => {
         useHead({ title, meta: [{ name: 'description', content: `${title} page` }] });
-        const data = useAsync('data-' + title, async () => {
+        const data = useData('data-' + title, async () => {
             await new Promise(r => setTimeout(r, 5));
             return loadedText;
         });
@@ -99,7 +99,7 @@ describe('renderDocument — blocking mode (default)', () => {
         const Page = makePage('State');
         const withState = await renderDocument((Page as any)({}), { template: TEMPLATE });
         expect(withState).toContain('window.__SIGX_ASYNC__');
-        // The blob is keyed by the useAsync key, not by component id
+        // The blob is keyed by the useData key, not by component id
         expect(withState).toContain('"data-State":"loaded-data"');
 
         const without = await renderDocument((Page as any)({}), {
@@ -132,7 +132,8 @@ describe('renderDocumentToNodeStream — streaming mode (default)', () => {
     it('flushes head with the shell, then streams replacements, then the tail', async () => {
         const Page = makePage('Streamed');
         const { stream, shell } = renderDocumentToNodeStream((Page as any)({}), { template: TEMPLATE });
-        await expect(shell).resolves.toBeUndefined();
+        // The shell now resolves with the response summary (useResponse seam)
+        await expect(shell).resolves.toEqual({ status: 200, headers: {} });
         const html = await collectNodeStream(stream);
 
         // Head present in document head (streaming previously LOST it)
@@ -163,7 +164,7 @@ describe('renderDocumentToNodeStream — streaming mode (default)', () => {
 
         await expect(shell).rejects.toThrow(/outlet marker/);
         expect(onError).toHaveBeenCalledTimes(1);
-        expect(onError.mock.calls[0][1]).toBe('shell');
+        expect(onError.mock.calls[0][1]).toEqual({ phase: 'shell' });
     });
 
     it('stops early on AbortSignal without the document tail', async () => {

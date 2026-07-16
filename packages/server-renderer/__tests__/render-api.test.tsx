@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { renderToNodeStream, renderToString } from '../src/server/render-api';
+import { renderToString } from '../src/server/render-api';
+import { renderToNodeStream } from '../src/node';
 import { TestCounter, TestText } from './test-utils';
 
 async function collectNodeStream(stream: import('node:stream').Readable): Promise<string> {
@@ -10,7 +11,7 @@ async function collectNodeStream(stream: import('node:stream').Readable): Promis
     return out;
 }
 
-describe('renderToNodeStream (server/render-api)', () => {
+describe('renderToNodeStream (node entry)', () => {
     it('returns a Node Readable that yields rendered HTML', async () => {
         const stream = renderToNodeStream((TestCounter as any)({}));
         const html = await collectNodeStream(stream);

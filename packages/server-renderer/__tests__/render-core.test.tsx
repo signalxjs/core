@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { component, useAsync, Comment } from 'sigx';
+import { component, useData, Comment } from 'sigx';
 import { renderToString, createSSR } from '../src/index';
 import { createSSRContext } from '../src/server/context';
 import {
@@ -302,50 +302,54 @@ describe('renderToString — component error handling', () => {
         consoleErr.mockRestore();
     });
 
-    it('uses onComponentError fallback when provided in context options', async () => {
+    it('uses the renderError hook when provided in context options', async () => {
         const consoleErr = vi.spyOn(console, 'error').mockImplementation(() => {});
         const ssr = createSSR();
         const ctx = createSSRContext({
-            onComponentError: (err: Error, name: string) => `<div data-error="${name}">${err.message}</div>`
+            renderError: (err, info) => `<div data-error="${info.componentName}">${err.message}</div>`
         });
         const html = await ssr.render((Boom as any)({}), ctx);
         expect(html).toContain('<div data-error="Boom">boom</div>');
         consoleErr.mockRestore();
     });
 
-    it('routes useAsync throwOnError rejections to the error fallback in block mode', async () => {
-        // Block mode (string render) awaits keyed useAsync fetchers inline —
-        // with throwOnError, a rejection must land in the component-level
-        // catch (→ error fallback), not escape the render.
-        const consoleErr = vi.spyOn(console, 'error').mockImplementation(() => {});
+    it('never routes useData fetcher rejections to the error fallback in block mode (soft error)', async () => {
+        // Block mode (string render) awaits keyed useData fetchers inline —
+        // server data errors are always SOFT: the rejection settles the cell
+        // to state 'errored' and the component renders its own error branch;
+        // it must NOT land in the component-level catch (→ error fallback).
+        const onError = vi.fn();
+        const renderError = vi.fn(
+            (err: Error, info: any) => `<i data-failed="${info.componentName}">${err.message}</i>`
+        );
         const LoadFail = component(() => {
-            useAsync('rc-throw-fail', async () => {
+            const data = useData('rc-throw-fail', async () => {
                 throw new Error('load-fail');
-            }, { throwOnError: true });
+            });
             return () => ({
                 type: 'div',
-                props: {},
+                props: { class: 'load-fail' },
                 key: null,
-                children: ['never shown'],
+                children: [data.error ? `failed: ${data.error.message}` : 'no error'],
                 dom: null
             } as any);
         }, { name: 'LoadFail' });
 
         const ssr = createSSR();
-        const ctx = createSSRContext({
-            onComponentError: (err: Error, name: string) => `<i data-failed="${name}">${err.message}</i>`
-        });
+        const ctx = createSSRContext({ onError, renderError });
         const html = await ssr.render((LoadFail as any)({}), ctx);
-        expect(html).toContain('<i data-failed="LoadFail">load-fail</i>');
-        expect(html).not.toContain('never shown');
-        consoleErr.mockRestore();
+        expect(onError).not.toHaveBeenCalled();
+        expect(renderError).not.toHaveBeenCalled();
+        expect(html).toContain('failed: load-fail');
+        expect(html).not.toContain('data-failed');
+        expect(html).not.toContain('no error');
     });
 
-    it('renders the component error branch (not the fallback) when the fetcher rejects without throwOnError', async () => {
+    it('renders the component error branch (not the fallback) when the fetcher rejects', async () => {
         // Soft failure: the rejection lands in `.error` and the component
         // renders its own error branch — the error fallback never fires.
         const SoftFail = component(() => {
-            const data = useAsync('rc-soft-fail', async () => {
+            const data = useData('rc-soft-fail', async () => {
                 throw new Error('soft-fail');
             });
             return () => ({
@@ -381,10 +385,10 @@ describe('renderToString — async setup (Promise-returning)', () => {
     });
 });
 
-describe('renderToString — useAsync block mode', () => {
-    it('awaits keyed useAsync fetchers before rendering and yields synchronously after', async () => {
+describe('renderToString — useData block mode', () => {
+    it('awaits keyed useData fetchers before rendering and yields synchronously after', async () => {
         const Loaded = component(() => {
-            const data = useAsync('rc-block-inline', async () => {
+            const data = useData('rc-block-inline', async () => {
                 await Promise.resolve();
                 return 'ready';
             });

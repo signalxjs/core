@@ -69,11 +69,11 @@ describe('createSSRContext', () => {
 
         it('should store data for multiple plugins', () => {
             ctx.setPluginData('islands', { count: 1 });
-            ctx.setPluginData('suspense', { boundaries: 2 });
+            ctx.setPluginData('defer', { boundaries: 2 });
             ctx.setPluginData('resumable', { active: true });
 
             expect(ctx.getPluginData<{ count: number }>('islands')!.count).toBe(1);
-            expect(ctx.getPluginData<{ boundaries: number }>('suspense')!.boundaries).toBe(2);
+            expect(ctx.getPluginData<{ boundaries: number }>('defer')!.boundaries).toBe(2);
             expect(ctx.getPluginData<{ active: boolean }>('resumable')!.active).toBe(true);
         });
 

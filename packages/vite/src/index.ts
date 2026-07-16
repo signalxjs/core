@@ -30,6 +30,23 @@ interface SigxPluginOptions {
      * config always take precedence over this option.
      */
     hmrPort?: number;
+
+    /**
+     * SSR mode (rfc-ssr-platform §3.1): orchestrate the client + server
+     * builds in ONE `vite build` via the environments/builder API — the
+     * client environment emits its manifest (`.vite/manifest.json`, feeding
+     * `collectAssets` → `DocumentOptions.assets`) into `clientOutDir`, and
+     * the ssr environment builds `entry` into `serverOutDir`. Replaces the
+     * hand-run `vite build && vite build --ssr …` double invocation.
+     */
+    ssr?: {
+        /** The SSR entry module, e.g. 'src/entry-server.tsx'. */
+        entry: string;
+        /** Client build output. Default: 'dist/client'. */
+        clientOutDir?: string;
+        /** Server build output. Default: 'dist/server'. */
+        serverOutDir?: string;
+    };
 }
 
 // ============================================================================
@@ -150,6 +167,7 @@ export function sigxPlugin(options: SigxPluginOptions = {}): Plugin {
     const {
         hmr = true,
         hmrPort,
+        ssr,
     } = options;
 
     let config: ResolvedConfig;
@@ -157,6 +175,33 @@ export function sigxPlugin(options: SigxPluginOptions = {}): Plugin {
     return {
         name: 'sigx',
         enforce: 'pre',
+
+        configureServer(server) {
+            // Workspace-dist modules must never be immutable in dev (#272):
+            // Vite serves `/@fs/**?v=<hash>` with a year-long immutable
+            // Cache-Control, and the hash does NOT change when a linked
+            // package's dist/ is rebuilt — real browsers end up on a MIXED
+            // module graph (fresh top-levels importing stale internals).
+            // Downgrade those responses to no-cache; ETag revalidation keeps
+            // repeat loads as cheap 304s.
+            const isWorkspaceDist = (url: string | undefined): boolean => {
+                if (!url) return false;
+                const path = url.split('?')[0];
+                // Vite's /@fs/ is a URL PREFIX, not a substring.
+                return path.startsWith('/@fs/') && path.includes('/dist/');
+            };
+            server.middlewares.use((req, res, next) => {
+                if (isWorkspaceDist(req.url)) {
+                    const setHeader = res.setHeader.bind(res);
+                    // Preserve the original return value (chainable) and
+                    // pass non-matching values through untouched.
+                    res.setHeader = ((name, value) =>
+                        setHeader(name, typeof name === 'string' && name.toLowerCase() === 'cache-control' ? 'no-cache' : value)
+                    ) as typeof res.setHeader;
+                }
+                next();
+            });
+        },
 
         async config(userConfig, { command }) {
             // In dev mode, alias @sigx/* packages to their source files
@@ -229,9 +274,17 @@ export function sigxPlugin(options: SigxPluginOptions = {}): Plugin {
                     resolve: {
                         dedupe: [...SIGX_CORE_PACKAGES],
                     },
-                    ssr: {
-                        noExternal: SIGX_SSR_NO_EXTERNAL
-                    },
+                    // In the ORCHESTRATED ssr mode the server bundle must
+                    // EXTERNALIZE its dependencies: the production request
+                    // handler (@sigx/server-renderer/node) loads from
+                    // node_modules, so a bundled copy of the runtime inside
+                    // entry-server.js would carry its own DI token identities
+                    // and never see the app's provides. Standalone
+                    // `vite build --ssr` flows (self-contained bundles) keep
+                    // the classic noExternal hygiene.
+                    ...(ssr
+                        ? {}
+                        : { ssr: { noExternal: SIGX_SSR_NO_EXTERNAL } }),
                     build: {
                         rollupOptions: {
                             output: {
@@ -243,6 +296,33 @@ export function sigxPlugin(options: SigxPluginOptions = {}): Plugin {
                             },
                         },
                     },
+                    // SSR mode: one `vite build` builds both environments —
+                    // client (with its asset manifest, feeding collectAssets)
+                    // and server (the SSR entry, dependencies external — the
+                    // whole @sigx family resolves from node_modules, sharing
+                    // one module graph with the production request handler).
+                    ...(ssr && {
+                        builder: {},
+                        environments: {
+                            client: {
+                                build: {
+                                    manifest: true,
+                                    outDir: ssr.clientOutDir ?? 'dist/client'
+                                }
+                            },
+                            ssr: {
+                                resolve: {
+                                    external: true
+                                },
+                                build: {
+                                    outDir: ssr.serverOutDir ?? 'dist/server',
+                                    rollupOptions: {
+                                        input: ssr.entry
+                                    }
+                                }
+                            }
+                        }
+                    })
                 };
             }
         },
@@ -251,7 +331,14 @@ export function sigxPlugin(options: SigxPluginOptions = {}): Plugin {
             config = resolvedConfig;
         },
 
-        transform(code, id) {
+        transform(code, id, transformOptions) {
+            // HMR is a browser concern: never inject into SSR transforms —
+            // ssrLoadModule'd component modules previously got the wrapper
+            // (and its registry side effects) on the server render path.
+            if (transformOptions?.ssr) {
+                return null;
+            }
+
             // Only process TypeScript/TSX source files (not pre-built JS)
             if (!/\.tsx?$/.test(id) && !id.endsWith('.jsx')) {
                 return null;

@@ -28,15 +28,18 @@
  * APIs stay opt-in to keep their output stable.
  */
 
-import { Readable } from 'node:stream';
 import type { JSXElement, AppContext } from 'sigx';
 import type { SSRPlugin } from '../plugin';
 import { createSSRContext, type SSRContext, type SSRContextOptions } from './context';
 import { renderToChunks } from './render-core';
-import { renderHeadToString } from '../head';
+import { emitBoundaryTable, scriptOpen } from './serialize';
+import { renderHeadToString, collectRootAttrs, mergeAttrsIntoTag } from '../head';
+import { responseSummary, type SSRResponse } from '../response';
 
 /** Same completion signal the plain streaming APIs emit. */
-const COMPLETION_SCRIPT = `<script>window.__SIGX_STREAMING_COMPLETE__=true;window.dispatchEvent(new Event('sigx:ready'));</script>`;
+function completionScript(nonce?: string): string {
+    return `${scriptOpen(nonce)}window.__SIGX_STREAMING_COMPLETE__=true;window.dispatchEvent(new Event('sigx:ready'));</script>`;
+}
 
 export interface DocumentOptions extends SSRContextOptions {
     /** Full HTML template containing the outlet marker. */
@@ -61,19 +64,33 @@ export interface DocumentOptions extends SSRContextOptions {
      */
     signal?: AbortSignal;
 
-    /**
-     * Error callback. `'shell'` fires before any byte is produced (the
-     * caller can still send a 500 page); `'stream'` fires mid-stream after
-     * the shell flushed (per-component errors stream their fallbacks and do
-     * NOT reach this — only stream-level failures do).
-     */
-    onError?: (error: Error, phase: 'shell' | 'stream') => void;
+    // onError / renderError are inherited from SSRContextOptions
+    // (rfc-ssr-platform §2.2): ONE callback receives per-component render
+    // failures (info.componentId set) and request-level failures (shell
+    // preparation, stream errors — info carries only the phase). A shell
+    // failure fires before any byte is produced, so the caller can still
+    // send a 500 page.
 
     /**
      * Serialize resolved useAsync/useStream values for hydration pickup.
      * Default: true (unlike the lower-level render APIs, which are opt-in).
      */
     serializeState?: boolean;
+
+    /**
+     * Build assets to preload from the shell (rfc-ssr-platform §3.1) —
+     * typically resolved from the Vite client manifest via `collectAssets`
+     * from `@sigx/vite`. `<link rel="stylesheet">` / `<link rel="modulepreload">`
+     * tags are injected before `</head>` in the first flush. Chunks of every
+     * boundary recorded during the walk (`__SIGX_BOUNDARIES__` entries with a
+     * `chunk` ref) are modulepreloaded automatically on top of this list.
+     */
+    assets?: {
+        /** Module URLs to `<link rel="modulepreload">`. */
+        modulepreload?: string[];
+        /** Stylesheet URLs to `<link rel="stylesheet">`. */
+        stylesheets?: string[];
+    };
 }
 
 /** Rendering internals handed in by createSSR (avoids a module cycle). */
@@ -104,6 +121,53 @@ interface PreparedDocument {
     postTail: string;
 }
 
+/** Normalize an unknown throw before it reaches the onError contract. */
+function toError(e: unknown): Error {
+    return e instanceof Error ? e : new Error(String(e));
+}
+
+function escapeAttrValue(s: string): string {
+    return s
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+}
+
+/**
+ * Render the shell's asset links: caller-provided stylesheets and module
+ * preloads, plus an automatic `<link rel="modulepreload">` per boundary
+ * chunk recorded during the walk (deduped across both sources).
+ */
+function renderAssetLinks(assets: DocumentOptions['assets'], ctx: SSRContext): string {
+    const links: string[] = [];
+    const preloaded = new Set<string>();
+
+    for (const href of assets?.stylesheets ?? []) {
+        links.push(`<link rel="stylesheet" href="${escapeAttrValue(href)}">`);
+    }
+    for (const href of assets?.modulepreload ?? []) {
+        if (preloaded.has(href)) continue;
+        preloaded.add(href);
+        links.push(`<link rel="modulepreload" href="${escapeAttrValue(href)}">`);
+    }
+    // Boundary chunks: every boundary CORE will schedule gets its chunk
+    // warmed from the shell. `hydrate: 'never'` records are skipped (#281):
+    // core never loads those — the owning pack wakes them on its own
+    // schedule and owns its own prefetch policy, so warming them here is
+    // speculative bytes (and inconsistently applied: streamed boundaries
+    // never reach this shell-time pass at all).
+    ctx._boundaries.forEach((record) => {
+        if (record.hydrate === 'never') return;
+        const url = record.chunk?.url;
+        if (!url || preloaded.has(url)) return;
+        preloaded.add(url);
+        links.push(`<link rel="modulepreload" href="${escapeAttrValue(url)}">`);
+    });
+
+    return links.join('\n');
+}
+
 function throwIfAborted(signal: AbortSignal | undefined): void {
     if (signal?.aborted) {
         throw signal.reason instanceof Error ? signal.reason : new Error('renderDocument aborted');
@@ -128,6 +192,7 @@ async function prepareDocument(
     throwIfAborted(options.signal);
 
     const ctx = createSSRContext(options);
+    ctx._appContext = input.appContext;
     ctx._plugins = engine.plugins;
     for (const plugin of engine.plugins) {
         plugin.server?.setup?.(ctx);
@@ -143,10 +208,21 @@ async function prepareDocument(
         throwIfAborted(options.signal);
     }
     const shellHtml = shellChunks.join('');
+    // Shell produced — later failures (deferred renders) are stream-phase
+    // for error routing.
+    ctx._phase = 'stream';
 
     // Head: collected per-request by useHead via the component instances
     const headConfigs = ctx._headConfigs;
-    const headHtml = headConfigs.length > 0 ? renderHeadToString(headConfigs) : '';
+    let headHtml = headConfigs.length > 0 ? renderHeadToString(headConfigs) : '';
+
+    // Asset preloads (rfc-ssr-platform §3.1): caller-provided manifest assets
+    // plus every boundary chunk recorded during the walk — links land in the
+    // first shell flush, before the user head block.
+    const assetsHtml = renderAssetLinks(options.assets, ctx);
+    if (assetsHtml) {
+        headHtml = headHtml ? assetsHtml + '\n' + headHtml : assetsHtml;
+    }
 
     // Plugin-injected HTML (the state blob arrives through this hook)
     let injected = '';
@@ -154,6 +230,9 @@ async function prepareDocument(
         const i = plugin.server?.getInjectedHTML?.(ctx);
         if (i) injected += typeof i === 'string' ? i : await i;
     }
+
+    // Boundary table (core protocol — empty renders emit nothing)
+    injected += emitBoundaryTable(ctx);
 
     let pre = options.template.slice(0, outletIdx);
     const post = options.template.slice(outletIdx + outlet.length);
@@ -163,6 +242,15 @@ async function prepareDocument(
         pre = headClose >= 0
             ? pre.slice(0, headClose) + headHtml + '\n' + pre.slice(headClose)
             : pre + headHtml;
+    }
+
+    // htmlAttrs/bodyAttrs collected via useHead patch the template's own
+    // <html>/<body> open tags (rfc-ssr-platform §2.4) — both live in `pre`
+    // (the template up to the outlet).
+    if (headConfigs.length > 0) {
+        const { htmlAttrs, bodyAttrs } = collectRootAttrs(headConfigs);
+        pre = mergeAttrsIntoTag(pre, 'html', htmlAttrs);
+        pre = mergeAttrsIntoTag(pre, 'body', bodyAttrs);
     }
 
     // Split the tail at </body>: everything before it (entry scripts!)
@@ -190,6 +278,11 @@ async function* documentChunks(
     // rethrow so the stream errors before producing bytes.
     const p = await prep;
 
+    // A redirect requested via useResponse() short-circuits the body: the
+    // shell promise carries the redirect, the HTTP layer sends it, and no
+    // document bytes are produced (rfc-ssr-platform §2.1).
+    if (p.ctx._response.redirect) return;
+
     // First flush: template head (with collected head tags) + shell + state
     // + the rest of the body markup incl. entry scripts (downloads start
     // now; module execution waits for parse end regardless)
@@ -208,9 +301,9 @@ async function* documentChunks(
         // document is by definition complete when delivered. The inline
         // script executes during parse, before deferred module scripts, so
         // the entry's flag check always sees it.
-        yield COMPLETION_SCRIPT;
+        yield completionScript(p.ctx._nonce);
     } catch (e) {
-        options.onError?.(e as Error, 'stream');
+        options.onError?.(toError(e), { phase: 'stream' });
         return; // end without the closing tail — visibly truncated
     }
 
@@ -225,7 +318,7 @@ function startPrepare(
     options: DocumentOptions
 ): Promise<PreparedDocument> {
     const prep = prepareDocument(engine, input, options);
-    prep.catch(e => options.onError?.(e as Error, 'shell'));
+    prep.catch(e => options.onError?.(toError(e), { phase: 'shell' }));
     return prep;
 }
 
@@ -249,23 +342,22 @@ export async function renderDocumentImpl(
 }
 
 /**
- * Document as a Node.js Readable plus a `shell` promise that settles before
- * any byte is produced — await it to decide the HTTP status code, then pipe.
+ * Document as a raw async chunk generator plus a `shell` promise that
+ * settles before any byte is produced — await it to write the response
+ * head (status, headers, redirect — collected via useResponse()) before
+ * piping. The runtime-agnostic primitive the Node entry wraps in a Readable.
  */
-export function renderDocumentToNodeStreamImpl(
+export function renderDocumentChunksImpl(
     engine: DocumentEngine,
     input: DocumentInput,
     options: DocumentOptions
-): { stream: Readable; shell: Promise<void> } {
+): { chunks: AsyncGenerator<string>; shell: Promise<SSRResponse> } {
     const resolved: DocumentOptions = { ...options, mode: options.mode ?? 'stream' };
     const prep = startPrepare(engine, input, resolved);
-    const shell = prep.then(() => undefined as void);
+    const shell = prep.then(p => responseSummary(p.ctx));
     shell.catch(() => { /* handled via onError / stream error */ });
     return {
-        // Non-object mode: backpressure/highWaterMark measured in BYTES —
-        // in object mode a few large HTML strings buffer far more memory
-        // than intended under slow clients.
-        stream: Readable.from(documentChunks(engine, prep, resolved), { objectMode: false }),
+        chunks: documentChunks(engine, prep, resolved),
         shell
     };
 }

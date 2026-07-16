@@ -76,20 +76,28 @@ export * from './compound.js';
 export { jsx, jsxs, jsxDEV, Fragment, Text, Comment } from './jsx-runtime.js';
 export type { VNode, JSXChild, JSXChildren, JSXElement } from './jsx-runtime.js';
 
-// Lazy loading & Suspense
-export { lazy, Suspense, isLazyComponent } from './lazy.js';
-export type { LazyComponentFactory, SuspenseProps } from './lazy.js';
+// Lazy loading & <Defer>
+export { lazy, isLazyComponent } from './lazy.js';
+export type { LazyComponentFactory } from './lazy.js';
+export { Defer } from './defer.js';
+export type { DeferProps } from './defer.js';
 
-// Async composable
-export { useAsync, useStream } from './use-async.js';
-export type { AsyncState, AsyncOptions, AsyncFetcherContext } from './use-async.js';
+// Value-first async — reads, writes, composition (docs/rfc-async.md)
+export { useData } from './use-data.js';
+export type { AsyncState, AsyncOptions, AsyncFetcherContext, Fetcher, MatchArms, KeyValue, KeyTuple, Falsy } from './use-data.js';
+export { useAction, SupersededError } from './use-action.js';
+export type { AsyncAction, ActionOptions, RunResult } from './use-action.js';
+export { all } from './all.js';
+export type { AllState } from './all.js';
+export { useStream } from './use-stream.js';
 
 // Model (two-way binding)
 export { createModel, createModelFromBinding, isModel } from './model.js';
 export type { Model, ModelBindingTuple } from './model.js';
 
 // Error handling
-export { ErrorBoundary } from './error-boundary.js';
+export { errorScope } from './error-scope.js';
+export type { ErrorScopeOptions } from './error-scope.js';
 
 // Error codes
 export { SigxError, SigxErrorCode } from './errors.js';
@@ -98,8 +106,10 @@ export {
     renderTargetNotFoundError,
     mountTargetNotFoundError,
     asyncSetupClientError,
+    errorScopeOutsideSetupError,
     provideOutsideSetupError,
     provideInvalidInjectableError,
+    requiredInjectableNotProvidedError,
 } from './errors.js';
 
 // Utilities

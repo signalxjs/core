@@ -12,13 +12,14 @@
  * Entry points:
  * - `renderToString()` — full render to a single string
  * - `renderToStream()` — ReadableStream
- * - `renderToNodeStream()` — Node.js Readable (faster on Node.js)
  * - `renderToStreamWithCallbacks()` — callback-based streaming
+ *
+ * Node Readable shapes (`renderToNodeStream`, `renderDocumentToNodeStream`)
+ * live in `@sigx/server-renderer/node` — this entry is WinterCG-clean.
  */
 
 import type { JSXElement } from 'sigx';
 import type { App } from 'sigx';
-import type { Readable } from 'node:stream';
 import type { SSRContext } from './context';
 import { createSSR } from '../ssr';
 import type { StreamCallbacks } from './types';
@@ -47,25 +48,6 @@ const _defaultSSR = createSSR();
  */
 export function renderToStream(input: JSXElement | App, context?: SSRContext): ReadableStream<string> {
     return _defaultSSR.renderStream(input, context);
-}
-
-/**
- * Render JSX element or App to a Node.js Readable stream.
- *
- * Faster than `renderToStream()` on Node.js because it bypasses WebStream
- * overhead entirely. Recommended for Express, Fastify, H3, and other
- * Node.js HTTP frameworks.
- *
- * @example
- * ```tsx
- * import { renderToNodeStream } from '@sigx/server-renderer/server';
- *
- * const stream = renderToNodeStream(<App />);
- * stream.pipe(res);
- * ```
- */
-export function renderToNodeStream(input: JSXElement | App, context?: SSRContext): Readable {
-    return _defaultSSR.renderNodeStream(input, context);
 }
 
 /**
@@ -116,26 +98,6 @@ export async function renderToString(input: JSXElement | App, context?: SSRConte
  */
 export function renderDocument(input: JSXElement | App, options: DocumentOptions): Promise<string> {
     return _defaultSSR.renderDocument(input, options);
-}
-
-/**
- * Stream a complete HTML document as a Node.js Readable.
- * `shell` settles before any byte is produced — await it, set the status
- * code, then pipe.
- *
- * @example
- * ```tsx
- * const { stream, shell } = renderDocumentToNodeStream(app, { template });
- * try { await shell; } catch { return res.status(500).send(errorPage); }
- * res.status(200).setHeader('content-type', 'text/html');
- * stream.pipe(res);
- * ```
- */
-export function renderDocumentToNodeStream(
-    input: JSXElement | App,
-    options: DocumentOptions
-): { stream: Readable; shell: Promise<void> } {
-    return _defaultSSR.renderDocumentToNodeStream(input, options);
 }
 
 /** Stream a complete HTML document as UTF-8 bytes (edge runtimes / Response body). */

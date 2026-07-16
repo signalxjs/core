@@ -6,7 +6,9 @@
  */
 
 import type { SSRPlugin } from '../plugin';
-import type { HeadConfig } from 'sigx';
+import type { SSRBoundaryRecord } from '../boundary';
+import type { ResponseState } from '../response';
+import type { HeadConfig, AppContext } from 'sigx';
 
 /**
  * Core-managed pending async component.
@@ -19,6 +21,22 @@ export interface CorePendingAsync {
     promise: Promise<string>;
 }
 
+/**
+ * What failed, and where in the request (rfc-ssr-platform §2.2). Component
+ * fields are present for per-component render failures; shell-preparation
+ * and stream-level failures carry only the phase.
+ */
+export interface SSRErrorInfo {
+    /** 'shell' before the first byte could flush; 'stream' after. */
+    phase: 'shell' | 'stream';
+    /** The failed component's numeric id (the `<!--$c:ID-->` scheme). */
+    componentId?: number;
+    /** The failed component's `__name` (or 'Anonymous'). */
+    componentName?: string;
+    /** Present when the failed component is a recorded boundary. */
+    boundaryId?: number;
+}
+
 export interface SSRContextOptions {
     /**
      * Enable streaming mode (default: true)
@@ -26,16 +44,26 @@ export interface SSRContextOptions {
     streaming?: boolean;
 
     /**
-     * Called when a component's setup() throws during SSR.
-     *
-     * Return a fallback HTML string to render in place of the failed component,
-     * or `null` to use the default error placeholder.
-     *
-     * @param error - The error thrown during rendering
-     * @param componentName - The component's `__name` (or 'Anonymous')
-     * @param componentId - The numeric component ID assigned by the SSR context
+     * The one error callback for the request (rfc-ssr-platform §2.2):
+     * per-component render failures (sync during the shell AND streamed
+     * deferred renders), shell-preparation failures, and stream-level
+     * failures all land here, distinguished by `info`.
      */
-    onComponentError?: (error: Error, componentName: string, componentId: number) => string | null;
+    onError?: (error: Error, info: SSRErrorInfo) => void;
+
+    /**
+     * The HTML rendered in place of a failed component. Default: the
+     * `<!--ssr-error:ID-->` boundary comment, plus a visible diagnostic box
+     * in development.
+     */
+    renderError?: (error: Error, info: SSRErrorInfo) => string;
+
+    /**
+     * CSP nonce applied to every `<script>` tag the renderer emits — the
+     * boundary table, state blobs, streaming protocol + replacement scripts,
+     * and the completion script. Apps pass their per-request CSP nonce.
+     */
+    nonce?: string;
 }
 
 export interface RenderOptions {
@@ -62,14 +90,40 @@ export interface SSRContext {
     _head: string[];
 
     /**
-     * Error callback for component rendering failures
+     * The request's error callback (per-component, shell, and stream-level
+     * failures — see SSRErrorInfo).
      */
-    _onComponentError?: (error: Error, componentName: string, componentId: number) => string | null;
+    _onError?: (error: Error, info: SSRErrorInfo) => void;
+
+    /**
+     * Failure-HTML hook — what renders in place of a failed component.
+     */
+    _renderError?: (error: Error, info: SSRErrorInfo) => string;
+
+    /**
+     * The request's CSP nonce — stamped on every renderer-emitted `<script>`
+     * tag (see SSRContextOptions.nonce). Undefined → plain `<script>`.
+     */
+    _nonce?: string;
+
+    /**
+     * Which request phase the walk is in: 'shell' until the shell has been
+     * produced, 'stream' while deferred renders replay. Feeds SSRErrorInfo.
+     */
+    _phase: 'shell' | 'stream';
 
     /**
      * Registered SSR plugins
      */
     _plugins?: SSRPlugin[];
+
+    /**
+     * The app context of the render input (null when rendering a bare
+     * element). Set by the render entry points; the DI source for per-app
+     * serializer type handlers and other app-level provides read at request
+     * time.
+     */
+    _appContext: AppContext | null;
 
     /**
      * Plugin-specific data storage, keyed by plugin name.
@@ -124,6 +178,28 @@ export interface SSRContext {
     _asyncKeysByComponent: Map<number, string[]>;
 
     /**
+     * Per-request boundary table (id → record). Populated by core when a
+     * plugin's `resolveBoundary` accepts a component; emitted as
+     * `__SIGX_BOUNDARIES__` when non-empty.
+     */
+    _boundaries: Map<number, SSRBoundaryRecord>;
+    /**
+     * Boundary ids recorded but not yet emitted to the client. Records born
+     * inside a deferred render are NOT in the shell table — each stream
+     * patch drains this set so they reach `window.__SIGX_BOUNDARIES__` too
+     * (#279). A dirty-set, not a flushed-set: draining is O(patch), never a
+     * rescan of every boundary per async resolution.
+     */
+    _unflushedBoundaries: Set<number>;
+
+    /**
+     * Per-request response state collected by useResponse() —
+     * status/headers/redirect, surfaced on the document shell promise
+     * (rfc-ssr-platform §2.1).
+     */
+    _response: ResponseState;
+
+    /**
      * Generate next component ID
      */
     nextId(): number;
@@ -157,6 +233,21 @@ export interface SSRContext {
      * Set plugin-specific data by plugin name.
      */
     setPluginData<T>(pluginName: string, data: T): void;
+
+    /**
+     * Record a boundary in the per-request table. Core calls this from the
+     * render walk; exposed for advanced plugins that manage boundaries
+     * outside the `resolveBoundary` flow.
+     */
+    recordBoundary(id: number, record: SSRBoundaryRecord): void;
+
+    /**
+     * Read a boundary record for augmentation — packs write captured state
+     * through this (e.g. islands' signal snapshot after render / async
+     * resolution). Mutations before the shell flush ship with the table;
+     * later mutations ship via the per-id mid-stream patch.
+     */
+    getBoundary(id: number): SSRBoundaryRecord | undefined;
 }
 
 /**
@@ -167,13 +258,19 @@ export function createSSRContext(options: SSRContextOptions = {}): SSRContext {
     const componentStack: number[] = [];
     const head: string[] = [];
     const pluginData = new Map<string, any>();
+    const boundaries = new Map<number, SSRBoundaryRecord>();
+    const unflushedBoundaries = new Set<number>();
 
     return {
         _componentId: componentId,
         _componentStack: componentStack,
         _head: head,
         _pluginData: pluginData,
-        _onComponentError: options.onComponentError,
+        _onError: options.onError,
+        _renderError: options.renderError,
+        _nonce: options.nonce,
+        _phase: 'shell',
+        _appContext: null,
         _streaming: false,
         _pendingAsync: [],
         _headConfigs: [],
@@ -181,6 +278,11 @@ export function createSSRContext(options: SSRContextOptions = {}): SSRContext {
         _asyncCache: new Map(),
         _asyncResults: new Map(),
         _asyncKeysByComponent: new Map(),
+        _boundaries: boundaries,
+        _unflushedBoundaries: unflushedBoundaries,
+        // Null-prototype headers bag: names can be caller-derived strings,
+        // and special keys (__proto__, constructor) must be plain data.
+        _response: { headers: Object.create(null) },
 
         nextId() {
             return ++componentId;
@@ -208,6 +310,15 @@ export function createSSRContext(options: SSRContextOptions = {}): SSRContext {
 
         setPluginData<T>(pluginName: string, data: T): void {
             pluginData.set(pluginName, data);
+        },
+
+        recordBoundary(id: number, record: SSRBoundaryRecord): void {
+            boundaries.set(id, record);
+            unflushedBoundaries.add(id);
+        },
+
+        getBoundary(id: number): SSRBoundaryRecord | undefined {
+            return boundaries.get(id);
         }
     };
 }

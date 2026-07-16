@@ -1,6 +1,6 @@
 {
     "name": "@sigx/vite",
-    "version": "0.8.0",
+    "version": "0.10.0",
     "description": "Vite plugin for SignalX Framework with HMR, library builds, and automatic type generation",
     "type": "module",
     "main": "./dist/index.js",
@@ -17,6 +17,18 @@
         "./lib": {
             "types": "./dist/lib.d.ts",
             "import": "./dist/lib.js"
+        },
+        "./ssr": {
+            "types": "./dist/ssr.d.ts",
+            "import": "./dist/ssr.js"
+        },
+        "./islands": {
+            "types": "./dist/islands.d.ts",
+            "import": "./dist/islands.js"
+        },
+        "./resume": {
+            "types": "./dist/resume.d.ts",
+            "import": "./dist/resume.js"
         }
     },
     "bin": {
@@ -34,13 +46,17 @@
     },
     "peerDependencies": {
         "sigx": "*",
-        "vite": ">=8.0.0"
+        "vite": ">=8.0.0",
+        "@sigx/server-renderer": "*",
+        "@sigx/ssr-islands": "*",
+        "@sigx/resume": "*"
     },
     "devDependencies": {
         "@types/node": "^26.1.1",
         "sigx": "workspace:^",
         "typescript": "^7.0.2",
-        "vite": "^8.1.4"
+        "vite": "^8.1.4",
+        "@sigx/server-renderer": "workspace:^"
     },
     "keywords": [
         "SignalX"
@@ -58,5 +74,16 @@
     },
     "engines": {
         "node": "^20.19.0 || >=22.12.0"
+    },
+    "peerDependenciesMeta": {
+        "@sigx/server-renderer": {
+            "optional": true
+        },
+        "@sigx/ssr-islands": {
+            "optional": true
+        },
+        "@sigx/resume": {
+            "optional": true
+        }
     }
 }

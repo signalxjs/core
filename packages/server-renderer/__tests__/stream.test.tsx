@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { component, useAsync, Fragment, Text, defineApp } from 'sigx';
+import { component, useData, Fragment, Text, defineApp } from 'sigx';
 import { renderToString, renderToStream, renderToStreamWithCallbacks, type StreamCallbacks } from '../src/server/index';
 import { createSSRContext } from '../src/server/context';
 import { createSSR } from '../src/ssr';
@@ -113,7 +113,7 @@ const MultiTextChildren = component(() => {
 }, { name: 'MultiTextChildren' });
 
 const AsyncComponent = component(() => {
-    const data = useAsync('stream-async-component', async () => 'loaded-data');
+    const data = useData('stream-async-component', async () => 'loaded-data');
 
     return () => (
         <div class="async">
@@ -123,11 +123,15 @@ const AsyncComponent = component(() => {
 }, { name: 'AsyncComponent' });
 
 const AsyncFailing = component(() => {
-    useAsync('stream-async-failing', async () => {
+    const failing = useData('stream-async-failing', async () => {
         throw new Error('Async load failed');
-    }, { throwOnError: true });
+    });
 
-    return () => <div class="async-fail">Content</div>;
+    return () => (
+        <div class="async-fail">
+            {failing.error ? `error: ${failing.error.message}` : 'Content'}
+        </div>
+    );
 }, { name: 'AsyncFailing' });
 
 const SetupThrowing = component(() => {
@@ -479,10 +483,10 @@ describe('renderToString', () => {
         });
     });
 
-    describe('async components with useAsync', () => {
-        it('should await keyed useAsync fetchers for non-island async components', async () => {
+    describe('async components with useData', () => {
+        it('should await keyed useData fetchers for non-island async components', async () => {
             const AsyncData = component(() => {
-                const loaded = useAsync('stream-await-inline', async () => true);
+                const loaded = useData('stream-await-inline', async () => true);
                 return () => <div>{loaded.value ? 'Loaded' : 'Not loaded'}</div>;
             }, { name: 'AsyncData' });
 
@@ -491,10 +495,10 @@ describe('renderToString', () => {
             expect(html).not.toContain('Not loaded');
         });
 
-        it('should handle multiple useAsync calls', async () => {
+        it('should handle multiple useData calls', async () => {
             const MultiLoad = component(() => {
-                const usersCsv = useAsync('stream-multi-users', async () => 'Alice,Bob');
-                const theme = useAsync('stream-multi-theme', async () => 'dark');
+                const usersCsv = useData('stream-multi-users', async () => 'Alice,Bob');
+                const theme = useData('stream-multi-theme', async () => 'dark');
                 return () => (
                     <div>
                         <span>{usersCsv.value}</span>
@@ -508,15 +512,13 @@ describe('renderToString', () => {
             expect(html).toContain('dark');
         });
 
-        it('should handle a throwOnError fetcher that rejects (non-island)', async () => {
-            // Suppress console.error for this test
-            const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-
+        it('should render the error branch for a fetcher that rejects (soft error, non-island)', async () => {
+            // Server data errors are SOFT: the component renders normally
+            // with `.error` set — no error fallback, no escaped rejection.
             const html = await renderToString(<AsyncFailing />);
-            // Component should still have a marker (error is caught)
+            expect(html).toContain('error: Async load failed');
+            expect(html).not.toContain('ssr-error');
             expect(html).toMatch(/<!--\$c:\d+-->/);
-
-            consoleSpy.mockRestore();
         });
     });
 
@@ -714,7 +716,7 @@ describe('edge cases', () => {
 
 // ─── Error Boundary Tests ──────────────────────────────────────────
 
-describe('Error boundary (onComponentError)', () => {
+describe('Error routing (onError + renderError)', () => {
     it('should render default error comment when component throws', async () => {
         const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
@@ -731,24 +733,25 @@ describe('Error boundary (onComponentError)', () => {
         consoleSpy.mockRestore();
     });
 
-    it('should call onComponentError with error details', async () => {
+    it('should call onError with error details and render via renderError', async () => {
         const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-        const errorHandler = vi.fn(() => '<div class="fallback">Something went wrong</div>');
-        const ctx = createSSRContext({ onComponentError: errorHandler });
+        const onError = vi.fn();
+        const renderError = vi.fn(() => '<div class="fallback">Something went wrong</div>');
+        const ctx = createSSRContext({ onError, renderError });
 
         const html = await renderToString(
             <div><SetupThrowing /></div>,
             ctx
         );
 
-        expect(errorHandler).toHaveBeenCalledOnce();
-        const callArgs = errorHandler.mock.calls[0] as unknown as [Error, string, number];
-        const [error, name, id] = callArgs;
+        expect(onError).toHaveBeenCalledOnce();
+        const [error, info] = onError.mock.calls[0] as unknown as [Error, any];
         expect(error).toBeInstanceOf(Error);
         expect(error.message).toBe('Setup exploded');
-        expect(name).toBe('SetupThrowing');
-        expect(typeof id).toBe('number');
+        expect(info.componentName).toBe('SetupThrowing');
+        expect(typeof info.componentId).toBe('number');
+        expect(info.phase).toBe('shell');
 
         // Custom fallback HTML is rendered
         expect(html).toContain('<div class="fallback">Something went wrong</div>');
@@ -756,18 +759,18 @@ describe('Error boundary (onComponentError)', () => {
         consoleSpy.mockRestore();
     });
 
-    it('should use default fallback when onComponentError returns null', async () => {
+    it('should use the default failure HTML when only onError is provided', async () => {
         const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-        const errorHandler = vi.fn(() => null);
-        const ctx = createSSRContext({ onComponentError: errorHandler });
+        const onError = vi.fn();
+        const ctx = createSSRContext({ onError });
 
         const html = await renderToString(
             <div><SetupThrowing /></div>,
             ctx
         );
 
-        expect(errorHandler).toHaveBeenCalledOnce();
+        expect(onError).toHaveBeenCalledOnce();
         expect(html).toMatch(/<!--ssr-error:\d+-->/);
 
         consoleSpy.mockRestore();
@@ -819,7 +822,7 @@ describe('Error boundary (onComponentError)', () => {
 describe('concurrent SSR requests', () => {
     it('should not leak data between parallel renders with async components', async () => {
         const SlowComponent = component(() => {
-            const data = useAsync('concurrent-slow', async () => {
+            const data = useData('concurrent-slow', async () => {
                 await new Promise(r => setTimeout(r, 50));
                 return 'slow-data';
             });
@@ -828,7 +831,7 @@ describe('concurrent SSR requests', () => {
         }, { name: 'SlowComponent' });
 
         const FastComponent = component(() => {
-            const data = useAsync('concurrent-fast', async () => {
+            const data = useData('concurrent-fast', async () => {
                 await new Promise(r => setTimeout(r, 10));
                 return 'fast-data';
             });
@@ -855,7 +858,7 @@ describe('concurrent SSR requests', () => {
         const instanceChecks: { component: string, isOwnContext: boolean }[] = [];
 
         const SlowParent = component(() => {
-            const data = useAsync('isolate-slow-child', async () => {
+            const data = useData('isolate-slow-child', async () => {
                 await new Promise(r => setTimeout(r, 50));
                 return 'slow-child';
             });
@@ -869,7 +872,7 @@ describe('concurrent SSR requests', () => {
         }, { name: 'SlowParent' });
 
         const FastParent = component(() => {
-            const data = useAsync('isolate-fast-child', async () => {
+            const data = useData('isolate-fast-child', async () => {
                 await new Promise(r => setTimeout(r, 10));
                 return 'fast-child';
             });
@@ -914,7 +917,7 @@ describe('concurrent SSR requests', () => {
     it('should handle many concurrent renders without errors', async () => {
         const renders = Array.from({ length: 10 }, (_, i) => {
             const Comp = component(() => {
-                const data = useAsync(`many-concurrent-${i}`, async () => {
+                const data = useData(`many-concurrent-${i}`, async () => {
                     await new Promise(r => setTimeout(r, Math.random() * 20));
                     return `render-${i}`;
                 });

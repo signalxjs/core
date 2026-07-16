@@ -69,6 +69,15 @@ export interface LibBuildOptions {
     jsx?: boolean;
 
     /**
+     * The module the automatic JSX runtime imports from. Only read when
+     * `jsx` is enabled. Platform packages that build their own components
+     * target their runtime directly (e.g. `@sigx/runtime-core`) instead of
+     * the `sigx` umbrella, which carries the DOM renderer.
+     * @default 'sigx'
+     */
+    importSource?: string;
+
+    /**
      * Platform target
      * @default 'browser'
      */
@@ -190,6 +199,7 @@ export function defineLibConfig(options: LibBuildOptions): UserConfigFnObject {
         minify = true,
         banner,
         jsx = false,
+        importSource = 'sigx',
         platform = 'browser',
         root = process.cwd(),
     } = options;
@@ -236,11 +246,19 @@ export function defineLibConfig(options: LibBuildOptions): UserConfigFnObject {
                 alias: resolvedAliases
             },
 
-            ...(prodDist && {
-                define: {
+            // `__DEV__` is the compile-time dev flag used in package sources.
+            // The prod pass pins it to `false` so the minifier strips guarded
+            // blocks; the dev pass re-emits the runtime NODE_ENV check so the
+            // dev dist behaves exactly as before (the consumer's bundler or
+            // Node decides at their build/run time).
+            define: {
+                __DEV__: prodDist
+                    ? 'false'
+                    : "(process.env.NODE_ENV !== 'production')",
+                ...(prodDist && {
                     'process.env.NODE_ENV': JSON.stringify('production')
-                }
-            }),
+                })
+            },
 
             build: {
                 outDir,
@@ -278,7 +296,7 @@ export function defineLibConfig(options: LibBuildOptions): UserConfigFnObject {
                 oxc: {
                     jsx: {
                         runtime: 'automatic',
-                        importSource: 'sigx'
+                        importSource
                     }
                 }
             })

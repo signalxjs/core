@@ -5,13 +5,13 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { component, Fragment, useAsync } from 'sigx';
+import { component, Fragment, useData } from 'sigx';
 import { renderToString, renderToStream, renderToStreamWithCallbacks, type StreamCallbacks } from '../../server-renderer/src/server/index';
 import { createSSR } from '../../server-renderer/src/ssr';
 import { islandsPlugin } from '../src/plugin';
 // Import client-directives for ComponentAttributeExtensions augmentation (client:* types)
 import '../src/client-directives';
-import { parseIslandData } from './test-utils';
+import { parseIslandData, parseBoundaryTable } from './test-utils';
 import type { SSRSignalFn } from './test-utils';
 
 // ─── Test Components ───────────────────────────────────────────────
@@ -65,7 +65,7 @@ describe('island rendering (renderToString)', () => {
             );
 
             // The island data should be in the rendered HTML
-            expect(html).toContain('__SIGX_ISLANDS__');
+            expect(html).toContain('__SIGX_BOUNDARIES__');
             const islandData = parseIslandData(html);
             const islands = Object.values(islandData);
             expect(islands.length).toBeGreaterThan(0);
@@ -80,7 +80,7 @@ describe('island rendering (renderToString)', () => {
             const html = await ssr.render(<WithSignal />);
 
             // No islands registered
-            expect(html).not.toContain('__SIGX_ISLANDS__');
+            expect(html).not.toContain('__SIGX_BOUNDARIES__');
         });
     });
 
@@ -96,35 +96,41 @@ describe('island rendering (renderToString)', () => {
             const ssr = createSSR().use(islandsPlugin());
             const html = await ssr.render(<IslandCounter client:only initial={5} />);
             // True skip-SSR: the component never runs server-side, so its content
-            // is absent and a <div data-island> placeholder stands in its place.
-            expect(html).toContain('data-island=');
+            // is absent and a <div data-boundary> placeholder stands in its place.
+            expect(html).toContain('data-boundary=');
             expect(html).not.toContain('island-counter');
             expect(html).not.toContain('>5<');
-            const islands = parseIslandData(html);
-            const island = Object.values(islands)[0] as any;
-            expect(island.strategy).toBe('only');
+            // client:only decomposes onto the two boundary axes on the wire
+            // (rfc-ssr-platform §1): skip the server render, mount on load.
+            const records = parseBoundaryTable(html);
+            const record = Object.values(records)[0] as any;
+            expect(record.flush).toBe('skip');
+            expect(record.hydrate).toBe('load');
             // No render ran, so no signal state was captured.
-            expect(island.state).toBeUndefined();
+            expect(record.state).toBeUndefined();
         });
 
         it('skips SSR for client:only in streaming mode too (#122)', async () => {
             const ssr = createSSR().use(islandsPlugin());
             const html = await collectStream(ssr.renderStream(<IslandCounter client:only initial={5} />));
-            expect(html).toContain('data-island=');
+            expect(html).toContain('data-boundary=');
             expect(html).not.toContain('island-counter');
         });
 
-        it('should include __SIGX_ISLANDS__ JSON for islands', async () => {
+        it('should include __SIGX_BOUNDARIES__ JSON for islands', async () => {
             const ssr = createSSR().use(islandsPlugin());
             const html = await ssr.render(<IslandCounter client:load />);
-            expect(html).toContain('__SIGX_ISLANDS__');
-            expect(html).toContain('application/json');
+            // Executable assignment sharing the __SIGX_ASYNC__ discipline —
+            // null-prototype merge target, plain-global client read.
+            expect(html).toContain(
+                'window.__SIGX_BOUNDARIES__=Object.assign(Object.create(null),window.__SIGX_BOUNDARIES__,'
+            );
         });
 
-        it('should not include __SIGX_ISLANDS__ when no islands', async () => {
+        it('should not include __SIGX_BOUNDARIES__ when no islands', async () => {
             const ssr = createSSR().use(islandsPlugin());
             const html = await ssr.render(<SimpleDiv />);
-            expect(html).not.toContain('__SIGX_ISLANDS__');
+            expect(html).not.toContain('__SIGX_BOUNDARIES__');
         });
 
         it('should serialize island props', async () => {
@@ -150,16 +156,16 @@ describe('island rendering (renderToString)', () => {
 });
 
 describe('island streaming (renderToStream)', () => {
-    it('should include __SIGX_ISLANDS__ for island content', async () => {
+    it('should include __SIGX_BOUNDARIES__ for island content', async () => {
         const ssr = createSSR().use(islandsPlugin());
         const html = await collectStream(ssr.renderStream(<IslandCounter client:load />));
-        expect(html).toContain('__SIGX_ISLANDS__');
+        expect(html).toContain('__SIGX_BOUNDARIES__');
     });
 
     describe('streaming async components', () => {
         it('should render async island placeholder first', async () => {
             const AsyncIsland = component(() => {
-                const data = useAsync('async-island-data', async () => {
+                const data = useData('async-island-data', async () => {
                     await new Promise(r => setTimeout(r, 10));
                     return 'async-loaded';
                 });
@@ -182,7 +188,7 @@ describe('island streaming (renderToStream)', () => {
 
         it('should include streaming script before replacements', async () => {
             const AsyncIsland = component(() => {
-                const data = useAsync('async-island-script', async () => {
+                const data = useData('async-island-script', async () => {
                     await new Promise(r => setTimeout(r, 10));
                     return 'loaded';
                 });
@@ -195,22 +201,21 @@ describe('island streaming (renderToStream)', () => {
             expect(html).toContain('$SIGX_REPLACE');
         });
 
-        it('should handle async component error in stream', async () => {
-            const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => { });
-
+        it('should stream the component error branch on a fetcher rejection (soft error)', async () => {
+            // Server data errors are SOFT: the deferred render resolves with
+            // the component's own error branch — no red error replacement.
             const FailingAsync = component(() => {
-                useAsync('stream-fail-1', async () => {
+                const data = useData('stream-fail-1', async () => {
                     throw new Error('Stream async fail');
-                }, { throwOnError: true });
-                return () => <div>Fallback</div>;
+                });
+                return () => <div>{data.error ? `error: ${data.error.message}` : 'Loading'}</div>;
             }, { name: 'FailingAsync' });
 
             const ssr = createSSR().use(islandsPlugin());
             const html = await collectStream(ssr.renderStream(<FailingAsync client:load />));
-            // Should have error fallback
-            expect(html).toContain('Error loading component');
-
-            consoleSpy.mockRestore();
+            // The replacement carries the error branch, not the red fallback
+            expect(html).toContain('error: Stream async fail');
+            expect(html).not.toContain('Error loading component');
         });
     });
 });
@@ -219,7 +224,7 @@ describe('island streaming (renderToStreamWithCallbacks)', () => {
     describe('async component streaming via callbacks', () => {
         it('should send async chunks for async island components', async () => {
             const AsyncIsland = component(() => {
-                const data = useAsync('cb-streamed-data', async () => {
+                const data = useData('cb-streamed-data', async () => {
                     await new Promise(r => setTimeout(r, 10));
                     return 'streamed-data';
                 });
@@ -245,12 +250,12 @@ describe('island streaming (renderToStreamWithCallbacks)', () => {
 
             const shellHtml = (callbacks.onShellReady as any).mock.calls[0][0] as string;
             // Sync islands should have their data in the shell
-            expect(shellHtml).toContain('__SIGX_ISLANDS__');
+            expect(shellHtml).toContain('__SIGX_BOUNDARIES__');
         });
 
         it('should call onAsyncChunk with replacement scripts', async () => {
             const AsyncIsland = component(() => {
-                const data = useAsync('cb-replacement-script', async () => {
+                const data = useData('cb-replacement-script', async () => {
                     await new Promise(r => setTimeout(r, 10));
                     return 'loaded';
                 });
@@ -268,30 +273,29 @@ describe('island streaming (renderToStreamWithCallbacks)', () => {
             expect(allAsync).toContain('$SIGX_REPLACE');
         });
 
-        it('should handle async error with onAsyncChunk error fallback', async () => {
-            const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => { });
-
+        it('should send the component error branch via onAsyncChunk on a fetcher rejection (soft error)', async () => {
             const FailingAsync = component(() => {
-                useAsync('cb-fail-1', async () => { throw new Error('fail'); }, { throwOnError: true });
-                return () => <div>Content</div>;
+                const data = useData('cb-fail-1', async () => { throw new Error('fail'); });
+                return () => <div>{data.error ? `error: ${data.error.message}` : 'Content'}</div>;
             }, { name: 'FailingAsync' });
 
             const { calls, callbacks } = createCallbackTracker();
             const ssr = createSSR().use(islandsPlugin());
             await ssr.renderStreamWithCallbacks(<FailingAsync client:load />, callbacks);
 
+            // Soft error: the async chunk replacement carries the component's
+            // own error branch, not the red error fallback.
             const asyncChunks = calls.filter(c => c.type === 'async');
             const allAsync = asyncChunks.map(c => c.data).join('');
-            expect(allAsync).toContain('Error loading component');
-
-            consoleSpy.mockRestore();
+            expect(allAsync).toContain('error: fail');
+            expect(allAsync).not.toContain('Error loading component');
         });
     });
 
     describe('callback ordering with islands', () => {
         it('should call shell before async chunks before complete', async () => {
             const AsyncIsland = component(() => {
-                const v = useAsync('cb-ordering', async () => {
+                const v = useData('cb-ordering', async () => {
                     await new Promise(r => setTimeout(r, 10));
                     return 'done';
                 });
@@ -318,7 +322,7 @@ describe('signal state serialization', () => {
         const StatefulIsland = component((ctx) => {
             const ssrSignal = ctx.signal as SSRSignalFn;
             const count = ssrSignal(0, 'count');
-            useAsync('stateful-count', async () => {
+            useData('stateful-count', async () => {
                 count.value = 42;
                 return count.value;
             });
@@ -340,7 +344,7 @@ describe('signal state serialization', () => {
             const ssrSignal = ctx.signal as SSRSignalFn;
             const name = ssrSignal('', 'name');
             const age = ssrSignal(0, 'age');
-            useAsync('multi-signal', async () => {
+            useData('multi-signal', async () => {
                 name.value = 'Alice';
                 age.value = 30;
                 return null;
@@ -358,27 +362,27 @@ describe('signal state serialization', () => {
         expect(island.state.age).toBe(30);
     });
 
-    it('should use auto-indexed keys when name not specified', async () => {
-        const AutoIndex = component((ctx) => {
+    it('should not serialize unkeyed signals (local-only, named = transferred)', async () => {
+        const Unkeyed = component((ctx) => {
+            // No key injected (in real apps the vite transform derives one from
+            // the declaration) → local state, never captured.
             const a = ctx.signal(1);
             const b = ctx.signal(2);
-            useAsync('auto-index', async () => {
+            useData('unkeyed', async () => {
                 a.value = 10;
                 b.value = 20;
                 return null;
             });
             return () => <div>{a.value},{b.value}</div>;
-        }, { name: 'AutoIndex' });
+        }, { name: 'Unkeyed' });
 
         const ssr = createSSR().use(islandsPlugin());
-        const html = await ssr.render(<AutoIndex client:load />);
+        const html = await ssr.render(<Unkeyed client:load />);
 
         const islandData = parseIslandData(html);
         const island = Object.values(islandData)[0] as any;
-        expect(island.state).toBeDefined();
-        // Auto-indexed: $0, $1
-        expect(island.state['$0']).toBe(10);
-        expect(island.state['$1']).toBe(20);
+        // Signals still worked during render, but nothing transfers.
+        expect(island.state).toBeUndefined();
     });
 
     it('should skip non-serializable signal values', async () => {
@@ -387,7 +391,7 @@ describe('signal state serialization', () => {
         const NonSerializable = component((ctx) => {
             const ssrSignal = ctx.signal as SSRSignalFn;
             const state = ssrSignal(null as any, 'state');
-            useAsync('non-serializable', async () => {
+            useData('non-serializable', async () => {
                 // Circular objects are not serializable
                 const circular: any = {};
                 circular.self = circular;

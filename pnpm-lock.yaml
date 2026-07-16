@@ -87,6 +87,49 @@ importers:
         specifier: ^8.1.4
         version: 8.1.4(@types/node@26.1.1)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.1)
 
+  examples/resume:
+    dependencies:
+      '@sigx/reactivity':
+        specifier: workspace:^
+        version: link:../../packages/reactivity
+      '@sigx/resume':
+        specifier: workspace:^
+        version: link:../../packages/resume
+      '@sigx/runtime-core':
+        specifier: workspace:^
+        version: link:../../packages/runtime-core
+      '@sigx/runtime-dom':
+        specifier: workspace:^
+        version: link:../../packages/runtime-dom
+      '@sigx/server-renderer':
+        specifier: workspace:^
+        version: link:../../packages/server-renderer
+      express:
+        specifier: ^5.2.1
+        version: 5.2.1
+      sigx:
+        specifier: workspace:^
+        version: link:../../packages/sigx
+    devDependencies:
+      '@sigx/vite':
+        specifier: workspace:^
+        version: link:../../packages/vite
+      '@types/express':
+        specifier: ^5.0.6
+        version: 5.0.6
+      '@types/node':
+        specifier: ^26.1.1
+        version: 26.1.1
+      cross-env:
+        specifier: ^10.1.0
+        version: 10.1.0
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+      vite:
+        specifier: ^8.1.4
+        version: 8.1.4(@types/node@26.1.1)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.1)
+
   examples/spa:
     dependencies:
       sigx:
@@ -105,6 +148,9 @@ importers:
 
   examples/spa-ssr:
     dependencies:
+      '@sigx/cache':
+        specifier: workspace:^
+        version: link:../../packages/cache
       '@sigx/reactivity':
         specifier: workspace:^
         version: link:../../packages/reactivity
@@ -136,9 +182,120 @@ importers:
       cross-env:
         specifier: ^10.1.0
         version: 10.1.0
-      tsx:
-        specifier: ^4.23.1
-        version: 4.23.1
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+      vite:
+        specifier: ^8.1.4
+        version: 8.1.4(@types/node@26.1.1)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.1)
+
+  examples/ssr-islands:
+    dependencies:
+      '@sigx/reactivity':
+        specifier: workspace:^
+        version: link:../../packages/reactivity
+      '@sigx/runtime-core':
+        specifier: workspace:^
+        version: link:../../packages/runtime-core
+      '@sigx/runtime-dom':
+        specifier: workspace:^
+        version: link:../../packages/runtime-dom
+      '@sigx/server-renderer':
+        specifier: workspace:^
+        version: link:../../packages/server-renderer
+      '@sigx/ssr-islands':
+        specifier: workspace:^
+        version: link:../../packages/ssr-islands
+      express:
+        specifier: ^5.2.1
+        version: 5.2.1
+      sigx:
+        specifier: workspace:^
+        version: link:../../packages/sigx
+    devDependencies:
+      '@sigx/vite':
+        specifier: workspace:^
+        version: link:../../packages/vite
+      '@types/express':
+        specifier: ^5.0.6
+        version: 5.0.6
+      '@types/node':
+        specifier: ^26.1.1
+        version: 26.1.1
+      cross-env:
+        specifier: ^10.1.0
+        version: 10.1.0
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+      vite:
+        specifier: ^8.1.4
+        version: 8.1.4(@types/node@26.1.1)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.1)
+
+  examples/storefront:
+    dependencies:
+      '@sigx/reactivity':
+        specifier: workspace:^
+        version: link:../../packages/reactivity
+      '@sigx/resume':
+        specifier: workspace:^
+        version: link:../../packages/resume
+      '@sigx/runtime-core':
+        specifier: workspace:^
+        version: link:../../packages/runtime-core
+      '@sigx/runtime-dom':
+        specifier: workspace:^
+        version: link:../../packages/runtime-dom
+      '@sigx/server-renderer':
+        specifier: workspace:^
+        version: link:../../packages/server-renderer
+      '@sigx/ssr-islands':
+        specifier: workspace:^
+        version: link:../../packages/ssr-islands
+      express:
+        specifier: ^5.2.1
+        version: 5.2.1
+      sigx:
+        specifier: workspace:^
+        version: link:../../packages/sigx
+    devDependencies:
+      '@sigx/vite':
+        specifier: workspace:^
+        version: link:../../packages/vite
+      '@types/express':
+        specifier: ^5.0.6
+        version: 5.0.6
+      '@types/node':
+        specifier: ^26.1.1
+        version: 26.1.1
+      cross-env:
+        specifier: ^10.1.0
+        version: 10.1.0
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+      vite:
+        specifier: ^8.1.4
+        version: 8.1.4(@types/node@26.1.1)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.1)
+
+  packages/cache:
+    dependencies:
+      '@sigx/reactivity':
+        specifier: workspace:^
+        version: link:../reactivity
+      '@sigx/runtime-core':
+        specifier: workspace:^
+        version: link:../runtime-core
+    devDependencies:
+      '@sigx/vite':
+        specifier: workspace:^
+        version: link:../vite
+      '@types/node':
+        specifier: ^26.1.1
+        version: 26.1.1
+      esbuild:
+        specifier: ^0.28.1
+        version: 0.28.1
       typescript:
         specifier: ^7.0.2
         version: 7.0.2
@@ -148,6 +305,31 @@ importers:
 
   packages/reactivity:
     devDependencies:
+      '@sigx/vite':
+        specifier: workspace:^
+        version: link:../vite
+      '@types/node':
+        specifier: ^26.1.1
+        version: 26.1.1
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+      vite:
+        specifier: ^8.1.4
+        version: 8.1.4(@types/node@26.1.1)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.1)
+
+  packages/resume:
+    dependencies:
+      '@sigx/server-renderer':
+        specifier: workspace:^
+        version: link:../server-renderer
+      sigx:
+        specifier: workspace:^
+        version: link:../sigx
+    devDependencies:
+      '@sigx/ssr-islands':
+        specifier: workspace:^
+        version: link:../ssr-islands
       '@sigx/vite':
         specifier: workspace:^
         version: link:../vite
@@ -211,6 +393,9 @@ importers:
         specifier: workspace:^
         version: link:../sigx
     devDependencies:
+      '@sigx/resume':
+        specifier: workspace:^
+        version: link:../resume
       '@sigx/vite':
         specifier: workspace:^
         version: link:../vite
@@ -272,7 +457,17 @@ importers:
         version: 8.1.4(@types/node@26.1.1)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.1)
 
   packages/vite:
+    dependencies:
+      '@sigx/resume':
+        specifier: '*'
+        version: link:../resume
+      '@sigx/ssr-islands':
+        specifier: '*'
+        version: link:../ssr-islands
     devDependencies:
+      '@sigx/server-renderer':
+        specifier: workspace:^
+        version: link:../server-renderer
       '@types/node':
         specifier: ^26.1.1
         version: 26.1.1
@@ -3086,6 +3281,7 @@ snapshots:
       esbuild: 0.28.1
     optionalDependencies:
       fsevents: 2.3.3
+    optional: true
 
   type-is@2.0.1:
     dependencies:

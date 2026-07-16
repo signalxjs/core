@@ -2,7 +2,7 @@
  * Coverage for client/hydrate-component.ts — branches the main
  * hydrate.test.tsx doesn't reach: setup errors, trailing-marker discovery,
  * and the null-first-render path. (Async-state restoration lives in
- * useAsync/useStream — see async-state.test.tsx.)
+ * useData/useStream — see async-state.test.tsx.)
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { component, signal } from 'sigx';

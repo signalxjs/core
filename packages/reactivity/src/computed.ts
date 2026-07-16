@@ -68,7 +68,7 @@ export function computed<T>(
     // Devtools id minted at create time. `null` skips emissions
     // entirely on every recompute.
     let computedId: number | null = null;
-    if (process.env.NODE_ENV !== 'production') {
+    if (__DEV__) {
         const hookAtCreate = getDevtoolsHook();
         if (hookAtCreate) {
             computedId = hookAtCreate.nextId();
@@ -120,7 +120,7 @@ export function computed<T>(
             firstRun = false;
             computedEffect.flags = CLEAN;
             if (changed) ownDep.version++;
-            if (process.env.NODE_ENV !== 'production' && computedId !== null) {
+            if (__DEV__ && computedId !== null) {
                 const hook = getDevtoolsHook();
                 if (hook) hook.emit({ type: 'computed:recomputed', id: computedId });
             }

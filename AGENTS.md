@@ -112,8 +112,18 @@ pnpm test:coverage
 pnpm typecheck   # tsc (TypeScript 7 native compiler), config: tsconfig.json
 pnpm lint        # oxlint over all packages' src (warnings fail: --deny-warnings)
 pnpm lint:fix
-pnpm size        # size-limit bundle-size check (.size-limit.json)
+pnpm size        # size-limit bundle-size check (.size-limit.mjs)
 pnpm verify:pack # verify npm pack output is sane
+pnpm test:edge   # WinterCG smoke: stream a document from the prod dist with node: imports forbidden (after pnpm build)
+pnpm bench:ssr:quick   # sigx-only quick SSR bench + regression table vs the committed baseline (after pnpm build)
+pnpm bench:ssr         # full comparative SSR bench: equivalence check, then sigx vs Vue/React/Preact
+                       # CI runs `verify` + the quick suite (bench-smoke job) as a CORRECTNESS gate: it catches
+                       # adapter rot and output divergence, never timing (CI logs the delta table without
+                       # --enforce, so its slower-hardware numbers are informational). Enforce locally with
+                       # `pnpm --filter @sigx/benchmarks bench:quick:enforce`, and re-baseline on YOUR machine
+                       # with `pnpm bench:ssr:baseline` (check-regression refuses to enforce across machines).
+                       # Every bench script runs node --conditions production: sigx picks its dev/prod dist at
+                       # module resolution, so a bare `node` measures the dev build (see benchmarks/README.md).
 pnpm dev:sigx    # watch-build the sigx package
 pnpm dev:vite    # watch-build the vite plugin
 ```
@@ -132,9 +142,21 @@ free port automatically).
 - `packages/ssr-islands` → `@sigx/ssr-islands` — islands architecture (selective
   hydration via `client:*` directives). The first-party *reference* strategy pack
   riding `@sigx/server-renderer`'s public plugin API; a drop-in equal of any
-  third-party pack, with no privileged access to core.
+  third-party pack, with no privileged access to core. Its runnable example app
+  lives at `examples/ssr-islands/` (private workspace package).
+- `packages/resume` → `@sigx/resume` — resumability (QRL event
+  handlers via `data-sigx-on:*` attributes, zero-JS pages, upgrade-on-write
+  hydration). The second first-party strategy pack riding
+  `@sigx/server-renderer`'s public plugin API — a drop-in equal of any
+  third-party pack, no privileged access to core. Its Vite transform lives at
+  `@sigx/vite/resume`.
+- `packages/cache` → `@sigx/cache` — cache policy for value-first async
+  (staleTime/gcTime, revalidation, `invalidate()`, optimistic `mutate()`). The
+  first-party pack on the rfc-async §7 engine seam — a drop-in equal of any
+  third-party pack, no privileged access to core.
 - `packages/vite` → `@sigx/vite` — Vite plugin for dev/build/HMR.
-- `examples/` — runnable apps (`hello`, `spa`, `spa-ssr`).
+- `examples/` — runnable apps (`hello`, `spa`, `spa-ssr`, `ssr-islands`,
+  `resume`, `storefront` — the resumability showcase).
 
 Path aliases: `tsconfig.json` and `vitest.config.ts` map `@sigx/*` and `sigx` to
 `packages/*/src`, so tests and typecheck run against source, not dist.
@@ -167,7 +189,7 @@ surfaces, two rules:
 
 | When you… | Update… |
 |---|---|
-| add / rename / remove a package | `AGENTS.md` "Packages" and the README package table — plus, **whichever of these the repo has**: `CONTRIBUTING.md` layout, the issue-template package dropdowns, `.size-limit.json`, and the `tsconfig` / `vitest` path aliases |
+| add / rename / remove a package | `AGENTS.md` "Packages" and the README package table — plus, **whichever of these the repo has**: `CONTRIBUTING.md` layout, the issue-template package dropdowns, `.size-limit.mjs`, and the `tsconfig` / `vitest` path aliases |
 | change a build / test / lint script | `AGENTS.md` "Build, Test, Lint", `CONTRIBUTING.md` "Common tasks", `package.json` |
 | change or add public API / behaviour | the package's own `README.md` and `CHANGELOG.md` under `[Unreleased]` |
 | change the workflow / process itself | `AGENTS.md` here — and, since it is the shared standard, upstream the same change to [`signalxjs/repo-template`](https://github.com/signalxjs/repo-template) |
@@ -204,6 +226,12 @@ the queue, in two moments:
 
 - **Plan first for non-trivial work.** Both Claude Code and Copilot CLI have a built-in plan mode; use it and let the CLI manage the plan file.
 - **Verify before declaring done.** Run typecheck/tests for code changes; show evidence the change works.
+- **Dev-only code goes behind `__DEV__`.** Warnings, validation, devtools
+  plumbing: guard with `if (__DEV__)` (not literal `process.env.NODE_ENV`
+  checks). It's a compile-time flag — `false` in the prod dist (blocks are
+  stripped), the runtime NODE_ENV check in the dev dist — defined by
+  `defineLibConfig` (package builds) and `vitest.config.ts` (tests); ambient
+  type in each package's `src/env.d.ts`.
 - **Minimal, surgical edits.** Don't refactor unrelated code. Don't add backward-compat shims for things that never shipped.
 - **Cross-platform paths**: Contributors and CI run on Windows, macOS and Linux — use the path separator and shell syntax of the environment you're in, and prefer Node scripts over shell one-liners for anything committed to the repo.
 - **Git hygiene**: Stage specific files (`git add <path>`), never `git add -A` / `git add .`. Run `pnpm typecheck` before any commit touching `.ts`. Do **not** add co-author trailers to commits (e.g. `Co-Authored-By: Claude …` / `Co-authored-by: Copilot …`).

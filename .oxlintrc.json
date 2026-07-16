@@ -3,6 +3,11 @@
     // contributors have an explicit config anchor. Keep rule changes minimal
     // and documented.
     "$schema": "./node_modules/oxlint/configuration_schema.json",
+    "globals": {
+        // Compile-time dev flag, defined at build time (see packages/vite
+        // defineLibConfig and vitest.config.ts).
+        "__DEV__": "readonly"
+    },
     "rules": {
         // The renderer's internal unmount(vnode, container) signature is part
         // of the cross-package renderer API (exported via internals and used

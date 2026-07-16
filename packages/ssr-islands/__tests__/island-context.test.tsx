@@ -1,7 +1,7 @@
 /**
- * Tests for client/island-context.ts — the island-data cache and server-state
- * lookup. Covers cache miss/hit, missing script, invalid JSON (→ console.error),
- * and getIslandServerState.
+ * Tests for client/island-context.ts — the island-shaped view over the
+ * window.__SIGX_BOUNDARIES__ table and the server-state lookup. Covers cache
+ * miss/hit, missing table, record→IslandInfo mapping, and getIslandServerState.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -24,11 +24,11 @@ afterEach(() => {
 });
 
 describe('getIslandData', () => {
-    it('returns an empty object when no __SIGX_ISLANDS__ script is present', () => {
+    it('returns an empty object when no __SIGX_BOUNDARIES__ table is present', () => {
         expect(getIslandData()).toEqual({});
     });
 
-    it('parses and returns island data from the script', () => {
+    it('maps boundary records onto the island-shaped view', () => {
         createIslandDataScript({
             '1': { strategy: 'load', componentId: 'A', props: {} }
         });
@@ -36,30 +36,34 @@ describe('getIslandData', () => {
         expect(data['1']).toMatchObject({ componentId: 'A', strategy: 'load' });
     });
 
-    it('caches the parsed result — a second read does not re-parse', () => {
+    it('maps flush:"skip" records to the "only" strategy and chunk to chunkUrl/exportName', () => {
+        (window as any).__SIGX_BOUNDARIES__ = {
+            '3': { flush: 'skip', hydrate: 'load', component: 'CO', chunk: { url: '/co.js', export: 'CO' } },
+            '4': { component: 'NoStrategy' }
+        };
+        invalidateIslandCache();
+        const data = getIslandData();
+        expect(data['3']).toMatchObject({
+            strategy: 'only',
+            componentId: 'CO',
+            chunkUrl: '/co.js',
+            exportName: 'CO'
+        });
+        // Records without a hydrate strategy inherit 'load'
+        expect(data['4']).toMatchObject({ strategy: 'load', componentId: 'NoStrategy' });
+    });
+
+    it('caches the mapped view — a second read ignores global mutation until invalidated', () => {
         createIslandDataScript({ '1': { strategy: 'load', componentId: 'A' } });
 
         const first = getIslandData();
-        // Mutate the script after first read; cache should win on second read.
-        const script = document.getElementById('__SIGX_ISLANDS__')!;
-        script.textContent = JSON.stringify({ '2': { strategy: 'idle', componentId: 'B' } });
+        // Replace the global after first read; cache should win on second read.
+        (window as any).__SIGX_BOUNDARIES__ = { '2': { hydrate: 'idle', component: 'B' } };
 
         const second = getIslandData();
         expect(second).toBe(first); // same cached reference
         expect(second['1']).toBeDefined();
         expect(second['2']).toBeUndefined();
-    });
-
-    it('returns {} and logs when the script contains invalid JSON', () => {
-        const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-        const script = document.createElement('script');
-        script.id = '__SIGX_ISLANDS__';
-        script.type = 'application/json';
-        script.textContent = '{ not valid json';
-        document.head.appendChild(script);
-
-        expect(getIslandData()).toEqual({});
-        expect(errorSpy).toHaveBeenCalled();
     });
 
     it('re-reads after invalidateIslandCache()', () => {

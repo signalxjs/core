@@ -54,14 +54,14 @@ async function bundleClientApp(entrySource: string, options: { minifySyntax?: bo
                 });
             }
         }],
-        define: { 'process.env.NODE_ENV': '"production"' },
+        define: { 'process.env.NODE_ENV': '"production"', __DEV__: 'false' },
         logLevel: 'silent'
     });
     return result.outputFiles[0].text;
 }
 
 // Marker strings that exist ONLY in the modules they guard
-const DATA_LAYER_MARKER = '__SIGX_ASYNC__';            // use-async.ts
+const DATA_LAYER_MARKER = '__SIGX_ASYNC__';            // runtime-core/src/async/restore.ts
 const HEAD_MARKER = 'data-sigx-head';                  // use-head.ts
 const SSR_MARKER = 'data-async-placeholder';           // @sigx/server-renderer only
 const HYDRATION_MARKER = 'client:only';                // islands vocabulary — lives in @sigx/ssr-islands, must never re-enter core
@@ -85,11 +85,11 @@ describe('client-only bundle layering guarantees', () => {
         expect(output).not.toContain(HYDRATION_MARKER);
     });
 
-    it('opting into useAsync pulls exactly the data layer (positive control)', async () => {
+    it('opting into useData pulls exactly the data layer (positive control)', async () => {
         const output = await bundleClientApp(`
-            import { component, render, useAsync } from 'sigx';
+            import { component, render, useData } from 'sigx';
             const App = component(() => {
-                const data = useAsync('k', async () => 1);
+                const data = useData('k', async () => 1);
                 return () => data.value;
             });
             render((App as any)({}), document.getElementById('app')!);
@@ -99,6 +99,22 @@ describe('client-only bundle layering guarantees', () => {
         // proves the negative assertions above can't be false greens.
         expect(output).toContain(DATA_LAYER_MARKER);
         // ...and still no server machinery
+        expect(output).not.toContain(SSR_MARKER);
+    });
+
+    it('useAction + all() alone do NOT pull the keyed data layer', async () => {
+        // Writes and combination are keyless — an app that never calls
+        // useData must not carry the SSR-blob pickup (async/restore.ts).
+        const output = await bundleClientApp(`
+            import { component, render, useAction, all } from 'sigx';
+            const App = component(() => {
+                const save = useAction(async (n: number) => n + 1);
+                return () => (save.value ?? 0) + (all as any).length;
+            });
+            render((App as any)({}), document.getElementById('app')!);
+        `);
+
+        expect(output).not.toContain(DATA_LAYER_MARKER);
         expect(output).not.toContain(SSR_MARKER);
     });
 

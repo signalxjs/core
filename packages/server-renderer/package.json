@@ -1,6 +1,6 @@
 {
     "name": "@sigx/server-renderer",
-    "version": "0.8.0",
+    "version": "0.10.0",
     "description": "Server-side rendering and client hydration for SigX",
     "type": "module",
     "main": "./dist/index.js",
@@ -23,6 +23,12 @@
             "development": "./dist/client/index.js",
             "production": "./dist/client/index.prod.js",
             "import": "./dist/client/index.js"
+        },
+        "./node": {
+            "types": "./dist/node.d.ts",
+            "development": "./dist/node.js",
+            "production": "./dist/node.prod.js",
+            "import": "./dist/node.js"
         }
     },
     "files": [
@@ -58,6 +64,7 @@
         "sigx": "workspace:^"
     },
     "devDependencies": {
+        "@sigx/resume": "workspace:^",
         "@sigx/vite": "workspace:^",
         "@types/node": "^26.1.1",
         "typescript": "^7.0.2",

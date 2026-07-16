@@ -30,6 +30,8 @@ packages/
   sigx/            → sigx                 (umbrella package)
   server-renderer/ → @sigx/server-renderer (SSR + hydration)
   ssr-islands/     → @sigx/ssr-islands    (islands architecture strategy pack)
+  resume/          → @sigx/resume         (resumability strategy pack)
+  cache/           → @sigx/cache          (async cache policy pack)
   vite/            → @sigx/vite           (Vite plugin)
 ```
 
@@ -41,6 +43,8 @@ packages/
 | Run all tests | `pnpm test` |
 | Run tests in watch mode | `pnpm test:watch` |
 | Lint | `pnpm lint` |
+| Edge smoke test (after `pnpm build`) | `pnpm test:edge` |
+| SSR benchmarks (after `pnpm build`) | `pnpm bench:ssr:quick` (quick + regression table) / `pnpm bench:ssr` (vs Vue, React, Preact) |
 | Try a runnable example | `pnpm --filter @sigx/spa-example dev` |
 
 ## Pre-push checklist

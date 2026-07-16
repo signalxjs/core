@@ -29,7 +29,10 @@ import type {
 } from './app-types.js';
 
 import { getAppContextToken, setActiveAppContext, type Providable } from './di/injectable.js';
+import { ERROR_SCOPE_TOKEN } from './error-scope.js';
+import { getProvided } from './di/token.js';
 import { isDirective } from './directives.js';
+import { isPromise } from './utils/index.js';
 import type { JSXElement } from './jsx-runtime.js';
 import { noMountFunctionError, provideInvalidInjectableError } from './errors.js';
 import { getDevtoolsHook } from './devtools-hook.js';
@@ -110,6 +113,8 @@ export function defineApp<TContainer = any>(rootComponent: JSXElement): App<TCon
     let isMounted = false;
     let container: TContainer | null = null;
     let unmountFn: (() => void) | null = null;
+    // Dev-only: warn once per app when runWithContext gets an async callback.
+    let warnedAsyncRunWithContext = false;
 
     const app: App<TContainer> = {
         config: context.config,
@@ -117,7 +122,7 @@ export function defineApp<TContainer = any>(rootComponent: JSXElement): App<TCon
         use(plugin, options) {
             if (installedPlugins.has(plugin)) {
                 // Plugin already installed, skip
-                if (process.env.NODE_ENV !== 'production') {
+                if (__DEV__) {
                     console.warn(`Plugin ${(plugin as Plugin).name || 'anonymous'} is already installed.`);
                 }
                 return app;
@@ -131,7 +136,7 @@ export function defineApp<TContainer = any>(rootComponent: JSXElement): App<TCon
             } else if (plugin && typeof plugin.install === 'function') {
                 // Object-style plugin
                 plugin.install(app, options);
-            } else if (process.env.NODE_ENV !== 'production') {
+            } else if (__DEV__) {
                 console.warn('Invalid plugin: must be a function or have an install() method.');
             }
 
@@ -171,10 +176,33 @@ export function defineApp<TContainer = any>(rootComponent: JSXElement): App<TCon
             // outside components (router guards, socket handlers, entry-scope
             // code). Synchronous only: restored in finally, so the context
             // never leaks past the first await of an async fn. Nested calls
-            // restore the previous context.
+            // restore the previous context. (Async continuation support via
+            // AsyncLocalStorage was considered and deferred: browsers have no
+            // ALS, so it would silently split state client-side — revisit
+            // when TC39 AsyncContext is available cross-platform.)
             const prev = setActiveAppContext(context);
             try {
-                return fn();
+                const result = fn();
+                if (__DEV__ && !warnedAsyncRunWithContext) {
+                    // The probe must never alter behavior: a hostile `then`
+                    // getter (Proxy trap) could throw, so swallow probe errors
+                    // and pass the value through regardless.
+                    let thenable = false;
+                    try {
+                        thenable = isPromise(result);
+                    } catch { /* probe only — never affect the return value */ }
+                    if (thenable) {
+                        warnedAsyncRunWithContext = true;
+                        console.warn(
+                            'app.runWithContext(fn) got a callback that returned a Promise (or ' +
+                            'other thenable) — the app context applies only to its synchronous ' +
+                            'portion and is restored before any awaited continuation runs. After ' +
+                            'an await, re-enter with another runWithContext call to resolve more ' +
+                            'dependencies.'
+                        );
+                    }
+                }
+                return result;
             } finally {
                 setActiveAppContext(prev);
             }
@@ -185,9 +213,20 @@ export function defineApp<TContainer = any>(rootComponent: JSXElement): App<TCon
             return app;
         },
 
+        onError(handler) {
+            if (__DEV__ && context.config.onError) {
+                console.warn(
+                    'app.onError() replaces the previous handler — for multiple observers use ' +
+                    'app.hook({ onComponentError }).'
+                );
+            }
+            context.config.onError = handler;
+            return app;
+        },
+
         directive(name: string, definition?: any): any {
             if (definition !== undefined) {
-                if (process.env.NODE_ENV !== 'production' && !isDirective(definition)) {
+                if (__DEV__ && !isDirective(definition)) {
                     console.warn(
                         `[sigx] app.directive('${name}', ...) received a value that is not a valid directive definition. ` +
                         `Use defineDirective() to create directive definitions.`
@@ -201,7 +240,7 @@ export function defineApp<TContainer = any>(rootComponent: JSXElement): App<TCon
 
         mount(target, renderFn?) {
             if (isMounted) {
-                if (process.env.NODE_ENV !== 'production') {
+                if (__DEV__) {
                     console.warn('App is already mounted. Call app.unmount() first.');
                 }
                 return app;
@@ -217,7 +256,7 @@ export function defineApp<TContainer = any>(rootComponent: JSXElement): App<TCon
             container = target;
             isMounted = true;
 
-            if (process.env.NODE_ENV !== 'production') {
+            if (__DEV__) {
                 const devtools = getDevtoolsHook();
                 if (devtools) {
                     devtools.apps.add(context);
@@ -237,7 +276,7 @@ export function defineApp<TContainer = any>(rootComponent: JSXElement): App<TCon
 
         unmount() {
             if (!isMounted) {
-                if (process.env.NODE_ENV !== 'production') {
+                if (__DEV__) {
                     console.warn('App is not mounted.');
                 }
                 return;
@@ -247,7 +286,7 @@ export function defineApp<TContainer = any>(rootComponent: JSXElement): App<TCon
                 unmountFn();
             }
 
-            if (process.env.NODE_ENV !== 'production') {
+            if (__DEV__) {
                 const devtools = getDevtoolsHook();
                 if (devtools) {
                     devtools.emit({ type: 'app:unmount', app: context });
@@ -318,7 +357,7 @@ export function notifyComponentCreated(context: AppContext | null, instance: Com
             handleHookError(context, err as Error, instance, 'onComponentCreated');
         }
     }
-    if (process.env.NODE_ENV !== 'production') {
+    if (__DEV__) {
         const devtools = getDevtoolsHook();
         if (devtools) devtools.emit({
             type: 'component:created',
@@ -343,7 +382,7 @@ export function notifyComponentMounted(context: AppContext | null, instance: Com
             handleHookError(context, err as Error, instance, 'onComponentMounted');
         }
     }
-    if (process.env.NODE_ENV !== 'production') {
+    if (__DEV__) {
         const devtools = getDevtoolsHook();
         if (devtools) devtools.emit({ type: 'component:mounted', app: context, instance, instanceId: getInstanceId(instance.ctx) });
     }
@@ -362,7 +401,7 @@ export function notifyComponentUnmounted(context: AppContext | null, instance: C
             handleHookError(context, err as Error, instance, 'onComponentUnmounted');
         }
     }
-    if (process.env.NODE_ENV !== 'production') {
+    if (__DEV__) {
         const devtools = getDevtoolsHook();
         if (devtools) devtools.emit({ type: 'component:unmounted', app: context, instance, instanceId: getInstanceId(instance.ctx) });
     }
@@ -381,7 +420,7 @@ export function notifyComponentUpdated(context: AppContext | null, instance: Com
             handleHookError(context, err as Error, instance, 'onComponentUpdated');
         }
     }
-    if (process.env.NODE_ENV !== 'production') {
+    if (__DEV__) {
         const devtools = getDevtoolsHook();
         if (devtools) devtools.emit({ type: 'component:updated', app: context, instance, instanceId: getInstanceId(instance.ctx) });
     }
@@ -389,7 +428,12 @@ export function notifyComponentUpdated(context: AppContext | null, instance: Com
 
 /**
  * Handle an error in a component. Returns true if the error was handled.
- * Called by the renderer when an error occurs in setup or render.
+ * Called by the renderer when an error occurs in setup or render (and by
+ * the DOM event path and the async bubble).
+ *
+ * Order: nearest errorScope (walking the instance parent chain) → plugin
+ * hooks → app `onError`. Scoped recovery is local handling, like DOM event
+ * bubbling — the app layer sees only what escapes every scope.
  */
 export function handleComponentError(
     context: AppContext | null,
@@ -397,14 +441,25 @@ export function handleComponentError(
     instance: ComponentInstance | null,
     info: string
 ): boolean {
-    if (!context) return false;
-
-    if (process.env.NODE_ENV !== 'production') {
+    if (context && __DEV__) {
         const devtools = getDevtoolsHook();
         if (devtools) devtools.emit({ type: 'component:error', app: context, instance, instanceId: getInstanceId(instance?.ctx ?? null), error: err, info });
     }
 
-    // First, try plugin hooks
+    // Nearest errorScope first — the walk runs even with a null app context
+    // (errorScope works in a bare render() without defineApp). Event-handler
+    // throws arrive with instance null, so they naturally skip to the app
+    // layer. A scope that declines (already errored) lets the walk continue.
+    let node = instance?.ctx as { provides?: Map<symbol, unknown>; parent?: unknown } | null | undefined;
+    while (node) {
+        const scope = getProvided(node.provides, ERROR_SCOPE_TOKEN);
+        if (scope && scope.handle(err, instance, info) === true) return true;
+        node = node.parent as typeof node;
+    }
+
+    if (!context) return false;
+
+    // Then, plugin hooks
     for (const hooks of context.hooks) {
         try {
             const handled = hooks.onComponentError?.(err, instance!, info);
@@ -415,17 +470,57 @@ export function handleComponentError(
         }
     }
 
-    // Then, try app-level error handler
-    if (context.config.errorHandler) {
+    // Then, the app-level onError handler
+    if (context.config.onError) {
         try {
-            const handled = context.config.errorHandler(err, instance, info);
+            const handled = context.config.onError(err, instance, info);
             if (handled === true) return true;
         } catch (handlerErr) {
-            console.error('Error in app.config.errorHandler:', handlerErr);
+            console.error('Error in app onError handler:', handlerErr);
         }
     }
 
     return false;
+}
+
+/**
+ * Bubble hook for the async layer: a cell is `'errored'`, `match()` was
+ * given no `error` arm, so the error escalates — nearest `errorScope`, then
+ * the app `onError` handler (both via {@link handleComponentError}). Never
+ * throws: `match()` runs during render, and an unhandled data error must
+ * not take the component down with it.
+ *
+ * `ctx` is the setup-time instance captured by the cell (matching where the
+ * `useData`/`useAction` call lives, regardless of which render reads it).
+ *
+ * @internal
+ */
+export function reportUnhandledAsyncError(
+    err: Error,
+    ctx: { provides?: Map<symbol, unknown>; parent?: unknown } | null
+): boolean {
+    // Resolve the owning app context by walking the provides chain from the
+    // captured instance (the root component carries the AppContext token).
+    const token = getAppContextToken();
+    let appContext: AppContext | null = null;
+    let node = ctx;
+    while (node) {
+        const found = node.provides?.get(token);
+        if (found) {
+            appContext = found as AppContext;
+            break;
+        }
+        node = node.parent as typeof ctx;
+    }
+
+    const instance: ComponentInstance | null = ctx
+        ? { name: (ctx as { __name?: string }).__name ?? 'Component', ctx: ctx as ComponentInstance['ctx'], vnode: null as unknown as ComponentInstance['vnode'] }
+        : null;
+    const handled = handleComponentError(appContext, err, instance, 'async');
+    if (!handled) {
+        console.error('[sigx] Unhandled async error:', err);
+    }
+    return handled;
 }
 
 /**
@@ -434,10 +529,10 @@ export function handleComponentError(
 function handleHookError(context: AppContext, err: Error, instance: ComponentInstance, hookName: string): void {
     console.error(`Error in ${hookName} hook:`, err);
 
-    // Try the app error handler
-    if (context.config.errorHandler) {
+    // Try the app onError handler
+    if (context.config.onError) {
         try {
-            context.config.errorHandler(err, instance, `plugin hook: ${hookName}`);
+            context.config.onError(err, instance, `plugin hook: ${hookName}`);
         } catch {
             // Give up - we've done our best
         }

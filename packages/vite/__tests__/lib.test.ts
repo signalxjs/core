@@ -178,6 +178,27 @@ describe('defineLibConfig — options & flags', () => {
         expect(config.oxc).toBeUndefined();
     });
 
+    it('targets a custom importSource when one is given', () => {
+        // Non-web platforms build against their runtime, not the `sigx`
+        // umbrella (which carries the DOM renderer).
+        const config: any = resolveConfig({
+            entry: 'src/index.ts',
+            jsx: true,
+            importSource: '@sigx/runtime-core'
+        });
+        expect(config.oxc).toEqual({
+            jsx: { runtime: 'automatic', importSource: '@sigx/runtime-core' }
+        });
+    });
+
+    it('ignores importSource when jsx is not enabled', () => {
+        const config: any = resolveConfig({
+            entry: 'src/index.ts',
+            importSource: '@sigx/runtime-core'
+        });
+        expect(config.oxc).toBeUndefined();
+    });
+
     it('propagates a banner into rolldownOptions.output', () => {
         const config: any = resolveConfig({
             entry: 'src/index.ts',
@@ -199,9 +220,10 @@ describe('defineLibConfig — prod-dist mode', () => {
         expect(config.build.rolldownOptions.output.chunkFileNames).toBe('[name]-[hash].prod.js');
     });
 
-    it('defines process.env.NODE_ENV away', () => {
+    it('defines process.env.NODE_ENV away and pins __DEV__ to false', () => {
         const config = resolveConfig({ entry: 'src/index.ts' }, 'prod-dist');
         expect(config.define['process.env.NODE_ENV']).toBe('"production"');
+        expect(config.define.__DEV__).toBe('false');
     });
 
     it('does not empty the outDir (writes next to the dev dist)', () => {
@@ -209,9 +231,10 @@ describe('defineLibConfig — prod-dist mode', () => {
         expect(config.build.emptyOutDir).toBe(false);
     });
 
-    it('the default build has no define and keeps plain filenames', () => {
+    it('the default build maps __DEV__ to the runtime NODE_ENV check, leaves NODE_ENV alone, and keeps plain filenames', () => {
         const config = resolveConfig({ entry: 'src/index.ts' });
-        expect(config.define).toBeUndefined();
+        expect(config.define.__DEV__).toBe("(process.env.NODE_ENV !== 'production')");
+        expect(config.define['process.env.NODE_ENV']).toBeUndefined();
         expect(config.build.lib.fileName('es', 'index')).toBe('index.js');
         expect(config.build.emptyOutDir).toBe(true);
     });

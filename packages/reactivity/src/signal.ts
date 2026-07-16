@@ -217,7 +217,7 @@ export function signal<T>(target: T): PrimitiveSignal<T> | Signal<T & object> {
     // `signalIds` so the `set` trap can include it in updates without
     // a per-write hook lookup.
     let signalId: number | null = null;
-    if (process.env.NODE_ENV !== 'production') {
+    if (__DEV__) {
         const hookAtCreate = getDevtoolsHook();
         if (hookAtCreate) {
             signalId = hookAtCreate.nextId();

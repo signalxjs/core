@@ -4,6 +4,13 @@ on:
   push:
     tags:
       - 'v*.*.*'
+  # Manual re-run for a missed/partial publish: publish.js skips versions
+  # already on the registry, so a dispatch publishes exactly the package
+  # versions main currently declares that npm doesn't have — intended for
+  # right after a tag run missed a package, before any new version bumps
+  # land. Dispatches are restricted to main (guard on publish-npm); the
+  # GitHub-release job is tag-only (guard below).
+  workflow_dispatch:
 
 # Top-level permissions are intentionally minimal. Each job declares what it
 # actually needs.
@@ -15,6 +22,9 @@ concurrency:
 
 jobs:
   publish-npm:
+    # Tag pushes always publish; manual dispatches only from main — never a
+    # feature branch.
+    if: github.event_name == 'push' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     # OIDC for npm trusted publishing; read-only on contents.
     permissions:
@@ -63,6 +73,9 @@ jobs:
 
   github-release:
     needs: publish-npm
+    # Only tag pushes create a GitHub release — a workflow_dispatch re-publish
+    # has no tag to release (github.ref_name would be a branch name).
+    if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     # Only this job needs write — npm publish already happened above.
     permissions:

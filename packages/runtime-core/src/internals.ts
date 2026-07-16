@@ -64,15 +64,34 @@ export { getComponentPlugins, applyContextExtensions, registerComponentPlugin, r
 
 // DI internals
 export { getAppContextToken, provideAppContext } from './di/injectable.js';
+// Typed seam tokens: create + read/write helpers that carry the value type,
+// so seam reads need no `as X | undefined` casts
+export { createToken, getProvided, setProvided } from './di/token.js';
+export type { InjectionToken } from './di/token.js';
+
+// Async engine internals (for server renderers and cache packs)
+export { matchAsyncState, registerHandledAsyncOptionKeys, makeUnhandledReporter, normalizeError, makeAbortController, inertAbortSignal } from './async/shared.js';
+export { reportUnhandledAsyncError } from './app.js';
+// Live-client declaration (for non-web platform-identity modules — lynx/terminal;
+// NOT for @sigx/runtime-dom/platform, which SSR also evaluates)
+export { declareLiveClient, isLiveClient } from './async/environment.js';
+// The §7 pack contract: per-app engine swap + the default engine to delegate to
+export { ASYNC_ENGINE_TOKEN, provideAsyncEngine, defaultAsyncEngine } from './async/engine.js';
+export type { AsyncEngine, AsyncReadHandle } from './async/engine.js';
+
+// SSR serializer type-handler seam (per-app provide, consumed by @sigx/server-renderer)
+export { SSR_SERIALIZER_TOKEN, provideSSRSerializerHandlers } from './ssr-serialize.js';
+export type { SSRTypeHandler } from './ssr-serialize.js';
+
+// errorScope internals (for the SSR hydrator: render wrapping + server-error seeding)
+export { applyErrorScope, seedErrorScopeError, ERROR_SCOPE_TOKEN } from './error-scope.js';
+export type { ErrorScopeHandle } from './error-scope.js';
 
 // Model internals
 export { getModelSymbol } from './model.js';
 
 // Directive internals
 export { __DIRECTIVE__ } from './directives.js';
-
-// Lazy loading internals
-export { registerPendingPromise } from './lazy.js';
 
 // Component-setup helpers shared with the client hydrator
 export { createEmit, splitComponentProps } from './utils/component-props.js';

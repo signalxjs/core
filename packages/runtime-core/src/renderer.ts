@@ -11,6 +11,7 @@ import { createEmit, splitComponentProps } from './utils/component-props.js';
 import { provideAppContext } from './di/injectable.js';
 import { isModel } from './model.js';
 import { asyncSetupClientError } from './errors.js';
+import { applyErrorScope } from './error-scope.js';
 import { queueJob, nextJobId, type SchedulerJob } from './scheduler.js';
 import {
     AppContext,
@@ -181,7 +182,7 @@ function getSequence(arr: number[]): number[] {
  * Check for duplicate keys in an array of VNodes and warn in development.
  */
 function checkDuplicateKeys(children: VNode[]): void {
-    if (process.env.NODE_ENV === 'production') return;
+    if (!__DEV__) return;
 
     const seenKeys = new Set<string>();
     for (const child of children) {
@@ -388,7 +389,7 @@ export function createRenderer<HostNode = any, HostElement = any>(
                             hostPatchDirective(element, key.slice(4), null, vnode.props[key], currentAppContext);
                         }
                     } else {
-                        hostPatchProp(element, key, null, vnode.props[key], isSVG);
+                        hostPatchProp(element, key, null, vnode.props[key], isSVG, currentAppContext);
                     }
                 }
             }
@@ -708,7 +709,7 @@ export function createRenderer<HostNode = any, HostElement = any>(
                             hostPatchDirective(element, key.slice(4), oldProps[key], null, currentAppContext);
                         }
                     } else {
-                        hostPatchProp(element, key, oldProps[key], null, isSVG);
+                        hostPatchProp(element, key, oldProps[key], null, isSVG, currentAppContext);
                     }
                 }
             }
@@ -723,7 +724,7 @@ export function createRenderer<HostNode = any, HostElement = any>(
                             hostPatchDirective(element, key.slice(4), oldValue, newValue, currentAppContext);
                         }
                     } else {
-                        hostPatchProp(element, key, oldValue, newValue, isSVG);
+                        hostPatchProp(element, key, oldValue, newValue, isSVG, currentAppContext);
                     }
                 }
             }
@@ -824,7 +825,7 @@ export function createRenderer<HostNode = any, HostElement = any>(
      */
     function reconcileChildrenArray(parent: HostElement, oldChildren: VNode[], newChildren: VNode[], parentIsSVG: boolean = false, fallbackAnchor: HostNode | null = null) {
         // Check for duplicate keys in development
-        if (process.env.NODE_ENV !== 'production') {
+        if (__DEV__) {
             checkDuplicateKeys(newChildren);
         }
 
@@ -1087,6 +1088,9 @@ export function createRenderer<HostNode = any, HostElement = any>(
         applyRef(vnode.props?.ref, refValue);
 
         if (renderFn) {
+            // errorScope() marked the ctx during setup — wrap the render fn
+            // so the subtree renders under the scope's fallback/keyed view.
+            renderFn = applyErrorScope(ctx, renderFn);
             ctx.renderFn = renderFn;
 
             // Shared mutable ref for the current subtree.

@@ -20,6 +20,7 @@
 import type { SSRPlugin } from '../plugin';
 import type { SSRContext } from './context';
 import { asyncAssignmentJs, serializeAsyncScript, isSerializable } from './state';
+import { getTypeHandlers } from './serialize';
 
 const PLUGIN_NAME = 'sigx:state';
 
@@ -58,7 +59,7 @@ export function stateSerializationPlugin(): SSRPlugin {
             getInjectedHTML(ctx) {
                 const data = ctx.getPluginData<StateData>(PLUGIN_NAME)!;
                 const values = takeUnemitted(ctx, data.emitted, null);
-                return values ? serializeAsyncScript(values) : '';
+                return values ? serializeAsyncScript(values, getTypeHandlers(ctx), ctx._nonce) : '';
             },
 
             onAsyncComponentResolved(id, _html, ctx) {
@@ -69,7 +70,7 @@ export function stateSerializationPlugin(): SSRPlugin {
                 if (!values) return;
                 // preScript runs BEFORE $SIGX_REPLACE — the state must be
                 // installed before the replace dispatches sigx:async-ready.
-                return { preScript: asyncAssignmentJs(values) };
+                return { preScript: asyncAssignmentJs(values, getTypeHandlers(ctx)) };
             }
         }
     };

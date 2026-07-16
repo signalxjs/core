@@ -4,18 +4,19 @@
  * Defines a generic, strategy-agnostic extension point for server-side rendering.
  * Plugins can control component context creation, async behavior, HTML injection,
  * and client-side hydration — enabling custom hydration strategies, resumable SSR,
- * streaming Suspense, progressive enhancement, or any future strategy without
+ * streaming Defer boundaries, progressive enhancement, or any future strategy without
  * core changes.
  */
 
 import type { VNode, ComponentSetupContext } from 'sigx';
 import type { SSRContext } from './server/context';
+import type { ResolvedBoundary } from './boundary';
 
 /**
  * SSR Plugin interface for extending server rendering and client hydration.
  *
  * The core renderer is strategy-agnostic. Hydration strategies (selective
- * hydration, resumability, streaming Suspense, progressive enhancement, etc.)
+ * hydration, resumability, streaming Defer boundaries, progressive enhancement, etc.)
  * are implemented as plugins that hook into the lifecycle below.
  */
 export interface SSRPlugin {
@@ -29,6 +30,40 @@ export interface SSRPlugin {
          * Use to initialize plugin-specific data via `ctx.setPluginData()`.
          */
         setup?(ctx: SSRContext): void;
+
+        /**
+         * The boundary seam (rfc-ssr-platform §1.3). Called once per component,
+         * after its id is allocated and pushed (read `ctx._componentStack` top
+         * if needed) but BEFORE the setup context is built and before
+         * `vnode.type.__setup` runs. First plugin to return an object wins.
+         *
+         * The returned axes flow into the render:
+         * - `flush: 'skip'` suppresses the server render entirely: setup never
+         *   runs, `transformComponentContext` and `afterRenderComponent` are
+         *   NOT called, and core emits the placeholder wrapper
+         *   `<div data-boundary="ID" style="display:contents;">` around the
+         *   (optional) `fallback` render, followed by the standard trailing
+         *   `<!--$c:ID-->` marker. The client fresh-mounts into the wrapper.
+         * - `flush: 'stream'` streams the boundary when it has pending async
+         *   setup work (keyed useAsync/useStream) and the render is streaming;
+         *   with no async work (or in string mode) it degrades to inline —
+         *   there is nothing to defer. `fallback`, when present, renders
+         *   inside the placeholder INSTEAD of the initial-state pass.
+         * - `flush: 'inline'` awaits async work in place even in streaming mode.
+         * - Omitted `flush` = today's default (stream in streaming mode,
+         *   block/inline otherwise).
+         * - `hydrate`/`media`/`chunk` are recorded in the per-request boundary
+         *   table (`__SIGX_BOUNDARIES__`) for the client hydrator; `props`
+         *   overrides the core-derived snapshot of `vnode.props` (packs strip
+         *   their directive vocabulary — core cannot know it).
+         *
+         * The placeholder wrappers are core protocol: `fallback` thunks get no
+         * id and must not emit their own wrapper element.
+         *
+         * @example Islands maps `client:only` → `{ flush: 'skip', hydrate: 'load' }`
+         * @example Islands maps `client:visible` → `{ hydrate: 'visible' }`
+         */
+        resolveBoundary?(vnode: VNode, ctx: SSRContext): ResolvedBoundary | undefined | void;
 
         /**
          * Called after ComponentSetupContext is constructed but BEFORE setup() runs.
@@ -47,28 +82,15 @@ export interface SSRPlugin {
         ): ComponentSetupContext | void;
 
         /**
-         * Called after the component context is built (`transformComponentContext`
-         * has run, the component id is assigned and pushed) but BEFORE `setup()`
-         * and render. Lets a plugin skip running the component entirely and emit a
-         * placeholder string in its place — e.g. islands `client:only` true
-         * skip-SSR. Returning **any object** suppresses the render: the component's
-         * `setup`/render and `afterRenderComponent` are skipped, and core emits the
-         * (optional) `placeholder` string — when present, including an empty string
-         * — followed by the standard trailing `<!--$c:id-->` marker for hydration.
-         * Return void to render normally. First plugin to return an object wins.
-         *
-         * @example Islands plugin emits `<div data-island>` for `client:only`
-         */
-        suppressComponentRender?(
-            id: number,
-            vnode: VNode,
-            ctx: SSRContext
-        ): { placeholder?: string } | void;
-
-        /**
-         * Called after a component renders. Receives the accumulated HTML string.
-         * Can transform it (e.g., wrap with markers, inject attributes).
-         * Return a string to replace, or void to pass through.
+         * Called after a component renders — APPEND-only. Output accumulates
+         * in one shared buffer (that is what makes streaming cheap), so there
+         * is no per-component HTML to intercept: the `html` argument is
+         * always `''`, and a returned string is appended between the
+         * component's content and its trailing `<!--$c:ID-->` marker. Typical
+         * use: capture per-boundary state into `ctx.getBoundary(id)`, the way
+         * the islands pack's plugin does. To influence what a component RENDERS, use
+         * `transformComponentContext` instead — wrapping or rewriting the
+         * emitted markup is deliberately not supported (#253).
          */
         afterRenderComponent?(
             id: number,
@@ -76,36 +98,6 @@ export interface SSRPlugin {
             html: string,
             ctx: SSRContext
         ): string | void;
-
-        /**
-         * Called when a component has pending async setup work (keyed
-         * `useAsync()` fetchers / `useStream()` sources).
-         * Plugin decides the async model:
-         * - `'block'`: wait inline (overrides streaming default)
-         * - `'stream'`: render placeholder now, stream replacement later (this is the default in streaming mode)
-         * - `'skip'`: don't render this component server-side
-         *
-         * Return void to accept the default behavior:
-         * - In streaming mode (`renderStream`/`renderStreamWithCallbacks`): defaults to `'stream'`
-         * - In string mode (`renderToString`/`render`): defaults to `'block'`
-         *
-         * When core handles streaming, it manages the deferred render and race loop.
-         * Plugins that need to augment the streamed result should use `onAsyncComponentResolved`.
-         *
-         * Note: this hook keys off useAsync/useStream setup work only. Suspense-boundary async
-         * (lazy() children) does not pass through here — Suspense boundaries
-         * stream via the same placeholder machinery and are observable on
-         * `ctx._pendingAsync` and in `onAsyncComponentResolved`.
-         *
-         * @example Suspense plugin returns `{ mode: 'stream', placeholder: '<Spinner/>' }`
-         * @example A plugin returns `{ mode: 'block' }` to force waiting
-         */
-        handleAsyncSetup?(
-            id: number,
-            ssrLoads: Promise<void>[],
-            renderFn: () => any,
-            ctx: SSRContext
-        ): { mode: 'block' | 'stream' | 'skip'; placeholder?: string } | void;
 
         /**
          * Called after a core-managed async component resolves its deferred render.

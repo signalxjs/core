@@ -35,9 +35,14 @@ import {
     createPropsAccessor,
     provideAppContext,
     resolveBuiltInDirective,
+    matchAsyncState,
+    ERROR_SCOPE_TOKEN,
+    getProvided,
 } from 'sigx/internals';
-import type { SSRContext } from './context';
+import type { SSRContext, SSRErrorInfo } from './context';
+import type { ResolvedBoundary, SSRBoundaryRecord } from '../boundary';
 import { generateAppendScript } from './streaming';
+import { serializeBoundaryProps, getTypeHandlers } from './serialize';
 
 // ============= HTML Utilities =============
 
@@ -204,16 +209,14 @@ function createComponentState(
     vnode: VNode,
     ctx: SSRContext,
     parentCtx: ComponentSetupContext | null,
-    appContext: AppContext | null
+    appContext: AppContext | null,
+    id: number
 ): ComponentRenderState {
     const componentName = (vnode.type as any).__name || 'Anonymous';
     const allProps = vnode.props || {};
 
     // Destructure props (filter out framework-internal keys)
     const { children, slots: slotsFromProps, $models: _modelsData, ...propsData } = allProps;
-
-    const id = ctx.nextId();
-    ctx.pushComponent(id);
 
     // Create slots from children, mirroring the client slot extractor so
     // server and client agree on slot presence (otherwise hydration could
@@ -348,39 +351,54 @@ function recordComponentKey(ctx: SSRContext, id: number, key: string): void {
     }
 }
 
-/** Shared inert state for unkeyed / { server: false } calls on the server. */
-const INERT_ASYNC_STATE = {
+/**
+ * Shared inert state for { server: false } calls on the server: the pending
+ * arm renders into the HTML and the client fetches after hydration.
+ */
+const INERT_PENDING_STATE = Object.freeze({
+    state: 'pending' as const,
     value: null,
-    loading: true,
     error: null,
+    loading: true,
+    match: (arms: { pending?: () => unknown }) => arms.pending?.(),
     refresh: () => Promise.resolve()
-};
+});
 
 /**
- * useAsync server provider (shared; invoked as instance._useAsync(...)).
+ * useData server provider (shared; invoked as instance._useAsync(...)).
  *
  * Keyed calls fetch on the server (deduped per request by key), settle
  * through the component's ssrLoads (block: awaited inline; streaming:
  * deferred behind the placeholder), and record their value for the
- * __SIGX_ASYNC__ hydration blob. Unkeyed / { server: false } calls never
- * run here — the loading branch renders into the HTML and the client
- * fetches after hydration.
+ * __SIGX_ASYNC__ hydration blob. `{ server: false }` calls never run here —
+ * the pending arm renders into the HTML and the client fetches after
+ * hydration. Core resolves keys (getter → canonical string) and pre-binds
+ * the fetcher's argument before this seam, so server cells are only ever
+ * 'pending' | 'ready' | 'errored'.
+ *
+ * The options bag arrives whole (open AsyncOptions interface) — this
+ * provider reads `server` and ignores the rest; pack options are the pack
+ * provider's business.
  */
 function serverUseAsync(
     this: any,
     key: string | null,
     fetcher: (fctx: { signal: AbortSignal }) => Promise<unknown>,
-    options: { throwOnError?: boolean; server?: boolean } = {}
+    options: { server?: boolean } & Record<string, unknown> = {}
 ) {
     if (key === null || options.server === false) {
-        return INERT_ASYNC_STATE;
+        return INERT_PENDING_STATE;
     }
 
     const ctx: SSRContext = this.__ssrCtx;
     const id: number = this.__ssrId;
     const ssrLoads: Promise<void>[] = this._ssrLoads;
 
-    const state = { data: null as unknown, pending: true, failure: null as Error | null };
+    const state = {
+        st: 'pending' as 'pending' | 'ready' | 'errored',
+        data: null as unknown,
+        failure: null as Error | null
+    };
 
     // Request-level dedupe: same key → one fetch, shared result
     let promise = ctx._asyncCache.get(key);
@@ -390,29 +408,31 @@ function serverUseAsync(
     }
 
     const settled = (promise as Promise<unknown>).then(value => {
+        state.st = 'ready';
         state.data = value;
-        state.pending = false;
         ctx._asyncResults.set(key, value);
         recordComponentKey(ctx, id, key);
     }, e => {
+        // Soft failure: the component renders its error arm. Nothing is
+        // serialized — the client refetches (fail-safe).
+        state.st = 'errored';
         state.failure = e instanceof Error ? e : new Error(String(e));
-        state.pending = false;
-        if (options.throwOnError) {
-            // Reject the load → component error fallback (block mode) or
-            // error replacement (streaming) — same as a setup throw.
-            throw state.failure;
-        }
-        // Soft failure: the component renders its own error branch.
-        // Nothing is serialized — the client refetches (fail-safe).
     });
     ssrLoads.push(settled);
 
     return {
+        get state() { return state.st; },
         get value() { return state.data; },
-        get loading() { return state.pending; },
-        get error() {
-            if (options.throwOnError && state.failure) throw state.failure;
-            return state.failure;
+        get loading() { return state.st === 'pending'; },
+        get error() { return state.failure; },
+        match(arms: Parameters<typeof matchAsyncState>[1]) {
+            return matchAsyncState({
+                state: state.st,
+                value: state.data,
+                error: state.failure,
+                stale: null,
+                retry: () => { /* no-op on the server */ }
+            }, arms);
         },
         refresh: () => Promise.resolve() // no-op on the server
     };
@@ -435,7 +455,7 @@ function serverUseStream(this: any, key: string, source: () => AsyncIterable<str
     // so keys must be UNIQUE per request — unlike useAsync, where sharing a
     // key is the dedupe feature. Duplicates would race on the serialized
     // final text (last finisher wins).
-    if (process.env.NODE_ENV !== 'production') {
+    if (__DEV__) {
         const seen: Set<string> = ((ctx as any)._streamKeys ??= new Set());
         if (seen.has(key)) {
             console.warn(
@@ -465,7 +485,7 @@ function serverUseStream(this: any, key: string, source: () => AsyncIterable<str
             try {
                 for await (const token of source()) {
                     acc += token;
-                    yield generateAppendScript(id, token);
+                    yield generateAppendScript(id, token, ctx._nonce);
                 }
                 finish(acc);
                 resolveDone();
@@ -491,26 +511,80 @@ function serverUseStream(this: any, key: string, source: () => AsyncIterable<str
 }
 
 /**
- * Error fallback for a failed component. Returns the HTML to emit in place of
- * the component ('' emits nothing).
+ * Internal server-side view of an errorScope (set on the component ctx by
+ * errorScope() during setup — see runtime-core/src/error-scope.ts).
+ */
+interface ServerErrorScope {
+    fallback?: (error: Error, retry: () => void) => JSXElement;
+}
+
+/**
+ * A descendant throw claimed by an enclosing errorScope — rethrown so it
+ * propagates up the generator stack to the owning component's frame, which
+ * rewinds its subtree output and renders the scope fallback in its place.
+ */
+class ScopeThrow extends Error {
+    constructor(
+        public readonly original: Error,
+        public readonly scope: ServerErrorScope
+    ) {
+        super(original.message);
+    }
+}
+
+/** Nearest errorScope on this component or an ancestor (self first). */
+function findEnclosingScope(componentCtx: ComponentSetupContext | null): ServerErrorScope | null {
+    let current: any = componentCtx;
+    while (current) {
+        if (current.__errorScope) return current.__errorScope as ServerErrorScope;
+        current = current.parent;
+    }
+    return null;
+}
+
+/**
+ * The default failure HTML (rfc-ssr-platform §2.2): the stable
+ * `<!--ssr-error:ID-->` boundary comment, plus a visible diagnostic box in
+ * development so a failed component is impossible to miss.
+ */
+export function defaultRenderError(error: Error, info: SSRErrorInfo): string {
+    const marker = info.componentId != null ? `<!--ssr-error:${info.componentId}-->` : '';
+    if (!__DEV__) {
+        return marker;
+    }
+    const label = escapeHtml(`[SSR] <${info.componentName ?? 'Anonymous'}> failed during ${info.phase}: ${error.message}`);
+    return marker
+        + `<div style="border:2px solid #c00;border-radius:4px;background:#fff5f5;color:#900;`
+        + `padding:8px 12px;font:13px/1.5 ui-monospace,monospace;">${label}</div>`;
+}
+
+/**
+ * Error fallback for a failed component: report through the request's one
+ * error callback, then emit `renderError`'s HTML in its place ('' emits
+ * nothing).
  */
 function componentErrorFallback(e: unknown, ctx: SSRContext, componentName: string, id: number): string {
     const error = e instanceof Error ? e : new Error(String(e));
-    let fallbackHtml: string | null = null;
+    const info: SSRErrorInfo = {
+        phase: ctx._phase,
+        componentId: id,
+        componentName,
+        ...(ctx._boundaries.has(id) ? { boundaryId: id } : {})
+    };
 
-    if (ctx._onComponentError) {
-        fallbackHtml = ctx._onComponentError(error, componentName, id);
+    try {
+        ctx._onError?.(error, info);
+    } catch (hookErr) {
+        if (__DEV__) {
+            console.error('Error in onError callback:', hookErr);
+        }
     }
 
-    if (fallbackHtml === null || fallbackHtml === undefined) {
-        fallbackHtml = `<!--ssr-error:${id}-->`;
-    }
-
-    if (process.env.NODE_ENV !== 'production') {
+    if (__DEV__) {
         console.error(`Error rendering component ${componentName}:`, e);
     }
 
-    return fallbackHtml;
+    return ctx._renderError ? ctx._renderError(error, info) : defaultRenderError(error, info);
 }
 
 /**
@@ -625,6 +699,14 @@ interface RenderBufState {
     len: number;
     /** Flush-hint threshold (Infinity in string mode: never hint) */
     threshold: number;
+    /**
+     * True while rendering inside a <Defer> boundary's deferred render:
+     * pending keyed reads are awaited inline (block mode) instead of
+     * spawning their own placeholders, so the boundary replaces ONCE with
+     * everything beneath it resolved. Per-driver — multiple deferred renders
+     * interleave on the shared SSRContext, so this must not live on ctx.
+     */
+    inDefer?: boolean;
 }
 
 /**
@@ -713,6 +795,33 @@ function syncSubtreeWorker(
     return false;
 }
 
+/**
+ * Emit the streaming placeholder wrapper — the frozen
+ * `<div data-async-placeholder="ID" style="display:contents;">` protocol —
+ * around optional in-place content (a Defer/boundary fallback or a
+ * component's initial pre-data render). Shared by the <Defer> streaming
+ * branch and the stream-mode async component branch: one emission path for
+ * every `flush: 'stream'` rendering.
+ */
+function* emitStreamPlaceholder(
+    id: number,
+    content: JSXElement | null | undefined,
+    ctx: SSRContext,
+    parentContext: ComponentSetupContext | null,
+    appContext: AppContext | null,
+    buf: string[],
+    state: RenderBufState
+): Generator<Suspend, void, unknown> {
+    const open = `<div data-async-placeholder="${id}" style="display:contents;">`;
+    buf.push(open);
+    state.len += open.length;
+    if (content != null) {
+        yield* renderNode(content, ctx, parentContext, appContext, buf, state);
+    }
+    buf.push('</div>');
+    state.len += 6;
+}
+
 /** Rollback wrapper: on bail-out, restores buf/state to the entry marks. */
 function renderSyncSubtree(
     element: JSXElement,
@@ -798,27 +907,19 @@ function* renderNode(
             yield { p: factory.preload().catch(() => undefined) };
         }
 
-        // Suspense boundaries in streaming mode: stream the fallback now,
-        // replace with the real children once their lazy deps resolve —
-        // reusing the standard placeholder/$SIGX_REPLACE machinery. In
-        // blocking/string mode Suspense needs no special handling: lazy
-        // children await inline (above), so the boundary never has pending
-        // promises and Suspense renders its children directly.
-        if (factory.__suspense && ctx._streaming) {
+        // <Defer> boundaries in streaming mode: stream the fallback now,
+        // replace with the real children once everything pending beneath
+        // them — lazy chunks AND keyed useData reads — resolves, reusing the
+        // standard placeholder/$SIGX_REPLACE machinery. In blocking/string
+        // mode Defer needs no special handling: lazy children await inline
+        // (above), keyed reads block per component, and the Defer component
+        // renders its children directly.
+        if (factory.__defer && ctx._streaming) {
             const id = ctx.nextId();
             const props = vnode.props || {};
 
-            const placeholder = `<div data-async-placeholder="${id}" style="display:contents;">`;
-            buf.push(placeholder);
-            state.len += placeholder.length;
-
             const fallback = typeof props.fallback === 'function' ? props.fallback() : props.fallback;
-            if (fallback != null) {
-                yield* renderNode(fallback, ctx, parentCtx, appContext, buf, state);
-            }
-
-            buf.push('</div>');
-            state.len += 6;
+            yield* emitStreamPlaceholder(id, fallback, ctx, parentCtx, appContext, buf, state);
 
             const children = props.children;
             const items: JSXElement[] = Array.isArray(children)
@@ -827,11 +928,15 @@ function* renderNode(
             const capturedParentCtx = parentCtx;
 
             const deferredRender = (async () => {
-                let html = '';
+                // Leading comment mirrors the client Defer's constant render
+                // shape ([fallback-or-comment, …children]) so the streamed
+                // replacement hydrates against the client's null-fallback slot.
+                let html = '<!---->';
                 for (const item of items) {
                     // The deferred driver awaits unresolved lazy() preloads
-                    // inline (rule above), so this resolves to real content.
-                    html += await renderVNodeToString(item, ctx, appContext, capturedParentCtx);
+                    // inline (rule above) and — via inDefer — blocks on keyed
+                    // useData reads too, so this resolves to real content.
+                    html += await renderVNodeToString(item, ctx, appContext, capturedParentCtx, { inDefer: true });
                 }
                 return html;
             })();
@@ -848,32 +953,97 @@ function* renderNode(
             return;
         }
 
-        const setup = vnode.type.__setup;
-        const { componentName, id, ssrLoads, componentCtx } = createComponentState(vnode, ctx, parentCtx, appContext);
+        // The component id is allocated (and pushed) BEFORE the boundary
+        // consult and the setup context — resolveBoundary and
+        // transformComponentContext both read their own id at the stack top.
+        // The nextId() call order is wire (marker sequence): keep it exactly
+        // here, matching where createComponentState allocated it before.
+        const id = ctx.nextId();
+        ctx.pushComponent(id);
 
-        // Plugin hook: suppressComponentRender — lets a plugin skip running this
-        // component's setup/render and emit a placeholder string instead (e.g.
-        // islands `client:only` true skip-SSR). createComponentState already ran
-        // transformComponentContext (so plugins have registered the component) and
-        // pushed the id, so on suppression we emit the placeholder + the standard
-        // trailing marker, pop the component, and bail before setup/render.
+        // Plugin hook: resolveBoundary (rfc-ssr-platform §1.3) — the one
+        // pre-setup boundary decision. First plugin to return wins.
+        let boundary: ResolvedBoundary | undefined;
         if (ctx._plugins) {
             for (const plugin of ctx._plugins) {
-                const suppressed = plugin.server?.suppressComponentRender?.(id, vnode, ctx);
-                if (suppressed) {
-                    if (suppressed.placeholder != null) {
-                        buf.push(suppressed.placeholder);
-                        state.len += suppressed.placeholder.length;
-                    }
-                    const marker = `<!--$c:${id}-->`;
-                    buf.push(marker);
-                    state.len += marker.length;
-                    ctx.popComponent();
-                    if (state.len >= state.threshold) yield FLUSH;
-                    return;
+                const resolved = plugin.server?.resolveBoundary?.(vnode, ctx);
+                if (resolved) {
+                    boundary = resolved;
+                    break;
                 }
             }
         }
+
+        if (boundary) {
+            // Record the boundary for the client hydrator. `flush` is
+            // serialized only for 'skip' (fresh-mount vs hydrate is the only
+            // client-relevant distinction); everything else on the flush axis
+            // is a server-side concern.
+            const record: SSRBoundaryRecord = {};
+            if (boundary.flush === 'skip') record.flush = 'skip';
+            if (boundary.hydrate !== undefined) record.hydrate = boundary.hydrate;
+            if (boundary.media !== undefined) record.media = boundary.media;
+            if (boundary.chunk !== undefined) record.chunk = boundary.chunk;
+            // The winner names its boundary; core derivation is the fallback.
+            const registryName =
+                boundary.component || (vnode.type as any).__islandId || (vnode.type as any).__name;
+            if (registryName) record.component = registryName;
+            // A present `props` key wins even when undefined ("no props") —
+            // packs pass their filtered snapshot explicitly so the core
+            // derivation never re-includes their directive vocabulary.
+            const props = 'props' in boundary
+                ? boundary.props
+                : serializeBoundaryProps(vnode.props, getTypeHandlers(ctx));
+            if (props !== undefined) record.props = props;
+            ctx.recordBoundary(id, record);
+        }
+
+        // flush: 'skip' — true skip-SSR (islands client:only). Setup never
+        // runs; transformComponentContext and afterRenderComponent are not
+        // called. Core emits the placeholder wrapper (the client's mount
+        // container) around the optional fallback, then the standard
+        // trailing marker.
+        if (boundary && boundary.flush === 'skip') {
+            const open = `<div data-boundary="${id}" style="display:contents;">`;
+            buf.push(open);
+            state.len += open.length;
+            if (boundary.fallback) {
+                try {
+                    yield* renderNode(boundary.fallback(), ctx, parentCtx, appContext, buf, state);
+                } catch (e) {
+                    const skipName = (vnode.type as any).__name || 'Anonymous';
+                    const fallbackHtml = componentErrorFallback(e, ctx, skipName, id);
+                    if (fallbackHtml) {
+                        buf.push(fallbackHtml);
+                        state.len += fallbackHtml.length;
+                    }
+                }
+            }
+            buf.push('</div>');
+            state.len += 6;
+            const marker = `<!--$c:${id}-->`;
+            buf.push(marker);
+            state.len += marker.length;
+            ctx.popComponent();
+            if (state.len >= state.threshold) yield FLUSH;
+            return;
+        }
+
+        const setup = vnode.type.__setup;
+        const { componentName, ssrLoads, componentCtx } = createComponentState(vnode, ctx, parentCtx, appContext, id);
+
+        // Rewind marks for a possible errorScope fallback (two locals —
+        // consulted only when a scope catches below).
+        const bufMark = buf.length;
+        const lenMark = state.len;
+        let ownScope: ServerErrorScope | null = null;
+        let scopeMarks: {
+            pendingAsync: number;
+            pendingStreams: number;
+            headConfigs: number;
+            boundaries: number;
+            threshold: number;
+        } | null = null;
 
         const prev = setCurrentInstance(componentCtx);
         try {
@@ -885,37 +1055,57 @@ function* renderNode(
                 renderFn = (yield { p: renderFn as Promise<any> }) as any;
             }
 
+            // errorScope (rfc-ssr-platform §2.2): a scoped subtree must stay
+            // rewindable — suppress mid-subtree flushing (bytes that left the
+            // process cannot be taken back) and snapshot the per-request
+            // containers descendants append to, so a caught throw can undo
+            // the partial subtree before the fallback renders in its place.
+            ownScope = (componentCtx as any).__errorScope ?? null;
+            if (ownScope) {
+                scopeMarks = {
+                    pendingAsync: ctx._pendingAsync.length,
+                    pendingStreams: ctx._pendingStreams.length,
+                    headConfigs: ctx._headConfigs.length,
+                    boundaries: ctx._boundaries.size,
+                    threshold: state.threshold
+                };
+                state.threshold = Infinity;
+            }
+
             // Check if we have pending useAsync/useStream work
             if (ssrLoads.length > 0) {
-                // Plugin hook: handleAsyncSetup
-                // Plugins can override the async mode.
-                // Default: 'stream' in streaming mode, 'block' in string mode.
-                let asyncMode: 'block' | 'stream' | 'skip' = ctx._streaming ? 'stream' : 'block';
-                let asyncPlaceholder: string | undefined;
-                let pluginHandled = false;
-
-                if (ctx._plugins) {
-                    for (const plugin of ctx._plugins) {
-                        const result = plugin.server?.handleAsyncSetup?.(id, ssrLoads, renderFn as () => any, ctx);
-                        if (result) {
-                            asyncMode = result.mode;
-                            asyncPlaceholder = result.placeholder;
-                            pluginHandled = true;
-                            break; // First plugin to handle wins
-                        }
-                    }
+                // The flush decision. A resolveBoundary flush wins:
+                // - 'inline' awaits in place even in streaming mode;
+                // - 'stream' streams when streaming (degrades to block in
+                //   string mode — a $SIGX_REPLACE with no stream to ride);
+                // - otherwise today's default: 'stream' in streaming mode,
+                //   'block' in string mode — and 'block' inside a <Defer>
+                //   deferred render, so the boundary's single replacement
+                //   carries the resolved data instead of nesting its own
+                //   placeholders.
+                let asyncMode: 'block' | 'stream';
+                if (boundary?.flush === 'inline') {
+                    asyncMode = 'block';
+                } else if (boundary?.flush === 'stream') {
+                    asyncMode = ctx._streaming ? 'stream' : 'block';
+                } else {
+                    asyncMode = (ctx._streaming && !state.inDefer) ? 'stream' : 'block';
                 }
 
                 if (asyncMode === 'stream') {
-                    // Use default placeholder if none provided by plugin
-                    const placeholder = asyncPlaceholder || `<div data-async-placeholder="${id}" style="display:contents;">`;
-
-                    // Render placeholder immediately
+                    // Render the placeholder wrapper immediately (frozen literal)
+                    const placeholder = `<div data-async-placeholder="${id}" style="display:contents;">`;
                     buf.push(placeholder);
                     state.len += placeholder.length;
 
-                    // Render with initial state (before data loads)
-                    if (renderFn) {
+                    if (boundary?.fallback) {
+                        // A boundary fallback renders in place of content
+                        // (rfc-ssr-platform §1) — instead of the initial-state
+                        // pass. Rendered under the parent (it is the plugin's
+                        // content, not the component's).
+                        yield* renderNode(boundary.fallback(), ctx, parentCtx, appContext, buf, state);
+                    } else if (renderFn) {
+                        // Render with initial state (before data loads)
                         const result = (renderFn as () => any)();
                         if (result) {
                             if (Array.isArray(result)) {
@@ -933,31 +1123,27 @@ function* renderNode(
                     buf.push('</div>');
                     state.len += 6;
 
-                    // If no plugin handled this, core manages the deferred render
-                    if (!pluginHandled) {
-                        const capturedRenderFn = renderFn;
-                        const capturedCtx = ctx;
-                        const capturedAppContext = appContext;
-                        const capturedComponentCtx = componentCtx;
+                    // Core always manages the deferred render and race-loop entry
+                    const capturedRenderFn = renderFn;
+                    const capturedCtx = ctx;
+                    const capturedAppContext = appContext;
+                    const capturedComponentCtx = componentCtx;
 
-                        const deferredRender = (async () => {
-                            await Promise.all(ssrLoads);
+                    const deferredRender = (async () => {
+                        await Promise.all(ssrLoads);
 
-                            let html = '';
-                            if (capturedRenderFn) {
-                                const result = (capturedRenderFn as () => any)();
-                                if (result) {
-                                    html = await renderVNodeToString(result, capturedCtx, capturedAppContext, capturedComponentCtx);
-                                }
+                        let html = '';
+                        if (capturedRenderFn) {
+                            const result = (capturedRenderFn as () => any)();
+                            if (result) {
+                                html = await renderVNodeToString(result, capturedCtx, capturedAppContext, capturedComponentCtx);
                             }
+                        }
 
-                            return html;
-                        })();
+                        return html;
+                    })();
 
-                        ctx._pendingAsync.push({ id, promise: deferredRender });
-                    }
-                } else if (asyncMode === 'skip') {
-                    // Plugin says skip — don't render content
+                    ctx._pendingAsync.push({ id, promise: deferredRender });
                 } else {
                     // Default: block — suspend until all async loads settle.
                     // A rejection is thrown back in here by the driver, landing
@@ -997,12 +1183,88 @@ function* renderNode(
                 }
             }
         } catch (e) {
-            const fallbackHtml = componentErrorFallback(e, ctx, componentName, id);
-            if (fallbackHtml) {
-                buf.push(fallbackHtml);
-                state.len += fallbackHtml.length;
+            const raw = e instanceof ScopeThrow
+                ? e.original
+                : (e instanceof Error ? e : new Error(String(e)));
+            const claimedScope = e instanceof ScopeThrow ? e.scope : findEnclosingScope(componentCtx);
+            // Re-read from the ctx: setup may have called errorScope() and
+            // THEN thrown, before the post-setup ownScope read ran.
+            const ownScopeNow: ServerErrorScope | null =
+                ownScope ?? ((componentCtx as any).__errorScope ?? null);
+
+            if (claimedScope && claimedScope !== ownScopeNow) {
+                // An enclosing scope owns this error — propagate up the
+                // generator stack to the owning component's frame.
+                throw e instanceof ScopeThrow ? e : new ScopeThrow(raw, claimedScope);
+            }
+
+            if (claimedScope && ownScopeNow && claimedScope === ownScopeNow) {
+                // This component's errorScope catches: rewind everything the
+                // subtree produced and render the fallback in its place —
+                // the same visual contract as the client (rfc-async §4).
+                buf.length = bufMark;
+                state.len = lenMark;
+                if (scopeMarks) {
+                    ctx._pendingAsync.length = scopeMarks.pendingAsync;
+                    ctx._pendingStreams.length = scopeMarks.pendingStreams;
+                    ctx._headConfigs.length = scopeMarks.headConfigs;
+                    if (ctx._boundaries.size > scopeMarks.boundaries) {
+                        // Map preserves insertion order — entries past the
+                        // mark belong to the rewound subtree.
+                        const doomed = Array.from(ctx._boundaries.keys()).slice(scopeMarks.boundaries);
+                        for (const key of doomed) ctx._boundaries.delete(key);
+                    }
+                }
+                // Descendant frames bailed without popping — restore this
+                // component to the top of the id stack.
+                while (
+                    ctx._componentStack.length > 0 &&
+                    ctx._componentStack[ctx._componentStack.length - 1] !== id
+                ) {
+                    ctx.popComponent();
+                }
+
+                if (__DEV__) {
+                    console.error(`[errorScope] server render failed below <${componentName}>:`, raw);
+                }
+
+                // Notify the scope exactly like the client's error walk would
+                // (fires the scope's onError observer, marks it errored).
+                const handle = getProvided((componentCtx as { provides?: Map<symbol, unknown> }).provides, ERROR_SCOPE_TOKEN);
+                handle?.handle(raw, null, 'ssr render');
+
+                if (ownScopeNow.fallback) {
+                    // Server-side retry is inert; the boundary marking below
+                    // wires the client's retry to a real remount.
+                    const retryNoop = () => { /* remounts after hydration */ };
+                    try {
+                        yield* renderNode(ownScopeNow.fallback(raw, retryNoop), ctx, componentCtx, appContext, buf, state);
+                    } catch (fallbackErr) {
+                        const fallbackHtml = componentErrorFallback(fallbackErr, ctx, componentName, id);
+                        if (fallbackHtml) {
+                            buf.push(fallbackHtml);
+                            state.len += fallbackHtml.length;
+                        }
+                    }
+                }
+
+                // Mark the boundary so the hydrator seeds the client scope
+                // errored: the fallback hydrates against this exact HTML and
+                // retry() performs the remount the server could not.
+                ctx.recordBoundary(id, {
+                    ...ctx._boundaries.get(id),
+                    hydrate: 'load',
+                    errorScope: { message: raw.message }
+                });
+            } else {
+                const fallbackHtml = componentErrorFallback(e, ctx, componentName, id);
+                if (fallbackHtml) {
+                    buf.push(fallbackHtml);
+                    state.len += fallbackHtml.length;
+                }
             }
         } finally {
+            if (scopeMarks) state.threshold = scopeMarks.threshold;
             setCurrentInstance(prev || null);
         }
 
@@ -1165,9 +1427,9 @@ export async function* renderToChunks(
  * @param parentCtx - optional parent component context so deferred renders
  *   keep their provide/inject chain
  */
-export async function renderVNodeToString(element: JSXElement, ctx: SSRContext, appContext: AppContext | null = null, parentCtx: ComponentSetupContext | null = null): Promise<string> {
+export async function renderVNodeToString(element: JSXElement, ctx: SSRContext, appContext: AppContext | null = null, parentCtx: ComponentSetupContext | null = null, opts?: { inDefer?: boolean }): Promise<string> {
     const buf: string[] = [];
-    const state: RenderBufState = { len: 0, threshold: Infinity };
+    const state: RenderBufState = { len: 0, threshold: Infinity, inDefer: opts?.inDefer };
     const gen = renderNode(element, ctx, parentCtx, appContext, buf, state);
 
     let result = gen.next();

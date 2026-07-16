@@ -97,7 +97,7 @@ export function startBatch(): void {
 /** @internal see {@link startBatch} */
 export function endBatch(): void {
     batchDepth--;
-    if (process.env.NODE_ENV !== 'production' && batchDepth < 0) {
+    if (__DEV__ && batchDepth < 0) {
         // Mis-paired start/end would leave a negative depth and silently
         // prevent every future flush — fail fast instead.
         batchDepth = 0;
@@ -138,7 +138,7 @@ export function setMaxWaveEffectRuns(limit: number | null): void {
 }
 
 function flushPendingEffects(): void {
-    if (process.env.NODE_ENV !== 'production') waveDepth++;
+    if (__DEV__) waveDepth++;
     try {
         while (pendingEffects.length > 0) {
             // Snapshot-and-clear: a nested trigger during a run flushes its
@@ -149,7 +149,7 @@ function flushPendingEffects(): void {
                 for (; i < effects.length; i++) {
                     const effect = effects[i];
                     effect.flags &= ~QUEUED;
-                    if (process.env.NODE_ENV !== 'production' && ++waveRuns > maxWaveEffectRuns) {
+                    if (__DEV__ && ++waveRuns > maxWaveEffectRuns) {
                         throw new Error(
                             `Runaway notification wave: more than ${maxWaveEffectRuns} effect ` +
                             `runs in a single wave — an effect cascade is writing reactive ` +
@@ -173,7 +173,7 @@ function flushPendingEffects(): void {
         // "am I mid-batch?" probe.
         if (flushHandler) flushHandler();
     } finally {
-        if (process.env.NODE_ENV !== 'production' && --waveDepth === 0) {
+        if (__DEV__ && --waveDepth === 0) {
             waveRuns = 0;
         }
     }
@@ -343,7 +343,7 @@ function runEffect(fn: EffectFn, scheduler?: EffectScheduler): EffectRunner {
     // `null` means "untracked by devtools" — the hot path in the
     // effect's body skips emission entirely.
     let effectId: number | null = null;
-    const hookAtCreate = process.env.NODE_ENV !== 'production' ? getDevtoolsHook() : null;
+    const hookAtCreate = __DEV__ ? getDevtoolsHook() : null;
     if (hookAtCreate) {
         effectId = hookAtCreate.nextId();
         hookAtCreate.emit({
@@ -396,7 +396,7 @@ function runEffect(fn: EffectFn, scheduler?: EffectScheduler): EffectRunner {
         startTracking(effectFn);
         const prev = currentSubscriber;
         currentSubscriber = effectFn;
-        if (process.env.NODE_ENV === 'production' || effectId === null) {
+        if (!__DEV__ || effectId === null) {
             try {
                 fn();
             } finally {
@@ -443,7 +443,7 @@ function runEffect(fn: EffectFn, scheduler?: EffectScheduler): EffectRunner {
     runner.stop = () => {
         stopped = true;
         cleanup(effectFn);
-        if (process.env.NODE_ENV !== 'production' && effectId !== null) {
+        if (__DEV__ && effectId !== null) {
             const hook = getDevtoolsHook();
             if (hook) {
                 hook.emit({ type: 'effect:stopped', id: effectId });
