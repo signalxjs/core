@@ -121,4 +121,20 @@ describe('Renderer - setup-scope disposal (core#288)', () => {
         renderer.mount(vnode, container as any);
         expect(() => renderer.unmount(vnode, container as any)).not.toThrow();
     });
+
+    it('disposes reactions created before a setup throw (no leak)', () => {
+        const s = signal({ n: 0 });
+        const runs: number[] = [];
+        const Boom = component(() => {
+            effect(() => { runs.push(s.n); });
+            throw new Error('setup-boom');
+        }, { name: 'Boom' });
+
+        // Mount surfaces the setup error (no boundary) — but the effect the
+        // setup created before throwing must still be disposed.
+        try { renderer.mount((Boom as any)({}), container as any); } catch { /* setup error */ }
+        expect(runs).toEqual([0]);
+        s.n = 1;
+        expect(runs).toEqual([0]);   // disposed despite the throw
+    });
 });

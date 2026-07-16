@@ -186,6 +186,13 @@ export function hydrateComponent(vnode: VNode, dom: Node | null, parent: Node, t
             renderFn = applyErrorScope(componentCtx, renderFn);
         }
     } catch (err) {
+        // If setup threw mid-collection, takeSetupDisposers() above was
+        // skipped — dispose the partial reactions and clear reactivity's
+        // pending slot so it can't leak into the next hydration/mount (#288).
+        const partial = takeSetupDisposers();
+        if (partial) {
+            for (let i = 0, len = partial.length; i < len; i++) partial[i]();
+        }
         if (__DEV__) {
             console.error(`Error hydrating component ${componentName}:`, err);
         }

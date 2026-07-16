@@ -129,6 +129,12 @@ function sameSlotChildren(a: any, b: any): boolean {
         && sameSlotChildren(a.children, b.children);
 }
 
+/** Run a list of disposers (setup-scope teardown), if any. */
+function runDisposers(disposers: (() => void)[] | null): void {
+    if (!disposers) return;
+    for (let i = 0, len = disposers.length; i < len; i++) disposers[i]();
+}
+
 const EMPTY_SEQUENCE: number[] = [];
 
 /**
@@ -1079,6 +1085,11 @@ export function createRenderer<HostNode = any, HostElement = any>(
                 });
             }
         } catch (err) {
+            // If setup threw mid-collection, takeSetupDisposers() above was
+            // skipped — dispose the reactions it created before throwing and
+            // clear reactivity's pending slot so it can't leak into the next
+            // mount. A no-op if setup already completed (disposers taken).
+            runDisposers(takeSetupDisposers());
             // Handle setup errors
             const handled = handleComponentError(currentAppContext, err as Error, componentInstance, 'setup');
             if (!handled) {
@@ -1197,11 +1208,8 @@ export function createRenderer<HostNode = any, HostElement = any>(
                     //    so hooks no longer accumulate across hot updates. Also
                     //    dispose the previous run's setup effect()/watch() (#288).
                     createdHooks = mountHooks = updatedHooks = unmountHooks = null;
-                    if (setupDisposers) {
-                        const disposers = setupDisposers;
-                        setupDisposers = null;
-                        for (let i = 0, len = disposers.length; i < len; i++) disposers[i]();
-                    }
+                    runDisposers(setupDisposers);
+                    setupDisposers = null;
 
                     // 3. Re-run the new setup exactly like mount: untracked
                     //    (no parent-dep capture, #111), instance current so
@@ -1210,8 +1218,16 @@ export function createRenderer<HostNode = any, HostElement = any>(
                     //    scope and fire the new created hooks.
                     const prevInstance = setCurrentInstance(ctx);
                     try {
-                        const setupResult = collectSetupScope(() => untrack(() => newSetup(ctx)));
-                        setupDisposers = takeSetupDisposers();
+                        let setupResult: unknown;
+                        try {
+                            setupResult = collectSetupScope(() => untrack(() => newSetup(ctx)));
+                            setupDisposers = takeSetupDisposers();
+                        } catch (e) {
+                            // Re-run threw mid-collection: dispose the partial
+                            // reactions and clear the pending slot before rethrowing.
+                            runDisposers(takeSetupDisposers());
+                            throw e;
+                        }
                         if (setupResult && typeof (setupResult as any).then === 'function') {
                             throw asyncSetupClientError(componentName ?? 'anonymous');
                         }
@@ -1265,11 +1281,8 @@ export function createRenderer<HostNode = any, HostElement = any>(
             }
             // Dispose effect()/watch() the setup created — AFTER onUnmounted so
             // user cleanup still sees live reactives (#288).
-            if (setupDisposers) {
-                const disposers = setupDisposers;
-                setupDisposers = null;
-                for (let i = 0, len = disposers.length; i < len; i++) disposers[i]();
-            }
+            runDisposers(setupDisposers);
+            setupDisposers = null;
         };
     }
 

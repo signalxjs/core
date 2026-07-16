@@ -96,13 +96,52 @@ describe('collectSetupScope', () => {
         expect(seen).toEqual([0, 1]);
     });
 
-    it('isolates nested collectSetupScope() calls', () => {
-        const inner = collectSetupScope(() => {
-            effect(() => {});
-            return 'inner';
+    it('isolates nested collectSetupScope() calls — each region gets only its own disposers', () => {
+        const so = signal({ n: 0 });
+        const si = signal({ n: 0 });
+        const outerRuns: string[] = [];
+        const innerRuns: string[] = [];
+        let innerDisposers: (() => void)[] | null = null;
+
+        collectSetupScope(() => {
+            effect(() => { outerRuns.push('o' + so.n); });   // belongs to outer
+            collectSetupScope(() => {
+                effect(() => { innerRuns.push('i' + si.n); }); // belongs to inner
+            });
+            innerDisposers = takeSetupDisposers();           // take inner's immediately
         });
-        expect(inner).toBe('inner');
-        expect(takeSetupDisposers()).toHaveLength(1);
+        const outerDisposers = takeSetupDisposers();         // outer's
+
+        expect(innerDisposers).toHaveLength(1);
+        expect(outerDisposers).toHaveLength(1);
+
+        // Dispose inner only: its effect stops, the outer's stays live.
+        innerDisposers!.forEach(d => d());
+        so.n = 1; si.n = 1;
+        expect(outerRuns).toEqual(['o0', 'o1']);
+        expect(innerRuns).toEqual(['i0']);                   // inner disposed — no i1
+
+        outerDisposers!.forEach(d => d());
+        so.n = 2;
+        expect(outerRuns).toEqual(['o0', 'o1']);
+    });
+
+    it('a throwing body still exposes its partial disposers via takeSetupDisposers()', () => {
+        const s = signal({ n: 0 });
+        const runs: number[] = [];
+
+        expect(() => collectSetupScope(() => {
+            effect(() => { runs.push(s.n); });
+            throw new Error('setup-boom');
+        })).toThrow('setup-boom');
+
+        // The effect created before the throw is retrievable, so the caller can
+        // dispose it instead of leaking it.
+        const partial = takeSetupDisposers();
+        expect(partial).toHaveLength(1);
+        partial!.forEach(d => d());
+        s.n = 1;
+        expect(runs).toEqual([0]);
     });
 
     it('takeSetupDisposers() clears after reading', () => {
