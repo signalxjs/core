@@ -1,7 +1,9 @@
-// Browser smoke for the storefront showcase (#265). Run after `pnpm build`
-// (workspace) + `pnpm --filter @sigx/storefront-example build`:
+// Browser smoke for the storefront showcase (#265).
 //
-//   node smoke.mjs
+//   node smoke.mjs         # PROD: needs `pnpm build` (workspace) +
+//                          # `pnpm --filter @sigx/storefront-example build`
+//   node smoke.mjs --dev   # DEV: spawns the dev server directly — only the
+//                          # workspace dists need to exist (`pnpm build`)
 //
 // Coverage-based (EXECUTION, not fetches): with ~48 resumable cards on the
 // page, nothing card-related executes until a card is clicked — and the two
