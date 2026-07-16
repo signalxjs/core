@@ -13,6 +13,12 @@ const TIERS = [50, 40, 30, 25];
 
 export const DealOfTheDay = component((ctx) => {
     const claims = ctx.signal(0);
+    // Wake feedback (#269): the fallback's first click hydrates WITHOUT
+    // replay — invisible by itself, which reads as broken. onMounted only
+    // runs when the component actually wakes (never during SSR), so this
+    // signal makes the wake visible: the button arms itself.
+    const armed = ctx.signal(false);
+    ctx.onMounted(() => { armed.value = true; });
     return () => (
         <aside class="deal">
             <h3>⚡ Deal of the day</h3>
@@ -26,9 +32,15 @@ export const DealOfTheDay = component((ctx) => {
                     claims.value++;
                 }}
             >
-                {claims.value === 0 ? 'Claim the deal' : `Claimed ×${claims.value} (discount shrinks!)`}
+                {claims.value > 0
+                    ? `Claimed ×${claims.value} (discount shrinks!)`
+                    : armed.value ? '⚡ Armed — click to claim!' : 'Claim the deal'}
             </button>
-            <p class="hint">wake-on-interaction fallback — see the build warning</p>
+            <p class="hint">
+                {armed.value
+                    ? 'woken by your first click (wake-on-interaction; not replayed by design)'
+                    : 'wake-on-interaction fallback — first click wakes it, second click counts'}
+            </p>
         </aside>
     );
 });
