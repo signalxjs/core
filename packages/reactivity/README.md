@@ -31,7 +31,7 @@ batch(() => {
 
 ## 📚 Documentation
 
-The complete API reference (`signal`, `computed`, `effect`, `batch`, `watch`, `untrack`, `effectScope`, `toSignal`, `toSignals`, and more), guides and live examples → **<https://sigx.dev/core/packages/reactivity/overview/>**
+The complete API reference (`signal`, `isSignal`, `computed`, `effect`, `batch`, `watch`, `untrack`, `effectScope`, `onScopeDispose`, `toSignal`, `toSignals`, and more), guides and live examples → **<https://sigx.dev/core/packages/reactivity/overview/>**
 
 ## License
 

@@ -28,11 +28,12 @@ export type {
 export { ComputedSymbol } from './types';
 
 // Effect system
-export { 
-    effect, 
-    batch, 
-    untrack, 
-    effectScope
+export {
+    effect,
+    batch,
+    untrack,
+    effectScope,
+    onScopeDispose
 } from './effect';
 
 // Collections
@@ -47,6 +48,9 @@ export {
     detectAccess,
     detectAccessDev
 } from './signal';
+
+// Signal brand (dependency-free — usable without pulling in signal.ts)
+export { isSignal } from './signal-brand';
 
 // Per-property signal views
 export { toSignal, toSignals } from './toSignal';

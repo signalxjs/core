@@ -3,6 +3,7 @@
 // ============================================================================
 
 import type { Dep, Signal, PrimitiveSignal, Primitive } from './types';
+import { markSignal } from './signal-brand';
 import { currentSubscriber, batch, startBatch, endBatch, createDep, track, trigger } from './effect';
 import { getDevtoolsHook, registerReactiveProxy, notifySignalUpdated } from './devtools-hook';
 import {
@@ -182,7 +183,7 @@ export function signal<T extends object>(target: T): Signal<T>;
 export function signal<T>(target: T): PrimitiveSignal<T> | Signal<T & object> {
     // Handle primitive types by wrapping in { value: T }
     if (isPrimitive(target)) {
-        return signal({ value: target }) as unknown as PrimitiveSignal<T>;
+        return markSignal(signal({ value: target })) as unknown as PrimitiveSignal<T>;
     }
 
     const objectTarget = target as T & object;

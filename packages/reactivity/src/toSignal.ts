@@ -2,6 +2,8 @@
 // toSignal / toSignals - Per-property signal views over reactive objects
 // ============================================================================
 
+import { markSignal } from './signal-brand';
+
 /**
  * A signal-shaped live view over a single property of a reactive object.
  * Reads and writes delegate to the source, so reactivity is preserved.
@@ -29,7 +31,7 @@ type SignalKey<T> = Exclude<Extract<keyof T, string>, '$set'>;
  * ```
  */
 export function toSignal<T extends object, K extends SignalKey<T>>(source: T, key: K): PropertySignal<T[K]> {
-    return {
+    return markSignal({
         get value() {
             return source[key];
         },
@@ -46,7 +48,7 @@ export function toSignal<T extends object, K extends SignalKey<T>>(source: T, ke
                 );
             }
         }
-    };
+    });
 }
 
 /**
