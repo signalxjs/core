@@ -24,9 +24,10 @@
  *    modulepreload hints).
  *
  * Handlers modules may contain TypeScript (annotations are preserved
- * verbatim), so their virtual ids end in `.handlers.ts` and Vite's own
- * transform strips types. Their relative imports are resolved against the
- * source file they were extracted from.
+ * verbatim); `load()` strips the types itself via `transformWithOxc` — the
+ * dev pipeline skips \0-prefixed ids, so the `.handlers.ts` suffix alone
+ * never triggers stripping (#270). Their relative imports are resolved
+ * against the source file they were extracted from.
  *
  * Unlike islands' one-shot discovery, resume registrations change whenever a
  * handler body changes (content-hashed symbols), so the `hotUpdate` hook
@@ -34,7 +35,7 @@
  */
 
 import type { Plugin } from 'vite';
-import { createFilter } from 'vite';
+import { createFilter, transformWithOxc } from 'vite';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { extractResumeHandlers, offsetToLoc, type ResumeExtraction } from './resume-extract.js';
@@ -203,7 +204,13 @@ export function sigxResume(options: SigxResumeOptions = {}): Plugin {
             }
             if (id.startsWith(RESOLVED_HANDLERS_PREFIX)) {
                 const extraction = extractions.get(fileOfHandlersId(id));
-                return extraction?.handlersModule ?? 'export {};';
+                const source = extraction?.handlersModule;
+                if (!source) return 'export {};';
+                // Handlers preserve the source's TS annotations, and Vite's
+                // own transform pipeline skips \0-prefixed ids in dev (#270)
+                // — the .ts suffix alone never strips them. Strip here so
+                // the module is plain JS in every mode.
+                return transformWithOxc(source, id.slice(1), { lang: 'ts' });
             }
         },
 
