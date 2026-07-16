@@ -67,9 +67,9 @@ describe('ResolvedBoundary.component', () => {
 
 describe("modulepreload policy (#281)", () => {
     it("skips hydrate:'never' chunks and keeps schedulable ones", async () => {
-        const Never = component((ctx) => () => <i>n</i>, { name: 'NeverComp' });
+        const Never = component(() => () => <i>n</i>, { name: 'NeverComp' });
         (Never as any).__testStamp = true;
-        const Load = component((ctx) => () => <b>l</b>, { name: 'LoadComp' });
+        const Load = component(() => () => <b>l</b>, { name: 'LoadComp' });
         (Load as any).__loadStamp = true;
 
         const pack: SSRPlugin = {
