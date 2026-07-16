@@ -63,7 +63,7 @@ describe('toSignal', () => {
         afterEach(() => vi.unstubAllEnvs());
 
         it('dev: throws the full message naming the key', () => {
-            const frozen = Object.freeze({ count: 1 });
+            const frozen = Object.freeze({ count: 1 as number });
             const count = toSignal(frozen, 'count');
             expect(() => { count.value = 2; }).toThrow(
                 /cannot write to read-only property "count"/
@@ -72,7 +72,7 @@ describe('toSignal', () => {
 
         it('prod: throws the compact SIGX500 code + docs URL, not the full message', () => {
             vi.stubEnv('NODE_ENV', 'production');
-            const frozen = Object.freeze({ count: 1 });
+            const frozen = Object.freeze({ count: 1 as number });
             const count = toSignal(frozen, 'count');
             let err: Error | undefined;
             try { count.value = 2; } catch (e) { err = e as Error; }
