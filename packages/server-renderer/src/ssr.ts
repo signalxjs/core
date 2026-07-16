@@ -120,13 +120,14 @@ async function* streamAllAsyncChunks(
                 }
             }
             // Boundary-table patch: plugins above may have mutated the
-            // record (post-async state re-capture) — re-emit it so the
-            // fresh record is installed before $SIGX_REPLACE dispatches
-            // sigx:async-ready. Prepended: the record must land before any
-            // plugin preScript that reads it.
-            if (ctx._boundaries.has(pending.id)) {
-                preScript = boundaryPatchJs(ctx, pending.id) + preScript;
-            }
+            // resolved record (post-async state re-capture), and the
+            // deferred render may have CREATED boundaries that exist in no
+            // earlier emission (#279 — a plain async wrapper full of
+            // pack-claimed components). Unconditional: boundaryPatchJs
+            // drains everything unflushed and returns '' when there is
+            // nothing to say. Prepended: records must land before any
+            // plugin preScript that reads them.
+            preScript = boundaryPatchJs(ctx, pending.id) + preScript;
             return {
                 index,
                 script: generateReplacementScript(pending.id, finalHtml, extraScript || undefined, preScript || undefined, ctx._nonce)
