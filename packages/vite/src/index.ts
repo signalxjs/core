@@ -187,7 +187,8 @@ export function sigxPlugin(options: SigxPluginOptions = {}): Plugin {
             const isWorkspaceDist = (url: string | undefined): boolean => {
                 if (!url) return false;
                 const path = url.split('?')[0];
-                return path.includes('/@fs/') && path.includes('/dist/');
+                // Vite's /@fs/ is a URL PREFIX, not a substring.
+                return path.startsWith('/@fs/') && path.includes('/dist/');
             };
             server.middlewares.use((req, res, next) => {
                 if (isWorkspaceDist(req.url)) {
