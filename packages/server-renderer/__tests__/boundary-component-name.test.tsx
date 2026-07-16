@@ -90,7 +90,7 @@ describe("modulepreload policy (#281)", () => {
         const html = await ssr.renderDocument(<div><Never /><Load /></div>, {
             template: '<!doctype html><html><head></head><body><div id="app"><!--ssr-outlet--></div></body></html>'
         });
-        expect(html).toContain('modulepreload" href="/assets/load.js"');
-        expect(html).not.toContain('modulepreload" href="/assets/never.js');
+        expect(html).toContain('modulepreload" href="/assets/load.js">');
+        expect(html).not.toContain('modulepreload" href="/assets/never.js"');
     });
 });
