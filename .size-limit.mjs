@@ -63,16 +63,19 @@ export default [
     path: 'packages/server-renderer/dist/client/scheduler.prod.js',
     limit: '3 KB',
     modifyEsbuildConfig(config) {
-      // Externalize the lazily-imported executor chunk. Its hashed name is
-      // rolldown's chunk-naming heuristic (currently `hydrate-core-<hash>`,
-      // after the largest module in the chunk), so match any same-dir prod
-      // chunk rather than a name that can drift. The entry facade's STATIC
-      // import (`../scheduler-<hash>.prod.js`) starts with `../` and stays
-      // bundled — that's the code being measured. A scheduler that regains
-      // a static sigx import still blows the limit (bare specifiers aren't
-      // external), and the source-level closure walk in
-      // dependency-direction.test.ts guards the split structurally.
-      (config.external ??= []).push('./*.prod.js');
+      // Externalize ONLY the lazily-imported executor chunk. Its hashed
+      // name is rolldown's chunk-naming heuristic — currently
+      // `hydrate-core-<hash>` (largest module in the chunk); the
+      // `hydration-core-*` variant is listed in case the heuristic drifts
+      // to the imported module's own name. Deliberately NOT a broad
+      // wildcard: esbuild would match the facade's static
+      // `../scheduler-<hash>.prod.js` import too, externalizing the very
+      // code this entry measures (observed: 2.13 kB → 226 B). If BOTH
+      // names miss after a tooling change, the check fails loudly upward
+      // (executor + runtime get bundled), never silently under — and the
+      // source-level closure walk in dependency-direction.test.ts guards
+      // the split structurally either way.
+      (config.external ??= []).push('./hydrate-core-*', './hydration-core-*');
       return config;
     },
   },
