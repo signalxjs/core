@@ -315,6 +315,13 @@ function scanHandler(fn: Node): HandlerScan {
             result.contextual = 'import.meta / new.target';
             return;
         }
+        if (node.type === 'JSXElement' || node.type === 'JSXFragment') {
+            // JSX inside a handler body would need the jsx-runtime import
+            // the (runtime-free) handlers chunk deliberately never carries,
+            // and the module is type-stripped as plain TS (#283).
+            result.contextual = 'JSX in the handler body';
+            return;
+        }
         if (node.type === 'Identifier') {
             const name = node.name as string;
             if (name === 'arguments' && !scopes.some((s, i) => i > 0 && s.isFunction)) {

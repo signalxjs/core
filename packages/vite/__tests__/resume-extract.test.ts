@@ -588,3 +588,19 @@ export const Aliased = component((ctx) => {
         }
     });
 });
+
+describe('JSX in handler bodies (#283)', () => {
+    it('is ineligible — the handlers chunk carries no jsx runtime', () => {
+        const result = extractResumeHandlers(`
+import { component } from 'sigx';
+import { showToast } from './toast';
+export const Toasty = component((ctx) => {
+    const n = ctx.signal(0);
+    return () => <button onClick={() => { n.value++; showToast(<b>added</b>); }}>x</button>;
+});
+`, '/src/Toasty.resume.tsx');
+        expect(result.handlers).toHaveLength(0);
+        expect(result.ineligible[0].reason).toContain('JSX');
+        expect(result.components[0].mode).toBe('hydrate');
+    });
+});

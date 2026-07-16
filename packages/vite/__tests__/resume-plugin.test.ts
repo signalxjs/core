@@ -119,10 +119,11 @@ describe('sigxResume — virtual modules', () => {
         expect(registry).toContain('__registerIslandChunk("Counter", () => import("/src/resume/Counter.tsx")');
     });
 
-    it('loads the per-file handlers module with replicated imports', () => {
+    it('loads the per-file handlers module with replicated imports (type-stripped)', async () => {
         const resolved = plugin.resolveId.call({}, 'virtual:sigx-resume:src/resume/Counter.tsx.handlers.ts', undefined);
-        const handlers = plugin.load.call({}, resolved);
-        expect(handlers).toContain('import { track } from "../analytics";');
+        const loaded = await plugin.load.call({}, resolved);
+        const handlers = typeof loaded === 'string' ? loaded : loaded.code;
+        expect(handlers).toContain('import { track } from "../analytics"');
         expect(handlers).toMatch(/export const Counter_click_[0-9a-f]{8} = \(\$scope, e\) =>/);
         expect(handlers).toContain('$scope.signals.count.value++');
         expect(handlers).not.toContain('sigx');
@@ -203,6 +204,37 @@ describe('sigxResume — duplicate component names', () => {
             expect(warn).toHaveBeenCalledWith(expect.stringContaining('duplicate resume component name "Counter"'));
         } finally {
             warn.mockRestore();
+            rmSync(root, { recursive: true, force: true });
+        }
+    });
+});
+
+describe('sigxResume — handlers module type-stripping (#270)', () => {
+    it('serves the handlers module as plain JS even when the source handler uses TS', async () => {
+        const { plugin, root } = makeProject({
+            'src/resume/TsForm.tsx': `
+import { component } from 'sigx';
+export const TsForm = component((ctx) => {
+    const done = ctx.signal(false);
+    return () => <form onSubmit={(e) => {
+        e.preventDefault();
+        const data = new FormData(e.target as HTMLFormElement).get('email') as string | null;
+        console.log(data);
+        done.value = true;
+    }}>x</form>;
+});
+`
+        });
+        try {
+            const resolved = plugin.resolveId.call({}, 'virtual:sigx-resume:src/resume/TsForm.tsx.handlers.ts', undefined);
+            const loaded = await plugin.load.call({}, resolved);
+            const code = typeof loaded === 'string' ? loaded : loaded.code;
+            expect(code).toContain('preventDefault');
+            expect(code).not.toContain(' as HTMLFormElement');
+            expect(code).not.toContain('string | null');
+            // Still a parseable module with the export intact.
+            expect(code).toMatch(/export const TsForm_submit_[0-9a-f]{8}/);
+        } finally {
             rmSync(root, { recursive: true, force: true });
         }
     });
