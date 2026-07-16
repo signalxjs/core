@@ -59,3 +59,61 @@ describe('@sigx/server-renderer edge portability (rfc-ssr-platform §2.3)', () =
         expect(offenders).toEqual([]);
     });
 });
+
+describe('@sigx/server-renderer/client/scheduler stays runtime-free', () => {
+    // The whole point of the scheduler entry is that a page with only
+    // deferred islands executes ZERO renderer code at load: the executor is
+    // reachable exclusively through loadHydrationCore()'s dynamic import.
+    // This test walks the scheduler's STATIC import closure (dynamic
+    // `import()` is the boundary) and fails on any sigx-family value import
+    // — the complement of the no-ignore size-limit entry, catching the
+    // regression at test time instead of at the bundle check.
+    const VALUE_IMPORT_FROM =
+        /(?:^|\n)\s*(?:import|export)\s+(?!type[\s{])[^;'"]*?from\s*['"]([^'"]+)['"]|(?:^|\n)\s*import\s*['"]([^'"]+)['"]/g;
+
+    function staticValueImports(file: string): string[] {
+        const source = readFileSync(file, 'utf-8');
+        const specs: string[] = [];
+        for (const match of source.matchAll(VALUE_IMPORT_FROM)) {
+            specs.push((match[1] ?? match[2])!);
+        }
+        return specs;
+    }
+
+    function resolveRelative(fromFile: string, spec: string): string {
+        // Source-relative specifiers may carry a .js extension (ESM style);
+        // the file on disk is .ts either way.
+        const base = join(fromFile, '..', spec.replace(/\.js$/, ''));
+        return base.endsWith('.ts') ? base : `${base}.ts`;
+    }
+
+    it('the static import closure of scheduler.ts contains no sigx-family value import', () => {
+        const entry = join(pkgRoot, 'src', 'client', 'scheduler.ts');
+        const seen = new Set<string>([entry]);
+        const queue = [entry];
+        const offenders: string[] = [];
+
+        while (queue.length > 0) {
+            const file = queue.pop()!;
+            for (const spec of staticValueImports(file)) {
+                if (spec === 'sigx' || spec.startsWith('sigx/') || spec.startsWith('@sigx/')) {
+                    offenders.push(`${file} → ${spec}`);
+                } else if (spec.startsWith('.')) {
+                    const resolved = resolveRelative(file, spec);
+                    if (!seen.has(resolved)) {
+                        seen.add(resolved);
+                        queue.push(resolved);
+                    }
+                }
+            }
+        }
+
+        expect(offenders).toEqual([]);
+        // Sanity: the closure actually covers the eager surface (a broken
+        // regex that matches nothing would green-light anything).
+        const names = [...seen].map((f) => f.split(/[\\/]/).pop());
+        expect(names).toContain('plugin-registry.ts');
+        expect(names).toContain('chunk-loader.ts');
+        expect(names).toContain('registry.ts');
+    });
+});

@@ -9,8 +9,18 @@
  * hydration is THE hydrator); the islands package re-exports this surface.
  */
 
-import { isComponent as isSigxComponent } from 'sigx';
 import type { ComponentFactory as BaseComponentFactory } from './hydrate-component';
+
+/**
+ * Structural component check, mirroring runtime-core's `isComponent`
+ * (`runtime-core/src/utils/is-component.ts`). Inlined so this module stays
+ * on the eager scheduler surface — a value import from `'sigx'` would
+ * execute the umbrella's platform side-effect and drag the renderer into
+ * every page that registers components.
+ */
+function isSigxComponent(value: unknown): boolean {
+    return typeof value === 'function' && '__setup' in value;
+}
 
 /**
  * Minimal type for component factories used in the hydration registry.

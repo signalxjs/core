@@ -43,14 +43,29 @@ export default [
   {
     name: '@sigx/server-renderer',
     path: 'packages/server-renderer/dist/index.prod.js',
-    limit: '12.5 KB',
+    limit: '13 KB',
     ignore: ['sigx', 'sigx/*', '@sigx/*', 'node:stream'],
   },
   {
     name: '@sigx/server-renderer/client (browser entry)',
     path: 'packages/server-renderer/dist/client/index.prod.js',
-    limit: '5 KB',
+    limit: '5.5 KB',
     ignore: ['sigx', 'sigx/*', '@sigx/*'],
+  },
+  {
+    // The eager half of selective hydration — what a page pays at load when
+    // every island strategy is deferred. NO sigx ignore — this entry doubles
+    // as the "scheduler imports no runtime" guard: if the scheduler ever
+    // regains a static sigx-family import, esbuild bundles the runtime and
+    // the check blows past the limit. Only the lazily-imported executor
+    // chunk is marked external (hashed dist name, hence the wildcard).
+    name: '@sigx/server-renderer/client/scheduler (eager scheduler)',
+    path: 'packages/server-renderer/dist/client/scheduler.prod.js',
+    limit: '3 KB',
+    modifyEsbuildConfig(config) {
+      (config.external ??= []).push('./hydrate-core-*');
+      return config;
+    },
   },
   {
     name: '@sigx/ssr-islands',

@@ -1,7 +1,7 @@
 /**
- * The boundary hydrator (rfc-ssr-platform §1.2) — selective hydration as THE
- * hydrator. Reads the per-request `window.__SIGX_BOUNDARIES__` table and
- * schedules each boundary per its hydrate strategy:
+ * The boundary scheduler (rfc-ssr-platform §1.2) — the EAGER half of
+ * selective hydration. Reads the per-request `window.__SIGX_BOUNDARIES__`
+ * table and schedules each boundary per its hydrate strategy:
  *
  * - load        — immediately
  * - idle        — requestIdleCallback (setTimeout fallback)
@@ -12,28 +12,49 @@
  *                 behind `beforeHydrate → false`)
  * - never       — not scheduled at all
  *
- * `flush: 'skip'` records (islands `client:only`) fresh-mount into the
- * core-emitted `<div data-boundary>` placeholder instead of hydrating.
- *
- * Two driving modes converge here:
- * - data-driven (`scheduleTableBoundaries`) — no root walk; every table
- *   entry schedules itself (the `boundaries: 'explicit'` app default);
- * - walk-driven (`scheduleWalkedBoundary`) — the root walk intercepts
- *   components that have a table record and defers them per strategy.
+ * This module (the `@sigx/server-renderer/client/scheduler` entry) must not
+ * value-import anything from the sigx family: the page pays only for trigger
+ * wiring at load. The hydration EXECUTOR — the renderer, `hydrateComponent`,
+ * the in-place/skip-mount primitives — lives in `./hydration-core` and is
+ * dynamically imported by {@link loadHydrationCore} on the first strategy
+ * that actually fires (the resume-loader pattern: cached promise, a failed
+ * load clears the cache so the next trigger retries).
  *
  * Generalized from the islands pack's scheduler; the islands package
  * re-exports this machinery and stays a mapping from `client:*` directives
  * to boundary records.
  */
 
-import { VNode, render } from 'sigx';
-import { seedErrorScopeError } from 'sigx/internals';
 import type { SSRBoundaryRecord, BoundaryHydrate } from '../boundary';
-import { hydrateComponent } from './hydrate-component';
-import { getCurrentAppContext, setCurrentAppContext } from './hydrate-context';
+import { resolveClientPlugins } from './plugin-registry';
 import { loadBoundaryComponent } from './chunk-loader';
-import { registerComponent, type ComponentFactory } from './registry';
-import { seedBoundaryState } from './boundary-state';
+
+/** The lazily-loaded executor surface consumed by the scheduler. */
+type HydrationCore = typeof import('./hydration-core');
+
+// ============= Lazy hydration core =============
+
+let _core: Promise<HydrationCore> | null = null;
+
+/**
+ * Load the hydration executor (renderer + `hydrateComponent` + the
+ * mount/hydrate primitives) and resolve lazily-registered client plugins.
+ * Cached after the first call; a failed load resets the cache so the next
+ * trigger retries. Every boundary-scheduled hydration path awaits this
+ * before touching a component — which is what guarantees the synchronous
+ * client plugin hooks see resolved plugins.
+ */
+export function loadHydrationCore(): Promise<HydrationCore> {
+    if (!_core) {
+        const p = Promise.all([import('./hydration-core.js'), resolveClientPlugins()])
+            .then(([mod]) => mod, (err) => {
+                if (_core === p) _core = null;
+                throw err;
+            });
+        _core = p;
+    }
+    return _core;
+}
 
 // ============= Table access =============
 
@@ -150,7 +171,10 @@ export async function hydrateTableBoundary(id: number): Promise<boolean> {
         if ((prev as Element).hasAttribute?.('data-async-placeholder')) {
             return false;
         }
-        const component = await loadBoundaryComponent(record);
+        const [core, component] = await Promise.all([
+            loadHydrationCore(),
+            loadBoundaryComponent(record)
+        ]);
         if (!component) return false;
         // Post-await re-validation: the table and the DOM may both have
         // changed while the chunk loaded.
@@ -162,9 +186,9 @@ export async function hydrateTableBoundary(id: number): Promise<boolean> {
         const liveMarker = findBoundaryMarker(id);
         if (!liveMarker || !liveMarker.isConnected) return false;
         if (fresh.flush === 'skip') {
-            mountSkipBoundary(liveMarker, component, fresh);
+            core.mountSkipBoundary(liveMarker, component, fresh);
         } else {
-            hydrateBoundaryInPlace(liveMarker, component, fresh);
+            core.hydrateBoundaryInPlace(liveMarker, component, fresh);
         }
         return true;
     }
@@ -256,7 +280,7 @@ function scheduleInteraction(target: Element | null, callback: () => void): void
 }
 
 /** First element node between `from` (inclusive) and `until` (exclusive). */
-function firstElementBetween(from: Node | null, until: Node | null): Element | null {
+export function firstElementBetween(from: Node | null, until: Node | null): Element | null {
     let current = from;
     while (current && current !== until) {
         if (current.nodeType === Node.ELEMENT_NODE) return current as Element;
@@ -367,74 +391,6 @@ export function scheduleByStrategy(
     }
 }
 
-// ============= Mount/hydrate primitives =============
-
-/** Build the mount vnode for a data-driven boundary (props from the table). */
-function recordVNode(component: ComponentFactory, record: SSRBoundaryRecord): VNode {
-    return {
-        type: component as any,
-        props: record.props || {},
-        key: null,
-        children: [],
-        dom: null
-    } as VNode;
-}
-
-/**
- * Hydrate a boundary in place: the element before its trailing marker is the
- * SSR content root. Stages the record's state snapshot (#120) for the pack's
- * client transformComponentContext hook.
- */
-function hydrateBoundaryInPlace(marker: Comment, component: ComponentFactory, record: SSRBoundaryRecord): void {
-    let container: Node | null = marker.previousSibling;
-    while (container && container.nodeType !== Node.ELEMENT_NODE) {
-        container = container.previousSibling;
-    }
-
-    if (!container || container.nodeType !== Node.ELEMENT_NODE) {
-        if (__DEV__) {
-            console.warn('No element found for boundary hydration');
-        }
-        return;
-    }
-
-    seedBoundaryState(record.state);
-    if (record.errorScope) {
-        seedErrorScopeError(new Error(record.errorScope.message));
-    }
-    const vnode = recordVNode(component, record);
-    const parent = container.parentNode!;
-    try {
-        hydrateComponent(vnode, container, parent, marker);
-    } finally {
-        // Clear even on throw so stale state can't seed the next hydration.
-        seedBoundaryState(null);
-        seedErrorScopeError(null);
-    }
-}
-
-/**
- * Fresh-mount a skip boundary (flush: 'skip' — islands client:only) into its
- * placeholder. Falls back to in-place hydration when the previous element is
- * not genuinely our placeholder (content SSR'd in place or unrelated markup).
- */
-function mountSkipBoundary(marker: Comment, component: ComponentFactory, record: SSRBoundaryRecord): void {
-    let placeholder = marker.previousSibling;
-    while (placeholder && placeholder.nodeType !== Node.ELEMENT_NODE) {
-        placeholder = placeholder.previousSibling;
-    }
-
-    const wantId = parseMarkerId(marker);
-    if (!isSkipPlaceholder(placeholder as Element | null, wantId)) {
-        hydrateBoundaryInPlace(marker, component, record);
-        return;
-    }
-
-    const container = placeholder as Element;
-    container.innerHTML = '';
-    render(recordVNode(component, record), container);
-}
-
 // ============= Data-driven scheduling (explicit mode) =============
 
 /**
@@ -487,7 +443,12 @@ function scheduleTableBoundary(id: number, record: SSRBoundaryRecord): void {
         // Re-read the record at fire time — a mid-stream patch may have
         // replaced the table since scheduling.
         const fresh = getBoundaryRecord(id) ?? record;
-        const component = await loadBoundaryComponent(fresh);
+        // The executor and the component chunk fetch in parallel: the first
+        // trigger pays one round trip for both, not two.
+        const [core, component] = await Promise.all([
+            loadHydrationCore(),
+            loadBoundaryComponent(fresh)
+        ]);
         if (!component) {
             if (__DEV__) {
                 console.warn(`Component "${fresh.component}" could not be resolved for hydration`);
@@ -495,9 +456,9 @@ function scheduleTableBoundary(id: number, record: SSRBoundaryRecord): void {
             return;
         }
         if (fresh.flush === 'skip') {
-            mountSkipBoundary(marker, component, fresh);
+            core.mountSkipBoundary(marker, component, fresh);
         } else {
-            hydrateBoundaryInPlace(marker, component, fresh);
+            core.hydrateBoundaryInPlace(marker, component, fresh);
         }
     };
 
@@ -509,162 +470,11 @@ function scheduleTableBoundary(id: number, record: SSRBoundaryRecord): void {
     scheduleByStrategy(strategy, record.media, anchor as Element | null, doHydrate);
 }
 
-// ============= Walk-driven scheduling (auto mode) =============
-
-/**
- * Schedule a boundary encountered during the root hydration walk. Receives
- * the LIVE vnode (children/slots intact) so in-place hydration matches what
- * an immediate walk would have produced. Returns the next DOM node after
- * this component's content.
- */
-export function scheduleWalkedBoundary(
-    vnode: VNode,
-    dom: Node | null,
-    parent: Node,
-    record: SSRBoundaryRecord
-): Node | null {
-    const { contentStart, trailingMarker } = findComponentBoundaries(dom);
-
-    const componentFactory = vnode.type as unknown as ComponentFactory;
-    const componentName = componentFactory.__islandId || componentFactory.__name || 'Anonymous';
-
-    // Skip async placeholders during the walk — the sigx:async-ready flow
-    // hydrates them when their content streams in.
-    if (contentStart && (contentStart as Element).hasAttribute?.('data-async-placeholder')) {
-        if (componentName !== 'Anonymous') {
-            registerComponent(componentName, componentFactory);
-        }
-        return trailingMarker ? trailingMarker.nextSibling : dom;
-    }
-
-    const capturedAppContext = getCurrentAppContext();
-    const componentId = trailingMarker ? parseMarkerId(trailingMarker) : null;
-    const strategy: BoundaryHydrate = record.hydrate ?? 'load';
-
-    const doHydrate = () => {
-        const prevAppContext = getCurrentAppContext();
-        setCurrentAppContext(capturedAppContext);
-        // Stage the freshest state snapshot for the pack's restore hook.
-        const fresh = (componentId !== null ? getBoundaryRecord(componentId) : undefined) ?? record;
-        seedBoundaryState(fresh.state);
-        // A server-caught errorScope failure: seed the client scope errored
-        // so the fallback hydrates against the server's fallback HTML and
-        // retry() performs the remount (rfc-ssr-platform §2.2).
-        if (fresh.errorScope) {
-            seedErrorScopeError(new Error(fresh.errorScope.message));
-        }
-        try {
-            hydrateComponent(vnode, contentStart, parent, trailingMarker);
-        } finally {
-            setCurrentAppContext(prevAppContext);
-            // Defensively clear: stale state must not leak into the next hydration.
-            seedBoundaryState(null);
-            seedErrorScopeError(null);
-        }
-    };
-
-    if (record.flush === 'skip') {
-        // Skip-SSR: the server emitted an empty <div data-boundary> placeholder.
-        // Mount fresh into it; fall back to in-place hydration when there is no
-        // placeholder (content SSR'd in place). Bound the search by
-        // trailingMarker so we never drift into a sibling's DOM.
-        const wantId = trailingMarker ? parseMarkerId(trailingMarker) : null;
-        let ph: Node | null = contentStart;
-        while (ph && ph !== trailingMarker && ph.nodeType !== Node.ELEMENT_NODE) ph = ph.nextSibling;
-        if (ph && ph !== trailingMarker && isSkipPlaceholder(ph as Element, wantId)) {
-            const container = ph as Element;
-            container.innerHTML = '';
-            const prevAppContext = getCurrentAppContext();
-            setCurrentAppContext(capturedAppContext);
-            try {
-                render(vnode, container);
-            } finally {
-                setCurrentAppContext(prevAppContext);
-            }
-        } else {
-            doHydrate();
-        }
-        return trailingMarker ? trailingMarker.nextSibling : dom;
-    }
-
-    const anchor = firstElementBetween(contentStart, trailingMarker);
-    // The walk-driven visible strategy keeps islands' pre-load margin.
-    scheduleByStrategy(strategy, record.media, anchor, doHydrate, '50px');
-
-    return trailingMarker ? trailingMarker.nextSibling : dom;
-}
-
 // ============= Streamed-boundary hydration (sigx:async-ready) =============
 
 function reportAsyncHydrateError(err: unknown): void {
     if (__DEV__) {
         console.error('[Hydrate] Failed to hydrate streamed async boundary:', err);
-    }
-}
-
-/**
- * Hydrate a boundary whose content just streamed in via $SIGX_REPLACE.
- */
-async function hydrateAsyncBoundary(container: Element, record: SSRBoundaryRecord): Promise<void> {
-    // The hydrate axis holds for streamed content too: a boundary
-    // explicitly marked 'never' stays static HTML.
-    if (record.hydrate === 'never') {
-        return;
-    }
-    if (!record.component) {
-        if (__DEV__) {
-            console.error(`[Hydrate] No component name in boundary record`);
-        }
-        return;
-    }
-
-    if (container.hasAttribute('data-hydrated')) {
-        return;
-    }
-    // Mark synchronously, BEFORE any await, so duplicate triggers (the
-    // leftover scan racing the sigx:async-ready event, or repeated events for
-    // one id) can't both pass the guard above and double-mount the component.
-    container.setAttribute('data-hydrated', '');
-
-    const component = await loadBoundaryComponent(record);
-    if (!component) {
-        if (__DEV__) {
-            console.error(`[Hydrate] Component "${record.component}" could not be resolved`);
-        }
-        return;
-    }
-
-    // Seed restored boundary signal state BEFORE hydrating.
-    seedBoundaryState(record.state);
-    try {
-        hydrateComponent(recordVNode(component, record), container.firstChild, container);
-    } finally {
-        // Clear even on throw so stale state can't seed the next hydration.
-        seedBoundaryState(null);
-    }
-}
-
-/**
- * Check for async boundaries that were skipped during the hydration walk but
- * whose $SIGX_REPLACE script already ran (event fired before the listener
- * was ready). Core runs this after hydrate() when a table exists.
- */
-export function hydrateLeftoverBoundaries(container: Element): void {
-    const placeholders = container.querySelectorAll('[data-async-placeholder]:not([data-hydrated])');
-    if (placeholders.length === 0) return;
-
-    const table = getBoundaryTable();
-    for (const placeholder of placeholders) {
-        const id = placeholder.getAttribute('data-async-placeholder');
-        if (!id) continue;
-
-        const record = table[id];
-        // Hydrate every streamed-in async boundary, not only those that
-        // captured signal state — an async component with no tracked state
-        // must still become interactive.
-        if (record) {
-            void hydrateAsyncBoundary(placeholder as Element, record).catch(reportAsyncHydrateError);
-        }
     }
 }
 
@@ -701,7 +511,11 @@ function ensureAsyncHydrationListener(): void {
             return;
         }
 
-        void hydrateAsyncBoundary(placeholder as Element, record).catch(reportAsyncHydrateError);
+        // The executor loads on demand — a page whose only boundaries stream
+        // in still defers the runtime until content actually arrives.
+        loadHydrationCore()
+            .then((core) => core.hydrateAsyncBoundary(placeholder as Element, record))
+            .catch(reportAsyncHydrateError);
     });
 }
 
