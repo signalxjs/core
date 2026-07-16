@@ -35,8 +35,11 @@ export type ClientPluginSource = SSRPlugin | LazyClientPlugin;
 
 interface LazyEntry {
     source: LazyClientPlugin;
-    /** In-flight/settled resolution; cleared on failure so a later trigger retries. */
-    pending: Promise<void> | null;
+    /**
+     * In-flight/settled load, resolving to the plugin or null on failure
+     * (cleared on failure so a later trigger retries).
+     */
+    loading: Promise<SSRPlugin | null> | null;
 }
 
 // ============= Module State =============
@@ -79,7 +82,7 @@ export function registerClientPlugin(source: ClientPluginSource): void {
     }
     _pluginNames.add(source.name);
     if (isLazySource(source)) {
-        _lazySources.push({ source, pending: null });
+        _lazySources.push({ source, loading: null });
     } else {
         _clientPlugins.push(source);
     }
@@ -101,11 +104,17 @@ export function hasPendingClientPlugins(): boolean {
 }
 
 /**
- * Resolve all registered lazy plugin sources, in registration order, and
- * return the full plugin list. Each source's `load()` runs once (concurrent
- * calls share the promise); a FAILED load is dropped from the cache so the
- * next trigger retries it, and the failure is reported instead of thrown —
- * one broken pack must not block the others from hydrating.
+ * Resolve all registered lazy plugin sources and return the full plugin
+ * list. Each source's `load()` runs once (concurrent calls share the
+ * promise); a FAILED load is dropped from the cache so the next trigger
+ * retries it, and the failure is reported instead of thrown — one broken
+ * pack must not block the others from hydrating.
+ *
+ * Ordering is deterministic: already-resolved plugin objects keep their
+ * registration positions, and lazy sources append AFTER them in
+ * registration order regardless of which `load()` settles first (the loads
+ * run concurrently; the appends happen once all have settled). A source
+ * that failed and succeeds on a later trigger rejoins at the back.
  *
  * The hydration core awaits this before the first `hydrateComponent`, which
  * is what lets the synchronous client hooks assume resolved plugins.
@@ -113,23 +122,33 @@ export function hasPendingClientPlugins(): boolean {
 export function resolveClientPlugins(): Promise<SSRPlugin[]> {
     if (_lazySources.length === 0) return Promise.resolve(_clientPlugins);
 
-    const resolutions = _lazySources.map((entry) => {
-        if (!entry.pending) {
-            entry.pending = entry.source.load().then((mod) => {
-                const plugin = (mod as { default?: SSRPlugin }).default ?? (mod as SSRPlugin);
-                _clientPlugins.push(plugin);
-                const index = _lazySources.indexOf(entry);
-                if (index !== -1) _lazySources.splice(index, 1);
-            }, (err) => {
-                entry.pending = null; // retry on the next trigger
-                if (__DEV__) {
-                    console.error(`[Hydrate] Failed to load client plugin "${entry.source.name}":`, err);
+    const entries = [..._lazySources];
+    const loads = entries.map((entry) => {
+        if (!entry.loading) {
+            entry.loading = entry.source.load().then(
+                (mod) => (mod as { default?: SSRPlugin }).default ?? (mod as SSRPlugin),
+                (err) => {
+                    entry.loading = null; // retry on the next trigger
+                    if (__DEV__) {
+                        console.error(`[Hydrate] Failed to load client plugin "${entry.source.name}":`, err);
+                    }
+                    return null;
                 }
-            });
+            );
         }
-        return entry.pending;
+        return entry.loading;
     });
-    return Promise.all(resolutions).then(() => _clientPlugins);
+    return Promise.all(loads).then((plugins) => {
+        entries.forEach((entry, i) => {
+            const plugin = plugins[i];
+            if (!plugin) return; // failed — stays registered for retry
+            const index = _lazySources.indexOf(entry);
+            if (index === -1) return; // a concurrent resolve already appended it
+            _lazySources.splice(index, 1);
+            _clientPlugins.push(plugin);
+        });
+        return _clientPlugins;
+    });
 }
 
 /**

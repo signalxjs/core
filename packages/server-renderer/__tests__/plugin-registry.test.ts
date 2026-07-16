@@ -55,6 +55,20 @@ describe('client plugin registry', () => {
         expect(await resolveClientPlugins()).toEqual([first, second]);
     });
 
+    it('keeps registration order even when loads settle out of order', async () => {
+        const slow = plugin('slow');
+        const fast = plugin('fast');
+        registerClientPlugin({
+            name: 'slow',
+            load: () => new Promise((r) => setTimeout(() => r(slow), 20))
+        });
+        registerClientPlugin({ name: 'fast', load: () => Promise.resolve(fast) });
+
+        // 'fast' settles long before 'slow', but hook order must stay
+        // deterministic: registration order, not completion order.
+        expect(await resolveClientPlugins()).toEqual([slow, fast]);
+    });
+
     it('dedupes by name, first-wins: object then lazy source', async () => {
         const eager = plugin('islands');
         const loader = vi.fn(() => Promise.resolve(plugin('islands')));
