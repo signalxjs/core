@@ -31,6 +31,26 @@ const Timer = component(() => {
 });
 ```
 
+### Setup reactions are disposed on unmount
+
+`effect()`, `watch()`, and non-detached `effectScope()` created **directly in a
+component's setup** are tied to the component's lifetime — they're stopped
+automatically when it unmounts (and re-created on HMR reload). You don't need to
+hold their handles and call `.stop()` in `onUnmounted`:
+
+```tsx
+const Search = component(() => {
+  const query = signal('');
+  // Auto-disposed on unmount — no manual cleanup needed.
+  watch(() => query.value, (q) => runSearch(q));
+  return () => <input onInput={(e) => (query.value = e.target.value)} />;
+});
+```
+
+Only setup itself is scoped: reactions created inside `onMounted`/`onCreated`
+(or async callbacks) are not captured — dispose those via `onUnmounted`.
+`computed()` is lazy and needs no disposal.
+
 ### Required injectables
 
 `defineInjectable(factory)` gives an injectable a zero-config fallback: used without a provider, it lazily creates a module-global singleton. That is right for optional services, and wrong for per-app services like a router — on the server, a forgotten provide would silently share one instance across every request (dev builds warn when this happens during SSR).

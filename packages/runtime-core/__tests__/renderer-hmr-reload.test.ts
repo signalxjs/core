@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { createRenderer } from '../src/renderer';
 import { jsx, VNode } from '../src/jsx-runtime';
 import { component } from '../src/component';
+import { signal, effect } from '@sigx/reactivity';
 import type { ComponentSetupContext } from '../src/component-types';
 
 /**
@@ -175,5 +176,37 @@ describe('Renderer - ctx.__hmrReload() (core#107)', () => {
         // Only the latest (v2) onUnmounted fires — the v1 one was already
         // disposed by the reload, so it must NOT fire again here.
         expect(events).toEqual(['unmounted:v2']);
+    });
+
+    it('disposes the previous run\'s setup effect() on reload, keeps the new one live (core#288)', () => {
+        const s = signal({ n: 0 });
+        const runs: string[] = [];
+        const makeEffectSetup = (tag: string) => (ctx: ComponentSetupContext) => {
+            capturedCtx = ctx;
+            effect(() => { runs.push(`${tag}:${s.n}`); });
+            return () => jsx('div', { children: tag });
+        };
+
+        const vnode = component(makeEffectSetup('v1'))({}) as VNode;
+        renderer.mount(vnode, container as any);
+        expect(runs).toEqual(['v1:0']);
+
+        s.n = 1;
+        expect(runs).toEqual(['v1:0', 'v1:1']);
+
+        // Hot update: the v1 effect must be disposed, the v2 effect created.
+        capturedCtx!.__hmrReload!(makeEffectSetup('v2'));
+        expect(runs).toContain('v2:1');          // v2 effect ran on creation
+
+        runs.length = 0;
+        s.n = 2;
+        // Only the v2 effect reacts — v1 was disposed by the reload.
+        expect(runs).toEqual(['v2:2']);
+
+        // Real unmount disposes the v2 effect too.
+        renderer.unmount(vnode, container as any);
+        runs.length = 0;
+        s.n = 3;
+        expect(runs).toEqual([]);
     });
 });
