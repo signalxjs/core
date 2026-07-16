@@ -474,7 +474,7 @@ export function createRenderer<HostNode = any, HostElement = any>(
         }
     }
 
-    function patch(oldVNode: VNode, newVNode: VNode, container: HostElement, parentNS: boolean = false): void {
+    function patch(oldVNode: VNode, newVNode: VNode, container: HostElement, parentNS: boolean | undefined = undefined): void {
         if (oldVNode === newVNode) return;
 
         // If types are different, replace completely
@@ -674,14 +674,13 @@ export function createRenderer<HostNode = any, HostElement = any>(
         // handling). Prefer the flag cached at mount — it is contextual, so
         // the host can disambiguate tags that exist in several namespaces.
         // Hydrated vnodes lack the flag until their first patch; ask the
-        // host to resolve it, then cache forward. Within patch,
-        // parentNS === false conflates "known default-namespace context"
-        // with "no context at all" (hydrated subtrees patched from the top),
-        // so pass undefined and let the host apply its tag-based heuristic.
+        // host to resolve it from the threaded context — undefined at the
+        // top of a subtree patched without context, a real flag once an
+        // ancestor has been resolved — then cache forward.
         const tag = newVNode.type as string;
         const ns = (newVNode as InternalVNode)._ns =
             (oldVNode as InternalVNode)._ns ??
-            (hostGetElementNamespace ? hostGetElementNamespace(tag, parentNS || undefined) : false);
+            (hostGetElementNamespace ? hostGetElementNamespace(tag, parentNS) : false);
 
         // Update props — skipped entirely when both sides share the same
         // props object (prop-less elements share EMPTY_PROPS). Compare the
@@ -730,7 +729,7 @@ export function createRenderer<HostNode = any, HostElement = any>(
         patchChildren(oldVNode, newVNode, element, childNS);
     }
 
-    function patchChildren(oldVNode: VNode, newVNode: VNode, container: HostElement, parentNS: boolean = false, fallbackAnchor: HostNode | null = null) {
+    function patchChildren(oldVNode: VNode, newVNode: VNode, container: HostElement, parentNS: boolean | undefined = undefined, fallbackAnchor: HostNode | null = null) {
         const oldChildren = oldVNode.children;
         const newChildren = newVNode.children;
 
@@ -813,7 +812,7 @@ export function createRenderer<HostNode = any, HostElement = any>(
      * are moved, and fragment/component children move their whole host
      * range (via moveVNode), not just their trailing anchor.
      */
-    function reconcileChildrenArray(parent: HostElement, oldChildren: VNode[], newChildren: VNode[], parentNS: boolean = false, fallbackAnchor: HostNode | null = null) {
+    function reconcileChildrenArray(parent: HostElement, oldChildren: VNode[], newChildren: VNode[], parentNS: boolean | undefined = undefined, fallbackAnchor: HostNode | null = null) {
         // Check for duplicate keys in development
         if (__DEV__) {
             checkDuplicateKeys(newChildren);

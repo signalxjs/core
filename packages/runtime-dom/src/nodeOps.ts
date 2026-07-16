@@ -82,10 +82,13 @@ export const nodeOps: RendererOptions<Node, Element> = {
     patchDirective,
     onElementMounted,
     onElementUnmounted,
-    // Namespace resolution: entering SVG happens exactly at <svg> (context
-    // known) or at any SVG tag name (context unknown); leaving happens at
-    // <foreignObject>, whose subtree — and, per the historical behavior
-    // asserted in svg-rendering tests, the element itself — is HTML.
+    // Namespace resolution. With a known context (parentNS is a boolean):
+    // entering SVG happens exactly at <svg>, and leaving at <foreignObject>,
+    // whose subtree — and, per the historical behavior asserted in the
+    // svg-rendering tests, the element itself — is HTML. With no context
+    // (parentNS === undefined, a hydrated subtree patched from the top):
+    // classification falls back to the SVG tag list, which deliberately
+    // includes foreignObject like any other SVG tag name.
     getElementNamespace: (tag, parentNS) =>
         parentNS === undefined
             ? svgTags.has(tag)

@@ -19,7 +19,7 @@ interface MockNode {
     [key: string]: any;
 }
 
-const mockSvgTags = new Set(['svg', 'rect', 'circle', 'path', 'g', 'foreignObject']);
+const mockSvgTags = new Set(['svg', 'rect', 'circle', 'path', 'g', 'title', 'foreignObject']);
 
 function createMockDOMOperations() {
     const operations: string[] = [];
