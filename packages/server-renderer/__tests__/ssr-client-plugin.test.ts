@@ -3,7 +3,7 @@
  * Tests the ssrClientPlugin install behavior and hydrate() method
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // Mock the hydration and render internals before importing the plugin
 vi.mock('../src/client/hydrate-core', () => ({
@@ -118,6 +118,32 @@ describe('ssrClientPlugin', () => {
             expect(() => (noRootApp as any).hydrate(container)).toThrowError(
                 /No root component found/
             );
+        });
+
+        describe('production error form', () => {
+            afterEach(() => vi.unstubAllEnvs());
+
+            it('missing container throws compact SIGX600 + docs URL, not the full message', () => {
+                vi.stubEnv('NODE_ENV', 'production');
+                let err: Error | undefined;
+                try { (app as any).hydrate('#nonexistent'); } catch (e) { err = e as Error; }
+                expect(err?.message).toContain('SIGX600');
+                expect(err?.message).toContain('https://sigx.dev/errors/SIGX600/');
+                expect(err?.message).not.toContain('Cannot find container');
+            });
+
+            it('missing root component throws compact SIGX601 + docs URL, not the full message', () => {
+                vi.stubEnv('NODE_ENV', 'production');
+                const noRootApp = createMockApp(null);
+                ssrClientPlugin.install!(noRootApp as any);
+                const container = document.createElement('div');
+                container.innerHTML = '<span>SSR</span>';
+                let err: Error | undefined;
+                try { (noRootApp as any).hydrate(container); } catch (e) { err = e as Error; }
+                expect(err?.message).toContain('SIGX601');
+                expect(err?.message).toContain('https://sigx.dev/errors/SIGX601/');
+                expect(err?.message).not.toContain('No root component found');
+            });
         });
 
         it('returns the app for chaining', () => {
