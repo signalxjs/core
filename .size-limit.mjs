@@ -63,7 +63,16 @@ export default [
     path: 'packages/server-renderer/dist/client/scheduler.prod.js',
     limit: '3 KB',
     modifyEsbuildConfig(config) {
-      (config.external ??= []).push('./hydrate-core-*');
+      // Externalize the lazily-imported executor chunk. Its hashed name is
+      // rolldown's chunk-naming heuristic (currently `hydrate-core-<hash>`,
+      // after the largest module in the chunk), so match any same-dir prod
+      // chunk rather than a name that can drift. The entry facade's STATIC
+      // import (`../scheduler-<hash>.prod.js`) starts with `../` and stays
+      // bundled — that's the code being measured. A scheduler that regains
+      // a static sigx import still blows the limit (bare specifiers aren't
+      // external), and the source-level closure walk in
+      // dependency-direction.test.ts guards the split structurally.
+      (config.external ??= []).push('./*.prod.js');
       return config;
     },
   },
