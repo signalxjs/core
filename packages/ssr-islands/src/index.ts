@@ -15,7 +15,9 @@
  *
  * ## Client Usage
  * ```ts
- * import { hydrateIslands, registerComponent } from '@sigx/ssr-islands';
+ * // Prefer the LIGHT entry — this root entry pulls the plugin (and the
+ * // sigx runtime) onto the page's eager graph:
+ * import { hydrateIslands, registerComponent } from '@sigx/ssr-islands/client';
  *
  * registerComponent('Counter', Counter);
  * hydrateIslands();
@@ -41,10 +43,12 @@ export type { IslandsPluginOptions } from './plugin';
 // Client
 export {
     hydrateIslands,
-    scheduleComponentHydration,
     cleanupPendingHydrations,
     invalidateMarkerIndex
 } from './client/hydrate-islands';
+// The walk fallback is heavy by nature (it feeds the hydration executor) —
+// exported from this root entry only; the /client entry stays runtime-free.
+export { scheduleComponentHydration } from './client/plugin-hooks';
 export { hydrateLeftoverAsyncComponents } from './client/hydrate-async';
 export {
     registerComponent,

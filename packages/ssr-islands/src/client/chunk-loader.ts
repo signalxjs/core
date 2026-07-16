@@ -8,7 +8,7 @@ import {
     loadBoundaryComponent,
     prefetchBoundaryChunks,
     type ComponentFactory
-} from '@sigx/server-renderer/client';
+} from '@sigx/server-renderer/client/scheduler';
 import type { SSRBoundaryRecord, BoundaryHydrate } from '@sigx/server-renderer';
 import type { IslandInfo } from '../types';
 

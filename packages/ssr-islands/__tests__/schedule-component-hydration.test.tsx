@@ -7,11 +7,8 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { component } from 'sigx';
-import {
-    scheduleComponentHydration,
-    cleanupPendingHydrations,
-    invalidateMarkerIndex
-} from '../src/client/hydrate-islands';
+import { cleanupPendingHydrations, invalidateMarkerIndex } from '../src/client/hydrate-islands';
+import { scheduleComponentHydration } from '../src/client/plugin-hooks';
 import { invalidateIslandCache } from '../src/client/island-context';
 import { islandsPlugin } from '../src/plugin';
 import { registerClientPlugin, clearClientPlugins } from '@sigx/server-renderer/client';

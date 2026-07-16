@@ -46,4 +46,54 @@ describe('islandsPlugin manifest', () => {
         expect(island.chunkUrl).toBeUndefined();
         expect(island.exportName).toBeUndefined();
     });
+
+    it('accepts manifest v2 and reads islands from the nested map', async () => {
+        const ssr = createSSR().use(islandsPlugin({
+            manifest: {
+                version: 2,
+                islands: {
+                    ManifestIsland: { chunkUrl: '/assets/v2-island.js', exportName: 'ManifestIsland' }
+                },
+                runtimePreload: ['/assets/hydrate-core-x.js']
+            }
+        }));
+
+        const html = await ssr.render(<ManifestIsland client:visible />);
+        const island = Object.values(parseIslandData(html))[0] as any;
+        expect(island.chunkUrl).toBe('/assets/v2-island.js');
+    });
+
+    it('a legacy flat manifest with an island literally named "islands" stays legacy', async () => {
+        // The v2 discriminator is the version TAG — an entry named "islands"
+        // (an object!) must not flip shape detection.
+        const Islands = component(() => () => <div class="named-islands" />, { name: 'islands' });
+        const ssr = createSSR().use(islandsPlugin({
+            manifest: {
+                islands: { chunkUrl: '/assets/islands-island.js', exportName: 'islands' }
+            }
+        }));
+
+        const html = await ssr.render(<Islands client:visible />);
+        const island = Object.values(parseIslandData(html))[0] as any;
+        expect(island.chunkUrl).toBe('/assets/islands-island.js');
+    });
+
+    it('modulepreloads runtimePreload chunks via the assets hook when islands are schedulable', async () => {
+        const TEMPLATE = `<!doctype html><html><head></head><body><div id="app"><!--ssr-outlet--></div></body></html>`;
+        const plugin = islandsPlugin({
+            manifest: { version: 2, islands: {}, runtimePreload: ['/assets/hydrate-core-x.js', '/assets/sigx-y.js'] }
+        });
+
+        // A schedulable island on the page → both runtime chunks preload.
+        const withIsland = await createSSR().use(plugin).renderDocument(
+            (ManifestIsland as any)({ 'client:visible': true }), { template: TEMPLATE });
+        expect(withIsland).toContain('<link rel="modulepreload" href="/assets/hydrate-core-x.js">');
+        expect(withIsland).toContain('<link rel="modulepreload" href="/assets/sigx-y.js">');
+
+        // No islands → no speculative runtime bytes.
+        const Plain = component(() => () => <p>static</p>, { name: 'Plain' });
+        const without = await createSSR().use(plugin).renderDocument(
+            (Plain as any)({}), { template: TEMPLATE });
+        expect(without).not.toContain('modulepreload');
+    });
 });

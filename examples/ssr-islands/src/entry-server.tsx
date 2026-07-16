@@ -7,6 +7,9 @@ import { App } from './App';
  * factory contract stays: a fresh app per request is what makes concurrent
  * SSR safe once state arrives.
  */
-export function createApp(_url: string) {
-    return defineApp(<App />);
+export function createApp(url: string) {
+    // `?deferred` — the deferred-only variant page (see App.tsx): no island
+    // can fire at load, so no sigx runtime may execute until one does.
+    const deferred = url.includes('deferred');
+    return defineApp(<App deferred={deferred} />);
 }

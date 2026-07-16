@@ -11,10 +11,14 @@ import { ServerDice } from './islands/ServerDice';
  * islands ships as static HTML and is never hydrated (in islands mode the
  * client skips the root walk entirely — only boundary-table entries mount).
  */
-export const App = component(() => {
+export const App = component((ctx: { props: { deferred?: boolean } }) => {
+    // `?deferred` renders only islands whose strategies CANNOT fire at load
+    // (interaction / visible-below-the-fold) — the smoke's proof page that
+    // zero sigx runtime executes until a strategy actually fires (#293).
+    const deferred = ctx.props.deferred === true;
     return () => (
         <main>
-            <h1>SignalX islands</h1>
+            <h1>SignalX islands{deferred ? ' — deferred-only variant' : ''}</h1>
             <p>
                 This page is static HTML rendered by the server. Only the cards below carry
                 JavaScript, each hydrating on its own schedule — declared per use with a{' '}
@@ -22,30 +26,30 @@ export const App = component(() => {
                 different schedules.
             </p>
 
-            <div class="card">
+            {!deferred && <div class="card">
                 <h3><code>client:load</code> — hydrate immediately</h3>
                 <Counter client:load label="counts right away" />
-            </div>
+            </div>}
 
-            <div class="card">
+            {!deferred && <div class="card">
                 <h3><code>client:idle</code> — hydrate when the browser is idle</h3>
                 <Clock client:idle />
-            </div>
+            </div>}
 
             <div class="card">
                 <h3><code>client:interaction</code> — hydrate on first pointer/key/touch/focus</h3>
                 <Echo client:interaction />
             </div>
 
-            <div class="card">
+            {!deferred && <div class="card">
                 <h3><code>client:media</code> — hydrate when a media query matches</h3>
                 <WideBadge client:media="(min-width: 768px)" />
-            </div>
+            </div>}
 
-            <div class="card">
+            {!deferred && <div class="card">
                 <h3><code>client:only</code> — skip SSR, mount fresh on the client</h3>
                 <BrowserInfo client:only />
-            </div>
+            </div>}
 
             <div class="spacer">⬇ keep scrolling — the last island hydrates when it enters the viewport ⬇</div>
 

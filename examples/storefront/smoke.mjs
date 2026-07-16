@@ -13,6 +13,7 @@
 // (unbundled modules — chunk-execution assertions don't apply, but state,
 // props flow, replay, wake, and pd must all behave identically; #269).
 import { spawn } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 
@@ -82,7 +83,30 @@ try {
     if (!DEV) {
         const onLoad = await executed();
         assert(!onLoad.some((p) => /ProductCard|Newsletter|DealOfTheDay|handlers-/.test(p)),
-            `no card/form/deal code executed on load (executed: ${onLoad.length} chunks — entry + islands only)`);
+            `no card/form/deal code executed on load (executed: ${onLoad.length} chunks — entry, scheduler, islands runtime)`);
+
+        // Build shape (#293): the sigx runtime is reachable only through
+        // dynamic imports — never the entry's static closure — and the
+        // document preloads it so the client:load badge pays no waterfall.
+        const islandsManifest = JSON.parse(
+            readFileSync(new URL('./dist/client/.vite/sigx-islands-manifest.json', import.meta.url), 'utf-8'));
+        assert(islandsManifest.version === 2 && islandsManifest.runtimePreload.length > 0,
+            `islands manifest v2 names the lazy runtime chunks (${islandsManifest.runtimePreload.join(', ')})`);
+        const viteManifest = JSON.parse(
+            readFileSync(new URL('./dist/client/.vite/manifest.json', import.meta.url), 'utf-8'));
+        const closure = new Set();
+        const walkStatic = (key) => {
+            if (!key || closure.has(key)) return;
+            closure.add(key);
+            for (const dep of viteManifest[key]?.imports ?? []) walkStatic(dep);
+        };
+        walkStatic(Object.keys(viteManifest).find((k) => viteManifest[k].isEntry));
+        const staticFiles = new Set([...closure].map((k) => '/' + viteManifest[k].file));
+        for (const chunk of islandsManifest.runtimePreload) {
+            assert(!staticFiles.has(chunk), `runtime chunk ${chunk} is dynamic-only`);
+            assert(await page.locator(`link[rel="modulepreload"][href="${chunk}"]`).count() === 1,
+                `document modulepreloads ${chunk}`);
+        }
     }
     assert(await page.locator('.badge').textContent() === '🛒 empty', 'cart badge island is live');
 

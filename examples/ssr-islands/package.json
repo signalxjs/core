@@ -2,12 +2,13 @@
     "name": "@sigx/ssr-islands-example",
     "version": "0.1.0",
     "private": true,
-    "description": "Islands architecture example — server-rendered page, selective hydration via client:* directives",
+    "description": "Islands architecture example \u2014 server-rendered page, selective hydration via client:* directives",
     "type": "module",
     "scripts": {
         "dev": "node server.mjs",
         "build": "vite build --app",
-        "start": "cross-env NODE_ENV=production node --conditions production server.mjs"
+        "start": "cross-env NODE_ENV=production node --conditions production server.mjs",
+        "smoke": "node smoke.mjs"
     },
     "dependencies": {
         "sigx": "workspace:^",
