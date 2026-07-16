@@ -154,13 +154,14 @@ export function resolveClientPlugins(): Promise<SSRPlugin[]> {
 }
 
 /**
- * Clear all registered client plugins, including unresolved lazy sources
- * (useful for testing).
+ * Clear all registered client plugins, including unresolved lazy sources,
+ * and reset the tracked app context (useful for testing).
  */
 export function clearClientPlugins(): void {
     _clientPlugins = [];
     _lazySources = [];
     _pluginNames = new Set();
+    _currentAppContext = null;
 }
 
 // ============= State Accessors =============
