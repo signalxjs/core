@@ -498,6 +498,36 @@ export function registerWithActiveScope(dispose: () => void): void {
 }
 
 /**
+ * Register an arbitrary disposer with the currently-active scope — the
+ * component setup being collected, or the innermost running `effectScope()`.
+ * Returns `false` (without retaining `fn`) when no scope is active; the
+ * caller owns the teardown itself then.
+ *
+ * This is the same registration path `effect()` and `watch()` use for their
+ * own disposers, exposed for non-reactive resources (event listeners, timers,
+ * observers) whose lifetime must match the owning scope's.
+ *
+ * @example
+ * ```ts
+ * function useIntervalFn(fn: () => void, ms: number) {
+ *   const id = setInterval(fn, ms);
+ *   onScopeDispose(() => clearInterval(id));
+ * }
+ *
+ * const scope = effectScope();
+ * scope.run(() => useIntervalFn(tick, 1000));
+ * scope.stop(); // interval cleared
+ * ```
+ */
+export function onScopeDispose(fn: () => void): boolean {
+    if (collectingScope || activeScopeCleanups !== null) {
+        registerWithActiveScope(fn);
+        return true;
+    }
+    return false;
+}
+
+/**
  * Execute a function without tracking any reactive dependencies.
  * Useful for reading signals inside an effect without creating a subscription.
  *

@@ -28,11 +28,12 @@ export type {
 export { ComputedSymbol } from './types';
 
 // Effect system
-export { 
-    effect, 
-    batch, 
-    untrack, 
-    effectScope
+export {
+    effect,
+    batch,
+    untrack,
+    effectScope,
+    onScopeDispose
 } from './effect';
 
 // Collections
@@ -44,6 +45,7 @@ export {
 // Signal
 export {
     signal,
+    isSignal,
     detectAccess,
     detectAccessDev
 } from './signal';
