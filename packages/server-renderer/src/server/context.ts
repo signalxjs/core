@@ -57,6 +57,13 @@ export interface SSRContextOptions {
      * in development.
      */
     renderError?: (error: Error, info: SSRErrorInfo) => string;
+
+    /**
+     * CSP nonce applied to every `<script>` tag the renderer emits — the
+     * boundary table, state blobs, streaming protocol + replacement scripts,
+     * and the completion script. Apps pass their per-request CSP nonce.
+     */
+    nonce?: string;
 }
 
 export interface RenderOptions {
@@ -92,6 +99,12 @@ export interface SSRContext {
      * Failure-HTML hook — what renders in place of a failed component.
      */
     _renderError?: (error: Error, info: SSRErrorInfo) => string;
+
+    /**
+     * The request's CSP nonce — stamped on every renderer-emitted `<script>`
+     * tag (see SSRContextOptions.nonce). Undefined → plain `<script>`.
+     */
+    _nonce?: string;
 
     /**
      * Which request phase the walk is in: 'shell' until the shell has been
@@ -170,6 +183,14 @@ export interface SSRContext {
      * `__SIGX_BOUNDARIES__` when non-empty.
      */
     _boundaries: Map<number, SSRBoundaryRecord>;
+    /**
+     * Boundary ids recorded but not yet emitted to the client. Records born
+     * inside a deferred render are NOT in the shell table — each stream
+     * patch drains this set so they reach `window.__SIGX_BOUNDARIES__` too
+     * (#279). A dirty-set, not a flushed-set: draining is O(patch), never a
+     * rescan of every boundary per async resolution.
+     */
+    _unflushedBoundaries: Set<number>;
 
     /**
      * Per-request response state collected by useResponse() —
@@ -238,6 +259,7 @@ export function createSSRContext(options: SSRContextOptions = {}): SSRContext {
     const head: string[] = [];
     const pluginData = new Map<string, any>();
     const boundaries = new Map<number, SSRBoundaryRecord>();
+    const unflushedBoundaries = new Set<number>();
 
     return {
         _componentId: componentId,
@@ -246,6 +268,7 @@ export function createSSRContext(options: SSRContextOptions = {}): SSRContext {
         _pluginData: pluginData,
         _onError: options.onError,
         _renderError: options.renderError,
+        _nonce: options.nonce,
         _phase: 'shell',
         _appContext: null,
         _streaming: false,
@@ -256,6 +279,7 @@ export function createSSRContext(options: SSRContextOptions = {}): SSRContext {
         _asyncResults: new Map(),
         _asyncKeysByComponent: new Map(),
         _boundaries: boundaries,
+        _unflushedBoundaries: unflushedBoundaries,
         // Null-prototype headers bag: names can be caller-derived strings,
         // and special keys (__proto__, constructor) must be plain data.
         _response: { headers: Object.create(null) },
@@ -290,6 +314,7 @@ export function createSSRContext(options: SSRContextOptions = {}): SSRContext {
 
         recordBoundary(id: number, record: SSRBoundaryRecord): void {
             boundaries.set(id, record);
+            unflushedBoundaries.add(id);
         },
 
         getBoundary(id: number): SSRBoundaryRecord | undefined {

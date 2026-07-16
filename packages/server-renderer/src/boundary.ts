@@ -40,6 +40,14 @@ export interface SSRBoundary {
     fallback?: () => JSXElement;
     /** Module ref for boundaries that load their component on demand. */
     chunk?: { url: string; export?: string };
+    /**
+     * The record's registry name (`record.component`) — how the client
+     * resolves the component (eager registry, lazy registry, then the chunk
+     * URL, in that order). Packs with their own stamp vocabulary set it
+     * here; when omitted, core derives it from `__islandId || __name`
+     * (#255 — anonymous records are refused by the client loader).
+     */
+    component?: string;
     /** Props snapshot for client-side mounting. */
     props?: Record<string, unknown>;
 }
@@ -85,5 +93,5 @@ export interface SSRBoundaryRecord {
  * `vnode.props` — packs override it to strip their directive vocabulary.
  */
 export type ResolvedBoundary = Partial<
-    Pick<SSRBoundary, 'flush' | 'hydrate' | 'media' | 'fallback' | 'chunk' | 'props'>
+    Pick<SSRBoundary, 'flush' | 'hydrate' | 'media' | 'fallback' | 'chunk' | 'component' | 'props'>
 >;

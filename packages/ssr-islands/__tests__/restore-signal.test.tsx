@@ -40,7 +40,7 @@ describe('createRestoringSignal', () => {
         const second = restore(1, 'n');
         expect(first.value).toBe(10);   // restored
         expect(second.value).toBe(1);   // its own initial — never state['n']
-        expect(warnSpy.mock.calls.flat().join(' ')).toContain('Duplicate island state key "n"');
+        expect(warnSpy.mock.calls.flat().join(' ')).toContain('Duplicate state key "n"');
     });
 
     it('restores object-form signals via the .value convention', () => {

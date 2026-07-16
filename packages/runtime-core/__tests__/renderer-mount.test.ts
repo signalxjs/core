@@ -19,6 +19,8 @@ interface MockNode {
     [key: string]: any;
 }
 
+const mockSvgTags = new Set(['svg', 'rect', 'circle', 'path', 'g', 'title', 'foreignObject']);
+
 function createMockDOMOperations() {
     const operations: string[] = [];
     let nodeIdCounter = 0;
@@ -103,6 +105,14 @@ function createMockDOMOperations() {
             elementMountedCalls.push(el);
             operations.push(`onElementMounted:#${el.id}`);
         },
+        // DOM-like namespace ops (SVG semantics) so the namespace-threading
+        // tests exercise core's context propagation
+        getElementNamespace: (tag: string, parentNS: boolean | undefined) =>
+            parentNS === undefined
+                ? mockSvgTags.has(tag)
+                : tag === 'svg' || (parentNS && tag !== 'foreignObject'),
+        getChildNamespace: (tag: string, ns: boolean) => ns && tag !== 'foreignObject',
+        getContainerNamespace: (tag: string, ns: boolean) => ns && tag !== 'svg',
         reset: () => {
             operations.length = 0;
             patchPropCalls.length = 0;
@@ -314,6 +324,23 @@ describe('Renderer - mount()', () => {
         // div inside foreignObject should have isSVG=false
         const divCall = mockOps.createElementCalls.find(c => c.type === 'div');
         expect(divCall?.isSVG).toBe(false);
+    });
+
+    it('should resolve every element to the default namespace when the host has no namespace ops', () => {
+        const { getElementNamespace: _e, getChildNamespace: _c, getContainerNamespace: _p, ...bareOps } = createMockDOMOperations();
+        const bareRenderer = createRenderer(bareOps as any);
+
+        const vnode = jsx('svg', {
+            children: jsx('rect', {})
+        }) as VNode;
+        bareRenderer.mount(vnode, container);
+
+        // Without host namespace ops, core knows nothing about SVG — even
+        // an <svg> tag mounts with the default (false) namespace flag.
+        const svgCall = bareOps.createElementCalls.find(c => c.type === 'svg');
+        expect(svgCall?.isSVG).toBe(false);
+        const rectCall = bareOps.createElementCalls.find(c => c.type === 'rect');
+        expect(rectCall?.isSVG).toBe(false);
     });
 
     it('should no-op for null/undefined/boolean vnodes', () => {

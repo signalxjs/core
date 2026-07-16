@@ -23,7 +23,7 @@ import { generateStreamingScript, generateReplacementScript, generateAppendBoots
 import { renderHeadToString } from './head';
 import type { StreamCallbacks } from './server/types';
 import { stateSerializationPlugin } from './server/state-plugin';
-import { emitBoundaryTable, boundaryPatchJs } from './server/serialize';
+import { emitBoundaryTable, boundaryPatchJs, scriptOpen } from './server/serialize';
 import type { SSRResponse } from './response';
 import {
     renderDocumentImpl,
@@ -86,7 +86,7 @@ async function* streamAllAsyncChunks(
     // below emits it just-in-time before the first core replacement.
     let bootstrapEmitted = false;
     if (ctx._pendingAsync.length > 0) {
-        yield generateStreamingScript();
+        yield generateStreamingScript(ctx._nonce);
         bootstrapEmitted = true;
     }
 
@@ -95,7 +95,7 @@ async function* streamAllAsyncChunks(
     // for streams that appear mid-stream (inside deferred renders).
     let appendBootstrapEmitted = false;
     if (ctx._pendingStreams.length > 0) {
-        yield generateAppendBootstrap();
+        yield generateAppendBootstrap(ctx._nonce);
         appendBootstrapEmitted = true;
     }
 
@@ -120,16 +120,17 @@ async function* streamAllAsyncChunks(
                 }
             }
             // Boundary-table patch: plugins above may have mutated the
-            // record (post-async state re-capture) — re-emit it so the
-            // fresh record is installed before $SIGX_REPLACE dispatches
-            // sigx:async-ready. Prepended: the record must land before any
-            // plugin preScript that reads it.
-            if (ctx._boundaries.has(pending.id)) {
-                preScript = boundaryPatchJs(ctx, pending.id) + preScript;
-            }
+            // resolved record (post-async state re-capture), and the
+            // deferred render may have CREATED boundaries that exist in no
+            // earlier emission (#279 — a plain async wrapper full of
+            // pack-claimed components). Unconditional: boundaryPatchJs
+            // drains everything unflushed and returns '' when there is
+            // nothing to say. Prepended: records must land before any
+            // plugin preScript that reads them.
+            preScript = boundaryPatchJs(ctx, pending.id) + preScript;
             return {
                 index,
-                script: generateReplacementScript(pending.id, finalHtml, extraScript || undefined, preScript || undefined)
+                script: generateReplacementScript(pending.id, finalHtml, extraScript || undefined, preScript || undefined, ctx._nonce)
             };
         }).catch(error => {
             // A streamed component failure routes through the same error
@@ -154,7 +155,7 @@ async function* streamAllAsyncChunks(
             const html = ctx._renderError ? ctx._renderError(err, info) : defaultRenderError(err, info);
             return {
                 index,
-                script: generateReplacementScript(pending.id, html)
+                script: generateReplacementScript(pending.id, html, undefined, undefined, ctx._nonce)
             };
         });
     }
@@ -245,11 +246,11 @@ async function* streamAllAsyncChunks(
         if (winner.script) {
             // Just-in-time bootstraps for work that only appeared mid-stream
             if (!bootstrapEmitted && winner.index < PUMP_BASE) {
-                yield generateStreamingScript();
+                yield generateStreamingScript(ctx._nonce);
                 bootstrapEmitted = true;
             }
             if (!appendBootstrapEmitted && winner.index >= PUMP_BASE && pumps[winner.index - PUMP_BASE].isStream) {
-                yield generateAppendBootstrap();
+                yield generateAppendBootstrap(ctx._nonce);
                 appendBootstrapEmitted = true;
             }
             yield winner.script;
@@ -397,7 +398,7 @@ export function createSSR(): SSRInstance {
             }
 
             // Phase 4: Signal streaming complete
-            yield `<script>window.__SIGX_STREAMING_COMPLETE__=true;window.dispatchEvent(new Event('sigx:ready'));</script>`;
+            yield `${scriptOpen(ctx._nonce)}window.__SIGX_STREAMING_COMPLETE__=true;window.dispatchEvent(new Event('sigx:ready'));</script>`;
         }
 
         return generateAll();
@@ -509,7 +510,7 @@ export function createSSR(): SSRInstance {
                 // Boundary table (core protocol — empty renders emit nothing)
                 shellHtml += emitBoundaryTable(ctx);
 
-                shellHtml += `<script>window.__SIGX_STREAMING_COMPLETE__=true;window.dispatchEvent(new Event('sigx:ready'));</script>`;
+                shellHtml += `${scriptOpen(ctx._nonce)}window.__SIGX_STREAMING_COMPLETE__=true;window.dispatchEvent(new Event('sigx:ready'));</script>`;
 
                 callbacks.onShellReady(shellHtml);
 

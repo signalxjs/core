@@ -46,6 +46,7 @@ body:
         - "@sigx/runtime-dom"
         - "@sigx/server-renderer"
         - "@sigx/ssr-islands"
+        - "@sigx/resume"
         - "@sigx/cache"
         - "@sigx/vite"
         - Not sure

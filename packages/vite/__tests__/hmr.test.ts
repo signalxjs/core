@@ -46,6 +46,22 @@ function makeCtx(): ComponentSetupContext & { update: ReturnType<typeof vi.fn>; 
     } as any;
 }
 
+/**
+ * A ctx that advertises the runtime-core `__hmrReload` primitive (dev builds).
+ * The spy mimics the renderer: it runs and drains the registered onUnmounted
+ * cleanups (including the HMR runtime's own instance-tracking cleanup, which
+ * de-registers the instance) — exactly what the real primitive does before
+ * re-running setup.
+ */
+function makeReloadCtx(): ReturnType<typeof makeCtx> & { __hmrReload: ReturnType<typeof vi.fn> } {
+    const ctx = makeCtx() as ReturnType<typeof makeCtx> & { __hmrReload: ReturnType<typeof vi.fn> };
+    ctx.__hmrReload = vi.fn(() => {
+        const cbs = ctx.unmountCbs.splice(0, ctx.unmountCbs.length);
+        cbs.forEach(cb => cb());
+    });
+    return ctx;
+}
+
 async function loadFreshHmrModule(): Promise<{
     registerHMRModule: (id: string) => void;
     installHMRPlugin: () => Promise<void>;
@@ -260,5 +276,55 @@ describe('hmr — HMR update path', () => {
 
         expect(ctx.update).not.toHaveBeenCalled();
         expect(ctx.renderFn).toBeUndefined();
+    });
+
+    it('prefers ctx.__hmrReload over the legacy re-run when the core exposes it (#107)', async () => {
+        const { registerHMRModule, plugin } = await loadFreshHmrModule();
+        registerHMRModule('moduleReload');
+
+        const factory: any = {};
+        plugin.onDefine!('Cmp', factory, () => () => 'v1');
+
+        const ctx = makeReloadCtx();
+        factory.__setup(ctx);
+        // Only the HMR instance-tracking cleanup is registered at mount.
+        expect(ctx.onUnmounted).toHaveBeenCalledTimes(1);
+
+        // Hot update: redefine with a new setup.
+        registerHMRModule('moduleReload');
+        const setup2 = () => () => 'v2';
+        plugin.onDefine!('Cmp', {} as any, setup2);
+
+        // The renderer primitive owns the reload — the legacy path (which sets
+        // ctx.renderFn directly and calls ctx.update()) is NOT used.
+        expect(ctx.__hmrReload).toHaveBeenCalledTimes(1);
+        expect(ctx.__hmrReload).toHaveBeenCalledWith(setup2);
+        expect(ctx.update).not.toHaveBeenCalled();
+        expect(ctx.renderFn).toBeUndefined();
+    });
+
+    it('re-tracks instances after a __hmrReload so later hot updates still reach them (#107)', async () => {
+        const { registerHMRModule, plugin } = await loadFreshHmrModule();
+        registerHMRModule('moduleRetrack');
+
+        const factory: any = {};
+        plugin.onDefine!('Cmp', factory, () => () => null);
+
+        const ctx = makeReloadCtx();
+        factory.__setup(ctx);
+
+        // First hot update: __hmrReload runs the tracking cleanup, removing the
+        // instance from the registry.
+        registerHMRModule('moduleRetrack');
+        plugin.onDefine!('Cmp', {} as any, () => () => null);
+        expect(ctx.__hmrReload).toHaveBeenCalledTimes(1);
+
+        // Second hot update must still reach the instance — proving the runtime
+        // re-registered it after the reload disposed the previous tracking hook.
+        registerHMRModule('moduleRetrack');
+        const setup3 = () => () => null;
+        plugin.onDefine!('Cmp', {} as any, setup3);
+        expect(ctx.__hmrReload).toHaveBeenCalledTimes(2);
+        expect(ctx.__hmrReload).toHaveBeenLastCalledWith(setup3);
     });
 });

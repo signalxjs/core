@@ -41,6 +41,8 @@ export type { HydrateDefaults } from './hydrate-defaults';
 export {
     getBoundaryTable,
     getBoundaryRecord,
+    findBoundaryMarker,
+    hydrateTableBoundary,
     scheduleTableBoundaries,
     scheduleWalkedBoundary,
     scheduleByStrategy,
@@ -52,6 +54,10 @@ export {
     parseMarkerId
 } from './boundary-hydrator';
 export { seedBoundaryState, consumeBoundaryState } from './boundary-state';
+
+// Restore side of "named = transferred" — seeds pack-swapped ctx.signal
+// factories from server-captured state (see server/state-signals).
+export { createRestoringSignal } from './restore-signal';
 
 // Component registry + chunk loading for on-demand boundary mounting
 export {
