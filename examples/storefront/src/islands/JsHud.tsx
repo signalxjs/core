@@ -15,7 +15,9 @@ export const JsHud = component((ctx) => {
         // Dev serves UNBUNDLED modules (no /assets/ chunks) — count what the
         // mode actually loads, and label it, or the HUD lies in dev (#269).
         const isChunk = (url: string) => import.meta.env.DEV
-            ? /\.m?[jt]sx?(\?|$)/.test(url) || url.includes('/@id/') || url.includes('/@fs/')
+            // Vite internals (/@vite/client etc.) have no extension — count
+            // every /@-prefixed dev module too, or the HUD undercounts.
+            ? /\.m?[jt]sx?(\?|$)/.test(url) || new URL(url, location.href).pathname.startsWith('/@')
             : url.includes('/assets/') && url.includes('.js');
         const push = (entry: PerformanceEntry) => {
             const url = entry.name;
