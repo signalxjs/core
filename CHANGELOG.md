@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- **`@sigx/runtime-core` / `@sigx/runtime-dom`**: runtime-core is now namespace-agnostic — the SVG tag-name Set and the `'svg'`/`'foreignObject'` context formulas moved out of the core renderer into three new optional `RendererOptions` host ops (`getElementNamespace`, `getChildNamespace`, `getContainerNamespace`), implemented by runtime-dom's `nodeOps`. Core threads an opaque boolean namespace flag (cached as `_ns` on vnodes; the `isSVG` parameter of `createElement`/`patchProp` is renamed `ns`, positions unchanged). Hosts that don't provide the ops resolve every element to the default namespace — custom DOM-like renderers must implement them to keep SVG support; DOM behavior via runtime-dom is unchanged. (#284)
+
+### Added
+
+- **`@sigx/vite`**: `defineLibConfig` takes an `importSource` option — the module the automatic JSX runtime imports from — defaulting to `'sigx'`, so every existing caller is unaffected. It was hardcoded to the `sigx` umbrella, which carries the DOM renderer, leaving non-web platform packages (terminal, lynx) no way to build their own components against their runtime: the only escape was a per-file `/** @jsxImportSource … */` pragma on every `.tsx` source, since oxc honors a pragma over config. Read only when `jsx: true`. (#277)
+
 ## [0.10.0] — 2026-07-15
 
 ### Changed

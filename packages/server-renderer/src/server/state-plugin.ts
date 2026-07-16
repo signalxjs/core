@@ -59,7 +59,7 @@ export function stateSerializationPlugin(): SSRPlugin {
             getInjectedHTML(ctx) {
                 const data = ctx.getPluginData<StateData>(PLUGIN_NAME)!;
                 const values = takeUnemitted(ctx, data.emitted, null);
-                return values ? serializeAsyncScript(values, getTypeHandlers(ctx)) : '';
+                return values ? serializeAsyncScript(values, getTypeHandlers(ctx), ctx._nonce) : '';
             },
 
             onAsyncComponentResolved(id, _html, ctx) {

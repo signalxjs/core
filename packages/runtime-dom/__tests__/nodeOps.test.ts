@@ -204,4 +204,54 @@ describe('nodeOps', () => {
             expect(result).toBe(document.activeElement);
         });
     });
+
+    // --- namespace ops -------------------------------------------------------------
+
+    describe('getElementNamespace', () => {
+        it('enters the SVG namespace at <svg> regardless of context', () => {
+            expect(nodeOps.getElementNamespace!('svg', false)).toBe(true);
+            expect(nodeOps.getElementNamespace!('svg', true)).toBe(true);
+        });
+
+        it('propagates a known SVG context to children', () => {
+            expect(nodeOps.getElementNamespace!('circle', true)).toBe(true);
+            expect(nodeOps.getElementNamespace!('circle', false)).toBe(false);
+        });
+
+        it('keeps foreignObject itself out of the SVG namespace', () => {
+            expect(nodeOps.getElementNamespace!('foreignObject', true)).toBe(false);
+        });
+
+        it('falls back to the tag list when the context is unknown', () => {
+            expect(nodeOps.getElementNamespace!('circle', undefined)).toBe(true);
+            expect(nodeOps.getElementNamespace!('div', undefined)).toBe(false);
+        });
+
+        it('does not namespace HTML tags that share SVG names outside a known SVG context', () => {
+            expect(nodeOps.getElementNamespace!('title', false)).toBe(false);
+            expect(nodeOps.getElementNamespace!('title', true)).toBe(true);
+        });
+    });
+
+    describe('getChildNamespace', () => {
+        it('resets the context inside foreignObject', () => {
+            expect(nodeOps.getChildNamespace!('foreignObject', true)).toBe(false);
+        });
+
+        it('lets other elements pass their flag through', () => {
+            expect(nodeOps.getChildNamespace!('g', true)).toBe(true);
+            expect(nodeOps.getChildNamespace!('div', false)).toBe(false);
+        });
+    });
+
+    describe('getContainerNamespace', () => {
+        it('reports an SVG container for namespaced elements below the root', () => {
+            expect(nodeOps.getContainerNamespace!('circle', true)).toBe(true);
+        });
+
+        it('reports an HTML container for the <svg> root and non-namespaced elements', () => {
+            expect(nodeOps.getContainerNamespace!('svg', true)).toBe(false);
+            expect(nodeOps.getContainerNamespace!('div', false)).toBe(false);
+        });
+    });
 });

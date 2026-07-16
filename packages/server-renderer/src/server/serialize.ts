@@ -11,6 +11,7 @@
 
 import { SSR_SERIALIZER_TOKEN, getProvided, type SSRTypeHandler } from 'sigx/internals';
 import type { SSRContext } from './context';
+import type { SSRBoundaryRecord } from '../boundary';
 
 export type { SSRTypeHandler };
 
@@ -24,6 +25,22 @@ export function escapeJsonForScript(json: string): string {
         .replace(/>/g, '\\u003e')
         .replace(/\u2028/g, '\\u2028')
         .replace(/\u2029/g, '\\u2029');
+}
+
+/**
+ * Open a renderer-emitted `<script>` tag: plain `<script>` without a nonce
+ * (byte-identical to the historical output), `<script nonce="...">` when the
+ * request carries a CSP nonce. The nonce is server-generated, but it is
+ * attribute-escaped anyway — one discipline for every emitted attribute.
+ */
+export function scriptOpen(nonce?: string): string {
+    if (!nonce) return '<script>';
+    const escaped = nonce
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+    return `<script nonce="${escaped}">`;
 }
 
 /**
@@ -176,12 +193,14 @@ export function serializeBoundaryProps(
  * stays byte-identical).
  */
 export function emitBoundaryTable(ctx: SSRContext): string {
+    // The shell table carries every record known so far — nothing pending.
+    ctx._unflushedBoundaries.clear();
     if (ctx._boundaries.size === 0) return '';
     const table: Record<number, unknown> = {};
     ctx._boundaries.forEach((record, id) => {
         table[id] = record;
     });
-    return `<script>${assignmentJs('__SIGX_BOUNDARIES__', table, getTypeHandlers(ctx))}</script>`;
+    return `${scriptOpen(ctx._nonce)}${assignmentJs('__SIGX_BOUNDARIES__', table, getTypeHandlers(ctx))}</script>`;
 }
 
 /**
@@ -192,11 +211,28 @@ export function emitBoundaryTable(ctx: SSRContext): string {
  * first recorded after the shell flushed (e.g. inside a Defer's deferred
  * render): Object.assign onto the (possibly undefined) global creates the
  * entry either way.
+ *
+ * The patch carries the resolved record (re-emitted even when already
+ * flushed — plugins mutate it during async re-capture) PLUS every record
+ * not yet emitted to the client: boundaries born inside the deferred render
+ * (a streamed subtree full of pack-claimed components) exist only in
+ * `ctx._boundaries`, never in the shell table (#279).
  */
 export function boundaryPatchJs(ctx: SSRContext, id: number): string {
+    const patch: Record<number, SSRBoundaryRecord> = {};
     const record = ctx._boundaries.get(id);
-    if (!record) return '';
-    return assignmentJs('__SIGX_BOUNDARIES__', { [id]: record }, getTypeHandlers(ctx));
+    if (record) {
+        patch[id] = record;
+        ctx._unflushedBoundaries.delete(id);
+    }
+    // Drain the dirty-set — O(patch size), no per-resolution map rescans.
+    for (const unflushedId of ctx._unflushedBoundaries) {
+        const unflushed = ctx._boundaries.get(unflushedId);
+        if (unflushed) patch[unflushedId] = unflushed;
+    }
+    ctx._unflushedBoundaries.clear();
+    if (Object.keys(patch).length === 0) return '';
+    return assignmentJs('__SIGX_BOUNDARIES__', patch, getTypeHandlers(ctx));
 }
 
 const NO_HANDLERS: readonly SSRTypeHandler[] = [];
