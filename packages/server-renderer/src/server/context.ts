@@ -183,6 +183,13 @@ export interface SSRContext {
      * `__SIGX_BOUNDARIES__` when non-empty.
      */
     _boundaries: Map<number, SSRBoundaryRecord>;
+    /**
+     * Boundary ids already emitted to the client (shell table or a stream
+     * patch). Records born inside a deferred render are NOT in the shell
+     * table — each stream patch drains the unflushed set so they reach
+     * `window.__SIGX_BOUNDARIES__` too (#279).
+     */
+    _flushedBoundaries: Set<number>;
 
     /**
      * Per-request response state collected by useResponse() —
@@ -270,6 +277,7 @@ export function createSSRContext(options: SSRContextOptions = {}): SSRContext {
         _asyncResults: new Map(),
         _asyncKeysByComponent: new Map(),
         _boundaries: boundaries,
+        _flushedBoundaries: new Set<number>(),
         // Null-prototype headers bag: names can be caller-derived strings,
         // and special keys (__proto__, constructor) must be plain data.
         _response: { headers: Object.create(null) },
