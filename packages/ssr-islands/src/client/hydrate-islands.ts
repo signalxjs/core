@@ -1,21 +1,26 @@
 /**
  * Islands client entry points — thin facades over the core boundary
- * hydrator in `@sigx/server-renderer/client` (rfc-ssr-platform §1.2:
- * selective hydration IS the hydrator; islands is the directive mapping).
+ * SCHEDULER in `@sigx/server-renderer/client/scheduler` (rfc-ssr-platform
+ * §1.2: selective hydration IS the hydrator; islands is the directive
+ * mapping).
+ *
+ * This module is the islands package's eager surface: it imports only the
+ * runtime-free scheduler entry, so a page whose islands are all deferred
+ * (`client:idle` / `client:visible` / `client:interaction` / `client:media`)
+ * executes ZERO sigx runtime code at load. The heavy pieces — the state
+ * restoration hooks and the walk fallback — live in `./plugin-hooks`, which
+ * `hydrateIslands()` registers as a lazy plugin source so it loads with the
+ * hydration core on the first strategy that fires.
  */
 
-import type { VNode } from 'sigx';
-import type { SSRBoundaryRecord } from '@sigx/server-renderer';
 import {
     scheduleTableBoundaries,
-    scheduleWalkedBoundary,
-    cleanupPendingHydrations,
-    invalidateMarkerIndex,
+    registerClientPlugin,
     seedBoundaryState,
-    consumeBoundaryState
-} from '@sigx/server-renderer/client';
-import type { HydrationStrategy } from '../types';
-import { filterClientDirectives, CLIENT_DIRECTIVE_PREFIX } from '../client-directives';
+    consumeBoundaryState,
+    cleanupPendingHydrations,
+    invalidateMarkerIndex
+} from '@sigx/server-renderer/client/scheduler';
 
 export { cleanupPendingHydrations, invalidateMarkerIndex };
 
@@ -23,42 +28,19 @@ export { cleanupPendingHydrations, invalidateMarkerIndex };
  * Hydrate islands based on their strategies (selective hydration) — the
  * standalone islands-mode entry (no root walk). Equivalent to hydrating an
  * app whose default is `boundaries: 'explicit'`.
+ *
+ * Self-contained: the state-restoration hooks register themselves as a lazy
+ * plugin source (loaded together with the hydration core, resolved before
+ * the first component hydrates), so this one call is the whole client
+ * bootstrap. Apps that already `registerClientPlugin(islandsPlugin())`
+ * keep working — plugin registration dedupes by name, first-wins.
  */
 export function hydrateIslands(): void {
+    registerClientPlugin({
+        name: 'islands',
+        load: () => import('./plugin-hooks.js').then((m) => m.islandsClientHooks)
+    });
     scheduleTableBoundaries();
-}
-
-/**
- * Schedule an island encountered during the root hydration walk — the
- * directive spelling mapped onto a boundary record for the core scheduler.
- * Used as the plugin's walk fallback for islands the boundary table did not
- * record (core's table interception claims recorded ones first).
- * Returns the next DOM node after this component's content.
- */
-export function scheduleComponentHydration(
-    vnode: VNode,
-    dom: Node | null,
-    parent: Node,
-    strategy: { strategy: HydrationStrategy; media?: string }
-): Node | null {
-    // Strip client:* before delegating — the directive vocabulary is
-    // islands-owned; core never filters props. Mutate props on THIS vnode
-    // rather than cloning it: core attaches hydration state to the passed
-    // vnode and retains it for later patching/unmount, so its object
-    // identity must be preserved. Only rewrite when a directive is present.
-    if (vnode.props) {
-        for (const key in vnode.props) {
-            if (key.startsWith(CLIENT_DIRECTIVE_PREFIX)) {
-                vnode.props = filterClientDirectives(vnode.props);
-                break;
-            }
-        }
-    }
-
-    const record: SSRBoundaryRecord = strategy.strategy === 'only'
-        ? { flush: 'skip', hydrate: 'load' }
-        : { hydrate: strategy.strategy, media: strategy.media };
-    return scheduleWalkedBoundary(vnode, dom, parent, record);
 }
 
 /**

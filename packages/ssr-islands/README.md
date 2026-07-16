@@ -20,8 +20,29 @@ npm install @sigx/ssr-islands sigx vite
 <Counter client:only />         {/* skip SSR — mount fresh on the client only */}
 ```
 
+```ts
+// Client entry (app-less islands page) — one call is the whole bootstrap
+import { hydrateIslands } from '@sigx/ssr-islands/client';
+
+hydrateIslands();
+```
+
+The eager cost of that entry is only the boundary *scheduler* (~2 kB, no
+sigx runtime): the hydration core and the islands state-restoration hooks
+load together in one lazily-imported chunk, on the first `client:*`
+strategy that actually fires. A page whose islands are all
+`idle`/`visible`/`interaction`/`media` executes **zero** framework JS at
+load — the chunk is still `modulepreload`ed (via the islands manifest), so
+the first interaction pays no network round trip. Migrating from the old
+two-call form? `registerClientPlugin(islandsPlugin()); hydrateIslands();`
+still works, but importing `islandsPlugin` from the package root puts the
+runtime back on the page's eager graph — drop it.
+
+Pages that ship a root app declare islands mode with the plugin instead
+(full runtime by definition — the app itself needs it):
+
 ```tsx
-// Client entry — islands mode is declared by using the plugin
+// Client entry — app-rooted islands mode
 import { defineApp } from 'sigx';
 import { ssrClientPlugin } from '@sigx/server-renderer/client';
 import { islandsPlugin } from '@sigx/ssr-islands';

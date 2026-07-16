@@ -3,9 +3,12 @@ import { component } from 'sigx';
 /**
  * The page demonstrates its own claim: this HUD (a `client:idle` island)
  * watches the resource timeline and lists every script chunk the page has
- * fetched. On load you see the entry + islands runtime and NOTHING for the
- * ~48 product cards; click one card and watch exactly two chunks arrive
- * (the shared handlers chunk, then that card's component on the write).
+ * fetched. On load you see the entry, the tiny boundary scheduler, and the
+ * (preloaded) hydration runtime that the client:load cart badge wakes —
+ * and NOTHING for the ~48 product cards; click one card and watch exactly
+ * two chunks arrive (the shared handlers chunk, then that card's component
+ * on the write). On a page with no client:load island the runtime would
+ * not even execute until the first strategy fired (#293).
  */
 export const JsHud = component((ctx) => {
     const chunks = ctx.signal<{ list: { key: string; label: string }[] }>({ list: [] });

@@ -1,17 +1,22 @@
 /**
  * @sigx/ssr-islands/client
  *
- * Client-side island hydration utilities.
+ * Client-side island hydration utilities — the package's EAGER surface.
+ * Everything here rides `@sigx/server-renderer/client/scheduler` (the
+ * runtime-free scheduler entry): `hydrateIslands()` is the whole client
+ * bootstrap, and the sigx runtime + restoration hooks load lazily on the
+ * first island strategy that fires. Guarded by a no-ignore size-limit
+ * entry and a structural import test.
+ *
+ * `scheduleComponentHydration` (the walk fallback — heavy by nature) lives
+ * on the root `@sigx/ssr-islands` entry.
  */
 
 // Load client directive type augmentations
 import '../client-directives';
 
 // Export islands hydration
-export {
-    hydrateIslands,
-    scheduleComponentHydration
-} from './hydrate-islands';
+export { hydrateIslands, seedPendingServerState, consumePendingServerState } from './hydrate-islands';
 
 // Export async hydration
 export { hydrateLeftoverAsyncComponents } from './hydrate-async';

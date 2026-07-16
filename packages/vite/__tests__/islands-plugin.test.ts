@@ -98,12 +98,20 @@ describe('sigxIslands end-to-end (real vite build)', () => {
         // each island code-splits into its own chunk.
         writeFileSync(join(root, 'src', 'entry-client.ts'),
             `import 'virtual:sigx-islands';\nconsole.log('islands registered');`);
-        // Stub the registry import the virtual module emits
+        // Stub the registry import the virtual module emits (the LIGHT
+        // ./client subpath — the package root would pull the runtime, #293)
         mkdirSync(join(root, 'node_modules', '@sigx', 'ssr-islands'), { recursive: true });
         writeFileSync(join(root, 'node_modules', '@sigx', 'ssr-islands', 'package.json'),
-            JSON.stringify({ name: '@sigx/ssr-islands', version: '0.0.0', type: 'module', main: 'index.js' }));
-        writeFileSync(join(root, 'node_modules', '@sigx', 'ssr-islands', 'index.js'),
+            JSON.stringify({
+                name: '@sigx/ssr-islands', version: '0.0.0', type: 'module', main: 'index.js',
+                exports: { '.': './index.js', './client': './client.js' }
+            }));
+        // Side effects matter: a no-op stub gets DCE'd and takes the dynamic
+        // island imports (and their chunks) with it.
+        writeFileSync(join(root, 'node_modules', '@sigx', 'ssr-islands', 'client.js'),
             `export const __registered = [];\nexport function __registerIslandChunk(name, loader) { __registered.push(name); }`);
+        writeFileSync(join(root, 'node_modules', '@sigx', 'ssr-islands', 'index.js'),
+            `export * from './client.js';`);
     }, 60_000);
 
     afterAll(() => {
@@ -123,20 +131,26 @@ describe('sigxIslands end-to-end (real vite build)', () => {
         const manifestPath = join(root, 'dist/client', '.vite', 'sigx-islands-manifest.json');
         expect(existsSync(manifestPath)).toBe(true);
         const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'));
-        expect(manifest.Counter).toBeTruthy();
-        expect(manifest.Counter.exportName).toBe('Counter');
-        expect(manifest.Counter.chunkUrl).toMatch(/^\/assets\/.+\.js$/);
+        // Manifest v2: islands nested under `islands`, plus `runtimePreload`
+        // for the lazily-imported hydration executor (empty here — the stub
+        // package carries no server-renderer dist chunk).
+        expect(manifest.version).toBe(2);
+        expect(Array.isArray(manifest.runtimePreload)).toBe(true);
+        const islands = manifest.islands;
+        expect(islands.Counter).toBeTruthy();
+        expect(islands.Counter.exportName).toBe('Counter');
+        expect(islands.Counter.chunkUrl).toMatch(/^\/assets\/.+\.js$/);
         // The non-component export is filtered by the runtime typeof guard,
         // but it should never reach the manifest either... it shares the
         // module, so it maps to the same chunk under its own name — assert
         // the shape is at least { chunkUrl, exportName } for every entry.
-        for (const entry of Object.values<any>(manifest)) {
+        for (const entry of Object.values<any>(islands)) {
             expect(entry).toHaveProperty('chunkUrl');
             expect(entry).toHaveProperty('exportName');
         }
 
         // The built island chunk contains the stamp
-        const islandChunk = readFileSync(join(root, 'dist/client', manifest.Counter.chunkUrl.slice(1)), 'utf-8');
+        const islandChunk = readFileSync(join(root, 'dist/client', islands.Counter.chunkUrl.slice(1)), 'utf-8');
         expect(islandChunk).toContain('__islandId');
 
         // The entry registered the island through the virtual module

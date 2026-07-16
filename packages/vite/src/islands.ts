@@ -181,7 +181,10 @@ export function sigxIslands(options: SigxIslandsOptions = {}): Plugin {
             if (id !== RESOLVED_VIRTUAL_ID) return;
             // Client-side lazy registry: each island code-splits behind a
             // dynamic import that only executes when its strategy fires.
-            const lines = ["import { __registerIslandChunk } from '@sigx/ssr-islands';"];
+            // Import from the LIGHT client entry — the package root pulls the
+            // plugin (and through it the sigx runtime) onto the page's eager
+            // graph, defeating the lazy hydration core (#293).
+            const lines = ["import { __registerIslandChunk } from '@sigx/ssr-islands/client';"];
             for (const [name, file] of islands) {
                 const spec = JSON.stringify('/' + path.relative(root, file).replace(/\\/g, '/'));
                 lines.push(
@@ -227,11 +230,57 @@ export function sigxIslands(options: SigxIslandsOptions = {}): Plugin {
                         manifest[name] = { chunkUrl: '/' + chunkFile, exportName: name };
                     }
                 }
+
+                // The lazily-imported hydration executor: find the app chunk
+                // that carries @sigx/server-renderer's hydration-core dist
+                // chunk, plus its transitive STATIC imports (the sigx
+                // runtime). islandsPlugin({ manifest }) modulepreloads these
+                // whenever a request records schedulable islands — the bytes
+                // download off the critical path while execution still waits
+                // for the first strategy to fire (#293).
+                const RUNTIME_MODULE = /[\\/]server-renderer[\\/]dist[\\/](hydrate|hydration)-core-[^\\/]*\.js$/;
+                // Chunks already reachable from an entry's STATIC import
+                // closure load eagerly regardless (e.g. the shared boundary
+                // scheduler) — preloading them again is noise; only chunks
+                // exclusive to the lazy runtime graph belong in the hint.
+                const entryReachable = new Set<string>();
+                const walkStatic = (fileName: string): void => {
+                    if (entryReachable.has(fileName)) return;
+                    entryReachable.add(fileName);
+                    const chunk = bundle[fileName];
+                    if (chunk && chunk.type === 'chunk') {
+                        for (const dep of chunk.imports) walkStatic(dep);
+                    }
+                };
+                for (const [fileName, chunk] of Object.entries(bundle)) {
+                    if (chunk.type === 'chunk' && chunk.isEntry) walkStatic(fileName);
+                }
+                const runtimePreload: string[] = [];
+                const seen = new Set<string>();
+                const collect = (fileName: string): void => {
+                    if (seen.has(fileName) || entryReachable.has(fileName)) return;
+                    seen.add(fileName);
+                    runtimePreload.push('/' + fileName);
+                    const chunk = bundle[fileName];
+                    if (chunk && chunk.type === 'chunk') {
+                        for (const dep of chunk.imports) collect(dep);
+                    }
+                };
+                for (const [fileName, chunk] of Object.entries(bundle)) {
+                    if (chunk.type === 'chunk' && chunk.moduleIds?.some((m) => RUNTIME_MODULE.test(m.split('?')[0]))) {
+                        collect(fileName);
+                    }
+                }
+
                 if (Object.keys(manifest).length > 0) {
                     this.emitFile({
                         type: 'asset',
                         fileName: MANIFEST_FILE,
-                        source: JSON.stringify(manifest, null, 2)
+                        source: JSON.stringify(
+                            { version: 2, islands: manifest, runtimePreload },
+                            null,
+                            2
+                        )
                     });
                 }
             }

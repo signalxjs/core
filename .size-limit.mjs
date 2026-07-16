@@ -92,10 +92,19 @@ export default [
     ignore: ['sigx', 'sigx/*', '@sigx/*'],
   },
   {
-    name: '@sigx/ssr-islands/client (browser entry)',
+    // The islands package's EAGER surface — what a page pays at load before
+    // any island strategy fires. NO sigx ignore: like the scheduler entry
+    // above, this doubles as the "no runtime on the eager path" guard; it
+    // bundles @sigx/server-renderer's scheduler through the prod dists, so
+    // only the lazily-imported executor chunk is external.
+    name: '@sigx/ssr-islands/client (eager islands entry)',
     path: 'packages/ssr-islands/dist/client/index.prod.js',
-    limit: '1 KB',
-    ignore: ['sigx', 'sigx/*', '@sigx/*'],
+    limit: '3.5 KB',
+    modifyEsbuildConfig(config) {
+      resolveProdDists(config);
+      (config.external ??= []).push('./hydrate-core-*', './hydration-core-*', './plugin-hooks-*');
+      return config;
+    },
   },
   {
     // The page's only initial script on a resumable page. NO ignore list —

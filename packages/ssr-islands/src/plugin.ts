@@ -25,7 +25,7 @@ import type { SSRContext } from '@sigx/server-renderer';
 import { serializeBoundaryProps, getTypeHandlers } from '@sigx/server-renderer/server';
 import { registerClientPlugin, provideHydrateDefaults } from '@sigx/server-renderer/client';
 import type { VNode, ComponentSetupContext, App } from 'sigx';
-import { signal } from 'sigx';
+import type { signal } from 'sigx';
 import {
     getHydrationDirective,
     filterClientDirectives,
@@ -33,8 +33,9 @@ import {
 
 import { createTrackingSignal, serializeSignalState } from './server/render-component';
 
-import { consumePendingServerState, scheduleComponentHydration } from './client/hydrate-islands';
-import { createRestoringSignal } from './client/restore-signal';
+// One copy of the client hook logic: the app-rooted form registers the same
+// hooks eagerly that hydrateIslands() registers lazily.
+import { islandsClientHooks } from './client/plugin-hooks';
 
 // ─── Plugin Data Types ──────────────────────────────────────────
 
@@ -47,6 +48,24 @@ const PLUGIN_NAME = 'islands';
 
 // ─── Plugin Options ─────────────────────────────────────────────
 
+/** One island's chunk reference in the manifest. */
+export interface IslandManifestEntry {
+    chunkUrl: string;
+    exportName: string;
+}
+
+/**
+ * Manifest v2 — emitted by `sigxIslands()` from `@sigx/vite`. Adds
+ * `runtimePreload`: the app chunk carrying the lazily-imported hydration
+ * executor plus its transitive static imports (the sigx runtime), which the
+ * plugin modulepreloads whenever a request records schedulable islands.
+ */
+export interface IslandsManifestV2 {
+    version: 2;
+    islands: Record<string, IslandManifestEntry>;
+    runtimePreload?: string[];
+}
+
 export interface IslandsPluginOptions {
     /**
      * Island manifest mapping component names to their chunk URLs.
@@ -56,13 +75,29 @@ export interface IslandsPluginOptions {
      * in the `__SIGX_BOUNDARIES__` table, enabling the client to load chunks
      * on-demand without requiring eager `registerComponent()` calls.
      *
+     * Accepts both the v2 shape (`{ version: 2, islands, runtimePreload }`)
+     * and the legacy flat name → entry map.
+     *
      * @example
      * ```ts
-     * import manifest from './dist/island-manifest.json';
+     * import manifest from './dist/.vite/sigx-islands-manifest.json';
      * const ssr = createSSR().use(islandsPlugin({ manifest }));
      * ```
      */
-    manifest?: Record<string, { chunkUrl: string; exportName: string }>;
+    manifest?: IslandsManifestV2 | Record<string, IslandManifestEntry>;
+}
+
+/** Normalize the two accepted manifest shapes. */
+function normalizeManifest(manifest: IslandsPluginOptions['manifest']): {
+    islands: Record<string, IslandManifestEntry>;
+    runtimePreload: string[];
+} {
+    if (!manifest) return { islands: {}, runtimePreload: [] };
+    if ('islands' in manifest && typeof manifest.islands === 'object') {
+        const v2 = manifest as IslandsManifestV2;
+        return { islands: v2.islands ?? {}, runtimePreload: v2.runtimePreload ?? [] };
+    }
+    return { islands: manifest as Record<string, IslandManifestEntry>, runtimePreload: [] };
 }
 
 // ─── Plugin Implementation ──────────────────────────────────────
@@ -83,6 +118,7 @@ export interface IslandsPluginOptions {
  * it with `registerClientPlugin(islandsPlugin())` for state restoration.
  */
 export function islandsPlugin(options?: IslandsPluginOptions): SSRPlugin & { install(app: App): void } {
+    const { islands: manifestIslands, runtimePreload } = normalizeManifest(options?.manifest);
     return {
         name: PLUGIN_NAME,
 
@@ -111,8 +147,8 @@ export function islandsPlugin(options?: IslandsPluginOptions): SSRPlugin & { ins
 
                 // Attach the chunk ref from the manifest if available
                 let chunk: { url: string; export?: string } | undefined;
-                if (options?.manifest && componentName in options.manifest) {
-                    const entry = options.manifest[componentName];
+                if (componentName in manifestIslands) {
+                    const entry = manifestIslands[componentName];
                     chunk = { url: entry.chunkUrl, export: entry.exportName };
                 }
 
@@ -157,6 +193,20 @@ export function islandsPlugin(options?: IslandsPluginOptions): SSRPlugin & { ins
                 componentCtx.signal = createTrackingSignal(signalMap) as typeof signal;
 
                 return componentCtx;
+            },
+
+            assets(ctx: SSRContext): { modulepreload?: string[] } | void {
+                // Preload the lazily-imported hydration runtime whenever this
+                // request recorded a schedulable island: the bytes download
+                // off the critical path, execution still waits for the first
+                // strategy to fire. `hydrate: 'never'` records are another
+                // pack's to wake — never a reason to warm OUR runtime.
+                if (runtimePreload.length === 0) return;
+                for (const record of ctx._boundaries.values()) {
+                    if (record.hydrate && record.hydrate !== 'never') {
+                        return { modulepreload: runtimePreload };
+                    }
+                }
             },
 
             afterRenderComponent(
@@ -205,42 +255,10 @@ export function islandsPlugin(options?: IslandsPluginOptions): SSRPlugin & { ins
             }
         },
 
-        client: {
-            transformComponentContext(
-                _vnode: VNode,
-                componentCtx: ComponentSetupContext
-            ): ComponentSetupContext | void {
-                // Restore the server-captured signal state staged by the core
-                // scheduler just before this island's hydrateComponent call.
-                // Presence of pending state scopes this to islands —
-                // non-island components have none and are left untouched
-                // (mirrors the server hook guarding on the client:* directive).
-                const state = consumePendingServerState();
-                if (!state) return;
-
-                componentCtx.signal = createRestoringSignal(state) as typeof signal;
-                return componentCtx;
-            },
-
-            hydrateComponent(
-                vnode: VNode,
-                dom: Node | null,
-                parent: Node
-            ): Node | null | undefined {
-                // Walk fallback for islands the boundary table did not record
-                // (a stripped blob, or markup rendered without the table):
-                // core's table interception claims recorded boundaries before
-                // this hook runs, so this only fires for directive-carrying
-                // components with no record.
-                const strategy = vnode.props ? getHydrationDirective(vnode.props) : null;
-
-                if (!strategy) return undefined; // Not an island — let core handle it
-
-                return scheduleComponentHydration(vnode, dom, parent, strategy);
-            }
-
-            // No afterHydrate hook anymore: the core hydrator runs the
-            // leftover streamed-boundary scan itself.
-        }
+        // The hooks live in ./client/plugin-hooks so the standalone
+        // hydrateIslands() entry can register them LAZILY (they ride the
+        // hydration-core chunk); this app/SSR-rooted plugin object registers
+        // the same hooks eagerly — full runtime by definition.
+        client: islandsClientHooks.client
     };
 }

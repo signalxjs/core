@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+**Islands pages now defer the sigx runtime until a strategy fires.** (#293)
+
+- `hydrateIslands()` (from `@sigx/ssr-islands/client`) is now the whole
+  client bootstrap: it self-registers the state-restoration hooks as a lazy
+  plugin source, loaded together with `@sigx/server-renderer`'s hydration
+  core on the first `client:*` strategy that fires. The eager surface is
+  only the boundary scheduler (~2 kB, size-limit-guarded with no sigx
+  ignore) — a page whose islands are all deferred executes zero framework
+  JS at load. The legacy `registerClientPlugin(islandsPlugin())` +
+  `hydrateIslands()` form keeps working (registration dedupes by name), but
+  importing `islandsPlugin` from the package root keeps the runtime eager —
+  drop it.
+- Islands manifest v2 (emitted by `sigxIslands()` from `@sigx/vite`):
+  `{ version: 2, islands, runtimePreload }`. `runtimePreload` names the app
+  chunks exclusive to the lazy runtime graph; `islandsPlugin({ manifest })`
+  accepts both v2 and the legacy flat map, and — via the new core `assets()`
+  hook — emits `<link rel="modulepreload">` for them whenever a request
+  records a schedulable island, so deferring execution never costs a
+  first-interaction network round trip. The generated
+  `virtual:sigx-islands` module now imports from `@sigx/ssr-islands/client`
+  (the light entry) instead of the package root.
+- **Breaking (pre-1.0):** `scheduleComponentHydration` moved off the
+  `./client` entry (it feeds the hydration executor — heavy by nature); it
+  remains exported from the package root. `hydrateLeftoverAsyncComponents`
+  now returns `Promise<void>` (the executor loads lazily).
+- Behavior note: a `client:load` island hydrates after one (preloaded)
+  dynamic-import round trip instead of within the entry module's microtask
+  queue.
+
 ## [0.10.0] - 2026-07-15
 
 The runnable example app moved from in-package (`packages/ssr-islands/example/`)

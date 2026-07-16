@@ -3,6 +3,20 @@
  */
 
 import { component, signal, VNode, Fragment, Text } from 'sigx';
+import { loadHydrationCore } from '../src/client/scheduler';
+
+// Pre-warm the lazily-imported hydration executor for every suite that uses
+// these utilities (ssr-islands' test-utils re-exports this module, so both
+// packages are covered). In the browser it loads on the first strategy that
+// fires; under vitest that first dynamic import runs a REAL async transform,
+// which fake timers can't advance and `await nextTick()` flushes can't bound
+// — scheduled-hydration tests would flake on module-cache timing. Warmed, a
+// trigger's `loadHydrationCore()` resolves in microtasks and the existing
+// flushes suffice. Laziness itself is covered by the examples'
+// coverage-based browser smoke, not unit timing. Deliberately NOT in the
+// global vitest setup: importing the executor registers the `ctx.ssr`
+// context extension, which must not leak into runtime-core suites.
+await loadHydrationCore();
 
 /**
  * Remove any leftover script tags injected into document.head by tests

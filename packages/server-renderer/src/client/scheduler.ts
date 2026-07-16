@@ -29,6 +29,34 @@ import type { SSRBoundaryRecord, BoundaryHydrate } from '../boundary';
 import { resolveClientPlugins } from './plugin-registry';
 import { loadBoundaryComponent } from './chunk-loader';
 
+// The rest of the eager surface, re-exported so packs can build their
+// zero-runtime client entries on this module alone: plugin registration,
+// the component registry (all lazy `() => import()` thunks), the chunk
+// loader, and the state-staging seam. Everything here shares the invariant
+// documented above — no sigx-family value imports.
+export {
+    registerClientPlugin,
+    getClientPlugins,
+    clearClientPlugins,
+    resolveClientPlugins,
+    hasPendingClientPlugins,
+    getCurrentAppContext,
+    setCurrentAppContext
+} from './plugin-registry';
+export type { ClientPluginSource, LazyClientPlugin } from './plugin-registry';
+export {
+    registerComponent,
+    registerComponents,
+    getComponent,
+    hasComponent,
+    resolveComponent,
+    __registerIslandChunk,
+    HydrationRegistry
+} from './registry';
+export type { ComponentFactory, LazyComponentLoader } from './registry';
+export { loadBoundaryComponent, prefetchBoundaryChunks } from './chunk-loader';
+export { seedBoundaryState, consumeBoundaryState } from './boundary-state';
+
 /** The lazily-loaded executor surface consumed by the scheduler. */
 type HydrationCore = typeof import('./hydration-core');
 
