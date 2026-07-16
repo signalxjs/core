@@ -80,8 +80,8 @@ export const SigxErrorCode = {
  * literal that ships in prod.
  *
  * `prodError` is exposed via `@sigx/runtime-core/internals` so first-party packs
- * (server-renderer, cache, …) build the same coded prod message without copying
- * the `SIGX### … — see <url>` scaffolding.
+ * that throw coded errors (e.g. `@sigx/server-renderer`) build the same coded
+ * prod message without copying the `SIGX### … — see <url>` scaffolding.
  */
 const ERRORS_URL = 'https://sigx.dev/errors/';
 
