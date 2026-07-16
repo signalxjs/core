@@ -189,6 +189,8 @@ export function sigxPlugin(options: SigxPluginOptions = {}): Plugin {
             server.middlewares.use((req, res, next) => {
                 if (isWorkspaceDist(req.url)) {
                     const setHeader = res.setHeader.bind(res);
+                    // Preserve the original return value — setHeader is
+                    // chainable (returns the response) in current Node.
                     res.setHeader = ((name: string, value: unknown) =>
                         setHeader(name, String(name).toLowerCase() === 'cache-control' ? 'no-cache' : (value as string))
                     ) as typeof res.setHeader;
