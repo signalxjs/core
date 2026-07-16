@@ -1,6 +1,6 @@
 {
     "name": "@sigx/cache",
-    "version": "0.10.0",
+    "version": "0.11.0",
     "description": "Cache policy for SignalX's value-first async — staleTime, gcTime, revalidation, keepPreviousData, invalidate() and optimistic mutate() on the rfc-async §7 pack contract",
     "type": "module",
     "main": "./dist/index.js",
