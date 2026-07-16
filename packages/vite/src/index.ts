@@ -184,15 +184,18 @@ export function sigxPlugin(options: SigxPluginOptions = {}): Plugin {
             // module graph (fresh top-levels importing stale internals).
             // Downgrade those responses to no-cache; ETag revalidation keeps
             // repeat loads as cheap 304s.
-            const isWorkspaceDist = (url: string | undefined): boolean =>
-                !!url && url.includes('/@fs/') && /\/dist\//.test(url.split('?')[0]);
+            const isWorkspaceDist = (url: string | undefined): boolean => {
+                if (!url) return false;
+                const path = url.split('?')[0];
+                return path.includes('/@fs/') && path.includes('/dist/');
+            };
             server.middlewares.use((req, res, next) => {
                 if (isWorkspaceDist(req.url)) {
                     const setHeader = res.setHeader.bind(res);
-                    // Preserve the original return value — setHeader is
-                    // chainable (returns the response) in current Node.
-                    res.setHeader = ((name: string, value: unknown) =>
-                        setHeader(name, String(name).toLowerCase() === 'cache-control' ? 'no-cache' : (value as string))
+                    // Preserve the original return value (chainable) and
+                    // pass non-matching values through untouched.
+                    res.setHeader = ((name, value) =>
+                        setHeader(name, typeof name === 'string' && name.toLowerCase() === 'cache-control' ? 'no-cache' : value)
                     ) as typeof res.setHeader;
                 }
                 next();
