@@ -51,7 +51,12 @@ const server = spawn(
 try {
     await waitForServer(`http://localhost:${PORT}/`, DEV ? 30000 : 15000);
     const browser = await chromium.launch();
-    const page = await browser.newPage();
+    // A REAL-Chrome UA: HeadlessChrome matches server.mjs's isBot regex and
+    // gets the blocking document — the human path is the STREAMING document,
+    // and it must be what the smoke exercises (#279 hid there).
+    const page = await browser.newPage({
+        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36'
+    });
     page.on('pageerror', (e) => console.error('[pageerror]', e.message));
     const cdp = await page.context().newCDPSession(page);
     await cdp.send('Profiler.enable');
