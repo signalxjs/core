@@ -13,6 +13,23 @@ import { patchDirective, onElementMounted, onElementUnmounted } from './directiv
 // SVG namespace for createElementNS
 const svgNS = 'http://www.w3.org/2000/svg';
 
+// SVG elements, for resolving the namespace of elements whose surrounding
+// context is unknown (hydrated subtrees patched from the top). Core is
+// namespace-agnostic: it threads an opaque boolean flag that the namespace
+// ops below give meaning to ("in the SVG namespace").
+const svgTags = new Set([
+    'svg', 'animate', 'animateMotion', 'animateTransform', 'circle', 'clipPath',
+    'defs', 'desc', 'ellipse', 'feBlend', 'feColorMatrix', 'feComponentTransfer',
+    'feComposite', 'feConvolveMatrix', 'feDiffuseLighting', 'feDisplacementMap',
+    'feDistantLight', 'feDropShadow', 'feFlood', 'feFuncA', 'feFuncB', 'feFuncG',
+    'feFuncR', 'feGaussianBlur', 'feImage', 'feMerge', 'feMergeNode', 'feMorphology',
+    'feOffset', 'fePointLight', 'feSpecularLighting', 'feSpotLight', 'feTile',
+    'feTurbulence', 'filter', 'foreignObject', 'g', 'image', 'line', 'linearGradient',
+    'marker', 'mask', 'metadata', 'mpath', 'path', 'pattern', 'polygon', 'polyline',
+    'radialGradient', 'rect', 'set', 'stop', 'switch', 'symbol', 'text', 'textPath',
+    'title', 'tspan', 'use', 'view'
+]);
+
 export const nodeOps: RendererOptions<Node, Element> = {
     insert: (child, parent, anchor) => {
         if (anchor && anchor.parentNode !== parent) anchor = null;
@@ -64,5 +81,18 @@ export const nodeOps: RendererOptions<Node, Element> = {
     patchProp,
     patchDirective,
     onElementMounted,
-    onElementUnmounted
+    onElementUnmounted,
+    // Namespace resolution. With a known context (parentNS is a boolean):
+    // entering SVG happens exactly at <svg>, and leaving at <foreignObject>,
+    // whose subtree — and, per the historical behavior asserted in the
+    // svg-rendering tests, the element itself — is HTML. With no context
+    // (parentNS === undefined, a hydrated subtree patched from the top):
+    // classification falls back to the SVG tag list, which deliberately
+    // includes foreignObject like any other SVG tag name.
+    getElementNamespace: (tag, parentNS) =>
+        parentNS === undefined
+            ? svgTags.has(tag)
+            : tag === 'svg' || (parentNS && tag !== 'foreignObject'),
+    getChildNamespace: (tag, isSVG) => isSVG && tag !== 'foreignObject',
+    getContainerNamespace: (tag, isSVG) => isSVG && tag !== 'svg'
 };

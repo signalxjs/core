@@ -21,6 +21,8 @@ interface MockNode {
     [key: string]: any;
 }
 
+const mockSvgTags = new Set(['svg', 'rect', 'circle', 'path', 'g', 'title', 'foreignObject']);
+
 function createMockDOMOperations() {
     const operations: string[] = [];
     let nodeIdCounter = 0;
@@ -105,6 +107,14 @@ function createMockDOMOperations() {
             elementMountedCalls.push(el);
             operations.push(`onElementMounted:#${el.id}`);
         },
+        // DOM-like namespace ops (SVG semantics) so the namespace-threading
+        // tests exercise core's context propagation
+        getElementNamespace: (tag: string, parentNS: boolean | undefined) =>
+            parentNS === undefined
+                ? mockSvgTags.has(tag)
+                : tag === 'svg' || (parentNS && tag !== 'foreignObject'),
+        getChildNamespace: (tag: string, ns: boolean) => ns && tag !== 'foreignObject',
+        getContainerNamespace: (tag: string, ns: boolean) => ns && tag !== 'svg',
         reset: () => {
             operations.length = 0;
             patchPropCalls.length = 0;
@@ -400,6 +410,61 @@ describe('Renderer - patch()', () => {
             const circleCall = mockOps.createElementCalls.find(c => c.type === 'circle');
             expect(circleCall).toBeDefined();
             expect(circleCall!.isSVG).toBe(true);
+        });
+
+        it('should ask the host to resolve namespace from the tag when patching a hydrated subtree with no context', () => {
+            // Mount, then strip the cached namespace flag to simulate a
+            // hydrated vnode (dom present, no _ns) patched from the top.
+            const oldCircle = jsx('circle', { cx: '1' }) as VNode;
+            mountAndReset(renderer, mockOps, oldCircle, container);
+            delete (oldCircle as any)._ns;
+
+            const newCircle = jsx('circle', { cx: '2' }) as VNode;
+            renderer.patch(oldCircle, newCircle, container);
+
+            // No context at the patch entrypoint → the host's tag heuristic
+            // classifies circle as namespaced.
+            const call = mockOps.patchPropCalls.find(c => c.key === 'cx');
+            expect(call?.isSVG).toBe(true);
+        });
+
+        it('should resolve hydrated children against the known context of a resolved ancestor', () => {
+            // 'title' is in the host's tag list (it exists in SVG) but here
+            // sits under a plain div. Once the div resolves to the default
+            // namespace, its children patch in a KNOWN non-namespaced
+            // context — the tag heuristic must not kick in for them.
+            const oldTree = jsx('div', {
+                children: [jsx('title', { key: 't', id: 'a' })]
+            }) as VNode;
+            mountAndReset(renderer, mockOps, oldTree, container);
+            delete (oldTree as any)._ns;
+            delete (oldTree.children[0] as any)._ns;
+
+            const newTree = jsx('div', {
+                children: [jsx('title', { key: 't', id: 'b' })]
+            }) as VNode;
+            renderer.patch(oldTree, newTree, container);
+
+            const call = mockOps.patchPropCalls.find(c => c.key === 'id');
+            expect(call).toBeDefined();
+            expect(call!.isSVG).toBe(false);
+        });
+
+        it('should derive the container context from a hydrated old element when replacing with no context', () => {
+            // Type replacement of a hydrated vnode (no cached _ns) patched
+            // from the top: the host resolves the old element's flag via its
+            // tag heuristic, then derives the container's context from it,
+            // so the replacement mounts in the right namespace.
+            const oldCircle = jsx('circle', { cx: '1' }) as VNode;
+            mountAndReset(renderer, mockOps, oldCircle, container);
+            delete (oldCircle as any)._ns;
+
+            const newRect = jsx('rect', { width: '2' }) as VNode;
+            renderer.patch(oldCircle, newRect, container);
+
+            const rectCall = mockOps.createElementCalls.find(c => c.type === 'rect');
+            expect(rectCall).toBeDefined();
+            expect(rectCall!.isSVG).toBe(true);
         });
     });
 });
