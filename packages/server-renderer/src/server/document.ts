@@ -166,6 +166,17 @@ function renderAssetLinks(assets: DocumentOptions['assets'], ctx: SSRContext): s
         preloaded.add(url);
         links.push(`<link rel="modulepreload" href="${escapeAttrValue(url)}">`);
     });
+    // Pack-contributed preloads (the `assets` plugin hook): packs whose
+    // runtime loads lazily keep the fetch off the critical path here — core
+    // never needs to know what the chunks are.
+    for (const plugin of ctx._plugins ?? []) {
+        const contributed = plugin.server?.assets?.(ctx);
+        for (const href of contributed?.modulepreload ?? []) {
+            if (preloaded.has(href)) continue;
+            preloaded.add(href);
+            links.push(`<link rel="modulepreload" href="${escapeAttrValue(href)}">`);
+        }
+    }
 
     return links.join('\n');
 }

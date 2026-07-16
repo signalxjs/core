@@ -38,6 +38,7 @@ export default defineConfig({
             '@sigx/runtime-dom': resolve(__dirname, 'packages/runtime-dom/src/index.ts'),
             '@sigx/server-renderer/server': resolve(__dirname, 'packages/server-renderer/src/server/index.ts'),
             '@sigx/server-renderer/node': resolve(__dirname, 'packages/server-renderer/src/node.ts'),
+            '@sigx/server-renderer/client/scheduler': resolve(__dirname, 'packages/server-renderer/src/client/scheduler.ts'),
             '@sigx/server-renderer/client': resolve(__dirname, 'packages/server-renderer/src/client/index.ts'),
             '@sigx/server-renderer': resolve(__dirname, 'packages/server-renderer/src/index.ts'),
             '@sigx/resume/server': resolve(__dirname, 'packages/resume/src/server/index.ts'),

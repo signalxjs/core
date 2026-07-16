@@ -62,6 +62,51 @@ describe('DocumentOptions.assets', () => {
         expect(html.slice(0, headEnd)).toContain('<link rel="modulepreload" href="/assets/Late-9.js">');
     });
 
+    it('plugins contribute modulepreloads via the assets hook, deduped and escaped', async () => {
+        const contributes: SSRPlugin = {
+            name: 'test:pack-runtime',
+            server: {
+                resolveBoundary: () => ({ hydrate: 'visible', chunk: { url: '/assets/Widget-abc.js' } }),
+                // A pack whose runtime loads lazily keeps its chunk fetch off
+                // the critical path here (#293).
+                assets: () => ({
+                    modulepreload: [
+                        '/assets/hydration-core-1.js',
+                        '/assets/Widget-abc.js', // duplicate of the boundary chunk
+                        '/assets/evil".js'
+                    ]
+                })
+            }
+        };
+        const html = await createSSR().use(contributes).renderDocument((Page as any)({}), {
+            template: TEMPLATE
+        });
+        const headEnd = html.indexOf('</head>');
+        const head = html.slice(0, headEnd);
+        expect(head).toContain('<link rel="modulepreload" href="/assets/hydration-core-1.js">');
+        expect((html.match(/href="\/assets\/Widget-abc\.js"/g) ?? []).length).toBe(1);
+        expect(head).toContain('/assets/evil&quot;.js');
+    });
+
+    it('the assets hook sees the boundaries this request recorded', async () => {
+        let sawBoundary = false;
+        const inspects: SSRPlugin = {
+            name: 'test:inspects',
+            server: {
+                resolveBoundary: () => ({ hydrate: 'idle', chunk: { url: '/assets/A.js' } }),
+                assets: (ctx) => {
+                    sawBoundary = ctx._boundaries.size > 0;
+                    // A pack preloads its runtime only when it recorded
+                    // schedulable boundaries — the policy this seam exists for.
+                    return sawBoundary ? { modulepreload: ['/assets/rt.js'] } : undefined;
+                }
+            }
+        };
+        const html = await createSSR().use(inspects).renderDocument((Page as any)({}), { template: TEMPLATE });
+        expect(sawBoundary).toBe(true);
+        expect(html).toContain('<link rel="modulepreload" href="/assets/rt.js">');
+    });
+
     it('escapes URLs and emits nothing when there is nothing to emit', async () => {
         const html = await createSSR().renderDocument((Page as any)({}), { template: TEMPLATE });
         expect(html).not.toContain('modulepreload');

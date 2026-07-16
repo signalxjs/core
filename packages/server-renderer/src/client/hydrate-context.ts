@@ -1,11 +1,13 @@
 /**
- * Hydration context and state management
+ * Hydration context helpers — the HEAVY half of what used to be one module.
  *
- * Manages app context tracking, client plugin registration, and the SSR
- * context extension for components (environment flags).
- *
- * Strategy-specific concerns (island data, async hydration) are handled
- * by plugins registered via `registerClientPlugin()`.
+ * Element normalization needs `Text` from the runtime and the module-scope
+ * `registerContextExtension` call needs `sigx/internals`, so this module
+ * lives on the hydration-core side of the scheduler/core split and loads
+ * with the executor. The client plugin registry and app-context tracking —
+ * which packs need EAGERLY, before any runtime code loads — moved to
+ * `./plugin-registry` (re-exported below so in-package imports keep
+ * working).
  */
 
 import {
@@ -13,8 +15,20 @@ import {
     Text,
 } from 'sigx';
 import { registerContextExtension } from 'sigx/internals';
-import type { AppContext } from 'sigx';
-import type { SSRPlugin } from '../plugin';
+
+// Re-export the eager plugin registry / app-context surface: this module is
+// where these names historically lived, and the hydration-side modules
+// import them from here.
+export {
+    registerClientPlugin,
+    getClientPlugins,
+    clearClientPlugins,
+    resolveClientPlugins,
+    hasPendingClientPlugins,
+    getCurrentAppContext,
+    setCurrentAppContext
+} from './plugin-registry';
+export type { ClientPluginSource, LazyClientPlugin } from './plugin-registry';
 
 // ============= Internal Types =============
 
@@ -24,52 +38,6 @@ export interface InternalVNode extends VNode {
     _effect?: any;
     _componentProps?: any;
     _slots?: any;
-}
-
-// ============= Module State =============
-
-// Track current app context during hydration for DI
-// Used for deferred hydration callbacks
-let _currentAppContext: AppContext | null = null;
-
-// Registered client-side SSR plugins
-let _clientPlugins: SSRPlugin[] = [];
-
-// ============= Client Plugin Registry =============
-
-/**
- * Register a client-side SSR plugin.
- * Plugins are called during hydration to intercept component processing,
- * skip default hydration walk, or run post-hydration logic.
- */
-export function registerClientPlugin(plugin: SSRPlugin): void {
-    _clientPlugins.push(plugin);
-}
-
-/**
- * Get all registered client-side plugins.
- */
-export function getClientPlugins(): SSRPlugin[] {
-    return _clientPlugins;
-}
-
-/**
- * Clear all registered client plugins (useful for testing).
- */
-export function clearClientPlugins(): void {
-    _clientPlugins = [];
-}
-
-// ============= State Accessors =============
-
-/** Get the current app context for deferred hydration */
-export function getCurrentAppContext(): AppContext | null {
-    return _currentAppContext;
-}
-
-/** Set the current app context during hydration */
-export function setCurrentAppContext(ctx: AppContext | null): void {
-    _currentAppContext = ctx;
 }
 
 // ============= Element Normalization =============

@@ -122,6 +122,24 @@ export interface SSRPlugin {
         ): { html?: string; script?: string; preScript?: string } | void;
 
         /**
+         * Contribute asset hints to the document shell. Called by
+         * `renderDocument`'s asset-links pass (after the initial walk, so
+         * `ctx` reflects the boundaries this request actually recorded).
+         * Returned `modulepreload` URLs are emitted as
+         * `<link rel="modulepreload">`, deduped against the caller's assets
+         * and core's per-boundary chunk preloads.
+         *
+         * This is the pack-owned side of the preload policy (#281): core
+         * only warms chunks IT will schedule, so a pack whose runtime or
+         * wake-up machinery loads lazily uses this hook to keep the fetch
+         * off the critical path without core knowing what the chunk is.
+         *
+         * @example Islands preloads its lazily-imported hydration runtime
+         *          whenever the request recorded a schedulable boundary.
+         */
+        assets?(ctx: SSRContext): { modulepreload?: string[] } | void;
+
+        /**
          * Called after rendering finishes. Return HTML to append after the rendered content.
          * Use for injecting scripts, JSON data, ready events, etc.
          */

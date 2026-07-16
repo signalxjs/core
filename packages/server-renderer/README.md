@@ -70,6 +70,38 @@ render call; concurrent renders share nothing. AsyncLocalStorage remains
 only a best-effort backstop for user code reading `getCurrentInstance()`
 after an `await` inside setup, which is dev-warned.
 
+## The eager scheduler vs the lazy hydration core
+
+Client-side selective hydration is split in two, so deferred pages execute
+zero runtime JS at load:
+
+- **`@sigx/server-renderer/client/scheduler`** — the eager half: reads the
+  boundary table, wires `load`/`idle`/`visible`/`media`/`interaction`
+  triggers, listens for streamed boundaries. It imports nothing from the
+  sigx family (~2 kB, size-limit-guarded).
+- **The hydration core** — the executor (`hydrateComponent`, the renderer,
+  mount/hydrate primitives) lives in a separate chunk that
+  `loadHydrationCore()` dynamically imports on the first strategy that
+  actually fires. The component chunk and the executor fetch in parallel.
+
+`registerClientPlugin` (part of the scheduler surface) accepts either a
+plugin object or a lazy source — `{ name, load: () => import('...') }` —
+resolved together with the hydration core, so a pack's client hooks ride the
+same lazily-fetched chunk as the renderer. Registrations dedupe by `name`,
+first-wins. Packs that hydrate through their own wake-up (rather than the
+boundary scheduler) should register plugin objects, or await
+`resolveClientPlugins()` before hydrating.
+
+Server plugins can contribute `<link rel="modulepreload">` URLs to the
+document shell via the optional `assets(ctx)` hook — the intended pairing is
+to preload the lazily-imported runtime chunk whenever the request recorded
+schedulable boundaries, keeping the fetch off the critical path while
+execution still waits for the first trigger.
+
+The `./client` barrel re-exports the full surface (scheduler + executor +
+`ssrClientPlugin`) for app-rooted hydration, where the runtime is loaded by
+definition.
+
 ## 📚 Documentation
 
 Streaming and string rendering, the plugin system, hydration, head management — full guides, the complete API reference and live examples → **<https://sigx.dev/server/>**

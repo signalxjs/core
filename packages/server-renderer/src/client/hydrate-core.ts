@@ -23,11 +23,10 @@ import { getHydrateDefaults } from './hydrate-defaults';
 import {
     getBoundaryTable,
     scheduleTableBoundaries,
-    scheduleWalkedBoundary,
-    hydrateLeftoverBoundaries,
     findComponentBoundaries,
     parseMarkerId
-} from './boundary-hydrator';
+} from './scheduler';
+import { scheduleWalkedBoundary, hydrateLeftoverBoundaries } from './hydration-core';
 import type { SSRBoundaryRecord } from '../boundary';
 
 /**

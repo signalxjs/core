@@ -13,7 +13,7 @@ import { hydrate } from '../src/client/hydrate-core';
 import {
     cleanupPendingHydrations,
     invalidateMarkerIndex
-} from '../src/client/boundary-hydrator';
+} from '../src/client/scheduler';
 import { clearClientPlugins } from '../src/client/hydrate-context';
 import type { SSRBoundaryRecord } from '../src/boundary';
 import { createSSRContainer, cleanupContainer, nextTick } from './test-utils';

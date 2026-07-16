@@ -14,7 +14,7 @@ import {
     cleanupPendingHydrations,
     invalidateMarkerIndex,
     getBoundaryTable
-} from '../src/client/boundary-hydrator';
+} from '../src/client/scheduler';
 import { registerComponent } from '../src/client/registry';
 import { clearClientPlugins } from '../src/client/hydrate-context';
 import {

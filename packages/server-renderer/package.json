@@ -24,6 +24,12 @@
             "production": "./dist/client/index.prod.js",
             "import": "./dist/client/index.js"
         },
+        "./client/scheduler": {
+            "types": "./dist/client/scheduler.d.ts",
+            "development": "./dist/client/scheduler.js",
+            "production": "./dist/client/scheduler.prod.js",
+            "import": "./dist/client/scheduler.js"
+        },
         "./node": {
             "types": "./dist/node.d.ts",
             "development": "./dist/node.js",

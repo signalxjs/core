@@ -43,14 +43,41 @@ export default [
   {
     name: '@sigx/server-renderer',
     path: 'packages/server-renderer/dist/index.prod.js',
-    limit: '12.5 KB',
+    limit: '13 KB',
     ignore: ['sigx', 'sigx/*', '@sigx/*', 'node:stream'],
   },
   {
     name: '@sigx/server-renderer/client (browser entry)',
     path: 'packages/server-renderer/dist/client/index.prod.js',
-    limit: '5 KB',
+    limit: '5.5 KB',
     ignore: ['sigx', 'sigx/*', '@sigx/*'],
+  },
+  {
+    // The eager half of selective hydration — what a page pays at load when
+    // every island strategy is deferred. NO sigx ignore — this entry doubles
+    // as the "scheduler imports no runtime" guard: if the scheduler ever
+    // regains a static sigx-family import, esbuild bundles the runtime and
+    // the check blows past the limit. Only the lazily-imported executor
+    // chunk is marked external (hashed dist name, hence the wildcard).
+    name: '@sigx/server-renderer/client/scheduler (eager scheduler)',
+    path: 'packages/server-renderer/dist/client/scheduler.prod.js',
+    limit: '3 KB',
+    modifyEsbuildConfig(config) {
+      // Externalize ONLY the lazily-imported executor chunk. Its hashed
+      // name is rolldown's chunk-naming heuristic — currently
+      // `hydrate-core-<hash>` (largest module in the chunk); the
+      // `hydration-core-*` variant is listed in case the heuristic drifts
+      // to the imported module's own name. Deliberately NOT a broad
+      // wildcard: esbuild would match the facade's static
+      // `../scheduler-<hash>.prod.js` import too, externalizing the very
+      // code this entry measures (observed: 2.13 kB → 226 B). If BOTH
+      // names miss after a tooling change, the check fails loudly upward
+      // (executor + runtime get bundled), never silently under — and the
+      // source-level closure walk in dependency-direction.test.ts guards
+      // the split structurally either way.
+      (config.external ??= []).push('./hydrate-core-*', './hydration-core-*');
+      return config;
+    },
   },
   {
     name: '@sigx/ssr-islands',
