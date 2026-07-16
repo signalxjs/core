@@ -485,14 +485,21 @@ export function createRenderer<HostNode = any, HostElement = any>(
             const nextSibling = oldVNode.dom ? hostNextSibling(oldVNode.dom) : null;
             unmount(oldVNode, parent as HostElement);
             // Thread the namespace context so a replacement inside a
-            // namespaced subtree keeps it. Fallback when the context is
-            // unknown: let the host derive the container's context from the
-            // old vnode's own cached flag.
-            const oldNS = (oldVNode as InternalVNode)._ns;
-            mount(newVNode, parent as HostElement, nextSibling,
-                parentNS || (oldNS === true && hostGetContainerNamespace
-                    ? hostGetContainerNamespace(oldVNode.type as string, oldNS)
-                    : false));
+            // namespaced subtree keeps it. When the context is unknown, let
+            // the host derive the container's context from the old element's
+            // flag — resolving that flag first via the tag heuristic if the
+            // old vnode was hydrated and never cached one.
+            let containerNS: boolean;
+            if (parentNS !== undefined) {
+                containerNS = parentNS;
+            } else if (typeof oldVNode.type === 'string' && hostGetContainerNamespace) {
+                const oldNS = (oldVNode as InternalVNode)._ns ??
+                    (hostGetElementNamespace ? hostGetElementNamespace(oldVNode.type, undefined) : false);
+                containerNS = hostGetContainerNamespace(oldVNode.type, oldNS);
+            } else {
+                containerNS = false;
+            }
+            mount(newVNode, parent as HostElement, nextSibling, containerNS);
             return;
         }
 

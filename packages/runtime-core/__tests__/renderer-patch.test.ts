@@ -449,5 +449,22 @@ describe('Renderer - patch()', () => {
             expect(call).toBeDefined();
             expect(call!.isSVG).toBe(false);
         });
+
+        it('should derive the container context from a hydrated old element when replacing with no context', () => {
+            // Type replacement of a hydrated vnode (no cached _ns) patched
+            // from the top: the host resolves the old element's flag via its
+            // tag heuristic, then derives the container's context from it,
+            // so the replacement mounts in the right namespace.
+            const oldCircle = jsx('circle', { cx: '1' }) as VNode;
+            mountAndReset(renderer, mockOps, oldCircle, container);
+            delete (oldCircle as any)._ns;
+
+            const newRect = jsx('rect', { width: '2' }) as VNode;
+            renderer.patch(oldCircle, newRect, container);
+
+            const rectCall = mockOps.createElementCalls.find(c => c.type === 'rect');
+            expect(rectCall).toBeDefined();
+            expect(rectCall!.isSVG).toBe(true);
+        });
     });
 });
