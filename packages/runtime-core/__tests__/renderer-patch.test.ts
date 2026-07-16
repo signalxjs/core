@@ -21,6 +21,8 @@ interface MockNode {
     [key: string]: any;
 }
 
+const mockSvgTags = new Set(['svg', 'rect', 'circle', 'path', 'g', 'foreignObject']);
+
 function createMockDOMOperations() {
     const operations: string[] = [];
     let nodeIdCounter = 0;
@@ -105,6 +107,14 @@ function createMockDOMOperations() {
             elementMountedCalls.push(el);
             operations.push(`onElementMounted:#${el.id}`);
         },
+        // DOM-like namespace ops (SVG semantics) so the namespace-threading
+        // tests exercise core's context propagation
+        getElementNamespace: (tag: string, parentNS: boolean | undefined) =>
+            parentNS === undefined
+                ? mockSvgTags.has(tag)
+                : tag === 'svg' || (parentNS && tag !== 'foreignObject'),
+        getChildNamespace: (tag: string, ns: boolean) => ns && tag !== 'foreignObject',
+        getContainerNamespace: (tag: string, ns: boolean) => ns && tag !== 'svg',
         reset: () => {
             operations.length = 0;
             patchPropCalls.length = 0;
