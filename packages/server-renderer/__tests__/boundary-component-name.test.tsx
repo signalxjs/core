@@ -64,3 +64,33 @@ describe('ResolvedBoundary.component', () => {
         expect(record.component).toBe('PackName');
     });
 });
+
+describe("modulepreload policy (#281)", () => {
+    it("skips hydrate:'never' chunks and keeps schedulable ones", async () => {
+        const Never = component(() => () => <i>n</i>, { name: 'NeverComp' });
+        (Never as any).__testStamp = true;
+        const Load = component(() => () => <b>l</b>, { name: 'LoadComp' });
+        (Load as any).__loadStamp = true;
+
+        const pack: SSRPlugin = {
+            name: 'preload-pack',
+            server: {
+                resolveBoundary(vnode) {
+                    if ((vnode.type as any).__testStamp) {
+                        return { hydrate: 'never', chunk: { url: '/assets/never.js' } };
+                    }
+                    if ((vnode.type as any).__loadStamp) {
+                        return { hydrate: 'load', chunk: { url: '/assets/load.js' } };
+                    }
+                    return undefined;
+                }
+            }
+        };
+        const ssr = createSSR().use(pack);
+        const html = await ssr.renderDocument(<div><Never /><Load /></div>, {
+            template: '<!doctype html><html><head></head><body><div id="app"><!--ssr-outlet--></div></body></html>'
+        });
+        expect(html).toContain('modulepreload" href="/assets/load.js">');
+        expect(html).not.toContain('modulepreload" href="/assets/never.js"');
+    });
+});
