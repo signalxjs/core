@@ -125,7 +125,9 @@ export function resolveClientPlugins(): Promise<SSRPlugin[]> {
     const entries = [..._lazySources];
     const loads = entries.map((entry) => {
         if (!entry.loading) {
-            entry.loading = entry.source.load().then(
+            // Route the load through a promise so a synchronously-throwing
+            // loader hits the same contained failure path as a rejection.
+            entry.loading = Promise.resolve().then(() => entry.source.load()).then(
                 (mod) => (mod as { default?: SSRPlugin }).default ?? (mod as SSRPlugin),
                 (err) => {
                     entry.loading = null; // retry on the next trigger

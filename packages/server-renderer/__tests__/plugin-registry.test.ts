@@ -117,6 +117,25 @@ describe('client plugin registry', () => {
         errorSpy.mockRestore();
     });
 
+    it('a synchronously-throwing load() is contained like a rejection, and retried', async () => {
+        let attempts = 0;
+        const p = plugin('sync-throw');
+        registerClientPlugin({
+            name: 'sync-throw',
+            load: () => {
+                attempts++;
+                if (attempts === 1) throw new Error('sync boom');
+                return Promise.resolve(p);
+            }
+        });
+        const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+        await expect(resolveClientPlugins()).resolves.toEqual([]);
+        expect(await resolveClientPlugins()).toEqual([p]);
+        expect(attempts).toBe(2);
+        errorSpy.mockRestore();
+    });
+
     it('one failing source does not block the others', async () => {
         const ok = plugin('ok');
         registerClientPlugin({ name: 'broken', load: () => Promise.reject(new Error('boom')) });
