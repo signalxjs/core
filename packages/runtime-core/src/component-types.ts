@@ -326,6 +326,15 @@ export interface ComponentSetupContext<
      * For HMR: first set ctx.renderFn to the new render function, then call update().
      */
     update(): void;
+    /**
+     * Reload this instance against a new setup body — for HMR only. Disposes
+     * the previous run's onUnmounted cleanups, clears all lifecycle hook lists
+     * (so hot updates don't accumulate hooks), re-runs `setup`, then re-fires
+     * the new created/mounted hooks and re-renders. See core#107.
+     *
+     * @internal Present only in dev builds; `undefined` in production.
+     */
+    __hmrReload?(setup: SetupFn<any, any, any, any>): void;
 }
 
 export type ViewFn = () => JSXElement | JSXElement[] | undefined;

@@ -1169,6 +1169,63 @@ export function createRenderer<HostNode = any, HostElement = any>(
             ctx.update = () => {
                 componentEffect();
             };
+
+            // HMR reload primitive (dev-only; stripped from the prod dist).
+            // Re-runs a new setup body against THIS instance without a full
+            // remount, replacing — not appending to — the previous run's
+            // lifecycle registrations. Mirrors the initial-mount sequence so
+            // resources the new setup creates in onCreated/onMounted are
+            // re-established (a pure reset would tear the old ones down and
+            // never re-create them). See core#107.
+            if (__DEV__) {
+                (ctx as InternalComponentContext).__hmrReload = (newSetup: SetupFn<any, any, any, any>) => {
+                    // 1. Dispose the previous run's cleanups (untracked, like
+                    //    the real unmount path) so old listeners/timers go away.
+                    if (unmountHooks) {
+                        const hooks: ((c: MountContext) => void)[] = unmountHooks;
+                        untrack(() => {
+                            for (let i = 0, len = hooks.length; i < len; i++) hooks[i](mountCtx);
+                        });
+                    }
+                    // 2. Clear every hook list — the re-run repopulates them,
+                    //    so hooks no longer accumulate across hot updates.
+                    createdHooks = mountHooks = updatedHooks = unmountHooks = null;
+
+                    // 3. Re-run the new setup exactly like mount: untracked
+                    //    (no parent-dep capture, #111), instance current so
+                    //    module-level hooks register here (#105), then rewrap
+                    //    with the error scope and fire the new created hooks.
+                    const prevInstance = setCurrentInstance(ctx);
+                    try {
+                        const setupResult = untrack(() => newSetup(ctx));
+                        if (setupResult && typeof (setupResult as any).then === 'function') {
+                            throw asyncSetupClientError(componentName ?? 'anonymous');
+                        }
+                        ctx.renderFn = applyErrorScope(ctx, setupResult as ViewFn);
+                        if (createdHooks) {
+                            const hooks: (() => void)[] = createdHooks;
+                            untrack(() => {
+                                for (let i = 0, len = hooks.length; i < len; i++) hooks[i]();
+                            });
+                        }
+                    } finally {
+                        setCurrentInstance(prevInstance);
+                    }
+
+                    // 4. Re-render through the existing effect (runs the new
+                    //    updatedHooks and notifies plugins of the update).
+                    componentEffect();
+
+                    // 5. Fire the new mount hooks (untracked, like initial
+                    //    mount) so onMounted-created resources are re-attached.
+                    if (mountHooks) {
+                        const hooks: ((c: MountContext) => void)[] = mountHooks;
+                        untrack(() => {
+                            for (let i = 0, len = hooks.length; i < len; i++) hooks[i](mountCtx);
+                        });
+                    }
+                };
+            }
         }
 
         // Run mount hooks (untrack to prevent signal reads from
