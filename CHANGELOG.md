@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- **`@sigx/vite`**: `defineLibConfig` takes an `importSource` option — the module the automatic JSX runtime imports from — defaulting to `'sigx'`, so every existing caller is unaffected. It was hardcoded to the `sigx` umbrella, which carries the DOM renderer, leaving non-web platform packages (terminal, lynx) no way to build their own components against their runtime: the only escape was a per-file `/** @jsxImportSource … */` pragma on every `.tsx` source, since oxc honors a pragma over config. Read only when `jsx: true`. (#277)
+
 ## [0.10.0] — 2026-07-15
 
 ### Changed

@@ -69,6 +69,15 @@ export interface LibBuildOptions {
     jsx?: boolean;
 
     /**
+     * The module the automatic JSX runtime imports from. Only read when
+     * `jsx` is enabled. Platform packages that build their own components
+     * target their runtime directly (e.g. `@sigx/runtime-core`) instead of
+     * the `sigx` umbrella, which carries the DOM renderer.
+     * @default 'sigx'
+     */
+    importSource?: string;
+
+    /**
      * Platform target
      * @default 'browser'
      */
@@ -190,6 +199,7 @@ export function defineLibConfig(options: LibBuildOptions): UserConfigFnObject {
         minify = true,
         banner,
         jsx = false,
+        importSource = 'sigx',
         platform = 'browser',
         root = process.cwd(),
     } = options;
@@ -286,7 +296,7 @@ export function defineLibConfig(options: LibBuildOptions): UserConfigFnObject {
                 oxc: {
                     jsx: {
                         runtime: 'automatic',
-                        importSource: 'sigx'
+                        importSource
                     }
                 }
             })

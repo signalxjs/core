@@ -178,6 +178,27 @@ describe('defineLibConfig — options & flags', () => {
         expect(config.oxc).toBeUndefined();
     });
 
+    it('targets a custom importSource when one is given', () => {
+        // Non-web platforms build against their runtime, not the `sigx`
+        // umbrella (which carries the DOM renderer).
+        const config: any = resolveConfig({
+            entry: 'src/index.ts',
+            jsx: true,
+            importSource: '@sigx/runtime-core'
+        });
+        expect(config.oxc).toEqual({
+            jsx: { runtime: 'automatic', importSource: '@sigx/runtime-core' }
+        });
+    });
+
+    it('ignores importSource when jsx is not enabled', () => {
+        const config: any = resolveConfig({
+            entry: 'src/index.ts',
+            importSource: '@sigx/runtime-core'
+        });
+        expect(config.oxc).toBeUndefined();
+    });
+
     it('propagates a banner into rolldownOptions.output', () => {
         const config: any = resolveConfig({
             entry: 'src/index.ts',
