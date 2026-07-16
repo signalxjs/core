@@ -45,10 +45,12 @@ export {
 // Signal
 export {
     signal,
-    isSignal,
     detectAccess,
     detectAccessDev
 } from './signal';
+
+// Signal brand (dependency-free — usable without pulling in signal.ts)
+export { isSignal } from './signal-brand';
 
 // Per-property signal views
 export { toSignal, toSignals } from './toSignal';

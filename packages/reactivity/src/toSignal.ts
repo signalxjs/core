@@ -2,7 +2,7 @@
 // toSignal / toSignals - Per-property signal views over reactive objects
 // ============================================================================
 
-import { markSignal } from './signal';
+import { markSignal } from './signal-brand';
 
 /**
  * A signal-shaped live view over a single property of a reactive object.

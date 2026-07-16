@@ -3,6 +3,7 @@
 // ============================================================================
 
 import type { Dep, Signal, PrimitiveSignal, Primitive } from './types';
+import { markSignal } from './signal-brand';
 import { currentSubscriber, batch, startBatch, endBatch, createDep, track, trigger } from './effect';
 import { getDevtoolsHook, registerReactiveProxy, notifySignalUpdated } from './devtools-hook';
 import {
@@ -24,40 +25,6 @@ import {
  * time — production-without-devtools never grows this map.
  */
 const signalIds = new WeakMap<object, number>();
-
-/**
- * Brand registry for signal-shaped `{ value }` handles: primitive-wrapper
- * signals (`signal(0)`) and `toSignal`/`toSignals` property views. Powers
- * {@link isSignal}. Object signals are NOT branded — test those with
- * `isReactive()`; computeds with `isComputed()`.
- */
-const valueSignals = new WeakSet<object>();
-
-/** @internal Brand a `{ value }` handle so isSignal() recognizes it. */
-export function markSignal<T extends object>(handle: T): T {
-    valueSignals.add(handle);
-    return handle;
-}
-
-/**
- * Check whether a value is a signal-shaped `{ value }` handle: a
- * primitive-wrapper signal created by `signal(primitive)`, or a property
- * view from `toSignal`/`toSignals`.
- *
- * Returns `false` for object signals (use `isReactive`) and computeds
- * (use `isComputed`).
- *
- * @example
- * ```ts
- * isSignal(signal(0));            // true
- * isSignal(toSignal(state, 'x')); // true
- * isSignal(signal({ x: 1 }));     // false — object signal
- * isSignal({ value: 1 });         // false — plain object
- * ```
- */
-export function isSignal(value: unknown): value is { value: unknown } {
-    return typeof value === 'object' && value !== null && valueSignals.has(value);
-}
 
 /** Check if a value is a primitive type */
 function isPrimitive(value: unknown): value is Primitive {
