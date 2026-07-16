@@ -193,7 +193,8 @@ export function serializeBoundaryProps(
  * stays byte-identical).
  */
 export function emitBoundaryTable(ctx: SSRContext): string {
-    ctx._boundaries.forEach((_record, id) => ctx._flushedBoundaries.add(id));
+    // The shell table carries every record known so far — nothing pending.
+    ctx._unflushedBoundaries.clear();
     if (ctx._boundaries.size === 0) return '';
     const table: Record<number, unknown> = {};
     ctx._boundaries.forEach((record, id) => {
@@ -222,13 +223,14 @@ export function boundaryPatchJs(ctx: SSRContext, id: number): string {
     const record = ctx._boundaries.get(id);
     if (record) {
         patch[id] = record;
-        ctx._flushedBoundaries.add(id);
+        ctx._unflushedBoundaries.delete(id);
     }
-    ctx._boundaries.forEach((unflushed, unflushedId) => {
-        if (ctx._flushedBoundaries.has(unflushedId)) return;
-        patch[unflushedId] = unflushed;
-        ctx._flushedBoundaries.add(unflushedId);
-    });
+    // Drain the dirty-set — O(patch size), no per-resolution map rescans.
+    for (const unflushedId of ctx._unflushedBoundaries) {
+        const unflushed = ctx._boundaries.get(unflushedId);
+        if (unflushed) patch[unflushedId] = unflushed;
+    }
+    ctx._unflushedBoundaries.clear();
     if (Object.keys(patch).length === 0) return '';
     return assignmentJs('__SIGX_BOUNDARIES__', patch, getTypeHandlers(ctx));
 }

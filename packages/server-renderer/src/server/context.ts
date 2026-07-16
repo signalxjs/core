@@ -184,12 +184,13 @@ export interface SSRContext {
      */
     _boundaries: Map<number, SSRBoundaryRecord>;
     /**
-     * Boundary ids already emitted to the client (shell table or a stream
-     * patch). Records born inside a deferred render are NOT in the shell
-     * table — each stream patch drains the unflushed set so they reach
-     * `window.__SIGX_BOUNDARIES__` too (#279).
+     * Boundary ids recorded but not yet emitted to the client. Records born
+     * inside a deferred render are NOT in the shell table — each stream
+     * patch drains this set so they reach `window.__SIGX_BOUNDARIES__` too
+     * (#279). A dirty-set, not a flushed-set: draining is O(patch), never a
+     * rescan of every boundary per async resolution.
      */
-    _flushedBoundaries: Set<number>;
+    _unflushedBoundaries: Set<number>;
 
     /**
      * Per-request response state collected by useResponse() —
@@ -258,6 +259,7 @@ export function createSSRContext(options: SSRContextOptions = {}): SSRContext {
     const head: string[] = [];
     const pluginData = new Map<string, any>();
     const boundaries = new Map<number, SSRBoundaryRecord>();
+    const unflushedBoundaries = new Set<number>();
 
     return {
         _componentId: componentId,
@@ -277,7 +279,7 @@ export function createSSRContext(options: SSRContextOptions = {}): SSRContext {
         _asyncResults: new Map(),
         _asyncKeysByComponent: new Map(),
         _boundaries: boundaries,
-        _flushedBoundaries: new Set<number>(),
+        _unflushedBoundaries: unflushedBoundaries,
         // Null-prototype headers bag: names can be caller-derived strings,
         // and special keys (__proto__, constructor) must be plain data.
         _response: { headers: Object.create(null) },
@@ -312,6 +314,7 @@ export function createSSRContext(options: SSRContextOptions = {}): SSRContext {
 
         recordBoundary(id: number, record: SSRBoundaryRecord): void {
             boundaries.set(id, record);
+            unflushedBoundaries.add(id);
         },
 
         getBoundary(id: number): SSRBoundaryRecord | undefined {
