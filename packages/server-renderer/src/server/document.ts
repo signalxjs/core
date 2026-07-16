@@ -151,9 +151,14 @@ function renderAssetLinks(assets: DocumentOptions['assets'], ctx: SSRContext): s
         preloaded.add(href);
         links.push(`<link rel="modulepreload" href="${escapeAttrValue(href)}">`);
     }
-    // Boundary chunks: every recorded boundary that loads its component on
-    // demand gets its chunk warmed from the shell.
+    // Boundary chunks: every boundary CORE will schedule gets its chunk
+    // warmed from the shell. `hydrate: 'never'` records are skipped (#281):
+    // core never loads those — the owning pack wakes them on its own
+    // schedule and owns its own prefetch policy, so warming them here is
+    // speculative bytes (and inconsistently applied: streamed boundaries
+    // never reach this shell-time pass at all).
     ctx._boundaries.forEach((record) => {
+        if (record.hydrate === 'never') return;
         const url = record.chunk?.url;
         if (!url || preloaded.has(url)) return;
         preloaded.add(url);
