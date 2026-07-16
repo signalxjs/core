@@ -224,3 +224,29 @@ describe('config hook — HMR websocket port', () => {
         expect(config.server).toBeUndefined();
     });
 });
+
+describe('dev cache headers for workspace dists (#272)', () => {
+    it('downgrades Cache-Control to no-cache for /@fs/**/dist/** modules', () => {
+        const sigx = sigxPlugin();
+        let handler: any;
+        (sigx as any).configureServer({ middlewares: { use: (h: any) => { handler = h; } } });
+
+        const run = (url: string) => {
+            const headers: Record<string, string> = {};
+            const res: any = { setHeader: (n: string, v: string) => { headers[n] = v; } };
+            let nexted = false;
+            handler({ url }, res, () => { nexted = true; });
+            res.setHeader('Cache-Control', 'max-age=31536000,immutable');
+            res.setHeader('Content-Type', 'text/javascript');
+            return { headers, nexted };
+        };
+
+        const dist = run('/@fs/repo/packages/resume/dist/client/index.js?v=abc');
+        expect(dist.nexted).toBe(true);
+        expect(dist.headers['Cache-Control']).toBe('no-cache');
+        expect(dist.headers['Content-Type']).toBe('text/javascript'); // others untouched
+
+        const source = run('/src/entry-client.ts');
+        expect(source.headers['Cache-Control']).toBe('max-age=31536000,immutable'); // untouched
+    });
+});

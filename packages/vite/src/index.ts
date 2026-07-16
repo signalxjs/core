@@ -176,6 +176,27 @@ export function sigxPlugin(options: SigxPluginOptions = {}): Plugin {
         name: 'sigx',
         enforce: 'pre',
 
+        configureServer(server) {
+            // Workspace-dist modules must never be immutable in dev (#272):
+            // Vite serves `/@fs/**?v=<hash>` with a year-long immutable
+            // Cache-Control, and the hash does NOT change when a linked
+            // package's dist/ is rebuilt — real browsers end up on a MIXED
+            // module graph (fresh top-levels importing stale internals).
+            // Downgrade those responses to no-cache; ETag revalidation keeps
+            // repeat loads as cheap 304s.
+            const isWorkspaceDist = (url: string | undefined): boolean =>
+                !!url && url.includes('/@fs/') && /\/dist\//.test(url.split('?')[0]);
+            server.middlewares.use((req, res, next) => {
+                if (isWorkspaceDist(req.url)) {
+                    const setHeader = res.setHeader.bind(res);
+                    res.setHeader = ((name: string, value: unknown) =>
+                        setHeader(name, String(name).toLowerCase() === 'cache-control' ? 'no-cache' : (value as string))
+                    ) as typeof res.setHeader;
+                }
+                next();
+            });
+        },
+
         async config(userConfig, { command }) {
             // In dev mode, alias @sigx/* packages to their source files
             // This ensures a single reactivity instance across all packages
