@@ -200,6 +200,29 @@ export type MountFn<TContainer = any> = (
  */
 export type UnmountFn<TContainer = any> = (container: TContainer) => void;
 
+/**
+ * Options for `app.runWithContext()`.
+ */
+export interface RunWithContextOptions {
+    /**
+     * Dev-only: tailor the async-callback warning for wrapping libraries.
+     *
+     * A string replaces the default remediation sentence of the warning (the
+     * sync-only diagnosis stays), so a library that runs user callbacks in
+     * app context — a router invoking navigation guards, a scheduler running
+     * handlers — can address the advice to ITS callers, who never see the
+     * `runWithContext` call site and cannot act on the default text.
+     *
+     * `false` suppresses the warning for this call entirely — for callers
+     * that deliberately use only the synchronous portion or re-enter the
+     * context themselves per continuation. Suppressed calls do not consume
+     * the once-per-app warning slot.
+     *
+     * Ignored in production builds.
+     */
+    asyncAdvice?: string | false;
+}
+
 // ============================================================================
 // App Instance
 // ============================================================================
@@ -280,6 +303,13 @@ export interface App<TContainer = any> {
      * deferred: browsers have no ALS, so the behavior would silently diverge
      * client-side — revisit when TC39 AsyncContext lands cross-platform.)
      *
+     * Libraries that run user-authored callbacks in app context can tailor
+     * that warning with `options.asyncAdvice`: a string replaces the default
+     * remediation sentence (so the advice reaches the callback's author, who
+     * never sees the `runWithContext` call site), `false` suppresses the
+     * warning for the call without consuming the once-per-app slot. The
+     * warning still fires at most once per app across all callers.
+     *
      * @example
      * ```typescript
      * const useAuthStore = defineFactory(() => createAuthStore(), 'scoped');
@@ -291,9 +321,18 @@ export interface App<TContainer = any> {
      * });
      * ```
      *
+     * @example
+     * ```typescript
+     * // A library wrapping user callbacks re-attributes the async warning:
+     * app.runWithContext(() => userGuard(to, from), {
+     *     asyncAdvice: '(from my-router) Resolve injectables at the top of ' +
+     *         'the guard, before the first await.'
+     * });
+     * ```
+     *
      * @returns The return value of `fn`.
      */
-    runWithContext<T>(fn: () => T): T;
+    runWithContext<T>(fn: () => T, options?: RunWithContextOptions): T;
 
     /**
      * Register lifecycle hooks to observe all components

@@ -15,6 +15,7 @@ export type {
     PluginInstallFn,
     MountFn,
     UnmountFn,
+    RunWithContextOptions,
     App
 } from './app-types.js';
 
@@ -25,6 +26,7 @@ import type {
     Plugin,
     PluginInstallFn,
     MountFn,
+    RunWithContextOptions,
     App
 } from './app-types.js';
 
@@ -171,7 +173,7 @@ export function defineApp<TContainer = any>(rootComponent: JSXElement): App<TCon
             return instance;
         },
 
-        runWithContext<T>(fn: () => T): T {
+        runWithContext<T>(fn: () => T, options?: RunWithContextOptions): T {
             // Make this app's context the active fallback for DI resolution
             // outside components (router guards, socket handlers, entry-scope
             // code). Synchronous only: restored in finally, so the context
@@ -183,7 +185,10 @@ export function defineApp<TContainer = any>(rootComponent: JSXElement): App<TCon
             const prev = setActiveAppContext(context);
             try {
                 const result = fn();
-                if (__DEV__ && !warnedAsyncRunWithContext) {
+                // asyncAdvice: false marks the caller as deliberately
+                // sync-only — skip the probe without consuming the
+                // once-per-app slot, so a later genuine misuse still warns.
+                if (__DEV__ && !warnedAsyncRunWithContext && options?.asyncAdvice !== false) {
                     // The probe must never alter behavior: a hostile `then`
                     // getter (Proxy trap) could throw, so swallow probe errors
                     // and pass the value through regardless.
@@ -196,9 +201,10 @@ export function defineApp<TContainer = any>(rootComponent: JSXElement): App<TCon
                         console.warn(
                             'app.runWithContext(fn) got a callback that returned a Promise (or ' +
                             'other thenable) — the app context applies only to its synchronous ' +
-                            'portion and is restored before any awaited continuation runs. After ' +
-                            'an await, re-enter with another runWithContext call to resolve more ' +
-                            'dependencies.'
+                            'portion and is restored before any awaited continuation runs. ' +
+                            (options?.asyncAdvice ??
+                                'After an await, re-enter with another runWithContext call to ' +
+                                'resolve more dependencies.')
                         );
                     }
                 }
