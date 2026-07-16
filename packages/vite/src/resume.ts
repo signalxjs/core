@@ -24,9 +24,10 @@
  *    modulepreload hints).
  *
  * Handlers modules may contain TypeScript (annotations are preserved
- * verbatim), so their virtual ids end in `.handlers.ts` and Vite's own
- * transform strips types. Their relative imports are resolved against the
- * source file they were extracted from.
+ * verbatim); `load()` strips the types itself via `transformWithOxc` — the
+ * dev pipeline skips \0-prefixed ids, so the `.handlers.ts` suffix alone
+ * never triggers stripping (#270). Their relative imports are resolved
+ * against the source file they were extracted from.
  *
  * Unlike islands' one-shot discovery, resume registrations change whenever a
  * handler body changes (content-hashed symbols), so the `hotUpdate` hook
