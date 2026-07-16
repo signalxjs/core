@@ -107,7 +107,11 @@ try {
     const before = DEV ? 0 : (await executed()).length;
     await page.locator('.card', { hasText: 'Camera' }).locator('button').click();
     await page.waitForFunction(() => document.querySelector('.badge')?.textContent?.includes('2 · $283'));
-    assert(true, 'second card: exactly one increment on a warm cache (badge 2 · $283)');
+    // A late double-fire (#266) would increment AGAIN after the match —
+    // settle, then assert the exact final value.
+    await page.waitForTimeout(600);
+    assert((await page.locator('.badge').textContent()) === '🛒 2 · $283',
+        'second card: exactly one increment on a warm cache, and it STAYS at 2 · $283');
     if (!DEV) assert((await executed()).length === before, 'second card reuses the loaded chunks');
 
     // 4) Newsletter: synchronous preventDefault + replay through the QRL.
