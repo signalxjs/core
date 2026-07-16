@@ -11,7 +11,17 @@ vi.mock('../src/client/hydrate-core', () => ({
 }));
 
 vi.mock('sigx', () => ({
-    render: vi.fn()
+    render: vi.fn(),
+    // plugin.ts throws SigxError on the dev branch — mirror the real
+    // constructor shape (message, { code }) so message assertions hold.
+    SigxError: class SigxError extends Error {
+        code: string;
+        constructor(message: string, opts: { code: string }) {
+            super(message);
+            this.name = 'SigxError';
+            this.code = opts.code;
+        }
+    }
 }));
 
 import { ssrClientPlugin } from '../src/client/plugin';

@@ -29,6 +29,8 @@
  */
 
 import type { JSXElement, AppContext } from 'sigx';
+import { SigxError } from 'sigx';
+import { prodError } from 'sigx/internals';
 import type { SSRPlugin } from '../plugin';
 import { createSSRContext, type SSRContext, type SSRContextOptions } from './context';
 import { renderToChunks } from './render-core';
@@ -179,7 +181,13 @@ async function prepareDocument(
     const outlet = options.outlet ?? '<!--ssr-outlet-->';
     const outletIdx = options.template.indexOf(outlet);
     if (outletIdx < 0) {
-        throw new Error(`renderDocument: outlet marker "${outlet}" not found in template`);
+        if (__DEV__) {
+            throw new SigxError(
+                `renderDocument: outlet marker "${outlet}" not found in template`,
+                { code: 'SIGX602' }
+            );
+        }
+        throw prodError('SIGX602', `"${outlet}"`);
     }
 
     throwIfAborted(options.signal);

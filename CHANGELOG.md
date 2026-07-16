@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- **`@sigx/reactivity` / `@sigx/server-renderer` / `@sigx/cache`**: production builds now ship compact coded errors for the framework's remaining uncoded throws/logs, extending #230's runtime-core treatment to the other client packages — the full human-readable message stays dev-only (`__DEV__`-stripped from the prod dist), prod ships `SIGX### — see https://sigx.dev/errors/SIGX###/`. New codes: `SIGX500` (`toSignal` write to a read-only property), `SIGX600`/`SIGX601` (SSR client `hydrate()` — container not found / no root component on app), `SIGX602` (`renderDocument` outlet marker missing), `SIGX700` (`@sigx/cache` focus-revalidation trigger threw while subscribing). The two server-renderer `hydrate()` throws and the `renderDocument` throw are now `SigxError` (a subclass of `Error`, so `instanceof Error` is unchanged) carrying `error.code`; the reactivity throw stays a plain `Error` and the cache case stays a `console.error` (both packages can't/needn't reuse `SigxError`). Most other framework warnings were already `__DEV__`-guarded and unaffected. (#289)
+
+### Added
+
+- **`@sigx/runtime-core` internals**: `prodError(code, detail?)` is now exported from `@sigx/runtime-core/internals` (and reaches `sigx/internals` consumers through the existing re-export) so first-party packs build the same `SIGX### — see <url>` prod message without copying the scaffolding. Used by `@sigx/server-renderer`. (#289)
+
 ## [0.10.0] — 2026-07-15
 
 ### Changed

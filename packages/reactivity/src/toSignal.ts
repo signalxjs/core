@@ -37,7 +37,13 @@ export function toSignal<T extends object, K extends SignalKey<T>>(source: T, ke
             // Reflect.set reports rejected writes (read-only descriptors,
             // proxies that refuse the set) instead of a generic TypeError.
             if (!Reflect.set(source, key, newValue)) {
-                throw new Error(`[sigx] toSignal: cannot write to read-only property "${String(key)}".`);
+                // Prod ships the bare code + docs pointer; the full message is
+                // dev-only (the __DEV__ branch folds away in the prod dist).
+                throw new Error(
+                    __DEV__
+                        ? `[sigx] toSignal: cannot write to read-only property "${String(key)}".`
+                        : 'SIGX500 — see https://sigx.dev/errors/SIGX500/'
+                );
             }
         }
     };
