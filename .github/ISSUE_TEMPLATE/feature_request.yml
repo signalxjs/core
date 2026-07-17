@@ -48,6 +48,7 @@ body:
         - "@sigx/ssr-islands"
         - "@sigx/resume"
         - "@sigx/cache"
+        - "@sigx/server"
         - "@sigx/vite"
         - Not sure
     validations:

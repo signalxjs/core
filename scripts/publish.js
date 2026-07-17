@@ -44,6 +44,7 @@ const PACKAGES = [
     'packages/ssr-islands',
     'packages/resume',
     'packages/cache',
+    'packages/server',
     'packages/vite',
 ];
 

@@ -2,6 +2,7 @@ import { component } from 'sigx';
 import { Counter } from './resume/Counter';
 import { Tracker } from './resume/Tracker';
 import { Legacy } from './resume/Legacy';
+import { Quote } from './resume/Quote';
 
 /**
  * Server-only page. The client ships ONLY the generated delegation loader
@@ -40,7 +41,18 @@ export const App = component(() => {
             </div>
 
             <div class="card">
-                <h3>3 — wake-on-interaction fallback</h3>
+                <h3>3 — server function from a resumed handler</h3>
+                <p class="hint">
+                    The handler imports from a *.server.ts module — the click
+                    loads the handler chunk, POSTs to /_sigx/fn/&lt;symbol&gt;,
+                    and the server does the work. The server module's code
+                    never ships to the browser.
+                </p>
+                <Quote />
+            </div>
+
+            <div class="card">
+                <h3>4 — wake-on-interaction fallback</h3>
                 <p class="hint">
                     This component's handler captures a module-scope table, so
                     it is not extractable — the transform warned at build time

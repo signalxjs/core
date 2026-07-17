@@ -119,4 +119,12 @@ export default [
     limit: '3 KB',
     ignore: ['sigx', 'sigx/*', '@sigx/*'],
   },
+  {
+    // The fetch stubs the server-fn transform emits imports of. NO ignore
+    // list — this entry doubles as the "stubs import nothing" guard (resume
+    // handler chunks replicate stub imports; they must stay dependency-free).
+    name: '@sigx/server/client (fetch stubs)',
+    path: 'packages/server/dist/client/index.prod.js',
+    limit: '1 KB',
+  },
 ];

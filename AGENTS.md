@@ -154,6 +154,13 @@ free port automatically).
   (staleTime/gcTime, revalidation, `invalidate()`, optimistic `mutate()`). The
   first-party pack on the rfc-async §7 engine seam — a drop-in equal of any
   third-party pack, no privileged access to core.
+- `packages/server` → `@sigx/server` — server functions (RPC): `serverFn` in
+  `*.server.ts` modules, extracted to typed fetch stubs by `@sigx/vite/server`;
+  WinterCG endpoint (`./server`) + Node adapter (`./node`) with security
+  defaults (rfc-server, #302). NOT `@sigx/server-renderer` (that renders
+  documents; this is how the app talks to the server). Platform adapters
+  (cloudflare/deno/bun) would be separate top-level packages — `./node` is
+  interface bridging, not platform integration. Rides public seams only.
 - `packages/vite` → `@sigx/vite` — Vite plugin for dev/build/HMR.
 - `examples/` — runnable apps (`hello`, `spa`, `spa-ssr`, `ssr-islands`,
   `resume`, `storefront` — the resumability showcase).

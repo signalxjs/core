@@ -719,8 +719,9 @@ function applySplices(code: string, splices: Splice[]): string {
     return out;
 }
 
-/** FNV-1a, 8 hex chars — deterministic across environments and builds. */
-function hash8(text: string): string {
+/** FNV-1a, 8 hex chars — deterministic across environments and builds.
+ *  Exported for the server-function transform's symbol minting (rfc-server §3). */
+export function hash8(text: string): string {
     let hash = 0x811c9dc5;
     for (let i = 0; i < text.length; i++) {
         hash ^= text.charCodeAt(i);

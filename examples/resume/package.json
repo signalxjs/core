@@ -13,6 +13,7 @@
         "sigx": "workspace:^",
         "@sigx/server-renderer": "workspace:^",
         "@sigx/resume": "workspace:^",
+        "@sigx/server": "workspace:^",
         "@sigx/reactivity": "workspace:^",
         "@sigx/runtime-core": "workspace:^",
         "@sigx/runtime-dom": "workspace:^",

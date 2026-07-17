@@ -1,6 +1,7 @@
 import { defineConfig } from 'vite';
 import sigx from '@sigx/vite';
 import { sigxResume } from '@sigx/vite/resume';
+import { sigxServer } from '@sigx/vite/server';
 
 // Same consumer-shaped setup as examples/ssr-islands: the @sigx family is
 // externalized from the dev-server module graph so the app, the request
@@ -9,6 +10,7 @@ const SIGX_FAMILY = [
     'sigx',
     '@sigx/server-renderer',
     '@sigx/resume',
+    '@sigx/server',
     '@sigx/runtime-core',
     '@sigx/runtime-dom',
     '@sigx/reactivity'
@@ -17,7 +19,8 @@ const SIGX_FAMILY = [
 export default defineConfig(({ command }) => ({
     plugins: [
         sigx({ ssr: { entry: 'src/entry-server.tsx' } }),
-        sigxResume()
+        sigxResume(),
+        sigxServer()
     ],
     oxc: {
         jsx: {
