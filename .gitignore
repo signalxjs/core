@@ -5,6 +5,7 @@ node_modules/
 
 # Build outputs
 dist/
+dist-cf/
 build/
 docs/dist/
 *.d.ts

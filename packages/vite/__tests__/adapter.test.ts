@@ -228,6 +228,44 @@ describe('buildApp ordering (rfc-deploy §3.1)', () => {
         expect(typeof ctx.logger.info).toBe('function');
     });
 
+    it('runs adapter.setup BEFORE any environment builds (scaffold-iff-absent inputs)', async () => {
+        const events: string[] = [];
+        const plugin = sigxPlugin({
+            ssr: {
+                entry: ENTRY,
+                adapter: {
+                    name: 't',
+                    serverBuild: 'external',
+                    setup(ctx) {
+                        events.push('setup');
+                        expect(ctx.ssrEntry).toBe(ENTRY);
+                        expect(typeof ctx.root).toBe('string');
+                    }
+                }
+            }
+        }) as any;
+        const { builder, order } = fakeBuilder();
+        const build = builder.build;
+        builder.build = vi.fn(async (e: { name: string; isBuilt: boolean }) => {
+            events.push('build:' + e.name);
+            return build(e);
+        });
+        await plugin.buildApp(builder);
+        expect(events[0]).toBe('setup');
+        expect(order).toEqual(['client', 'ssr', 'extra']);
+    });
+
+    it('fails with the scaffold contract named when the platform entry is missing', async () => {
+        const plugin = sigxPlugin({
+            ssr: {
+                entry: ENTRY,
+                adapter: { name: 't', serverBuild: 'external', entry: 'src/definitely-missing.worker.ts' }
+            }
+        }) as any;
+        const { builder } = fakeBuilder();
+        await expect(plugin.buildApp(builder)).rejects.toThrow(/platform entry.*does not exist.*scaffold/s);
+    });
+
     it('skips environments that are already built', async () => {
         const plugin = sigxPlugin({ ssr: { entry: ENTRY } }) as any;
         const { builder, order } = fakeBuilder();

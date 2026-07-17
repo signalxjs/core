@@ -21,6 +21,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join, isAbsolute } from 'node:path';
 import { sigxPlugin, type AdapterGenerateContext } from '../src/index';
+import { sigxServer } from '../src/server-fn';
 
 /** Write a stub package into the fixture's node_modules. */
 function stub(root: string, name: string, pkg: Record<string, unknown>, files: Record<string, string>) {
@@ -244,5 +245,82 @@ describe('bundled build — self-contained edge output (real vite)', () => {
             .flatMap((f) => bareImports(readFileSync(join(serverDir, f), 'utf-8')));
         expect(bare.length).toBeGreaterThan(0); // cf:runtime survives…
         expect(bare.every((s) => /^cf:/.test(s))).toBe(true); // …and nothing else does
+    }, 120_000);
+});
+
+describe('bundled build + server functions — registry inlined, no chunk (real vite)', () => {
+    let root: string;
+
+    beforeAll(() => {
+        vi.stubEnv('NODE_ENV', 'production');
+        root = mkdtempSync(join(tmpdir(), 'sigx-adapter-bundled-fns-'));
+        mkdirSync(join(root, 'src'), { recursive: true });
+        writeFileSync(join(root, 'package.json'), JSON.stringify({ name: 'fixture-fns', type: 'module' }));
+        writeFileSync(
+            join(root, 'index.html'),
+            `<!doctype html><html><head></head><body><div id="app"><!--ssr-outlet--></div>` +
+                `<script type="module" src="/src/entry-client.ts"></script></body></html>`
+        );
+        writeFileSync(join(root, 'src', 'entry-client.ts'), `console.log('client');`);
+        writeFileSync(
+            join(root, 'src', 'api.server.ts'),
+            `import { serverFn } from '@sigx/server';\nexport const ping = serverFn(async () => 'pong');\n`
+        );
+        // The worker entry imports the registry virtual — in a bundled build
+        // it INLINES; the sigx-server-fns.js chunk must not be emitted.
+        writeFileSync(
+            join(root, 'src', 'entry-server.ts'),
+            `import { serverFns } from 'virtual:sigx-server-fns';\n` +
+                `export function createApp(url) { return { url, count: Object.keys(serverFns).length }; }\n`
+        );
+        stub(root, 'sigx', { main: 'index.js', exports: { '.': './index.js' } }, {
+            'index.js': `export const component = (s) => s;\n`
+        });
+        stub(
+            root,
+            '@sigx/server',
+            { exports: { '.': './index.js', './client': './client.js' } },
+            {
+                'index.js':
+                    `export const serverFn = (impl) => Object.assign((...a) => impl({}, ...a), ` +
+                    `{ __sigxFn: impl, __sigxName: impl.name || '' });\n`,
+                'client.js': `export function __serverFnStub() { return async () => {}; }\n` +
+                    `export function __serverOnly(n) { return () => { throw new Error(n); }; }\n`
+            }
+        );
+    }, 60_000);
+
+    afterAll(() => {
+        vi.unstubAllEnvs();
+        rmSync(root, { recursive: true, force: true });
+    });
+
+    it('inlines the registry (stable symbol present) and emits no sigx-server-fns.js', async () => {
+        const { createBuilder } = await import('vite');
+        const builder = await createBuilder({
+            root,
+            logLevel: 'error',
+            plugins: [
+                sigxPlugin({
+                    hmr: false,
+                    ssr: {
+                        entry: 'src/entry-server.ts',
+                        adapter: { name: 'test-edge', serverBuild: 'bundled' }
+                    }
+                }),
+                sigxServer()
+            ]
+        });
+        await builder.buildApp();
+
+        const serverDir = join(root, 'dist/server');
+        const files = readdirSync(serverDir);
+        expect(files).not.toContain('sigx-server-fns.js');
+        const code = files
+            .filter((f) => f.endsWith('.js'))
+            .map((f) => readFileSync(join(serverDir, f), 'utf-8'))
+            .join('\n');
+        // Dual registration inlined: the deterministic stable symbol.
+        expect(code).toContain('fixture-fns/src/api.server.ts#ping');
     }, 120_000);
 });

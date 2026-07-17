@@ -63,6 +63,7 @@ Full guides, API reference and live examples → **<https://sigx.dev/core/>**
 | `@sigx/cache`          | [npm](https://www.npmjs.com/package/@sigx/cache)          | [docs](https://sigx.dev/)                                     | Cache policy for value-first async — staleTime, revalidation, `invalidate()`, optimistic `mutate()` (rfc-async §7 pack) |
 | `@sigx/server`         | [npm](https://www.npmjs.com/package/@sigx/server)         | [docs](https://sigx.dev/server/)                              | Server functions (RPC) — `serverFn` in `*.server.ts` modules, typed fetch stubs, security-first endpoint (rfc-server) |
 | `@sigx/vite`           | [npm](https://www.npmjs.com/package/@sigx/vite)           | [docs](https://sigx.dev/vite/)                                | Vite plugin for dev/build with HMR |
+| `@sigx/cloudflare`     | [npm](https://www.npmjs.com/package/@sigx/cloudflare)     | [docs](https://sigx.dev/deploy/cloudflare/)                   | Cloudflare Workers deployment adapter — bundled workerd build, `wrangler.jsonc` + entry scaffolding, dev binding proxies (rfc-deploy) |
 
 ## Part of SignalX
 

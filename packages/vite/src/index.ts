@@ -209,6 +209,12 @@ export function sigxPlugin(options: SigxPluginOptions = {}): Plugin {
         name: 'sigx',
         enforce: 'pre',
 
+        // Cross-plugin introspection seam (mirror of sigx:server's
+        // api.role): sigx:server reads adapter.serverBuild to skip the
+        // registry-chunk emission in bundled builds, where the virtual
+        // inlines into the one worker bundle and the chunk has no consumer.
+        api: ssr ? { adapter: { name: adapter.name, serverBuild: adapter.serverBuild } } : {},
+
         async configureServer(server) {
             // Platform-binding proxies in dev (rfc-deploy §4.6) — adapters
             // change builds, not dev; this hook is the one exception.
@@ -451,6 +457,32 @@ export function sigxPlugin(options: SigxPluginOptions = {}): Plugin {
         // whatever this left unbuilt).
         ...(ssr && {
             buildApp: async (builder: ViteBuilder) => {
+                const buildLogger = {
+                    info: (msg: string) => builder.config.logger.info(msg),
+                    warn: (msg: string) => builder.config.logger.warn(msg)
+                };
+                // Scaffold-iff-absent inputs first (platform entry) — the
+                // one moment an adapter may write into src/ (PR #322: "then
+                // never touch").
+                if (adapter.setup) {
+                    await adapter.setup({
+                        root: builder.config.root,
+                        ssrEntry: ssr.entry,
+                        logger: buildLogger
+                    });
+                }
+                // A missing platform entry now fails with the contract named
+                // instead of rolldown's raw unresolved-input error.
+                if (adapter.entry) {
+                    const entryFile = path.resolve(builder.config.root, adapter.entry);
+                    if (!fs.existsSync(entryFile)) {
+                        throw new Error(
+                            `[sigx] adapter '${adapter.name}': platform entry '${adapter.entry}' ` +
+                            `does not exist. Adapters scaffold it on first build (setup hook) - ` +
+                            `if you deleted it, restore it or let the next build scaffold a fresh one.`
+                        );
+                    }
+                }
                 for (const name of ['client', 'ssr']) {
                     const env = builder.environments[name];
                     if (env && !env.isBuilt) await builder.build(env);
@@ -475,10 +507,7 @@ export function sigxPlugin(options: SigxPluginOptions = {}): Plugin {
                                 'dist/server'
                         ),
                         ssrInput: path.resolve(root, adapter.entry ?? ssr.entry),
-                        logger: {
-                            info: (msg: string) => builder.config.logger.info(msg),
-                            warn: (msg: string) => builder.config.logger.warn(msg)
-                        }
+                        logger: buildLogger
                     });
                 }
             }
@@ -539,7 +568,7 @@ export { installHMRPlugin, registerHMRModule } from './hmr.js';
 
 // Deployment build seam (rfc-deploy §3)
 export { nodeAdapter } from './adapter.js';
-export type { SigxAdapter, AdapterGenerateContext } from './adapter.js';
+export type { SigxAdapter, AdapterGenerateContext, AdapterSetupContext } from './adapter.js';
 
 // Default export for convenience
 export default sigxPlugin;

@@ -50,6 +50,7 @@ body:
         - "@sigx/cache"
         - "@sigx/server"
         - "@sigx/vite"
+        - "@sigx/cloudflare"
         - Not sure
     validations:
       required: true

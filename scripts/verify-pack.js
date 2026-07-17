@@ -38,6 +38,7 @@ const PACKAGES = [
     'packages/server-renderer',
     'packages/ssr-islands',
     'packages/vite',
+    'packages/cloudflare',
 ];
 
 const sandbox = join(tmpdir(), `sigx-verify-pack-${Date.now()}`);
@@ -216,6 +217,103 @@ function main() {
         }
     }
     console.log(`   ✔ ${bundles.length} bundle(s) clean and platform side effects retained`);
+
+    // -----------------------------------------------------------------------
+    // Scratch app #2 (rfc-deploy §3.1/§6): the BUNDLED edge build from real
+    // tarballs — cloudflare() from the packed @sigx/cloudflare, the platform
+    // entry scaffolded by the adapter itself, wrangler.jsonc generated, and
+    // the bundled server output provably prod + node:-free.
+    // -----------------------------------------------------------------------
+    step('Create cloudflare scratch app (bundled edge build)');
+    const cfDir = join(sandbox, 'app-cf');
+    mkdirSync(join(cfDir, 'src'), { recursive: true });
+    writeFileSync(join(cfDir, 'package.json'), JSON.stringify({
+        name: 'sigx-pack-smoke-cf',
+        version: '0.0.0',
+        private: true,
+        type: 'module',
+        scripts: { build: 'vite build --app' },
+        dependencies: deps,
+        devDependencies: appPkg.devDependencies,
+    }, null, 2));
+    writeFileSync(join(cfDir, 'tsconfig.json'), readFileSync(join(appDir, 'tsconfig.json')));
+    writeFileSync(
+        join(cfDir, 'vite.config.ts'),
+        [
+            "import { defineConfig } from 'vite';",
+            "import sigx from '@sigx/vite';",
+            "import { cloudflare } from '@sigx/cloudflare';",
+            'export default defineConfig({',
+            "  plugins: [sigx({ ssr: { entry: 'src/entry-server.tsx', adapter: cloudflare() } })]",
+            '});',
+            '',
+        ].join('\n')
+    );
+    writeFileSync(
+        join(cfDir, 'index.html'),
+        `<!doctype html><html><head></head><body><div id="app"><!--ssr-outlet--></div><script type="module" src="/src/entry-client.tsx"></script></body></html>\n`
+    );
+    writeFileSync(join(cfDir, 'src', 'entry-client.tsx'), `console.log('client');\n`);
+    writeFileSync(
+        join(cfDir, 'src', 'entry-server.tsx'),
+        [
+            "import { component } from 'sigx';",
+            'const Page = component(() => {',
+            "  return () => <main>pack-smoke-cf</main>;",
+            '});',
+            'export function createApp(_url: string) {',
+            '  return <Page />;',
+            '}',
+            '',
+        ].join('\n')
+    );
+    // Deliberately NO src/entry.cloudflare.ts — the adapter's setup() hook
+    // must scaffold it from the real tarball.
+
+    step('Install cloudflare scratch app');
+    run('npm install --no-audit --no-fund --loglevel=error', { cwd: cfDir });
+
+    step('Build cloudflare scratch app (vite build --app)');
+    run('npm run build', { cwd: cfDir });
+
+    step('Assert the adapter scaffolded + generated, and the bundle is provably prod');
+    if (!existsSync(join(cfDir, 'src', 'entry.cloudflare.ts'))) {
+        throw new Error('cloudflare(): setup() did not scaffold src/entry.cloudflare.ts from the tarball.');
+    }
+    if (!existsSync(join(cfDir, 'wrangler.jsonc'))) {
+        throw new Error('cloudflare(): generate() did not write wrangler.jsonc.');
+    }
+    const wrangler = readJson(join(cfDir, 'wrangler.jsonc'));
+    if (wrangler.main !== 'dist/server/entry.cloudflare.js') {
+        throw new Error(`wrangler.jsonc main is ${wrangler.main} — expected dist/server/entry.cloudflare.js`);
+    }
+    const serverDir = join(cfDir, 'dist', 'server');
+    const serverBundles = readdirSync(serverDir).filter((f) => f.endsWith('.js'));
+    if (!serverBundles.includes('entry.cloudflare.js')) {
+        throw new Error(`Bundled build did not produce entry.cloudflare.js (got: ${serverBundles.join(', ')})`);
+    }
+    const importRe = /(?:from\s*|import\s*\(?\s*)["']([^"']+)["']/g;
+    for (const f of serverBundles) {
+        const content = readFileSync(join(serverDir, f), 'utf-8');
+        for (const marker of FORBIDDEN) {
+            if (content.includes(marker)) {
+                throw new Error(
+                    `Bundled server output ${f} contains "${marker}" — the production condition did not ` +
+                    'resolve to the .prod.js dist inside the edge bundle.'
+                );
+            }
+        }
+        for (let m = importRe.exec(content); m; m = importRe.exec(content)) {
+            const spec = m[1];
+            if (spec.startsWith('.') || spec.startsWith('/')) continue;
+            if (/^cloudflare:/.test(spec)) continue;
+            throw new Error(
+                `Bundled server output ${f} still imports "${spec}" — the edge bundle must be ` +
+                'self-contained (node: and bare imports forbidden beyond runtimeExternal).'
+            );
+        }
+    }
+    console.log(`   ✔ scaffolded entry + wrangler.jsonc + ${serverBundles.length} self-contained prod server bundle(s)`);
 
     step('✅ Pack smoke test passed');
 }
