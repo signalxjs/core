@@ -59,8 +59,10 @@ const DEFAULT_INCLUDE = ['**/*.server.ts', '**/*.server.tsx'];
 const DEFAULT_EXCLUDE = ['**/node_modules/**', '**/dist/**'];
 const DEFAULT_BASE = '/_sigx/fn';
 
-/** `import … from '@sigx/server'` (not -renderer), excluding type-only. */
-const SERVER_IMPORT_RE = /import\s*(?!type\b)[^;'"]*from\s*['"]@sigx\/server['"]/;
+/** `import … from '@sigx/server'` (not -renderer), excluding type-only.
+ *  The lookahead sits directly after `import` — a backtrackable `\s*` before
+ *  it would let `import type {` match with zero spaces consumed. */
+const SERVER_IMPORT_RE = /import(?!\s*type\b)[^;'"]*from\s*['"]@sigx\/server['"]/;
 /** A serverFn call site, tolerant of formatting (`serverFn (`, newline). */
 const SERVER_FN_CALL_RE = /\bserverFn\s*\(/;
 
