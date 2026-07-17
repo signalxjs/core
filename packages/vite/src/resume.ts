@@ -35,7 +35,7 @@
  */
 
 import type { Plugin } from 'vite';
-import { createFilter, transformWithOxc } from 'vite';
+import { createFilter, normalizePath, transformWithOxc } from 'vite';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { extractResumeHandlers, offsetToLoc, type ResumeExtraction } from './resume-extract.js';
@@ -80,9 +80,14 @@ export function sigxResume(options: SigxResumeOptions = {}): Plugin {
     const relPath = (file: string): string => path.relative(root, file).replace(/\\/g, '/');
     const handlersIdFor = (file: string): string => HANDLERS_PREFIX + relPath(file) + HANDLERS_SUFFIX;
     const fileOfHandlersId = (resolved: string): string =>
-        path.resolve(root, resolved.slice(RESOLVED_HANDLERS_PREFIX.length, -HANDLERS_SUFFIX.length));
+        normalizePath(path.resolve(root, resolved.slice(RESOLVED_HANDLERS_PREFIX.length, -HANDLERS_SUFFIX.length)));
 
     function extractInto(file: string, code: string): ResumeExtraction | null {
+        // Map keys must use ONE separator: discovery walks the fs (native
+        // backslashes on Windows) while transform/hotUpdate get Vite's
+        // forward-slash ids — unnormalized, the same file registers twice
+        // and every component warns as its own duplicate (#324).
+        file = normalizePath(file);
         let extraction: ResumeExtraction;
         try {
             extraction = extractResumeHandlers(code, file);
@@ -252,7 +257,7 @@ export function sigxResume(options: SigxResumeOptions = {}): Plugin {
 
         async hotUpdate({ type, file, read }) {
             if (!filter(file)) return;
-            if (type === 'delete') extractions.delete(file);
+            if (type === 'delete') extractions.delete(normalizePath(file));
             else extractInto(file, await read());
             const graph = this.environment.moduleGraph;
             for (const vid of [RESOLVED_VIRTUAL_ID, RESOLVED_ENTRY_ID, RESOLVED_HANDLERS_PREFIX + relPath(file) + HANDLERS_SUFFIX]) {
