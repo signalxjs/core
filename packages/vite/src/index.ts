@@ -148,14 +148,15 @@ async function resolveHmrPortOverride(
     hmrPort: number | undefined
 ): Promise<UserConfig['server'] | undefined> {
     // The user's websocket config wins under EITHER spelling — `server.ws`
-    // (current) or the deprecated `server.hmr` alias Vite still honors.
-    const userWs = userConfig.server?.ws ?? userConfig.server?.hmr;
-    // HMR disabled, or the user already pinned a port / supplied a server —
-    // their config wins.
-    if (userWs === false) return undefined;
-    if (typeof userWs === 'object' && (userWs.port != null || userWs.server)) {
-        return undefined;
-    }
+    // (current) or the deprecated `server.hmr` alias Vite still honors —
+    // and both are inspected (not `??`-chained), so a port pinned under one
+    // spelling defers even when the other spelling holds unrelated options.
+    const userWs = userConfig.server?.ws;
+    const userHmr = userConfig.server?.hmr;
+    if (userWs === false || userHmr === false) return undefined;
+    const pinned = (value: typeof userWs | typeof userHmr): boolean =>
+        typeof value === 'object' && value != null && (value.port != null || !!value.server);
+    if (pinned(userWs) || pinned(userHmr)) return undefined;
     if (hmrPort != null) {
         return { ws: { port: hmrPort } };
     }

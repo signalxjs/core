@@ -217,6 +217,15 @@ describe('config hook — HMR websocket port', () => {
         expect(config.server).toBeUndefined();
     });
 
+    it('defers to a legacy hmr.port even when ws holds unrelated options', async () => {
+        const config = await runConfigHook(
+            { root, server: { middlewareMode: true, ws: { protocol: 'wss' }, hmr: { port: 12345 } } },
+            'serve',
+            { hmrPort: 24999 }
+        );
+        expect(config.server).toBeUndefined();
+    });
+
     it('defers to a user-supplied server.ws.server (and legacy hmr.server)', async () => {
         const fakeServer: any = {};
         for (const server of [
