@@ -247,6 +247,33 @@ const go = serverFn(async (rq) => 1);
         expect(viaExport.errors[0].message).toContain('collides');
     });
 
+    it('named function expressions do not mask module-scope captures', () => {
+        const result = extract(`
+import { serverFn } from '@sigx/server';
+const inner = 1;
+const f = serverFn(async (rq) => {
+    const g = function inner() { return 2; };
+    return g() + inner;
+});
+`, '/src/api.ts');
+        expect(result.errors).toHaveLength(1);
+        expect(result.errors[0].message).toContain('module-scope binding "inner"');
+    });
+
+    it('shadowed locals do not keep a server-only import alive', () => {
+        const result = extract(`
+import { serverFn } from '@sigx/server';
+import { shadowed } from './server-stuff';
+
+const go = serverFn(async (rq) => shadowed());
+export const clientSide = () => { const shadowed = 1; return shadowed; };
+export { go };
+`, '/src/api.ts');
+        expect(result.errors).toHaveLength(0);
+        const client = result.clientModule!;
+        expect(client).not.toContain(`'./server-stuff'`);
+    });
+
     it('accepts params, locals, and nested function scopes', () => {
         const code = `
 import { serverFn } from '@sigx/server';

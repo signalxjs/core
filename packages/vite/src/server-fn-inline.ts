@@ -143,7 +143,11 @@ function functionScopeBindings(fn: Node): Set<string> {
     if (!isNode(body)) return bindings;
     walk(body, (node) => {
         if (FUNCTION_TYPES.has(node.type)) {
-            if (node.id && isNode(node.id)) bindings.add((node.id as Node).name as string);
+            // Only DECLARATIONS bind their name in the enclosing scope; a
+            // named function EXPRESSION's name binds inside itself only.
+            if (node.type === 'FunctionDeclaration' && node.id && isNode(node.id)) {
+                bindings.add((node.id as Node).name as string);
+            }
             return false; // nested scope owns its own bindings
         }
         if (node.type === 'VariableDeclaration') {
@@ -200,10 +204,15 @@ function freeReferences(expr: Node): { refs: FreeRef[]; hasJsx: boolean } {
         }
         if (node.type === 'JSXElement' || node.type === 'JSXFragment') hasJsx = true;
         if (FUNCTION_TYPES.has(node.type)) {
-            const inner = [...scopes, functionScopeBindings(node)];
+            const own = functionScopeBindings(node);
+            // A named function EXPRESSION's name is visible inside itself.
+            if (node.type !== 'FunctionDeclaration' && node.id && isNode(node.id)) {
+                own.add((node.id as Node).name as string);
+            }
+            const inner = [...scopes, own];
             for (const key of Object.keys(node)) {
                 const value = node[key];
-                if (key === 'id') continue; // own name binds in the outer set
+                if (key === 'id') continue; // handled above / binds outside
                 if (Array.isArray(value)) {
                     for (const item of value) if (isNode(item)) visitScoped(item, node, inner);
                 } else if (isNode(value)) {
@@ -479,13 +488,14 @@ function stripUnusedImports(code: string, id: string): string {
     const ext = id.slice(id.lastIndexOf('.'));
     const program = parseAst(code, { lang: LANG_BY_EXT[ext] ?? 'tsx' }, id) as unknown as Node;
 
+    // Scope-AWARE reference counting: a local that shadows an import inside
+    // a function must not keep the import alive (a falsely-kept server-only
+    // import is exactly the dev-mode crash the strip exists to prevent).
     const referenced = new Set<string>();
-    walk(program, (node, parent) => {
-        if (node.type === 'ImportDeclaration') return false;
-        if ((node.type === 'Identifier' || node.type === 'JSXIdentifier') && isReference(node, parent)) {
-            referenced.add(node.name as string);
-        }
-    });
+    for (const stmt of program.body as Node[]) {
+        if (stmt.type === 'ImportDeclaration') continue;
+        for (const ref of freeReferences(stmt).refs) referenced.add(ref.name);
+    }
 
     const splices: Splice[] = [];
     for (const stmt of program.body as Node[]) {
