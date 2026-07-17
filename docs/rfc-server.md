@@ -221,7 +221,8 @@ loading/error/staleness UX to every call site.
 export interface ServerFnContext {
     request: Request;                    // WinterCG Request (request headers live here)
     url: URL;
-    signal: AbortSignal;                 // fires on client disconnect
+    abortSignal: AbortSignal;            // fires on client disconnect — named to
+                                         // never collide with reactive signals
     responseHeaders: Headers;            // mutable response headers
     status(code: number): void;          // response status override
     locals: Record<string, unknown>;     // guard/middleware hand-off (auth results)
@@ -508,7 +509,7 @@ const text = useStream(`explain:${id}`, () => explain(id));
 // <p>{text.value}</p> — progressive text, no new client concept
 ```
 
-Client `break`/`return()` aborts the fetch; `rq.signal` fires server-side.
+Client `break`/`return()` aborts the fetch; `rq.abortSignal` fires server-side.
 
 ### 6.2 Server-declared cache directives
 

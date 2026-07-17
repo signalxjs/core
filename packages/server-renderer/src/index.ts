@@ -45,6 +45,8 @@ export type { SSRPlugin } from './plugin.js';
 // Re-export from server (convenience)
 export { renderToStream, renderToString, renderVNodeToString } from './server/index.js';
 export { renderDocument, renderDocumentToWebStream } from './server/index.js';
+export { createFetchHandler, defaultIsBot, chunksToBytes } from './server/index.js';
+export type { FetchHandlerOptions, FetchHandler } from './server/fetch-handler.js';
 export type { DocumentOptions } from './server/document.js';
 export { createSSRContext } from './server/context.js';
 export type { SSRContext, SSRContextOptions, RenderOptions, CorePendingAsync, SSRErrorInfo } from './server/context.js';

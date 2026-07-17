@@ -37,6 +37,7 @@ import { renderToChunks } from './render-core';
 import { emitBoundaryTable, scriptOpen } from './serialize';
 import { renderHeadToString, collectRootAttrs, mergeAttrsIntoTag } from '../head';
 import { responseSummary, type SSRResponse } from '../response';
+import { chunksToBytes } from './bytes';
 
 /** Same completion signal the plain streaming APIs emit. */
 function completionScript(nonce?: string): string {
@@ -389,24 +390,5 @@ export function renderDocumentToWebStreamImpl(
 ): ReadableStream<Uint8Array> {
     const resolved: DocumentOptions = { ...options, mode: options.mode ?? 'stream' };
     const prep = startPrepare(engine, input, resolved);
-    const gen = documentChunks(engine, prep, resolved);
-    const encoder = new TextEncoder();
-
-    return new ReadableStream<Uint8Array>({
-        async pull(controller) {
-            try {
-                const { value, done } = await gen.next();
-                if (done) {
-                    controller.close();
-                } else {
-                    controller.enqueue(encoder.encode(value));
-                }
-            } catch (error) {
-                controller.error(error);
-            }
-        },
-        cancel() {
-            void gen.return(undefined);
-        }
-    });
+    return chunksToBytes(documentChunks(engine, prep, resolved));
 }
