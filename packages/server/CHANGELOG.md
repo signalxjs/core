@@ -11,6 +11,21 @@
 
 ### Added
 
+- Native-client transport (rfc-server rev 2, #318/#320): `configureServerFn({
+  endpoint, headers, fetch })` in `@sigx/server/client` — stubs resolve the
+  transport at call time (absolute endpoints, static or async header
+  factories, injected fetch; `content-type` merges last and is not
+  overridable). Zero config is byte-identical to v1.
+- `origin: 'verify-when-present'` on the request handlers: verifies the
+  `Origin` header when present, admits header-less programmatic clients
+  (native apps, CLIs); `Origin: null` is a present header and still
+  rejected. Default stays `'same-origin'`.
+- Live-client guard (rfc-server rev 2 N.2): the real `serverFn` wrapper
+  throws when invoked in a declared live client
+  (`globalThis.__SIGX_LIVE_CLIENT__`, stamped by `@sigx/runtime-core`'s
+  `declareLiveClient()`) — a lynx/terminal build that skipped the stub swap
+  fails loudly instead of running server bodies locally.
+
 - Inline server functions (rfc-server §1.1(b), #305): a module-scope
   `const x = serverFn(...)` in any component file is extracted in place —
   the client build gets the fetch stub and strips imports orphaned by the

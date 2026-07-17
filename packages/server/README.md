@@ -134,13 +134,49 @@ On WinterCG runtimes (Cloudflare, Deno, Bun) skip the adapter —
 `handleServerFnRequest(request, options)` from `@sigx/server/server` is
 already fetch-handler-shaped.
 
+## Native clients — transport config
+
+A lynx or terminal app calling a remote sigx server — or a bearer-auth web
+SPA — configures its stubs' transport once at startup (rfc-server rev 2):
+
+```ts
+import { configureServerFn } from '@sigx/server/client';
+
+configureServerFn({
+    endpoint: 'https://api.example.com/_sigx/fn',
+    headers: () => ({ authorization: `Bearer ${token()}` })
+});
+```
+
+Stubs resolve the transport at **call time**: one build serves
+dev/staging/prod, header factories (sync or async) can rotate credentials,
+and a custom `fetch` slots in where the platform provides its own.
+`content-type` always merges last — the endpoint accepts nothing but JSON.
+`configureServerFn(null)` restores the build-time target; with no config,
+requests are byte-identical to v1.
+
+Native clients authenticate with token headers (CSRF-immune by
+construction) and never send `Origin` — serve them with
+`origin: 'verify-when-present'` (below).
+
+Server bodies must never execute in a live client: `declareLiveClient()`
+(the platform-identity call lynx/terminal make) stamps a global marker,
+and the real `serverFn` wrapper **throws** if invoked there — a build that
+skipped the stub swap fails loudly, matching the browser condition's
+posture.
+
 ## Security defaults
 
 Every server function is a public HTTP endpoint; the defaults assume that:
 
 - **POST-only**, required `application/json` media type, and a same-origin
-  `Origin` check (CSRF posture — opt out per handler with `origin: false`
-  or an allowlist, which makes it a deliberate public API).
+  `Origin` check (CSRF posture). `origin: 'verify-when-present'` verifies
+  the header when present and admits header-less programmatic clients
+  (native apps, CLIs, server-to-server) — browser CSRF stays independently
+  blocked by the non-safelisted JSON content-type, and `Origin: null` is a
+  present header and still rejected. Never deploy an Origin-stripping
+  proxy in front of a cookie-authenticated app under that policy. An
+  allowlist or `origin: false` makes it a deliberate public API.
 - **`guard` hook** runs before every function, for every transport — the
   app-wide auth seam. Per-function `use` chains compose on top.
 - **`maxBodyBytes`** (1 MiB default) enforced while reading.
@@ -155,7 +191,7 @@ Every server function is a public HTTP endpoint; the defaults assume that:
 | Entry | Runs on | What |
 |---|---|---|
 | `@sigx/server` | server (browser condition throws) | `serverFn`, `ServerFnError`, `isServerFnError`, types |
-| `@sigx/server/client` | browser | the generated stubs' runtime (dependency-free, ~450 B) |
+| `@sigx/server/client` | any client (browser, lynx, terminal) | the generated stubs' runtime + `configureServerFn` (dependency-free) |
 | `@sigx/server/server` | anywhere (WinterCG) | `handleServerFnRequest(request, options)` |
 | `@sigx/server/node` | Node | `createServerFnHandler(options)` — connect-style |
 
