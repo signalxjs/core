@@ -165,6 +165,26 @@ describe('sigxServer — dev lint', () => {
         expect(warnings).toHaveLength(1);
     });
 
+    it('catches aliased serverFn imports', () => {
+        const warnings: string[] = [];
+        plugin.transform.call(
+            { environment: { name: 'client' }, warn: (m: string) => warnings.push(m) },
+            `import { serverFn as fn } from '@sigx/server';\nexport const leak = fn(async (rq) => 1);`,
+            join(root, 'src/Aliased.tsx')
+        );
+        expect(warnings).toHaveLength(1);
+    });
+
+    it('does not warn when only other values are imported', () => {
+        const warnings: string[] = [];
+        plugin.transform.call(
+            { environment: { name: 'client' }, warn: (m: string) => warnings.push(m) },
+            `import { isServerFnError } from '@sigx/server';\nconst handle = (e: unknown) => isServerFnError(e);`,
+            join(root, 'src/Errors.ts')
+        );
+        expect(warnings).toHaveLength(0);
+    });
+
     it('does not warn for @sigx/server-renderer imports or type-only imports', () => {
         const warnings: string[] = [];
         plugin.transform.call(

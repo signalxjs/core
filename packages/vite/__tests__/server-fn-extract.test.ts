@@ -116,6 +116,19 @@ export default serverFn(async (rq) => 1);
         expect(result.stubModule).toContain('export default __serverOnly("default"');
     });
 
+    it('treats `export { x as default }` like an export default', () => {
+        const code = `
+import { serverFn } from '@sigx/server';
+const ping = serverFn(async (rq) => 'pong');
+export { ping as default };
+`;
+        const result = extractServerFns(code, '/src/x.server.ts', 'src/x.server.ts', BASE);
+        expect(result.fns).toHaveLength(0);
+        expect(result.warnings).toHaveLength(1);
+        expect(result.warnings[0]).toContain('named export');
+        expect(result.stubModule).toContain('export default __serverOnly("default"');
+    });
+
     it('emits an empty module for a server file with no exports', () => {
         const result = extractServerFns(
             `const secret = 'x';`,

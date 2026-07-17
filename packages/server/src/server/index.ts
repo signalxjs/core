@@ -127,7 +127,12 @@ export async function handleServerFnRequest(
     if (!fn || typeof fn.__sigxFn !== 'function') {
         return errorResponse(404, `Unknown server function "${symbol}"`);
     }
-    const info = { symbol, name: fn.__sigxName ?? '' };
+    // The export name is encoded in the symbol (`<name>_fn_<hash8>`) — the
+    // impl's own name (`__sigxName`) is often '' for arrow functions.
+    const info = {
+        symbol,
+        name: /^(.+)_fn_[0-9a-f]{8}$/.exec(symbol)?.[1] ?? fn.__sigxName ?? ''
+    };
 
     const body = await readBody(request, options.maxBodyBytes ?? DEFAULT_MAX_BODY);
     if (body === null) {

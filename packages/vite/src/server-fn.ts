@@ -62,9 +62,26 @@ const DEFAULT_BASE = '/_sigx/fn';
 /** `import … from '@sigx/server'` (not -renderer), excluding type-only.
  *  The lookahead sits directly after `import` — a backtrackable `\s*` before
  *  it would let `import type {` match with zero spaces consumed. */
-const SERVER_IMPORT_RE = /import(?!\s*type\b)[^;'"]*from\s*['"]@sigx\/server['"]/;
-/** A serverFn call site, tolerant of formatting (`serverFn (`, newline). */
-const SERVER_FN_CALL_RE = /\bserverFn\s*\(/;
+const SERVER_IMPORT_RE = /import(?!\s*type\b)([^;'"]*)from\s*['"]@sigx\/server['"]/g;
+
+/** Local aliases under which `serverFn` is value-imported from '@sigx/server'. */
+function serverFnAliases(code: string): string[] {
+    const aliases: string[] = [];
+    for (const match of code.matchAll(SERVER_IMPORT_RE)) {
+        const clause = match[1];
+        if (/\btype\s+serverFn\b/.test(clause)) continue; // inline type import
+        const spec = /\bserverFn\b(?:\s+as\s+(\w+))?/.exec(clause);
+        if (spec) aliases.push(spec[1] ?? 'serverFn');
+    }
+    return aliases;
+}
+
+/** Does the code call any of the aliases (formatting-tolerant)? */
+function callsServerFn(code: string): boolean {
+    return serverFnAliases(code).some((alias) =>
+        new RegExp(`\\b${alias}\\s*\\(`).test(code)
+    );
+}
 
 export function sigxServer(options: SigxServerOptions = {}): Plugin {
     const filter = createFilter(options.include ?? DEFAULT_INCLUDE, options.exclude ?? DEFAULT_EXCLUDE);
@@ -158,8 +175,7 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
                     !lintWarned.has(clean) &&
                     /\.(ts|tsx|js|jsx|mts|mjs)$/.test(clean) &&
                     !clean.includes('node_modules') &&
-                    SERVER_FN_CALL_RE.test(code) &&
-                    SERVER_IMPORT_RE.test(code)
+                    callsServerFn(code)
                 ) {
                     lintWarned.add(clean);
                     this.warn(

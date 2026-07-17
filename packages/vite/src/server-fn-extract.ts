@@ -195,7 +195,20 @@ export function extractServerFns(
             if (spec.exportKind === 'type') continue;
             const local = ((spec.local as Node)?.name as string) ?? '';
             const exported = ((spec.exported as Node)?.name as string) ?? local;
-            if (local) addExport(exported, local);
+            if (!local) continue;
+            // `export { x as default }` — same posture as `export default`:
+            // a transport symbol needs a stable NAMED export.
+            if (exported === 'default') {
+                if (localFnSources.has(local)) {
+                    warnings.push(
+                        'default-exported serverFn is not extracted — the transport symbol needs a ' +
+                        'stable export name. Use a named export.'
+                    );
+                }
+                serverOnly.push('default');
+                continue;
+            }
+            addExport(exported, local);
         }
     }
 

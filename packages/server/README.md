@@ -114,7 +114,9 @@ Every server function is a public HTTP endpoint; the defaults assume that:
 - **`maxBodyBytes`** (1 MiB default) enforced while reading.
 - **Error masking**: only `ServerFnError` crosses the wire verbatim; other
   throws become a generic 500 in production.
-- **Prototype-pollution rejection** on both parse sites.
+- **Prototype-pollution keys dropped** from parsed values on both parse
+  sites (a reviver removes `__proto__`/`constructor`/`prototype`; the
+  request itself is not rejected).
 
 ## Entry points
 
