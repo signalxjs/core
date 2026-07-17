@@ -320,7 +320,8 @@ structured like `sigxResume`:
 
   ```js
   export const serverFns = {
-      "addToCart_fn_9f3a01cc": () => import("/abs/src/cart.server.ts").then(m => m.addToCart),
+      "addToCart_fn_9f3a01cc": () => import("/src/cart.server.ts").then(m => m.addToCart),
+      // Vite-root specifiers, matching the resume registry's import discipline
   };
   ```
 
@@ -368,7 +369,7 @@ Responses (all `application/json`):
   (`__DEV__` includes message + stack).
 - `400` malformed body / non-array args / validator rejection (validator
   issues in `data`); `403` origin; `404` unknown symbol (stub throws the
-  skew-aware error); `405` + `allow: POST`; `413` over `maxBodyBytes`;
+  skew-aware error); `405` + `Allow: POST`; `413` over `maxBodyBytes`;
   `415` wrong content-type.
 
 Handler options (shared by `/server` and `/node`):
