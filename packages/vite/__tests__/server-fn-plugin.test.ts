@@ -175,6 +175,16 @@ describe('sigxServer — dev lint', () => {
         expect(warnings).toHaveLength(1);
     });
 
+    it('catches namespace-import call sites', () => {
+        const warnings: string[] = [];
+        plugin.transform.call(
+            { environment: { name: 'client' }, warn: (m: string) => warnings.push(m) },
+            `import * as srv from '@sigx/server';\nexport const leak = srv.serverFn(async (rq) => 1);`,
+            join(root, 'src/Namespace.tsx')
+        );
+        expect(warnings).toHaveLength(1);
+    });
+
     it('handles $-containing aliases', () => {
         const warnings: string[] = [];
         plugin.transform.call(

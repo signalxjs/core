@@ -64,28 +64,38 @@ const DEFAULT_BASE = '/_sigx/fn';
  *  it would let `import type {` match with zero spaces consumed. */
 const SERVER_IMPORT_RE = /import(?!\s*type\b)([^;'"]*)from\s*['"]@sigx\/server['"]/g;
 
-/** Local aliases under which `serverFn` is value-imported from '@sigx/server'. */
-function serverFnAliases(code: string): string[] {
-    const aliases: string[] = [];
+const REGEX_SPECIALS = /[.*+?^${}()|[\]\\]/g;
+const escapeRe = (name: string): string => name.replace(REGEX_SPECIALS, '\\$&');
+
+/**
+ * Call-site patterns for `serverFn` as value-imported from '@sigx/server' —
+ * named (aliased or not) and namespace imports. Best-effort dev lint, not
+ * an analysis: re-exports and indirections are out of scope.
+ */
+function serverFnCallPatterns(code: string): RegExp[] {
+    const patterns: RegExp[] = [];
     for (const match of code.matchAll(SERVER_IMPORT_RE)) {
         const clause = match[1];
+        const namespace = /\*\s*as\s+([\w$]+)/.exec(clause);
+        if (namespace) {
+            patterns.push(new RegExp(`(?<![\\w$.])${escapeRe(namespace[1])}\\s*\\.\\s*serverFn\\s*\\(`));
+            continue;
+        }
         if (/\btype\s+serverFn\b/.test(clause)) continue; // inline type import
         const spec = /\bserverFn\b(?:\s+as\s+([\w$]+))?/.exec(clause);
-        if (spec) aliases.push(spec[1] ?? 'serverFn');
+        if (spec) {
+            // Escape the alias ($ is a valid identifier char but a regex
+            // anchor); the lookbehind's dot exclusion keeps unrelated
+            // property calls (obj.serverFn()) from matching.
+            patterns.push(new RegExp(`(?<![\\w$.])${escapeRe(spec[1] ?? 'serverFn')}\\s*\\(`));
+        }
     }
-    return aliases;
+    return patterns;
 }
 
-const REGEX_SPECIALS = /[.*+?^${}()|[\]\\]/g;
-
-/** Does the code call any of the aliases (formatting-tolerant)? */
+/** Does the code call serverFn under any of its imported names? */
 function callsServerFn(code: string): boolean {
-    return serverFnAliases(code).some((alias) =>
-        // Escape the alias ($ is a valid identifier char but a regex anchor)
-        // and use a lookbehind — \b misfires before a $-leading name; the
-        // dot exclusion keeps property calls (obj.serverFn()) from matching.
-        new RegExp(`(?<![\\w$.])${alias.replace(REGEX_SPECIALS, '\\$&')}\\s*\\(`).test(code)
-    );
+    return serverFnCallPatterns(code).some((pattern) => pattern.test(code));
 }
 
 export function sigxServer(options: SigxServerOptions = {}): Plugin {
