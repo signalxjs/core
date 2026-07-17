@@ -26,8 +26,34 @@ function build(filter) {
     execSync(`pnpm --filter ${filter} build:cloudflare`, { cwd: repoRoot, stdio: 'inherit' });
 }
 
+/** Strip // and block comments outside strings — wrangler.jsonc is JSONC. */
+function parseJsonc(source) {
+    let out = '';
+    let inString = false;
+    for (let i = 0; i < source.length; i++) {
+        const two = source.slice(i, i + 2);
+        if (inString) {
+            out += source[i];
+            if (source[i] === '\\') {
+                out += source[i + 1] ?? '';
+                i++;
+            } else if (source[i] === '"') inString = false;
+        } else if (two === '//') {
+            while (i < source.length && source[i] !== '\n') i++;
+            out += '\n';
+        } else if (two === '/*') {
+            const end = source.indexOf('*/', i + 2);
+            i = end === -1 ? source.length : end + 1;
+        } else {
+            if (source[i] === '"') inString = true;
+            out += source[i];
+        }
+    }
+    return JSON.parse(out);
+}
+
 async function withWorker(exampleDir, run) {
-    const cfg = JSON.parse(readFileSync(join(exampleDir, 'wrangler.jsonc'), 'utf-8'));
+    const cfg = parseJsonc(readFileSync(join(exampleDir, 'wrangler.jsonc'), 'utf-8'));
     const mf = new Miniflare({
         // Explicit single-module list: the bundle IS one self-contained file
         // (rfc-deploy §3.1), and Miniflare's automatic import walker rejects
