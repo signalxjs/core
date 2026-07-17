@@ -179,8 +179,10 @@ describe('config hook — HMR websocket port', () => {
         const config = await runConfigHook({ root, server: { middlewareMode: true } }, 'serve');
 
         expect(config.server).toBeDefined();
-        expect(typeof config.server.hmr.port).toBe('number');
-        expect(config.server.hmr.port).toBeGreaterThan(0);
+        // Emitted under server.ws — server.hmr.* is deprecated in Vite 8.
+        expect(typeof config.server.ws.port).toBe('number');
+        expect(config.server.ws.port).toBeGreaterThan(0);
+        expect(config.server.hmr).toBeUndefined();
     });
 
     it('does not touch server config outside middleware mode', async () => {
@@ -194,10 +196,19 @@ describe('config hook — HMR websocket port', () => {
             'serve',
             { hmrPort: 24999 }
         );
-        expect(config.server.hmr.port).toBe(24999);
+        expect(config.server.ws.port).toBe(24999);
     });
 
-    it('defers to an explicit server.hmr.port in the user config', async () => {
+    it('defers to an explicit server.ws.port in the user config', async () => {
+        const config = await runConfigHook(
+            { root, server: { middlewareMode: true, ws: { port: 12345 } } },
+            'serve',
+            { hmrPort: 24999 }
+        );
+        expect(config.server).toBeUndefined();
+    });
+
+    it('defers to a legacy server.hmr.port in the user config', async () => {
         const config = await runConfigHook(
             { root, server: { middlewareMode: true, hmr: { port: 12345 } } },
             'serve',
@@ -206,22 +217,25 @@ describe('config hook — HMR websocket port', () => {
         expect(config.server).toBeUndefined();
     });
 
-    it('defers to a user-supplied server.hmr.server', async () => {
+    it('defers to a user-supplied server.ws.server (and legacy hmr.server)', async () => {
         const fakeServer: any = {};
-        const config = await runConfigHook(
-            { root, server: { middlewareMode: true, hmr: { server: fakeServer } } },
-            'serve'
-        );
-        expect(config.server).toBeUndefined();
+        for (const server of [
+            { middlewareMode: true, ws: { server: fakeServer } },
+            { middlewareMode: true, hmr: { server: fakeServer } }
+        ]) {
+            const config = await runConfigHook({ root, server }, 'serve');
+            expect(config.server).toBeUndefined();
+        }
     });
 
-    it('stays silent when HMR is disabled in the user config', async () => {
-        const config = await runConfigHook(
-            { root, server: { middlewareMode: true, hmr: false } },
-            'serve',
-            { hmrPort: 24999 }
-        );
-        expect(config.server).toBeUndefined();
+    it('stays silent when the websocket is disabled in the user config', async () => {
+        for (const server of [
+            { middlewareMode: true, ws: false as const },
+            { middlewareMode: true, hmr: false as const }
+        ]) {
+            const config = await runConfigHook({ root, server }, 'serve', { hmrPort: 24999 });
+            expect(config.server).toBeUndefined();
+        }
     });
 });
 
