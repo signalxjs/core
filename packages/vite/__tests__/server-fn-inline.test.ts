@@ -228,6 +228,16 @@ const use = serverFn(async (rq) => helper());
         expect(viaDefault.errors[0].message).toContain('module-scope binding "helper"');
     });
 
+    it('rejects a source binding named __serverFnStub', () => {
+        const result = extract(`
+import { serverFn } from '@sigx/server';
+const __serverFnStub = 1;
+const go = serverFn(async (rq) => 2);
+`, '/src/api.ts');
+        expect(result.errors).toHaveLength(1);
+        expect(result.errors[0].message).toContain('reserved by the server-function transform');
+    });
+
     it('rejects mangled-name collisions from imports and exports too', () => {
         const viaImport = extract(`
 import { serverFn } from '@sigx/server';

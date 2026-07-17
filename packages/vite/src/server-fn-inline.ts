@@ -457,6 +457,18 @@ export function extractInlineServerFns(
         }
     });
 
+    // The stub runtime's identifier is injected into the client output —
+    // a same-named binding in the source would collide with the import.
+    if (
+        fns.length > 0 &&
+        (moduleLocals.has('__serverFnStub') || imports.has('__serverFnStub') || exportedNames.has('__serverFnStub'))
+    ) {
+        errors.push({
+            offset: 0,
+            message: '"__serverFnStub" is reserved by the server-function transform — rename the binding.'
+        });
+    }
+
     if (errors.length > 0 || fns.length === 0) {
         return { fns: errors.length > 0 ? [] : fns, errors, clientModule: null, ssrModule: null };
     }
