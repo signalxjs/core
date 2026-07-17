@@ -1,8 +1,23 @@
 # RFC: `@sigx/server` — server functions (RPC), the sigx way
 
-Status: **proposed / under review**. Tracking: signalxjs/core#302.
+Status: **v1 implemented (v0.12.0 — #306, #308); rev 2 — native clients —
+proposed**. Tracking: signalxjs/core#302 (v1), signalxjs/core#318 (rev 2).
 Pre-1.0, no-compat (same stance as `rfc-async.md` and `rfc-ssr-platform.md`):
 one way to do it.
+
+> **rev-2 changes** (native clients — the third role): v1 modeled two roles,
+> a same-origin browser client and a Node SSR renderer. A **lynx or terminal
+> app calling a remote sigx server** is a third role with no representation —
+> rev 2 designs it: runtime transport config (`configureServerFn`), the
+> `endpoint`/`base` split and a `role: 'client'` build mode, the
+> `'verify-when-present'` origin posture, a hard throw when server bodies
+> reach a declared live client, root-independent symbol seeds for one-solution
+> multi-client builds, and **stable routes** so backend deploys never break
+> installed apps. See "Native clients — the third role" below; §3, §5, and §7
+> are amended in place. Grounded against the real platform repos:
+> signalxjs/terminal (Vite-built, already on `@sigx/vite`; must add
+> `declareLiveClient()`) and signalxjs/lynx (rspeedy/Rsbuild-built, native
+> WHATWG `fetch` via `@sigx/lynx-http`, `declareLiveClient()` wired).
 
 Relationship to the other RFCs:
 
@@ -307,6 +322,19 @@ export interface ServerFnExtraction {
   Content-hashing makes **version skew self-announcing**: a stale client
   posts an old symbol and gets a structured 404 the stub converts into a
   typed "stale build — reload?" error (never a silent wrong-function call).
+  *(rev 2)* The path component of the seed becomes a **root-independent
+  stable id** — a printable string joining the nearest enclosing package's
+  name with the file's package-relative path
+  (`@acme/api/src/cart.server.ts`; build-root-relative fallback when no
+  package.json exists). The `\0` remains purely a hash-seed FIELD separator
+  between id, name, and impl source (as in v1) and never appears in the
+  stable id itself — the id must survive URL routing in the stable symbol
+  below. This makes every app build of one solution mint the SAME symbol
+  for a shared server module. All symbols regenerate once at the
+  seed change; client+server deploy together, so nothing at rest breaks.
+  Alongside the hashed symbol, every function also gets a hash-free
+  **stable symbol** (`<stableId>#<name>`) for long-lived clients — see
+  "Native clients" below.
 - `*.server.ts` files: client environment → `stubModule`; SSR environment →
   untouched (the `serverFn` wrapper is pure runtime there).
 - Inline form: scan files importing `@sigx/server` for module-scope
@@ -336,7 +364,12 @@ structured like `sigxResume`:
   emitted as a named chunk → `dist/server/sigx-server-fns.js` next to
   `entry-server.js`. This is the resume-manifest posture — **explicitly
   passed, never ambient**; the server has a module system, so lazy import
-  records suffice (no JSON manifest).
+  records suffice (no JSON manifest). *(rev 2)* The registry
+  **dual-registers** every function under its content-hashed symbol AND its
+  stable symbol (see "Native clients"); server modules living outside the
+  Vite root (shared workspace packages, discovered via the new `scan`
+  option) use absolute-path specs here and `/@fs/` paths in the dev
+  resolver — `'/' + relPath` breaks for `../` paths.
 - `configureServer`: the **dev endpoint** inside `vite.middlewares`
   (precedent: the Cache-Control middleware in `packages/vite/src/index.ts`).
   Every example already mounts `vite.middlewares` before the dev request
@@ -423,7 +456,20 @@ attacker with `curl`. Defaults, in order of the failure they prevent:
 2. **CSRF** — POST-only + required `application/json` content-type (forms
    cannot send it cross-origin without a preflight) + same-origin `Origin`
    check by default. Opting out (`origin: false` or an allowlist) is
-   explicit and documented as "you are now a public API."
+   explicit and documented as "you are now a public API." *(rev 2)* A middle
+   posture, `origin: 'verify-when-present'`, verifies the `Origin` header
+   whenever it exists and allows requests without one — programmatic
+   clients (native apps, CLIs, server-to-server) never send `Origin`, and an
+   Origin-less request is by construction not a mainstream browser's
+   cross-site POST, so it carries no victim's ambient credentials. Browser
+   CSRF stays independently blocked by the non-safelisted JSON content-type
+   (cross-origin browsers must preflight; this endpoint never emits CORS
+   approval). `Origin: null` is a PRESENT header and still rejected. The
+   default stays `'same-origin'` — serving native clients is a deliberate,
+   reviewable one-line opt-in, far narrower than `origin: false`. Caveat to
+   document: never deploy an Origin-stripping proxy in front of a
+   cookie-authenticated app using this policy; native clients authenticate
+   with token headers (CSRF-immune by construction).
 3. **Injection via 'captured' state** — structurally impossible: the
    imports-only rule (§1.2) means nothing crosses the boundary except typed
    arguments, and the `input` validator runs server-side on exactly those.
@@ -528,6 +574,152 @@ still resumes the component to run it; this skips the component. High
 complexity (binding expressions; lists are out of scope) — research
 prototype on text bindings first, not committed design.
 
+## Native clients — the third role (rev 2)
+
+v1 models exactly two roles: a **same-origin browser client** (fetch stubs,
+ambient cookies, Origin-checked) and a **Node SSR renderer** (real functions,
+in-process detached calls). sigx has two more real renderers —
+signalxjs/lynx (iOS/Android via the Lynx engine) and signalxjs/terminal
+(TUIs) — and an app on either is a **third role**: a client of a remote sigx
+server. It wants stubs like the browser, but with an absolute endpoint (no
+page origin on-device), explicit auth headers (no cookie jar), no `Origin`
+header, its own `fetch`, and — decisive for design — a **lifetime measured in
+app-store updates**, not page reloads.
+
+The product model this section serves: **native clients always talk to the
+backend** (a server body executing locally in a live client is never
+legitimate), and one solution typically ships web + native + terminal apps
+importing the **same `*.server.ts` modules** against **one deployed server**
+— one way to talk to the backend, everywhere.
+
+### N.1 Runtime transport — `configureServerFn`
+
+`@sigx/server/client` (the module every stub already imports) gains
+module-level transport config, resolved by stubs **at call time**:
+
+```ts
+export interface ServerFnTransport {
+    /** Absolute URL or path prefix; wins over the build-time endpoint. */
+    endpoint?: string;
+    /** Extra request headers — static map or (possibly async) factory. */
+    headers?: Record<string, string>
+        | (() => Record<string, string> | Promise<Record<string, string>>);
+    /** Fetch implementation; default is the global fetch. */
+    fetch?: typeof globalThis.fetch;
+}
+export function configureServerFn(transport: ServerFnTransport | null): void;
+```
+
+A lynx or terminal app calls it once at startup:
+
+```ts
+configureServerFn({
+    endpoint: 'https://api.example.com/_sigx/fn',
+    headers: () => ({ authorization: `Bearer ${token()}` })
+});
+```
+
+— and every server function in the app targets the deployed backend with
+rotating credentials.
+One build serves dev/staging/prod (call-time resolution). Web apps benefit
+too: bearer-auth SPAs finally have a header seam. `content-type` merges LAST
+and is not overridable (the endpoint 415s anything else). Zero config is
+byte-identical to v1 behavior; the entry stays dependency-free under its
+size-limit no-ignore-list guard.
+
+### N.2 Build roles — `endpoint`, `role: 'client'`
+
+`SigxServerOptions.base` conflated two meanings in v1: the client fetch
+target baked into stubs AND the server mount-path prefix. Rev 2 splits them:
+
+- **`base`** (unchanged default `/_sigx/fn`) — the SERVER mount path (dev
+  middleware, `createServerFnHandler`).
+- **`endpoint`** (default: `base`) — the fetch target baked into stubs; an
+  absolute URL for builds that call a remote server. Precedence at call
+  time: `configureServerFn` endpoint > baked `endpoint` > `base`.
+- **`role: 'auto' | 'client'`** (default `'auto'`) — `'auto'` keeps v1
+  behavior (stub swap in the Vite `client` environment only; web SSR
+  unchanged). `'client'` declares the WHOLE build a remote-server client:
+  every environment gets stubs (including a terminal app building through
+  the `ssr` environment or a custom-named one) and **no registry chunk is
+  emitted** — there is no server in this build.
+
+**Live-client guard.** The remaining failure mode is a build that never runs
+the transform: Node resolves the real `@sigx/server` entry (the throwing
+marker is `browser`-condition-only), and server bodies would execute
+locally against the detached context — silently wrong, server code leaked
+into a client bundle. Rev 2 closes it: `declareLiveClient()` (the existing
+platform-identity seam in `@sigx/runtime-core`) additionally stamps
+`globalThis.__SIGX_LIVE_CLIENT__`, and the real `serverFn` wrapper
+**throws** when invoked in a declared live client — *"server function
+reached a live client unextracted — this app must call its backend over
+stubs (set `role: 'client'` in `sigxServer()`, or fix the bundler
+integration)"* — the exact posture of the browser condition, extended to
+lynx/terminal. Not dev-only, matching the browser variant. `@sigx/server`
+stays free of a runtime-core dependency (a global marker, not an import);
+web SSR never stamps (the `typeof window` fallback deliberately does not).
+
+### N.3 Stable routes — backend deploys must not break installed apps
+
+Content-hashed symbols are the right skew story for the web: a stale page
+404s and a reload fixes it. An app-store lynx app or an installed terminal
+CLI **cannot reload** — under hashed-only symbols, every backend deploy that
+touches a function body would break every installed client until its user
+updates. Native clients need API-stable routes:
+
+- Every function gets a hash-free **stable symbol** — `<stableId>#<name>`
+  (URL-encoded path segment), where `stableId` is the §3 package-qualified
+  id. The `serverFn` options form gains **`id?: string`** (read statically
+  by the extractor, string literal only) for published APIs that must
+  survive file moves: `serverFn({ id: 'cart/add', handler })`. Moving or
+  renaming a server module WITHOUT an explicit `id` is a breaking API
+  change for native clients — exactly like changing a REST route.
+- The registry **dual-registers** hashed + stable symbols. Web builds keep
+  emitting hashed symbols in stubs (v1 skew detection unchanged);
+  `role: 'client'` builds emit STABLE symbols — installed apps keep working
+  across backend redeploys.
+- **Contract safety moves from routes to the validator**: argument-shape
+  changes surface as the `input` validator's 400 (issues in `data` — the
+  client shows "update the app"), and semantic changes are explicit
+  versioning (a new export or a new `id`) — standard API evolution. The
+  trade, stated plainly: hashed = wrong-call-proof but deploy-coupled
+  (web); stable = deploy-durable but contract-governed (native).
+
+### N.4 One solution, shared server modules
+
+With web + native + terminal apps importing shared
+`packages/api/src/*.server.ts`, symbols must agree across every build — the
+§3 stable-id seed guarantees it (v1's build-root-relative seed would mint
+per-app symbols and 404 every non-web client as skew). Shared packages
+outside an app's Vite root are discovered via the new
+**`scan?: string[]`** option, with absolute-path registry specs (§3). The
+server app's build registers everything; each client build stubs the same
+modules against the same ids.
+
+### N.5 Non-Vite bundlers — `@sigx/vite/server-extract`
+
+lynx apps build with rspeedy/Rsbuild, not Vite. The pure extractors
+(`extractServerFns`, `extractInlineServerFns`, plus `hash8`/`offsetToLoc`)
+are re-exported under a new **`@sigx/vite/server-extract`** subpath so the
+lynx repo's Rspack loader can reuse the exact analysis: `*.server.*` →
+`stubModule`; other files → inline extraction behind a cheap
+serverFn-import gate, hard-failing on capture errors. `parseAst` stays
+imported from `vite` — a pure text→AST function; the loader takes `vite` as
+a build-time dependency rather than this RFC growing an injectable-parser
+option (revisit only if that proves painful).
+
+### N.6 Platform prerequisites (their repos, not this one)
+
+- **signalxjs/terminal** (Vite-built; already depends on `@sigx/vite`):
+  add the missing `declareLiveClient()` platform-identity call (without it
+  `useData` hangs at `pending` — the gate `isLiveClient()` sees no window
+  and no declaration); adopt `role: 'client'` + `endpoint`/
+  `configureServerFn`; bump to the release carrying this rev.
+- **signalxjs/lynx** (rspeedy-built; native WHATWG `fetch` installed
+  globally by `@sigx/lynx-http`; `declareLiveClient()` already wired):
+  an Rspack loader on `@sigx/vite/server-extract`, startup
+  `configureServerFn({ endpoint, headers })`, version bump.
+
 ## §7 Phasing
 
 - **v1**: `serverFn` (both authoring forms), transform + dev endpoint +
@@ -545,6 +737,11 @@ prototype on text bindings first, not committed design.
   side of the serializer seam ships.
 - **v2+**: single-flight boundary refresh (6.3) once the envelope and the
   per-request re-render path are proven.
+- **Native clients (rev 2, one milestone, independent of v2)**:
+  `configureServerFn` + stub call-time resolution; `'verify-when-present'`;
+  plugin `endpoint`/`role`/`scan`; stable-id seeds + stable symbols + dual
+  registration + options-form `id`; live-client marker + throw;
+  `@sigx/vite/server-extract`. Then the platform-repo adoptions (N.6).
 - **Research**: bind extraction / write-without-upgrade (6.5), and a
   `serverComputed` sugar on top of it.
 
@@ -566,6 +763,10 @@ prototype on text bindings first, not committed design.
   option of `createRequestHandler`).
 - **A meta-framework.** No file-system routing; `*.server.ts` is a build
   convention, not a route convention.
+- **Platform bundler integrations.** *(rev 2)* The lynx Rspack loader and
+  the terminal `declareLiveClient()`/adoption changes live in their own
+  repos against `@sigx/vite/server-extract` and the public seams here —
+  this RFC defines the contract, not their build plumbing.
 
 ## Compatibility
 
@@ -580,3 +781,9 @@ prototype on text bindings first, not committed design.
   server function is a plain async fetcher by construction.
 - Envelope fields `$cache`/`$boundaries` are reserved in v1 and ignored by
   clients that don't know them, so v2 features are non-breaking.
+- *(rev 2)* Wire and envelope unchanged; every rev-2 addition is additive
+  and zero-config-identical for existing web apps, with one deliberate
+  exception: the stable-id symbol seed regenerates all hashed symbols once.
+  Client and server ship together in v1 deployments, so nothing at rest
+  breaks — and the regeneration is precisely what makes shared server
+  modules coherent across the builds of one solution.
