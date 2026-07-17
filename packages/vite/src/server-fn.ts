@@ -248,7 +248,7 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
                             code:
                                 cached ??
                                 `throw new Error(${JSON.stringify(
-                                    `[sigx server] could not extract inline serverFn from ${relPath(clean)} ` +
+                                    `[sigx:server] could not extract inline serverFn from ${relPath(clean)} ` +
                                     `(syntax error?) — refusing to serve the module to the browser.`
                                 )});`,
                             map: null
@@ -295,7 +295,7 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
                     code:
                         stub ??
                         `throw new Error(${JSON.stringify(
-                            `[sigx server] could not extract ${relPath(clean)} (syntax error?) — ` +
+                            `[sigx:server] could not extract ${relPath(clean)} (syntax error?) — ` +
                             `refusing to serve the server module to the browser.`
                         )});`,
                     map: null

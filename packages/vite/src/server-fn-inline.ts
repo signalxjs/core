@@ -362,16 +362,20 @@ export function extractInlineServerFns(
         for (const declarator of decl.declarations as Node[]) {
             const init = declarator.init;
             if (!isNode(init) || init.type !== 'CallExpression' || !isServerFnCallee(init.callee as Node)) continue;
-            if ((declarator.id as Node).type !== 'Identifier') {
+            // Claim the call site NOW — an invalid declaration should raise
+            // ONE precise error, not also the misplaced-call error below.
+            accepted.add(init as Node);
+            if ((declarator.id as Node).type !== 'Identifier' || decl.kind !== 'const') {
                 errors.push({
                     offset: (declarator.id as Node).start,
-                    message: 'serverFn() must be declared as a plain `const name = serverFn(...)`.'
+                    message:
+                        'serverFn() must be declared as a plain `const name = serverFn(...)` — a ' +
+                        'reassignable let/var binding would break the stub swap.'
                 });
                 continue;
             }
             const name = (declarator.id as Node).name as string;
             const call = init as Node;
-            accepted.add(call);
 
             // Imports-only capture rule (§1.2), enforced on the whole call
             // (options-form guards/validators must satisfy it too).

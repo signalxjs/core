@@ -180,6 +180,15 @@ export const C = component((ctx) => {
         expect(result.errors[0].message).toContain('arguments');
     });
 
+    it('rejects let/var declarations (const only)', () => {
+        const result = extract(`
+import { serverFn } from '@sigx/server';
+let mutable = serverFn(async (rq) => 1);
+`, '/src/api.ts');
+        expect(result.errors).toHaveLength(1);
+        expect(result.errors[0].message).toContain('const name = serverFn');
+    });
+
     it('rejects JSX inside a server body', () => {
         const code = `
 import { serverFn } from '@sigx/server';
