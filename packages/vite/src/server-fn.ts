@@ -263,6 +263,13 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
     return {
         name: 'sigx:server',
         enforce: 'pre',
+        // Cross-plugin introspection seam (rfc-deploy §3.3): when `sigx({
+        // ssr })` grows its `adapter` option, its config branch reads this to
+        // raise the config-time conflict error — `role: 'client'` describes a
+        // build with no server in it, so an adapter (which shapes the server
+        // build) cannot apply. The error lands with `adapter`; the seam
+        // lands with `role` (here).
+        api: { role, base, endpoint },
 
         configResolved(config) {
             root = config.root;

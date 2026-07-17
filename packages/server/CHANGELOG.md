@@ -11,6 +11,10 @@
 
 ### Added
 
+- `matchesServerFn(request, base = '/_sigx/fn')` on `@sigx/server/server`
+  (rfc-deploy §2, #320/#321): the routing predicate platform entries compose
+  with — pathname-under-mount-path match, method deliberately unchecked (a
+  GET should reach the handler's 405, not the document handler).
 - Native-client transport (rfc-server rev 2, #318/#320): `configureServerFn({
   endpoint, headers, fetch })` in `@sigx/server/client` — stubs resolve the
   transport at call time (absolute endpoints, static or async header
