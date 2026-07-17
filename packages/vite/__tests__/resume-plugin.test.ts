@@ -94,6 +94,37 @@ export const Stepper = component((ctx) => {
     });
 });
 
+describe('sigxResume — path-separator normalization (#324)', () => {
+    it('discovery (native paths) + transform (vite ids) yield ONE registration per file', () => {
+        // discover() walks the fs (backslashes on Windows); transform gets
+        // Vite's forward-slash id for the SAME file. Unnormalized map keys
+        // register the file twice — every component then warns as its own
+        // duplicate and QRL loaders double up.
+        const { plugin, root } = makeProject({ 'src/resume/Counter.tsx': COUNTER });
+        try {
+            const posixId = join(root, 'src/resume/Counter.tsx').replace(/\\/g, '/');
+            plugin.transform.call({ warn: () => {} }, COUNTER, posixId);
+
+            const warnings: string[] = [];
+            const spy = vi.spyOn(console, 'warn').mockImplementation((msg: unknown) => {
+                warnings.push(String(msg));
+            });
+            try {
+                const registry = plugin.load(plugin.resolveId('virtual:sigx-resume'));
+                expect(
+                    warnings.filter((w) => w.includes('duplicate resume component name'))
+                ).toHaveLength(0);
+                expect(registry.match(/__registerResumeQrl\("Counter_click_/g)).toHaveLength(1);
+                expect(registry.match(/__registerIslandChunk\("Counter"/g)).toHaveLength(1);
+            } finally {
+                spy.mockRestore();
+            }
+        } finally {
+            rmSync(root, { recursive: true, force: true });
+        }
+    });
+});
+
 describe('sigxResume — virtual modules', () => {
     let plugin: any;
     let root: string;
@@ -139,7 +170,9 @@ describe('sigxResume — virtual modules', () => {
             }
         };
         await plugin.resolveId.call(ctx, '../analytics', importer);
-        expect(resolvedAgainst).toBe(join(root, 'src/resume/Counter.tsx'));
+        // Normalized (forward-slash) form — Vite's canonical importer shape
+        // and the #324 map-key discipline.
+        expect(resolvedAgainst).toBe(join(root, 'src/resume/Counter.tsx').replace(/\\/g, '/'));
     });
 
     it('emits the manifest with components and handlers sections', () => {

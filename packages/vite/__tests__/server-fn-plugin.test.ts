@@ -110,6 +110,26 @@ describe('sigxServer — transform', () => {
     });
 });
 
+describe('sigxServer — path-separator normalization (#324)', () => {
+    it('discovery + transform register one entry per file across separators', () => {
+        const { plugin, root } = makeProject({ 'src/cart.server.ts': CART });
+        try {
+            const posixId = join(root, 'src/cart.server.ts').replace(/\\/g, '/');
+            plugin.transform.call(
+                { environment: { name: 'client' }, warn: () => {} },
+                CART,
+                posixId
+            );
+            const registry = plugin.load(plugin.resolveId('virtual:sigx-server-fns'));
+            // One record — an unnormalized second map entry would emit the
+            // same symbol key twice.
+            expect(registry.match(/"addToCart_fn_[0-9a-f]{8}":/g)).toHaveLength(1);
+        } finally {
+            rmSync(root, { recursive: true, force: true });
+        }
+    });
+});
+
 describe('sigxServer — virtual registry', () => {
     let plugin: any;
     let root: string;

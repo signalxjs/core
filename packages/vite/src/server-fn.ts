@@ -30,7 +30,7 @@
  */
 
 import type { Plugin, ViteDevServer } from 'vite';
-import { createFilter } from 'vite';
+import { createFilter, normalizePath } from 'vite';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -119,6 +119,10 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
     const relPath = (file: string): string => path.relative(root, file).replace(/\\/g, '/');
 
     function extractInto(file: string, code: string): ServerFnExtraction | null {
+        // One separator for map keys — discovery walks the fs (native
+        // backslashes on Windows), transform/hotUpdate get Vite's
+        // forward-slash ids (#324).
+        file = normalizePath(file);
         try {
             const extraction = extractServerFns(code, file, relPath(file), base);
             extractions.set(file, extraction);
@@ -132,6 +136,7 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
     }
 
     function extractInlineInto(file: string, code: string): InlineServerFnExtraction | null {
+        file = normalizePath(file); // see extractInto
         try {
             const extraction = extractInlineServerFns(code, file, relPath(file), base);
             if (extraction.fns.length > 0) inline.set(file, extraction);
@@ -237,7 +242,7 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
         },
 
         transform(code, id) {
-            const clean = id.split('?')[0];
+            const clean = normalizePath(id.split('?')[0]);
             if (!filter(clean)) {
                 // Inline extraction (rfc-server §1.1(b)): module-scope
                 // serverFn declarations in any other client-reachable file.
@@ -312,15 +317,16 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
         },
 
         async hotUpdate({ type, file, read }) {
+            const key = normalizePath(file);
             if (filter(file)) {
-                if (type === 'delete') extractions.delete(file);
+                if (type === 'delete') extractions.delete(key);
                 else extractInto(file, await read());
             } else if (type === 'delete') {
-                if (!inline.delete(file)) return;
+                if (!inline.delete(key)) return;
             } else {
                 const code = await read();
                 // Re-extract when the file is (or was) an inline carrier.
-                if (!inline.has(file) && !inlineCandidate(file, code)) return;
+                if (!inline.has(key) && !inlineCandidate(file, code)) return;
                 extractInlineInto(file, code);
             }
             const mod = this.environment.moduleGraph.getModuleById(RESOLVED_VIRTUAL_ID);
