@@ -406,6 +406,36 @@ describe('sigxServer — rev 2: role, endpoint, stable symbols, scan (#320)', ()
         }
     });
 
+    it('a dev /@fs/ id keys the SAME extraction entry as discovery (no dup registry keys)', () => {
+        const shared = mkdtempSync(join(tmpdir(), 'sigx-fs-'));
+        const roots = [shared];
+        try {
+            mkdirSync(join(shared, 'src'), { recursive: true });
+            writeFileSync(join(shared, 'package.json'), '{"name": "@acme/fs-pkg"}');
+            writeFileSync(join(shared, 'src/cart.server.ts'), CART);
+            const { plugin, root } = makeProject(
+                { 'package.json': '{"name": "@test/app"}' },
+                'serve',
+                { scan: [shared] }
+            );
+            roots.push(root);
+            // Vite serves the out-of-root module as an /@fs/ URL; the map key
+            // must land on discovery's entry, not mint a second one.
+            const fsId = '/@fs/' + join(shared, 'src/cart.server.ts').replace(/\\/g, '/');
+            const result = plugin.transform.call(
+                { environment: { name: 'client' }, ...noWarn },
+                CART,
+                fsId
+            );
+            expect(result.code).toMatch(/__serverFnStub\("addToCart_fn_[0-9a-f]{8}"/);
+            const registry = plugin.load(plugin.resolveId('virtual:sigx-server-fns'));
+            expect(registry.match(/"addToCart_fn_[0-9a-f]{8}":/g)).toHaveLength(1);
+            expect(registry).toContain('"@acme/fs-pkg/src/cart.server.ts#addToCart"');
+        } finally {
+            for (const dir of roots) rmSync(dir, { recursive: true, force: true });
+        }
+    });
+
     it('warns when duplicate explicit `id`s collide on a stable symbol', () => {
         const FN = (impl: string) =>
             `import { serverFn } from '@sigx/server';\n` +
