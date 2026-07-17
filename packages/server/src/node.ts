@@ -93,7 +93,9 @@ export function createServerFnHandler(options: ServerFnHandlerOptions): NodeRequ
             // stream's cancel() returns the server generator).
             const reader = response.body.getReader();
             res.on('close', () => {
-                if (!res.writableEnded) void reader.cancel();
+                // Fire-and-forget: cancel() rejects if the stream already
+                // errored — never let that surface as an unhandled rejection.
+                if (!res.writableEnded) void reader.cancel().catch(() => {});
             });
             for (;;) {
                 const { value, done } = await reader.read();

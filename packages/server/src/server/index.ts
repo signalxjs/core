@@ -272,7 +272,9 @@ async function streamResponse(
             }
         },
         cancel() {
-            void gen.return(undefined);
+            // Fire-and-forget: a throwing generator `finally` must not
+            // become an unhandled rejection.
+            void gen.return(undefined).catch(() => {});
         }
     });
     return new Response(body, { status: ctx._status ?? 200, headers });

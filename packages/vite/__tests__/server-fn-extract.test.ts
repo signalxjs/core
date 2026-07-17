@@ -185,6 +185,20 @@ export const ticks = serverStream(async function* () { yield 1; });
         expect(result.stubModule).not.toContain('__serverFnStub(');
     });
 
+    it('namespace imports extract in the file form too (srv.serverFn / srv.serverStream)', () => {
+        const code = `
+import * as srv from '@sigx/server';
+export const ping = srv.serverFn(async (rq) => 'pong');
+export const ticks = srv.serverStream(async function* () { yield 1; });
+`;
+        const result = extractServerFns(code, '/src/ns.server.ts', opts('src/ns.server.ts'));
+        expect(result.fns.map((f) => [f.name, f.stream])).toEqual([
+            ['ping', false],
+            ['ticks', true]
+        ]);
+        expect(result.serverOnly).toHaveLength(0);
+    });
+
     it('aliased serverStream imports are recognized; look-alikes are not', () => {
         const aliased = `
 import { serverStream as stream } from '@sigx/server';

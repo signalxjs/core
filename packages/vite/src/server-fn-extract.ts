@@ -165,15 +165,21 @@ export function extractServerFns(
     const ext = clean.slice(clean.lastIndexOf('.'));
     const program = parseAst(code, { lang: LANG_BY_EXT[ext] ?? 'ts' }, clean) as unknown as Node;
 
-    // -- pass 1: locals — `serverFn`/`serverStream` aliases and their
-    // module-level declarations --
+    // -- pass 1: locals — `serverFn`/`serverStream` aliases (named or
+    // namespace imports) and their module-level declarations --
     const wrapperLocals = new Map<string, 'fn' | 'stream'>();
+    const namespaceLocals = new Set<string>();
     for (const stmt of program.body as Node[]) {
         if (stmt.type !== 'ImportDeclaration') continue;
         if (((stmt.source as Node).value as string) !== '@sigx/server') continue;
         if (stmt.importKind === 'type') continue;
         for (const spec of (stmt.specifiers as Node[]) ?? []) {
-            if (spec.type !== 'ImportSpecifier' || spec.importKind === 'type') continue;
+            if (spec.importKind === 'type') continue;
+            if (spec.type === 'ImportNamespaceSpecifier') {
+                namespaceLocals.add((spec.local as Node).name as string);
+                continue;
+            }
+            if (spec.type !== 'ImportSpecifier') continue;
             const imported = (spec.imported as Node).name as string;
             if (imported === 'serverFn') {
                 wrapperLocals.set((spec.local as Node).name as string, 'fn');
@@ -191,13 +197,28 @@ export function extractServerFns(
         string,
         { source: string; stream: boolean; explicitId?: string }
     >();
-    const wrapperKind = (init: unknown): 'fn' | 'stream' | undefined =>
-        isNode(init) &&
-        init.type === 'CallExpression' &&
-        isNode(init.callee) &&
-        (init.callee as Node).type === 'Identifier'
-            ? wrapperLocals.get(((init.callee as Node).name as string) ?? '')
-            : undefined;
+    const wrapperKind = (init: unknown): 'fn' | 'stream' | undefined => {
+        if (!isNode(init) || init.type !== 'CallExpression' || !isNode(init.callee)) {
+            return undefined;
+        }
+        const callee = init.callee as Node;
+        if (callee.type === 'Identifier') {
+            return wrapperLocals.get((callee.name as string) ?? '');
+        }
+        // Namespace form: `srv.serverFn(...)` / `srv.serverStream(...)`.
+        if (
+            callee.type === 'MemberExpression' &&
+            callee.computed !== true &&
+            (callee.object as Node).type === 'Identifier' &&
+            namespaceLocals.has(((callee.object as Node).name as string) ?? '') &&
+            isNode(callee.property)
+        ) {
+            const prop = (callee.property as Node).name as string;
+            if (prop === 'serverFn') return 'fn';
+            if (prop === 'serverStream') return 'stream';
+        }
+        return undefined;
+    };
     const isServerFnCall = (init: unknown): init is Node => wrapperKind(init) !== undefined;
 
     for (const stmt of program.body as Node[]) {
