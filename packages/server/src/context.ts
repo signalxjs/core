@@ -11,8 +11,11 @@ export interface ServerFnContext {
     request: Request;
     /** Parsed request URL. */
     url: URL;
-    /** Fires when the client disconnects. */
-    signal: AbortSignal;
+    /** Fires when the client disconnects. (Named `abortSignal` so it can
+     *  never be confused with sigx's reactive signals — `ctx.signal` is a
+     *  different world; the platform-named twin stays at
+     *  `rq.request.signal`.) */
+    abortSignal: AbortSignal;
     /** Mutable RESPONSE headers, applied before the body is written. */
     responseHeaders: Headers;
     /** Override the success status code (errors carry their own). */
@@ -31,7 +34,7 @@ export function createRequestContext(request: Request): InternalServerFnContext 
     const ctx: InternalServerFnContext = {
         request,
         url: new URL(request.url),
-        signal: request.signal,
+        abortSignal: request.signal,
         responseHeaders: new Headers(),
         status(code: number) {
             ctx._status = code;
@@ -66,7 +69,7 @@ export function createDetachedContext(): ServerFnContext {
         get url(): URL {
             return noRequest('rq.url');
         },
-        signal: detachedSignal,
+        abortSignal: detachedSignal,
         responseHeaders: new Headers(),
         status(code: number) {
             if (__DEV__) {
