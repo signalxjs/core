@@ -79,9 +79,12 @@ export default {
 };
 ```
 
-The optional second argument is the platform context — opaque to sigx,
-threaded verbatim into the `template`/`app`/`document` callbacks
-(instantiate the generic for typed bindings). A redirect from `useResponse`
+The second argument is the platform context — opaque to sigx, threaded
+verbatim into the `template`/`app`/`document` callbacks. It is optional
+under the default `TPlatform = unknown` (Deno/Bun entries pass nothing);
+instantiating the generic with typed bindings makes it required, so
+forgetting Cloudflare's `{ env, ctx }` is a compile error rather than an
+`undefined` at render time. A redirect from `useResponse`
 returns a bodyless `Response` and releases the render; cancelling the
 `Response` body (client disconnect) does the same. A shell failure yields a
 minimal 500 — there is no `next()` in the fetch world; a custom error page

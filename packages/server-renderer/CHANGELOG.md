@@ -16,9 +16,11 @@ Phase 1 of #321; #323)
   same dispatch — parallel template/app resolution, bot → blocking mode,
   the shell as the status/redirect decision point, redirects as bodyless
   responses with the generator released, shell failures as a minimal 500.
-  The optional `platform` argument (Cloudflare's `{ env, ctx }`, …) is
-  opaque and threaded verbatim into every callback; instantiate the
-  `TPlatform` generic for typed bindings.
+  The `platform` argument (Cloudflare's `{ env, ctx }`, …) is opaque and
+  threaded verbatim into every callback — optional under the default
+  `TPlatform = unknown`, required once the generic is instantiated with
+  bindings that don't admit `undefined` (omitting it is a compile error,
+  keeping the callbacks' `platform: TPlatform` sound).
 - New `defaultIsBot` export: the crawler-UA regex behind the bot →
   blocking dispatch, now shared by the fetch, Node, and dev handlers.
 - New `chunksToBytes(chunks): ReadableStream<Uint8Array>` export: the

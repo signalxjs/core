@@ -96,8 +96,11 @@ export type FetchHandler<TPlatform = unknown> = (
  * };
  * ```
  *
- * The optional second argument is the platform context (e.g. Cloudflare's
+ * The second argument is the platform context (e.g. Cloudflare's
  * `{ env, ctx }`) — opaque to sigx, threaded verbatim into every callback.
+ * It is optional under the default `TPlatform = unknown`; instantiating the
+ * generic with real bindings makes it required, so the callbacks' typed
+ * `platform` can never silently be `undefined`.
  * A shell failure produces a minimal 500; there is no `next()` in the fetch
  * world — a custom error page is a wrapper around the returned handler.
  */
