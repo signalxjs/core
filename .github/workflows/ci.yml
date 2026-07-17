@@ -5,6 +5,9 @@ on:
     branches: [main]
   push:
     branches: [main]
+  # The main ruleset's merge queue runs required checks on merge_group refs —
+  # without this trigger, queued PRs wait forever for checks that never start.
+  merge_group:
 
 concurrency:
   group: ci-${{ github.ref }}
