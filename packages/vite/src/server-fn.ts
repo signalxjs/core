@@ -333,9 +333,11 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
             let clean = normalizePath(id.split('?')[0]);
             // Out-of-root (scanned) modules arrive as /@fs/ URLs in dev —
             // strip back to the fs path so map keys match discovery's.
+            // Mirrors Vite's fsPathFromId: the remainder may or may not carry
+            // its own leading slash (`/@fs/C:/x`, `/@fs/home/x`, `/@fs//home/x`).
             if (clean.startsWith('/@fs/')) {
                 clean = clean.slice('/@fs/'.length);
-                if (!/^[a-zA-Z]:/.test(clean)) clean = '/' + clean;
+                if (!clean.startsWith('/') && !/^[a-zA-Z]:/.test(clean)) clean = '/' + clean;
             }
             if (!filter(clean)) {
                 // Inline extraction (rfc-server §1.1(b)): module-scope
