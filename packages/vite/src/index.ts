@@ -478,8 +478,12 @@ export function sigxPlugin(options: SigxPluginOptions = {}): Plugin {
                     if (!fs.existsSync(entryFile)) {
                         throw new Error(
                             `[sigx] adapter '${adapter.name}': platform entry '${adapter.entry}' ` +
-                            `does not exist. Adapters scaffold it on first build (setup hook) - ` +
-                            `if you deleted it, restore it or let the next build scaffold a fresh one.`
+                            `does not exist. ` +
+                            (adapter.setup
+                                ? `This adapter scaffolds it on first build (setup hook) - if you ` +
+                                  `deleted it, restore it or let the next build scaffold a fresh one.`
+                                : `Create it (the adapter declares no setup hook, so nothing ` +
+                                  `scaffolds it automatically).`)
                         );
                     }
                 }

@@ -10,7 +10,7 @@
  *   - dist/ produced by stale builds
  *
  * What it does:
- *   1. Build all six publishable packages (delegates to `pnpm run build`).
+ *   1. Build the publishable packages (delegates to `pnpm run build`).
  *   2. `pnpm pack` each package into a temp dir.
  *   3. Spin up a minimal scratch project with file: deps to those tarballs.
  *   4. Build it with vite to prove the published shape actually works.
