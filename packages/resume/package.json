@@ -1,6 +1,6 @@
 {
     "name": "@sigx/resume",
-    "version": "0.11.0",
+    "version": "0.12.0",
     "description": "Resumability for SignalX SSR — QRL event handlers, zero-JS pages, upgrade-on-write hydration",
     "type": "module",
     "main": "./dist/index.js",
