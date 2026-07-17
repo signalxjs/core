@@ -49,6 +49,15 @@ export type {
 /** The options form — validation and middleware as part of the definition. */
 export interface ServerFnOptions<S, R> {
     /**
+     * Explicit stable id (rfc-server rev 2, N.3) — a NON-EMPTY string
+     * literal, read statically by the build; the runtime ignores it, and
+     * anything else (a variable, a template, `''`) is warned about and falls
+     * back to the file-derived id. Pins the function's routes (`<id>#<name>`
+     * and the hashed twin) across file moves — for published APIs
+     * long-lived native clients call.
+     */
+    id?: string;
+    /**
      * Input validator (Standard Schema — Zod/Valibot/ArkType all qualify).
      * ALWAYS runs server-side before the handler, on every transport;
      * rejection throws a `ServerFnError(400, 'Invalid input', { issues })`.

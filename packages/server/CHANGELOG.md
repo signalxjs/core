@@ -25,6 +25,12 @@
   (`globalThis.__SIGX_LIVE_CLIENT__`, stamped by `@sigx/runtime-core`'s
   `declareLiveClient()`) — a lynx/terminal build that skipped the stub swap
   fails loudly instead of running server bodies locally.
+- Stable routes (rfc-server rev 2 N.3, #320): the endpoint resolves hash-free
+  stable symbols (`<stableId>#<name>`) alongside hashed ones — the guard's
+  `info.name` derives from the after-`#` segment first, so a stable id with a
+  hashed-looking tail can't misparse. The options form accepts `id?: string`
+  (read statically by the build; a runtime no-op) to pin published routes
+  across file moves.
 
 - Inline server functions (rfc-server §1.1(b), #305): a module-scope
   `const x = serverFn(...)` in any component file is extracted in place —

@@ -166,6 +166,61 @@ describe('handleServerFnRequest — status matrix', () => {
     });
 });
 
+describe('handleServerFnRequest — stable symbols (rfc-server rev 2, N.3)', () => {
+    it('resolves an encoded stable symbol and derives the name after the "#"', async () => {
+        const stable = '@acme/api/src/cart.server.ts#addToCart';
+        const seen: { symbol: string; name: string }[] = [];
+        const res = await handleServerFnRequest(
+            new Request(`${ORIGIN}/_sigx/fn/${encodeURIComponent(stable)}`, {
+                method: 'POST',
+                headers: { 'content-type': 'application/json', origin: ORIGIN },
+                body: '{"args":[2,3]}'
+            }),
+            {
+                resolve: (sym) => (sym === stable ? add : null),
+                guard: (_rq, fn) => {
+                    seen.push(fn);
+                }
+            }
+        );
+        expect(res.status).toBe(200);
+        await expect(res.json()).resolves.toEqual({ data: 5 });
+        // resolve received the DECODED symbol; the guard's info.name is the
+        // after-# segment, even though the id contains no hashed tail.
+        expect(seen).toEqual([{ symbol: stable, name: 'addToCart' }]);
+    });
+
+    it('a stable id containing a hashed-looking tail cannot misparse the name', async () => {
+        const tricky = 'legacy_fn_00000001/api.server.ts#run';
+        const seen: string[] = [];
+        const res = await handleServerFnRequest(
+            new Request(`${ORIGIN}/_sigx/fn/${encodeURIComponent(tricky)}`, {
+                method: 'POST',
+                headers: { 'content-type': 'application/json', origin: ORIGIN },
+                body: '{"args":[]}'
+            }),
+            {
+                resolve: () => echo,
+                guard: (_rq, fn) => {
+                    seen.push(fn.name);
+                }
+            }
+        );
+        expect(res.status).toBe(200);
+        expect(seen).toEqual(['run']); // '#' wins over the _fn_<hex8> pattern
+    });
+
+    it('hashed-symbol name derivation is unregressed', async () => {
+        const seen: string[] = [];
+        await call('add_fn_00000001', { args: [1, 2] }, {}, {
+            guard: (_rq, fn) => {
+                seen.push(fn.name);
+            }
+        });
+        expect(seen).toEqual(['add']);
+    });
+});
+
 describe('handleServerFnRequest — origin: verify-when-present (rfc-server rev 2)', () => {
     const noOrigin = (options: Partial<ServerFnRequestOptions>) =>
         handleServerFnRequest(

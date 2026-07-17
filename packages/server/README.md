@@ -165,6 +165,36 @@ and the real `serverFn` wrapper **throws** if invoked there — a build that
 skipped the stub swap fails loudly, matching the browser condition's
 posture.
 
+A native-client build declares itself in the Vite plugin:
+`sigxServer({ role: 'client', endpoint: 'https://api.example.com/_sigx/fn' })`
+— every environment gets stubs and no registry is emitted (there is no
+server in that build). Shared `*.server.ts` packages outside the app's
+Vite root are discovered with `scan: ['../packages/api']`.
+
+## Stable routes — backend deploys never break installed apps
+
+Every function is registered under TWO symbols. The content-hashed one
+(`addToCart_fn_9f3a01cc`) is what web builds fetch — version skew is a
+typed 404 and a reload fixes it. The hash-free **stable symbol**
+(`@acme/api/src/cart.server.ts#addToCart`) is what `role: 'client'` builds
+fetch — an installed lynx app or terminal CLI cannot reload, so its routes
+survive every backend redeploy. Symbol seeds are package-qualified, so
+every app build of one solution mints identical symbols for a shared
+server module.
+
+Moving or renaming a server module changes its stable symbol — a breaking
+API change for native clients, exactly like changing a REST route. Published
+APIs pin an explicit id instead: `serverFn({ id: 'cart/add', handler })`
+(string literal — the build reads it statically) keeps both routes stable
+across file moves. Contract safety lives in the `input` validator (argument
+changes surface as a 400 the client can show as "update the app"), and
+semantic changes are explicit versioning — a new export or a new `id`.
+
+Deploy note: stable symbols URL-encode into one path segment
+(`%2F`-encoded slashes). A proxy or CDN that decodes or merges encoded
+slashes will mangle them — hashed symbols are immune; configure the proxy
+to pass encoded paths through untouched.
+
 ## Security defaults
 
 Every server function is a public HTTP endpoint; the defaults assume that:
