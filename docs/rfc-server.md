@@ -236,11 +236,19 @@ export function serverStream<A extends unknown[], T>(
     impl: (rq: ServerFnContext, ...args: A) => AsyncGenerator<T>
 ): (...args: A) => AsyncIterable<T>;
 
+/** Guard/middleware: veto by throwing; hand results downstream via rq.locals. */
+export type ServerFnGuard = (
+    rq: ServerFnContext,
+    fn: { symbol: string; name: string }
+) => void | Promise<void>;
+
 /** Passes through the wire verbatim; everything else is masked (§5). */
 export class ServerFnError extends Error {
-    readonly __sigxServerFnError: true;  // brand, NOT instanceof — dev module
-                                         // graphs differ between the Vite
-                                         // runner and Node (see packages/vite/src/ssr.ts)
+    readonly __sigxServerFnError = true; // initialized field, so the brand exists
+                                         // at runtime; checked as a brand, NOT
+                                         // instanceof — dev module graphs differ
+                                         // between the Vite runner and Node
+                                         // (see packages/vite/src/ssr.ts)
     constructor(status: number, message: string, data?: unknown);
 }
 ```
@@ -354,7 +362,9 @@ app.use(createRequestHandler({ /* unchanged */ }));
 
 ```
 POST {base=/_sigx/fn}/{symbol}
-content-type: application/json        ← REQUIRED (415 otherwise)
+content-type: application/json        ← REQUIRED media type (415 otherwise);
+                                        parameters tolerated, e.g.
+                                        "application/json; charset=utf-8"
 origin: <same-origin>                 ← REQUIRED by default (403 otherwise)
 
 {"args": [ ... ]}
