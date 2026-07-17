@@ -44,6 +44,38 @@ and the whole `@sigx/cache` pack (staleTime, `invalidate()`, optimistic
 chunk gets the stub, the page still ships ~1 KB of JS, and the first click
 POSTs to the server.
 
+### Inline form (co-location)
+
+For one-offs where a separate file is ceremony, declare a `serverFn` at
+**module scope** of any component file — the transform lifts it the same
+way:
+
+```tsx
+// Search.tsx — co-located
+import { component, useData } from 'sigx';
+import { serverFn } from '@sigx/server';
+import { searchIndex } from './search-index';   // server-only dep
+
+const search = serverFn(async (rq, q: string) => searchIndex.query(q));
+
+export const Search = component((ctx) => {
+    const q = ctx.signal('');
+    const results = useData(() => ['search', q.value], () => search(q.value));
+    /* … */
+});
+```
+
+The client build swaps the initializer for the fetch stub and strips
+imports that were only used inside the body (`searchIndex` never loads in
+the browser); the server keeps the body in place. One strict rule makes
+this safe: an inline body may capture **imports and globals only** —
+touching component scope, signals, props, or file-local bindings is a
+compile-time error telling you to pass the value as an argument. Two
+placement rules follow from it: `serverFn` must be a module-scope `const`
+(never created inside a component), and resume files should keep importing
+from `*.server.ts` modules instead (a module-scope const is not a legal
+capture for extracted QRL handlers).
+
 There is **no closure serialization** — data crosses the boundary only as
 typed arguments (I consider Qwik's captured-value round-trip an injection
 surface, not a convenience). Validate them: the options form takes a

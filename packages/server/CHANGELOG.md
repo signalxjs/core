@@ -4,6 +4,14 @@
 
 ### Added
 
+- Inline server functions (rfc-server §1.1(b), #305): a module-scope
+  `const x = serverFn(...)` in any component file is extracted in place —
+  the client build gets the fetch stub and strips imports orphaned by the
+  swap; the SSR build keeps the body (one module instance) and gains a
+  mangled export the endpoint resolves. The imports-only capture rule is
+  a hard build error (module scope, component scope, JSX all rejected),
+  never a degrade.
+
 - Initial package (rfc-server v1, #302/#305): `serverFn()` — server
   functions authored in `*.server.ts` modules, extracted to typed fetch
   stubs by `@sigx/vite/server`. Direct form (`serverFn(async (rq, ...args) =>

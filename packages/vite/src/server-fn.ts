@@ -12,13 +12,18 @@
  *    of the real module; the SSR build emits it as `sigx-server-fns.js` next
  *    to the server entry. Pass its `serverFns` export EXPLICITLY to
  *    `createServerFnHandler` (the resume-manifest posture, never ambient).
- * 3. **Dev endpoint** — a `configureServer` middleware on the plugin's base
- *    path resolves symbols through the in-memory extraction map and
+ * 3. **Inline extraction** — a module-scope `const x = serverFn(...)` in ANY
+ *    other client-reachable file is extracted in place (rfc-server §1.1(b)):
+ *    client build gets the stub + orphaned-import stripping, SSR build keeps
+ *    the body and gains a mangled export the endpoint resolves. Capture
+ *    violations (module scope, component scope, JSX) are HARD errors —
+ *    see `server-fn-inline.ts`. (Resume handlers can't capture module-scope
+ *    consts — they import from `*.server.ts` modules instead.)
+ * 4. **Dev endpoint** — a `configureServer` middleware on the plugin's base
+ *    path resolves symbols through the in-memory extraction maps and
  *    `ssrLoadModule` (edits apply per request). The request logic itself is
  *    loaded through `ssrLoadModule('@sigx/server/node')` for module-graph
  *    identity (the concern documented in `./ssr.ts`).
- * 4. **Dev lint** — `serverFn` referenced in a NON-matching file would ship
- *    its body to the client; `transform` warns (dev only).
  *
  * Symbols change when a function's body changes (content-hashed), so
  * `hotUpdate` re-extracts and invalidates the registry virtual module.
@@ -30,6 +35,8 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { extractServerFns, type ServerFnExtraction } from './server-fn-extract.js';
+import { extractInlineServerFns, type InlineServerFnExtraction } from './server-fn-inline.js';
+import { offsetToLoc } from './resume-extract.js';
 import { walkFiles } from './islands.js';
 
 export interface SigxServerOptions {
@@ -106,7 +113,8 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
     let isServe = false;
     /** Latest extraction per absolute module path (matching files only). */
     const extractions = new Map<string, ServerFnExtraction>();
-    const lintWarned = new Set<string>();
+    /** Inline extractions per absolute module path (non-matching files). */
+    const inline = new Map<string, InlineServerFnExtraction>();
 
     const relPath = (file: string): string => path.relative(root, file).replace(/\\/g, '/');
 
@@ -123,18 +131,55 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
         }
     }
 
-    function discover(): void {
-        extractions.clear();
-        for (const file of walkFiles(root)) {
-            if (!filter(file)) continue;
-            extractInto(file, fs.readFileSync(file, 'utf-8'));
+    function extractInlineInto(file: string, code: string): InlineServerFnExtraction | null {
+        try {
+            const extraction = extractInlineServerFns(code, file, relPath(file), base);
+            if (extraction.fns.length > 0) inline.set(file, extraction);
+            else inline.delete(file);
+            return extraction;
+        } catch (error) {
+            console.warn(`[sigx:server] inline extraction failed for ${relPath(file)}:`, error);
+            return null;
         }
     }
 
-    function findSymbol(symbol: string): { file: string; name: string } | null {
+    /**
+     * Cheap regex gate before PARSING a non-matching file for inline
+     * serverFn. Deliberately approximate: a false positive (the pattern in
+     * a comment/string) costs one parse — `extractInlineServerFns` is the
+     * AST-accurate authority and returns no fns. False negatives require
+     * indirection (re-exporting serverFn through another module), which is
+     * documented as out of scope for inline extraction.
+     */
+    const inlineCandidate = (file: string, code: string): boolean =>
+        /\.(ts|tsx|js|jsx|mts|mjs)$/.test(file) &&
+        !file.includes('node_modules') &&
+        callsServerFn(code);
+
+    function discover(): void {
+        extractions.clear();
+        inline.clear();
+        for (const file of walkFiles(root)) {
+            if (filter(file)) {
+                extractInto(file, fs.readFileSync(file, 'utf-8'));
+                continue;
+            }
+            // Inline candidates must be known BEFORE the registry virtual
+            // module loads — the SSR build reads it early.
+            if (!/\.(ts|tsx|js|jsx|mts|mjs)$/.test(file)) continue;
+            const code = fs.readFileSync(file, 'utf-8');
+            if (inlineCandidate(file, code)) extractInlineInto(file, code);
+        }
+    }
+
+    function findSymbol(symbol: string): { file: string; exportName: string } | null {
         for (const [file, extraction] of extractions) {
             const fn = extraction.fns.find((f) => f.symbol === symbol);
-            if (fn) return { file, name: fn.name };
+            if (fn) return { file, exportName: fn.name };
+        }
+        for (const [file, extraction] of inline) {
+            const fn = extraction.fns.find((f) => f.symbol === symbol);
+            if (fn) return { file, exportName: fn.mangled };
         }
         return null;
     }
@@ -164,6 +209,14 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
                     );
                 }
             }
+            for (const [file, extraction] of inline) {
+                const moduleSpec = JSON.stringify('/' + relPath(file));
+                for (const fn of extraction.fns) {
+                    lines.push(
+                        `    ${JSON.stringify(fn.symbol)}: () => import(${moduleSpec}).then(m => m[${JSON.stringify(fn.mangled)}]),`
+                    );
+                }
+            }
             lines.push('};');
             return lines.join('\n');
         },
@@ -176,6 +229,9 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
             for (const extraction of extractions.values()) {
                 if (extraction.fns.length > 0) hasFns = true;
             }
+            for (const extraction of inline.values()) {
+                if (extraction.fns.length > 0) hasFns = true;
+            }
             if (!hasFns) return;
             this.emitFile({ type: 'chunk', id: VIRTUAL_ID, fileName: REGISTRY_FILE });
         },
@@ -183,24 +239,46 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
         transform(code, id) {
             const clean = id.split('?')[0];
             if (!filter(clean)) {
-                // Dev lint: a serverFn outside the include pattern is NOT
-                // extracted — its body would ship to the client.
-                if (
-                    isServe &&
-                    !lintWarned.has(clean) &&
-                    /\.(ts|tsx|js|jsx|mts|mjs)$/.test(clean) &&
-                    !clean.includes('node_modules') &&
-                    callsServerFn(code)
-                ) {
-                    lintWarned.add(clean);
-                    this.warn(
-                        `[sigx:server] ${relPath(clean)} calls serverFn() but does not match the ` +
-                        `server-module pattern (default **/*.server.{ts,tsx}) — it will NOT be ` +
-                        `extracted and its body will ship to the client. Move it to a matching ` +
-                        `file or adjust the plugin's include option.`
-                    );
+                // Inline extraction (rfc-server §1.1(b)): module-scope
+                // serverFn declarations in any other client-reachable file.
+                // (Our own stub output imports '@sigx/server/client', not
+                // '@sigx/server', so re-runs never pass this gate.)
+                if (!inlineCandidate(clean, code)) return null;
+                const extraction = extractInlineInto(clean, code);
+                if (!extraction) {
+                    // Parse failure mid-edit: NEVER let the original module
+                    // (server body included) reach the browser — last good
+                    // client output, else a loud refusal.
+                    if (this.environment?.name === 'client') {
+                        const cached = inline.get(clean)?.clientModule;
+                        return {
+                            code:
+                                cached ??
+                                `throw new Error(${JSON.stringify(
+                                    `[sigx:server] could not extract inline serverFn from ${relPath(clean)} ` +
+                                    `(syntax error?) — refusing to serve the module to the browser.`
+                                )});`,
+                            map: null
+                        };
+                    }
+                    return null;
                 }
-                return null;
+                if (extraction.errors.length > 0) {
+                    // Capture violations are HARD errors, never a degrade.
+                    const detail = extraction.errors
+                        .map((e) => {
+                            const { line, column } = offsetToLoc(code, e.offset);
+                            return `${relPath(clean)}:${line}:${column} ${e.message}`;
+                        })
+                        .join('\n');
+                    this.error(`[sigx:server] inline serverFn extraction failed:\n${detail}`);
+                }
+                if (extraction.fns.length === 0) return null;
+                const out =
+                    this.environment?.name === 'client'
+                        ? extraction.clientModule
+                        : extraction.ssrModule;
+                return out ? { code: out, map: null } : null;
             }
             // Rolldown can run the transform more than once per module (scan
             // + build phases), the later pass over our OWN stub output —
@@ -224,7 +302,7 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
                     code:
                         stub ??
                         `throw new Error(${JSON.stringify(
-                            `[sigx server] could not extract ${relPath(clean)} (syntax error?) — ` +
+                            `[sigx:server] could not extract ${relPath(clean)} (syntax error?) — ` +
                             `refusing to serve the server module to the browser.`
                         )});`,
                     map: null
@@ -234,9 +312,17 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
         },
 
         async hotUpdate({ type, file, read }) {
-            if (!filter(file)) return;
-            if (type === 'delete') extractions.delete(file);
-            else extractInto(file, await read());
+            if (filter(file)) {
+                if (type === 'delete') extractions.delete(file);
+                else extractInto(file, await read());
+            } else if (type === 'delete') {
+                if (!inline.delete(file)) return;
+            } else {
+                const code = await read();
+                // Re-extract when the file is (or was) an inline carrier.
+                if (!inline.has(file) && !inlineCandidate(file, code)) return;
+                extractInlineInto(file, code);
+            }
             const mod = this.environment.moduleGraph.getModuleById(RESOLVED_VIRTUAL_ID);
             if (mod) this.environment.moduleGraph.invalidateModule(mod);
         },
@@ -277,7 +363,7 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
                         const record = findSymbol(symbol);
                         if (!record) return null;
                         const mod = await devServer.ssrLoadModule('/' + relPath(record.file));
-                        return mod[record.name];
+                        return mod[record.exportName];
                     }
                 });
                 await handler(req, res, next);

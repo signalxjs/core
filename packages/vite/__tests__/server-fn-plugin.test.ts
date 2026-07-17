@@ -133,9 +133,18 @@ describe('sigxServer — virtual registry', () => {
     });
 });
 
-describe('sigxServer — dev lint', () => {
+describe('sigxServer — inline extraction (non-matching files)', () => {
     let plugin: any;
     let root: string;
+
+    /** transform-hook context: this.error must throw, like rollup's. */
+    const ctx = (env: string, warnings: string[] = []) => ({
+        environment: { name: env },
+        warn: (m: string) => warnings.push(m),
+        error: (m: string): never => {
+            throw new Error(m);
+        }
+    });
 
     beforeAll(() => {
         ({ plugin, root } = makeProject({}, 'serve'));
@@ -143,56 +152,63 @@ describe('sigxServer — dev lint', () => {
 
     afterAll(() => rmSync(root, { recursive: true, force: true }));
 
-    it('warns when serverFn appears in a non-matching file', () => {
-        const warnings: string[] = [];
-        const result = plugin.transform.call(
-            { environment: { name: 'client' }, warn: (m: string) => warnings.push(m) },
-            `import { serverFn } from '@sigx/server';\nexport const leak = serverFn(async (rq) => 1);`,
-            join(root, 'src/Page.tsx')
-        );
-        expect(result).toBeNull();
-        expect(warnings).toHaveLength(1);
-        expect(warnings[0]).toContain('will NOT be extracted');
+    const INLINE = `import { serverFn } from '@sigx/server';\nexport const ping = serverFn(async (rq) => 1);`;
+
+    it('client env: swaps module-scope declarations for stubs', () => {
+        const result = plugin.transform.call(ctx('client'), INLINE, join(root, 'src/Page.tsx'));
+        expect(result.code).toContain('__serverFnStub(');
+        expect(result.code).toMatch(/ping_fn_[0-9a-f]{8}/);
+        expect(result.code).not.toContain('async (rq) => 1');
     });
 
-    it('tolerates compact imports and spaced call sites', () => {
-        const warnings: string[] = [];
-        plugin.transform.call(
-            { environment: { name: 'client' }, warn: (m: string) => warnings.push(m) },
-            `import{ serverFn } from '@sigx/server';\nexport const leak = serverFn (async (rq) => 1);`,
-            join(root, 'src/Compact.tsx')
-        );
-        expect(warnings).toHaveLength(1);
+    it('ssr env: keeps the body and appends the mangled export', () => {
+        const result = plugin.transform.call(ctx('ssr'), INLINE, join(root, 'src/Page.tsx'));
+        expect(result.code).toContain('async (rq) => 1');
+        expect(result.code).toContain('export const __sigxSrvFn_ping = ping;');
     });
 
-    it('catches aliased serverFn imports', () => {
-        const warnings: string[] = [];
-        plugin.transform.call(
-            { environment: { name: 'client' }, warn: (m: string) => warnings.push(m) },
-            `import { serverFn as fn } from '@sigx/server';\nexport const leak = fn(async (rq) => 1);`,
-            join(root, 'src/Aliased.tsx')
+    it('registers inline symbols in the registry under the mangled export', () => {
+        plugin.transform.call(ctx('client'), INLINE, join(root, 'src/Page.tsx'));
+        const registry = plugin.load(plugin.resolveId('virtual:sigx-server-fns'));
+        expect(registry).toMatch(
+            /"ping_fn_[0-9a-f]{8}": \(\) => import\("\/src\/Page\.tsx"\)\.then\(m => m\["__sigxSrvFn_ping"\]\)/
         );
-        expect(warnings).toHaveLength(1);
     });
 
-    it('catches namespace-import call sites', () => {
-        const warnings: string[] = [];
-        plugin.transform.call(
-            { environment: { name: 'client' }, warn: (m: string) => warnings.push(m) },
-            `import * as srv from '@sigx/server';\nexport const leak = srv.serverFn(async (rq) => 1);`,
-            join(root, 'src/Namespace.tsx')
+    it('never serves the original module when inline extraction fails to parse', () => {
+        const file = join(root, 'src/Live.tsx');
+        const good = `import { serverFn } from '@sigx/server';\nexport const ping = serverFn(async (rq) => 'SECRET_BODY');`;
+        const first = plugin.transform.call(ctx('client'), good, file);
+        expect(first.code).not.toContain('SECRET_BODY');
+
+        const broken = good + '\nconst oops = {';
+        const fallback = plugin.transform.call(ctx('client'), broken, file);
+        expect(fallback.code).toContain('__serverFnStub'); // last good client output
+        expect(fallback.code).not.toContain('SECRET_BODY');
+
+        const fresh = plugin.transform.call(
+            ctx('client'),
+            `import { serverFn } from '@sigx/server';\nconst x = serverFn(async (rq) => 'SECRET_BODY');\nconst broken = {`,
+            join(root, 'src/NeverSeen.tsx')
         );
-        expect(warnings).toHaveLength(1);
+        expect(fresh.code).toMatch(/^throw new Error/);
+        expect(fresh.code).not.toContain('SECRET_BODY');
     });
 
-    it('handles $-containing aliases', () => {
-        const warnings: string[] = [];
-        plugin.transform.call(
-            { environment: { name: 'client' }, warn: (m: string) => warnings.push(m) },
-            `import { serverFn as server$ } from '@sigx/server';\nexport const leak = server$(async (rq) => 1);`,
-            join(root, 'src/Dollar.tsx')
-        );
-        expect(warnings).toHaveLength(1);
+    it('capture violations are hard errors', () => {
+        const bad = `import { serverFn } from '@sigx/server';\nconst T = {};\nexport const leak = serverFn(async (rq) => T);`;
+        expect(() =>
+            plugin.transform.call(ctx('client'), bad, join(root, 'src/Bad.tsx'))
+        ).toThrow(/module-scope binding "T"/);
+    });
+
+    it('serverFn inside a component is a hard error with a location', () => {
+        const bad =
+            `import { serverFn } from '@sigx/server';\n` +
+            `export const C = () => {\n    const f = serverFn(async (rq) => 1);\n    return f;\n};`;
+        expect(() =>
+            plugin.transform.call(ctx('client'), bad, join(root, 'src/Nested.tsx'))
+        ).toThrow(/Nested\.tsx:3:15/);
     });
 
     it('skips re-runs over its own stub output without clobbering the cache', () => {
