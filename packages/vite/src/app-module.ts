@@ -1,0 +1,76 @@
+// ============================================================================
+// virtual:sigx-app — the document-side artifacts as a module (rfc-deploy
+// §3.2). The sibling of virtual:sigx-server-fns: what a fetch handler needs
+// (template, precomputed assets, manifests) with no filesystem in the
+// OUTPUT. The build always runs in Node — load() reads the client outDir
+// with fs at build time and inlines everything as literals.
+//
+// Also materialized as dist/server/sigx-app.js (the emitFile chunk pattern
+// the server-fn registry uses), so a Node server.mjs collapses from four
+// readFiles to one import — one documented pattern across all platforms.
+// ============================================================================
+
+import { readFileSync } from 'fs';
+import { join } from 'path';
+import { collectAssets, type ViteManifest } from './ssr.js';
+
+export const APP_VIRTUAL_ID = 'virtual:sigx-app';
+export const APP_RESOLVED_ID = '\0' + APP_VIRTUAL_ID;
+export const APP_FILE = 'sigx-app.js';
+
+/** Serve mode has no manifests — dev already solves template/assets live. */
+export function generateServeError(): string {
+    return (
+        `throw new Error("[sigx] virtual:sigx-app is a BUILD artifact - it does not exist under vite dev. ` +
+        `Use createDevRequestHandler from '@sigx/vite/ssr' for the dev server (template and assets are resolved live).");`
+    );
+}
+
+function readJsonIfExists(file: string): unknown | undefined {
+    try {
+        return JSON.parse(readFileSync(file, 'utf-8')) as unknown;
+    } catch {
+        return undefined;
+    }
+}
+
+/**
+ * Generate the virtual module's code by reading the CLIENT build's outputs.
+ * Requires the client environment to have built first — `buildApp` ordering
+ * (client → ssr) is what guarantees it.
+ */
+export function generateAppModuleCode(clientDir: string, base: string): string {
+    let template: string;
+    try {
+        template = readFileSync(join(clientDir, 'index.html'), 'utf-8');
+    } catch {
+        throw new Error(
+            `[sigx] virtual:sigx-app: no index.html in the client outDir (${clientDir}). ` +
+            `The client environment must build before the ssr environment - build with ` +
+            `'vite build --app' (builder mode) so the sigx plugin's buildApp ordering applies.`
+        );
+    }
+    const manifest = readJsonIfExists(join(clientDir, '.vite/manifest.json')) as
+        | ViteManifest
+        | undefined;
+    if (!manifest) {
+        throw new Error(
+            `[sigx] virtual:sigx-app: no .vite/manifest.json in the client outDir (${clientDir}). ` +
+            `The sigx plugin enables the client manifest itself - was the client environment built ` +
+            `by a config without sigx({ ssr })?`
+        );
+    }
+    const entries = Object.keys(manifest).filter((key) => manifest[key].isEntry);
+    const assets = collectAssets(manifest, entries, base);
+    const islandsManifest = readJsonIfExists(join(clientDir, '.vite/sigx-islands-manifest.json'));
+    const resumeManifest = readJsonIfExists(join(clientDir, '.vite/sigx-resume-manifest.json'));
+
+    return [
+        `export const template = ${JSON.stringify(template)};`,
+        `export const assets = ${JSON.stringify(assets)};`,
+        `export const manifest = ${JSON.stringify(manifest)};`,
+        `export const islandsManifest = ${islandsManifest === undefined ? 'undefined' : JSON.stringify(islandsManifest)};`,
+        `export const resumeManifest = ${resumeManifest === undefined ? 'undefined' : JSON.stringify(resumeManifest)};`,
+        ''
+    ].join('\n');
+}

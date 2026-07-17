@@ -61,8 +61,9 @@ sigx({
 
   // SSR mode: ONE `vite build --app` produces the client bundle (with its
   // asset manifest) into dist/client AND the server entry into dist/server —
-  // the server bundle externalizes its dependencies so it shares one module
-  // graph with the production request handler.
+  // shaped by `adapter` (default nodeAdapter(): dependencies external, one
+  // module graph with the production request handler; see "Deployment
+  // artifacts" below).
   ssr: { entry: 'src/entry-server.tsx' },
 })
 ```
@@ -84,6 +85,47 @@ app.use(await createDevRequestHandler(vite, { entry: '/src/entry-server.tsx' }))
 import { collectAssets } from '@sigx/vite/ssr';
 const assets = collectAssets(manifest, ['index.html']);
 ```
+
+## Deployment artifacts — `ssr.adapter` and `virtual:sigx-app`
+
+The build seam of the deployment RFC (`docs/rfc-deploy.md` §3). `ssr.adapter`
+is a plain `SigxAdapter` object — default `nodeAdapter()`, which keeps
+today's externalized Node output byte-identical:
+
+```ts
+sigx({ ssr: { entry: 'src/entry-server.tsx', adapter: nodeAdapter() } })
+```
+
+`serverBuild: 'external'` resolves deps from node_modules at runtime (Node /
+Bun hosts); `serverBuild: 'bundled'` produces a fully self-contained server
+build (`resolve.noExternal: true`, platform `conditions` — a REPLACEMENT
+array, so `node` is present only if the adapter lists it — target `esnext`,
+`runtimeExternal` for platform-scheme imports). Binary on purpose:
+partially-external is the dangerous middle ground for DI-token identity.
+Build ordering is explicit: client → ssr → remaining environments →
+`adapter.generate(ctx)` (which sees both finished output trees). Adapters
+may also hook the dev server via `dev(server)` — dev stays
+`createDevRequestHandler` on every platform.
+
+The document-side artifacts become code: `virtual:sigx-app` exports
+`template`, `assets` (precomputed `collectAssets`), `manifest`,
+`islandsManifest`, and `resumeManifest` as inlined literals — no filesystem
+in the output. External builds also materialize it as
+`dist/server/sigx-app.js` (imports of the virtual resolve to that emitted
+sibling), so a Node `server.mjs` collapses from four `readFile`s to one
+import:
+
+```js
+const { template, assets, islandsManifest, resumeManifest } = await import(
+    new URL('./dist/server/sigx-app.js', import.meta.url).href
+);
+```
+
+Bundled builds inline the module instead — one self-contained file is the
+deliverable. In dev the virtual throws (dev has no manifests;
+`createDevRequestHandler` resolves template/assets live). Combining
+`ssr.adapter` with `sigxServer({ role: 'client' })` is a config-time error —
+a client-role build has no server for an adapter to shape.
 
 ## Islands
 
