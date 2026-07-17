@@ -164,6 +164,22 @@ describe('virtual:sigx-app codegen error surfaces', () => {
             rmSync(dir, { recursive: true, force: true });
         }
     });
+
+    it('names the ordering contract when index.html or the client manifest is absent', async () => {
+        const { mkdtempSync, writeFileSync, mkdirSync, rmSync } = await import('node:fs');
+        const { tmpdir } = await import('node:os');
+        const { join } = await import('node:path');
+        const { generateAppModuleCode } = await import('../src/app-module');
+        const dir = mkdtempSync(join(tmpdir(), 'sigx-app-absent-'));
+        try {
+            expect(() => generateAppModuleCode(dir, '/')).toThrow(/no index\.html.*build --app/s);
+            mkdirSync(join(dir, '.vite'), { recursive: true });
+            writeFileSync(join(dir, 'index.html'), '<!doctype html>');
+            expect(() => generateAppModuleCode(dir, '/')).toThrow(/no \.vite\/manifest\.json/);
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
+    });
 });
 
 describe('buildApp ordering (rfc-deploy §3.1)', () => {
