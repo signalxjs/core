@@ -101,7 +101,7 @@ parameter** — no `this`, no ambient globals:
 serverFn(async (rq, ...args) => {
     rq.request;          // WinterCG Request (headers, cookies via headers)
     rq.url;              // parsed URL
-    rq.signal;           // fires on client disconnect
+    rq.abortSignal;      // fires on client disconnect (never a reactive signal)
     rq.responseHeaders;  // mutable response headers
     rq.status(201);      // success status override
     rq.locals;           // guard hand-off (auth results)

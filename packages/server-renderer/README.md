@@ -53,6 +53,49 @@ app.use(createRequestHandler({
 }));
 ```
 
+### The fetch handler (edge runtimes)
+
+`createFetchHandler` is the WinterCG sibling (rfc-deploy §2) — the same
+dispatch decisions expressed as `(Request) => Promise<Response>`, the shape
+Cloudflare Workers, Deno Deploy, Bun, Vercel Edge, and Netlify all consume
+natively. It lives on the WinterCG-clean `./server` entry (and the root
+`.`), so it runs wherever the render path runs:
+
+```ts
+import { createFetchHandler } from '@sigx/server-renderer/server';
+
+const handler = createFetchHandler<{ env: Env; ctx: ExecutionContext }>({
+    template,
+    app: (url) => createApp(url),   // same frozen entry contract
+    document: { assets }
+});
+
+export default {
+    // static assets → server functions → document render: the composition
+    // stays in YOUR entry — no sigx handler serves files or mounts the
+    // server-fn endpoint for you.
+    fetch: (request: Request, env: Env, ctx: ExecutionContext) =>
+        handler(request, { env, ctx })
+};
+```
+
+The second argument is the platform context — opaque to sigx, threaded
+verbatim into the `template`/`app`/`document` callbacks. It is optional
+under the default `TPlatform = unknown` (Deno/Bun entries pass nothing);
+instantiating the generic with typed bindings makes it required, so
+forgetting Cloudflare's `{ env, ctx }` is a compile error rather than an
+`undefined` at render time. A redirect from `useResponse`
+returns a bodyless `Response` and releases the render; cancelling the
+`Response` body (client disconnect) does the same. A shell failure yields a
+minimal 500 — there is no `next()` in the fetch world; a custom error page
+is a `try/catch` wrapper around the returned handler.
+
+Shared with the Node handler: `defaultIsBot` (the crawler regex behind the
+bot → blocking dispatch) and `chunksToBytes` (the pull-based
+string-chunks → UTF-8 `ReadableStream<Uint8Array>` encoder under both the
+fetch handler and `renderDocumentToWebStream`) — both exported from
+`./server` for hand-written servers.
+
 ## Runtime portability & request isolation
 
 The `.` and `./server` entries are **WinterCG-clean** — no Node builtins on
