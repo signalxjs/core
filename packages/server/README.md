@@ -135,6 +135,8 @@ On WinterCG runtimes (Cloudflare, Deno, Bun) skip the adapter —
 already fetch-handler-shaped. Route with its sibling predicate:
 
 ```js
+import { handleServerFnRequest, matchesServerFn } from '@sigx/server/server';
+
 if (matchesServerFn(request)) return handleServerFnRequest(request, opts);
 return renderDocument(request);   // your document handler
 ```
