@@ -84,6 +84,20 @@ describe('createServerFnHandler over node:http', () => {
         expect(res.status).toBe(200);
     });
 
+    it('honors x-forwarded-host for the same-origin check (host-rewriting proxy)', async () => {
+        const res = await fetch(`${origin}/_sigx/fn/add_fn_00000002`, {
+            method: 'POST',
+            headers: {
+                'content-type': 'application/json',
+                origin: 'https://app.example',
+                'x-forwarded-proto': 'https',
+                'x-forwarded-host': 'app.example'
+            },
+            body: '{"args":[1,1]}'
+        });
+        expect(res.status).toBe(200);
+    });
+
     it('passes non-matching URLs to next()', async () => {
         const res = await fetch(`${origin}/somewhere-else`);
         expect(res.status).toBe(404);

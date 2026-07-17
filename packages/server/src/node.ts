@@ -102,7 +102,8 @@ function toWebRequest(req: IncomingMessage, res: ServerResponse): Request {
     const forwarded = String(req.headers['x-forwarded-proto'] ?? '').split(',')[0].trim();
     const proto =
         forwarded || ((req.socket as { encrypted?: boolean }).encrypted ? 'https' : 'http');
-    const host = req.headers.host ?? 'localhost';
+    const forwardedHost = String(req.headers['x-forwarded-host'] ?? '').split(',')[0].trim();
+    const host = forwardedHost || (req.headers.host ?? 'localhost');
     const url = `${proto}://${host}${req.url ?? '/'}`;
 
     const headers = new Headers();
