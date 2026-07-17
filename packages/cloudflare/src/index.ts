@@ -46,6 +46,11 @@ const DEFAULT_COMPAT_DATE = '2026-07-01';
 
 const toPosix = (p: string): string => p.replace(/\\/g, '/');
 
+/** Any string → a wrangler-safe worker name slug. */
+function slugify(value: string): string {
+    return value.replace(/^@/, '').replace(/[^a-zA-Z0-9-]+/g, '-').replace(/^-+|-+$/g, '').toLowerCase();
+}
+
 /** Root package.json name → a wrangler-safe worker name. */
 function workerName(root: string): string {
     try {
@@ -53,20 +58,26 @@ function workerName(root: string): string {
             name?: string;
         };
         if (pkg.name) {
-            const slug = pkg.name.replace(/^@/, '').replace(/[^a-zA-Z0-9-]+/g, '-').toLowerCase();
+            const slug = slugify(pkg.name);
             if (slug) return slug;
         }
     } catch {
         // fall through to the directory name
     }
-    return path.basename(root).toLowerCase() || 'sigx-app';
+    return slugify(path.basename(root)) || 'sigx-app';
 }
 
-/** The import specifier a scaffolded entry uses for the app's SSR entry. */
+/**
+ * The import specifier a scaffolded entry uses for the app's SSR entry.
+ * Both inputs are PROJECT-relative — computed with posix path math on the
+ * normalized strings, never `path.relative` (which resolves against
+ * process.cwd() and breaks when the builder runs from another directory).
+ */
 function relEntryImport(platformEntry: string, ssrEntry: string): string {
-    const rel = toPosix(
-        path.relative(path.dirname(platformEntry), ssrEntry.replace(/^\//, ''))
-    ).replace(/\.(tsx|ts|jsx|mjs|js)$/, '');
+    const norm = (p: string) => toPosix(p).replace(/^\//, '');
+    const rel = path.posix
+        .relative(path.posix.dirname(norm(platformEntry)), norm(ssrEntry))
+        .replace(/\.(tsx|ts|jsx|mjs|js)$/, '');
     return rel.startsWith('.') ? rel : './' + rel;
 }
 
