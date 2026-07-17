@@ -3,6 +3,10 @@ name: Bundle size
 on:
   pull_request:
     branches: [main]
+  # The `size` job is a required check on main, so it must also report on the
+  # merge-queue ref — a required context that never runs there wedges every
+  # queued PR in AWAITING_CHECKS (#336).
+  merge_group:
 
 permissions:
   contents: read
@@ -25,9 +29,18 @@ jobs:
           node-version: '22'
           cache: 'pnpm'
 
-      - uses: andresz1/size-limit-action@v1
+      # PR events: the diffing/commenting action (needs a PR context).
+      - if: github.event_name == 'pull_request'
+        uses: andresz1/size-limit-action@v1
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           package_manager: pnpm
           script: pnpm size
           build_script: build
+
+      # Merge-queue ref: no PR to comment on — enforce the budgets directly.
+      - if: github.event_name == 'merge_group'
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+          pnpm size
