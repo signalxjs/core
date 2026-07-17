@@ -16,6 +16,13 @@
  * the `sigx` umbrella imports it unconditionally, so server-side SSR code
  * evaluates it too — declaring there would defeat the server guard. Web
  * relies on the window fallback; only genuinely windowless clients declare.
+ *
+ * A declaration also stamps `globalThis.__SIGX_LIVE_CLIENT__` (rfc-server
+ * rev 2, N.2): `@sigx/server` reads that global — never this module — so its
+ * real `serverFn` wrapper can refuse to execute server bodies that leaked
+ * into a live client's bundle. The `typeof window` fallback deliberately
+ * does NOT stamp: web SSR evaluates this module too, and a stamp there
+ * would trip the server-side guard.
  */
 
 let declared: boolean | null = null;
@@ -26,6 +33,7 @@ let declared: boolean | null = null;
  */
 export function declareLiveClient(live = true): void {
     declared = live;
+    (globalThis as Record<string, unknown>).__SIGX_LIVE_CLIENT__ = live;
 }
 
 /** Declaration wins; `typeof window` is the fallback. */

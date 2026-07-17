@@ -166,6 +166,48 @@ describe('handleServerFnRequest — status matrix', () => {
     });
 });
 
+describe('handleServerFnRequest — origin: verify-when-present (rfc-server rev 2)', () => {
+    const noOrigin = (options: Partial<ServerFnRequestOptions>) =>
+        handleServerFnRequest(
+            new Request(`${ORIGIN}/_sigx/fn/add_fn_00000001`, {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: '{"args":[1,2]}'
+            }),
+            { resolve: (sym) => FNS[sym], ...options }
+        );
+
+    it('admits a request WITHOUT an Origin header (programmatic client)', async () => {
+        const res = await noOrigin({ origin: 'verify-when-present' });
+        expect(res.status).toBe(200);
+        await expect(res.json()).resolves.toEqual({ data: 3 });
+    });
+
+    it('still verifies a PRESENT Origin — match passes, mismatch 403s', async () => {
+        const match = await call('add_fn_00000001', { args: [1, 2] }, {}, {
+            origin: 'verify-when-present'
+        });
+        expect(match.status).toBe(200);
+
+        const cross = await call('add_fn_00000001', { args: [1, 2] }, {
+            headers: { origin: 'https://evil.example' }
+        }, { origin: 'verify-when-present' });
+        expect(cross.status).toBe(403);
+    });
+
+    it('rejects "Origin: null" — a PRESENT header, not an absent one', async () => {
+        const res = await call('add_fn_00000001', { args: [1, 2] }, {
+            headers: { origin: 'null' }
+        }, { origin: 'verify-when-present' });
+        expect(res.status).toBe(403);
+    });
+
+    it("the default 'same-origin' still rejects an absent Origin", async () => {
+        const res = await noOrigin({});
+        expect(res.status).toBe(403);
+    });
+});
+
 describe('handleServerFnRequest — errors', () => {
     it('ServerFnError passes through verbatim', async () => {
         const res = await call('polite_fn_00000003', { args: [] });

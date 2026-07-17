@@ -53,7 +53,7 @@ export interface SigxServerOptions {
      */
     guard?: string;
     /** Origin policy forwarded to the dev endpoint. Default `'same-origin'`. */
-    origin?: 'same-origin' | string[] | false;
+    origin?: 'same-origin' | 'verify-when-present' | string[] | false;
     /** Body cap forwarded to the dev endpoint. Default 1 MiB. */
     maxBodyBytes?: number;
 }

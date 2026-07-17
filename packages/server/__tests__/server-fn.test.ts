@@ -6,7 +6,7 @@
  * context.
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { serverFn, ServerFnError, isServerFnError, type StandardSchemaV1 } from '../src/index';
 import { createRequestContext } from '../src/context';
 
@@ -110,6 +110,33 @@ describe('serverFn — options form', () => {
         const error = await fn(undefined as never).catch((e: unknown) => e);
         expect(isServerFnError(error)).toBe(true);
         expect((error as ServerFnError).status).toBe(401);
+    });
+});
+
+describe('serverFn — live-client guard (rfc-server rev 2, N.2)', () => {
+    const setMarker = (value: unknown) => {
+        (globalThis as { __SIGX_LIVE_CLIENT__?: unknown }).__SIGX_LIVE_CLIENT__ = value;
+    };
+    afterEach(() => {
+        delete (globalThis as { __SIGX_LIVE_CLIENT__?: unknown }).__SIGX_LIVE_CLIENT__;
+    });
+
+    it('throws when invoked in a declared live client — server bodies never run there', () => {
+        const fn = serverFn(async function leaked() {
+            return 'server secret';
+        });
+        setMarker(true);
+        expect(() => fn()).toThrow(/"leaked" reached a live client unextracted/);
+        expect(() => fn()).toThrow(/role: 'client'/);
+    });
+
+    it('only the strict `true` marker trips it — absent or `false` runs normally', async () => {
+        const fn = serverFn(async () => 'ok');
+        await expect(fn()).resolves.toBe('ok');           // no marker
+        setMarker(false);                                  // declared NOT a live client
+        await expect(fn()).resolves.toBe('ok');
+        setMarker('yes');                                  // sloppy truthy ≠ declared
+        await expect(fn()).resolves.toBe('ok');
     });
 });
 

@@ -106,7 +106,22 @@ export function serverFn(
 
     // In-process (SSR-time) calls run the same pipeline against a detached
     // context — no network hop, and no transport symbol (rfc-server §7 v1).
-    const wrapper = (...args: unknown[]) =>
-        invoke(createDetachedContext(), { symbol: '', name }, args);
+    const wrapper = (...args: unknown[]) => {
+        // A declared live client (lynx/terminal — `declareLiveClient()` stamps
+        // the global; rfc-server rev 2 N.2) must never execute server bodies
+        // locally: reaching this wrapper there means the build skipped the
+        // stub swap. Checked at CALL time (robust to declaration ordering)
+        // and not __DEV__-gated, matching the browser-condition posture.
+        // A global marker, not a runtime-core import — this package stays
+        // dependency-free of the runtime.
+        if ((globalThis as { __SIGX_LIVE_CLIENT__?: unknown }).__SIGX_LIVE_CLIENT__ === true) {
+            throw new Error(
+                `[sigx server] server function ${name ? `"${name}" ` : ''}reached a live client ` +
+                `unextracted — this app must call its backend over stubs (set role: 'client' in ` +
+                `sigxServer(), or fix the bundler integration).`
+            );
+        }
+        return invoke(createDetachedContext(), { symbol: '', name }, args);
+    };
     return Object.assign(wrapper, { __sigxFn: invoke, __sigxName: name });
 }

@@ -152,6 +152,8 @@ declareLiveClient(); // this runtime is a live client — keyed reads fetch on m
 
 Never call this from code a server render can evaluate (that would defeat the SSR guard) — it belongs in the module that defines your renderer's platform, the way `@sigx/runtime-dom/platform` defines the web's.
 
+A declaration also stamps `globalThis.__SIGX_LIVE_CLIENT__`, which `@sigx/server`'s live-client guard reads (rfc-server rev 2): a server function invoked in a declared live client throws instead of executing its body locally. The `window` fallback never stamps.
+
 > **Note:** Most users should install [`sigx`](https://www.npmjs.com/package/sigx) instead, which bundles this package with a DOM renderer and the reactivity system.
 
 ## 📚 Documentation
