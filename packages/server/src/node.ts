@@ -96,7 +96,12 @@ export function createServerFnHandler(options: ServerFnHandlerOptions): NodeRequ
 
 /** Bridge IncomingMessage → WinterCG Request (body streamed, abort wired). */
 function toWebRequest(req: IncomingMessage, res: ServerResponse): Request {
-    const proto = (req.socket as { encrypted?: boolean }).encrypted ? 'https' : 'http';
+    // Behind a TLS-terminating proxy the socket is plaintext but the
+    // browser's Origin is https — honor the standard forwarded proto so the
+    // same-origin check compares like with like.
+    const forwarded = String(req.headers['x-forwarded-proto'] ?? '').split(',')[0].trim();
+    const proto =
+        forwarded || ((req.socket as { encrypted?: boolean }).encrypted ? 'https' : 'http');
     const host = req.headers.host ?? 'localhost';
     const url = `${proto}://${host}${req.url ?? '/'}`;
 

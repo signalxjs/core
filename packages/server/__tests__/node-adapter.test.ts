@@ -70,6 +70,20 @@ describe('createServerFnHandler over node:http', () => {
         expect(cookies).toEqual(['a=1; Path=/', 'b=2; Path=/']);
     });
 
+    it('honors x-forwarded-proto for the same-origin check (TLS proxy)', async () => {
+        const httpsOrigin = origin.replace('http://', 'https://');
+        const res = await fetch(`${origin}/_sigx/fn/add_fn_00000002`, {
+            method: 'POST',
+            headers: {
+                'content-type': 'application/json',
+                origin: httpsOrigin,
+                'x-forwarded-proto': 'https'
+            },
+            body: '{"args":[1,1]}'
+        });
+        expect(res.status).toBe(200);
+    });
+
     it('passes non-matching URLs to next()', async () => {
         const res = await fetch(`${origin}/somewhere-else`);
         expect(res.status).toBe(404);
