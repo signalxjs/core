@@ -138,5 +138,12 @@ export async function installHMRPlugin(): Promise<void> {
     });
 }
 
-// Auto-install when this module is loaded
-installHMRPlugin();
+// Auto-install when this module is loaded — the injected BROWSER runtime
+// path (the transform only injects into client transforms). Skipped
+// server-side: the node plugin re-exports from this module, and a
+// fire-and-forget dynamic import there is pure liability — HMR is a browser
+// concern, and a test environment can tear down before the import settles
+// (the EnvironmentTeardownError flake, core#307).
+if (typeof window !== 'undefined') {
+    void installHMRPlugin();
+}

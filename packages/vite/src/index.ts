@@ -1,9 +1,17 @@
 // Vite plugin for sigx with HMR support
-import type { Plugin, ResolvedConfig, UserConfig } from 'vite';
+import type { Plugin, ResolvedConfig, UserConfig, ViteBuilder } from 'vite';
 import { createRequire } from 'module';
 import * as fs from 'fs';
 import * as net from 'net';
 import path from 'path';
+import { adapterSsrEnvironment, nodeAdapter, type SigxAdapter } from './adapter.js';
+import {
+    APP_VIRTUAL_ID,
+    APP_RESOLVED_ID,
+    APP_FILE,
+    generateAppModuleCode,
+    generateServeError
+} from './app-module.js';
 
 // ============================================================================
 // Types
@@ -49,6 +57,14 @@ interface SigxPluginOptions {
         clientOutDir?: string;
         /** Server build output. Default: 'dist/server'. */
         serverOutDir?: string;
+        /**
+         * Deployment adapter (rfc-deploy §3.1): shapes the ssr environment's
+         * build ('external' vs fully 'bundled', platform conditions) and may
+         * generate platform output after both environments have written.
+         * Default: `nodeAdapter()` — today's externalized Node output,
+         * byte-identical.
+         */
+        adapter?: SigxAdapter;
     };
 }
 
@@ -178,13 +194,27 @@ export function sigxPlugin(options: SigxPluginOptions = {}): Plugin {
         ssr,
     } = options;
 
+    // The adapter shapes the ssr environment (rfc-deploy §3.1). The default
+    // is today's externalized Node output; only an EXPLICIT adapter can
+    // conflict with sigxServer({ role: 'client' }).
+    const adapter = ssr?.adapter ?? nodeAdapter();
+    const adapterExplicit = ssr?.adapter != null;
+
     let config: ResolvedConfig;
+    let isServe = false;
+    /** Absolute client outDir — where virtual:sigx-app reads at build time. */
+    let clientDir = '';
 
     return {
         name: 'sigx',
         enforce: 'pre',
 
-        configureServer(server) {
+        async configureServer(server) {
+            // Platform-binding proxies in dev (rfc-deploy §4.6) — adapters
+            // change builds, not dev; this hook is the one exception.
+            if (ssr?.adapter?.dev) {
+                await ssr.adapter.dev(server);
+            }
             // Workspace-dist modules must never be immutable in dev (#272):
             // Vite serves `/@fs/**?v=<hash>` with a year-long immutable
             // Cache-Control, and the hash does NOT change when a linked
@@ -306,9 +336,14 @@ export function sigxPlugin(options: SigxPluginOptions = {}): Plugin {
                     },
                     // SSR mode: one `vite build` builds both environments —
                     // client (with its asset manifest, feeding collectAssets)
-                    // and server (the SSR entry, dependencies external — the
-                    // whole @sigx family resolves from node_modules, sharing
-                    // one module graph with the production request handler).
+                    // and server (the SSR entry, shaped by the adapter:
+                    // 'external' resolves the whole @sigx family from
+                    // node_modules, sharing one module graph with the
+                    // production request handler; 'bundled' is total — one
+                    // bundle IS one module graph, handler included — so both
+                    // ends of the binary are safe for DI-token identity, and
+                    // the partially-external middle ground stays
+                    // unrepresentable).
                     ...(ssr && {
                         builder: {},
                         environments: {
@@ -318,17 +353,11 @@ export function sigxPlugin(options: SigxPluginOptions = {}): Plugin {
                                     outDir: ssr.clientOutDir ?? 'dist/client'
                                 }
                             },
-                            ssr: {
-                                resolve: {
-                                    external: true
-                                },
-                                build: {
-                                    outDir: ssr.serverOutDir ?? 'dist/server',
-                                    rollupOptions: {
-                                        input: ssr.entry
-                                    }
-                                }
-                            }
+                            ssr: adapterSsrEnvironment(
+                                adapter,
+                                ssr.serverOutDir ?? 'dist/server',
+                                adapter.entry ?? ssr.entry
+                            )
                         }
                     })
                 };
@@ -337,7 +366,123 @@ export function sigxPlugin(options: SigxPluginOptions = {}): Plugin {
 
         configResolved(resolvedConfig) {
             config = resolvedConfig;
+            isServe = resolvedConfig.command === 'serve';
+            clientDir = path.resolve(
+                resolvedConfig.root,
+                resolvedConfig.environments?.client?.build?.outDir ??
+                    ssr?.clientOutDir ??
+                    'dist/client'
+            );
+
+            // rfc-deploy §3.3: role 'client' describes a build with NO server
+            // in it (every server module stubbed, no registry emitted), so an
+            // adapter — which shapes the server build — cannot apply. The
+            // seam (`api: { role, … }`) landed with role; the error lands
+            // here, with adapter.
+            if (ssr && adapterExplicit) {
+                const serverPlugin = resolvedConfig.plugins.find((p) => p.name === 'sigx:server');
+                const role = (serverPlugin?.api as { role?: string } | undefined)?.role;
+                if (role === 'client') {
+                    throw new Error(
+                        `[sigx] ssr.adapter ('${adapter.name}') cannot be combined with ` +
+                        `sigxServer({ role: 'client' }): role 'client' declares this whole build a ` +
+                        `remote-server client - every server function is stubbed and no registry is ` +
+                        `emitted - so there is no server for an adapter to shape. Drop ssr.adapter, ` +
+                        `or build the deployed server with role 'auto'.`
+                    );
+                }
+            }
         },
+
+        resolveId(id, importer) {
+            if (id !== APP_VIRTUAL_ID) return;
+            // External builds materialize the module as dist/server/sigx-app.js
+            // (emitFile below). App imports of the virtual resolve to that
+            // emitted sibling instead of the module itself — Rolldown would
+            // otherwise inline a SECOND copy of the template into the entry
+            // chunk (duplication verified empirically; rfc-deploy §7 flagged
+            // it). Bundled builds inline the virtual — one self-contained
+            // file IS the deliverable — so no chunk and no indirection.
+            if (
+                !isServe &&
+                ssr &&
+                adapter.serverBuild === 'external' &&
+                importer &&
+                this.environment?.name !== 'client'
+            ) {
+                return { id: './' + APP_FILE, external: true };
+            }
+            return APP_RESOLVED_ID;
+        },
+
+        load(id) {
+            if (id !== APP_RESOLVED_ID) return;
+            // Dev has no manifests and already solves template/assets live.
+            if (isServe) return generateServeError();
+            if (this.environment?.name === 'client') {
+                this.error(
+                    `virtual:sigx-app is server-only - it inlines the CLIENT build's artifacts ` +
+                    `for the server render path and must not be imported by client code.`
+                );
+            }
+            try {
+                return generateAppModuleCode(clientDir, config.base);
+            } catch (err) {
+                this.error(err instanceof Error ? err.message : String(err));
+            }
+        },
+
+        buildStart() {
+            // Materialize dist/server/sigx-app.js for the EXTERNAL build (the
+            // registry-chunk emitFile pattern): a Node server.mjs collapses
+            // from four readFiles to one import, and entry imports of the
+            // virtual resolve to this emitted sibling (see resolveId).
+            // Bundled builds inline the virtual instead — no separate chunk.
+            if (isServe || !ssr || adapter.serverBuild !== 'external') return;
+            if (this.environment?.name === 'client') return;
+            this.emitFile({ type: 'chunk', id: APP_VIRTUAL_ID, fileName: APP_FILE });
+        },
+
+        // Explicit build ordering (rfc-deploy §3.1): the ssr environment's
+        // virtual:sigx-app inlines CLIENT artifacts, so client must write
+        // first; adapter.generate sees both output trees last. Any further
+        // user-defined environments build after the pair (a user-supplied
+        // config-level builder.buildApp still runs after this hook and owns
+        // whatever this left unbuilt).
+        ...(ssr && {
+            buildApp: async (builder: ViteBuilder) => {
+                for (const name of ['client', 'ssr']) {
+                    const env = builder.environments[name];
+                    if (env && !env.isBuilt) await builder.build(env);
+                }
+                for (const env of Object.values(builder.environments)) {
+                    if (!env.isBuilt) await builder.build(env);
+                }
+                if (adapter.generate) {
+                    const root = builder.config.root;
+                    await adapter.generate({
+                        root,
+                        clientOutDir: path.resolve(
+                            root,
+                            builder.config.environments.client?.build?.outDir ??
+                                ssr.clientOutDir ??
+                                'dist/client'
+                        ),
+                        serverOutDir: path.resolve(
+                            root,
+                            builder.config.environments.ssr?.build?.outDir ??
+                                ssr.serverOutDir ??
+                                'dist/server'
+                        ),
+                        ssrInput: path.resolve(root, adapter.entry ?? ssr.entry),
+                        logger: {
+                            info: (msg: string) => builder.config.logger.info(msg),
+                            warn: (msg: string) => builder.config.logger.warn(msg)
+                        }
+                    });
+                }
+            }
+        }),
 
         transform(code, id, transformOptions) {
             // HMR is a browser concern: never inject into SSR transforms —
@@ -391,6 +536,10 @@ if (import.meta.hot) {
 
 // Re-export the HMR runtime functions for manual use if needed
 export { installHMRPlugin, registerHMRModule } from './hmr.js';
+
+// Deployment build seam (rfc-deploy §3)
+export { nodeAdapter } from './adapter.js';
+export type { SigxAdapter, AdapterGenerateContext } from './adapter.js';
 
 // Default export for convenience
 export default sigxPlugin;
