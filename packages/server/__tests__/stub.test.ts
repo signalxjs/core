@@ -110,11 +110,13 @@ describe('configureServerFn (rfc-server rev 2, N.1)', () => {
         expect(mock.mock.calls[0][0]).toBe('/_sigx/fn/add_fn_00000001');
     });
 
-    it('merges static headers, with content-type NOT overridable', async () => {
+    it('merges static headers, with content-type NOT overridable — any casing', async () => {
         const mock = stubFetch(200, { data: 1 });
         const fn = __serverFnStub('add_fn_00000001', 'add', '/_sigx/fn');
         configureServerFn({
-            headers: { authorization: 'Bearer abc', 'content-type': 'text/plain' }
+            // 'Content-Type' must be stripped too — Headers normalization
+            // would otherwise COMBINE it with ours ('text/plain, application/json').
+            headers: { authorization: 'Bearer abc', 'Content-Type': 'text/plain' }
         });
         await fn(1);
         expect(mock).toHaveBeenCalledWith('/_sigx/fn/add_fn_00000001', {

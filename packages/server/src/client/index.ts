@@ -62,12 +62,18 @@ export function __serverFnStub(
         const prefix = target.endsWith('/') ? target.slice(0, -1) : target;
         const extra =
             typeof config?.headers === 'function' ? await config.headers() : config?.headers;
+        // content-type is NOT overridable (the endpoint 415s anything else;
+        // rfc-server N.1) — stripped case-insensitively, since Headers
+        // normalization would otherwise COMBINE `Content-Type: x` with ours.
+        const headers: Record<string, string> = {};
+        for (const key in extra) {
+            if (key.toLowerCase() !== 'content-type') headers[key] = extra[key];
+        }
+        headers['content-type'] = 'application/json';
         const url = `${prefix}/${encodeURIComponent(symbol)}`;
         const init: RequestInit = {
             method: 'POST',
-            // content-type merges LAST — not overridable (the endpoint 415s
-            // anything else; rfc-server N.1).
-            headers: { ...extra, 'content-type': 'application/json' },
+            headers,
             body: JSON.stringify({ args })
         };
         // Branch instead of aliasing the global fetch — an unbound alias is
