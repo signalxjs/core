@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+**`createFetchHandler` — the WinterCG request handler.** (rfc-deploy §2,
+Phase 1 of #321; #323)
+
+- New `createFetchHandler(options): (request, platform?) => Promise<Response>`
+  on `@sigx/server-renderer/server` (re-exported from the root entry): the
+  fetch-shaped sibling of `createRequestHandler`, with byte-for-byte the
+  same dispatch — parallel template/app resolution, bot → blocking mode,
+  the shell as the status/redirect decision point, redirects as bodyless
+  responses with the generator released, shell failures as a minimal 500.
+  The `platform` argument (Cloudflare's `{ env, ctx }`, …) is opaque and
+  threaded verbatim into every callback — optional under the default
+  `TPlatform = unknown`, required once the generic is instantiated with
+  bindings that don't admit `undefined` (omitting it is a compile error,
+  keeping the callbacks' `platform: TPlatform` sound).
+- New `defaultIsBot` export: the crawler-UA regex behind the bot →
+  blocking dispatch, now shared by the fetch, Node, and dev handlers.
+- New `chunksToBytes(chunks): ReadableStream<Uint8Array>` export: the
+  pull-based string→UTF-8 encoder (backpressure in `pull()`, generator
+  released on `cancel()`) extracted from `renderDocumentToWebStream` and
+  shared with the fetch handler and hand-written servers.
+- The edge smoke (`pnpm test:edge`) now round-trips a full
+  `Request → createFetchHandler → Response` through the production dist,
+  and covers `@sigx/server`'s `handleServerFnRequest` under the same
+  no-Node-builtin import hooks (rfc-deploy §6).
+
 **The boundary scheduler split from the hydration executor — deferred pages
 now execute zero runtime JS at load.** (#293)
 

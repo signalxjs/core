@@ -414,6 +414,9 @@ importers:
       '@sigx/resume':
         specifier: workspace:^
         version: link:../resume
+      '@sigx/server':
+        specifier: workspace:^
+        version: link:../server
       '@sigx/vite':
         specifier: workspace:^
         version: link:../vite
