@@ -165,7 +165,10 @@ function isReference(node: Node, parent: Node | null): boolean {
     if (parent.type === 'MemberExpression' && parent.property === node && parent.computed !== true) return false;
     if (parent.type === 'Property' && parent.key === node && parent.computed !== true && parent.shorthand !== true) return false;
     if (parent.type === 'ImportSpecifier' || parent.type === 'ImportDefaultSpecifier' || parent.type === 'ImportNamespaceSpecifier') return false;
-    if (parent.type === 'ExportSpecifier') return false;
+    // `export { local as exported }`: the LOCAL name references the binding
+    // (an import re-exported this way must survive stripping); the exported
+    // name does not.
+    if (parent.type === 'ExportSpecifier') return parent.local === node;
     if ((parent.type === 'LabeledStatement' || parent.type === 'BreakStatement' || parent.type === 'ContinueStatement') && parent.label === node) return false;
     // Binding positions (declarator ids, params, fn names) — handled by the
     // scope sets, but exclude the id of its own declaration outright.

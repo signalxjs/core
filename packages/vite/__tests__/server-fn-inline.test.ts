@@ -94,6 +94,22 @@ export const alsoClient = () => used(1);
         expect(client).not.toContain('onlyServer');
     });
 
+    it('keeps imports that are re-exported', () => {
+        const code = `
+import { serverFn } from '@sigx/server';
+import { helper, serverSide } from './utils';
+
+const go = serverFn(async (rq) => serverSide());
+export { helper };
+export { go };
+`;
+        const result = extract(code, '/src/api.ts');
+        expect(result.errors).toHaveLength(0);
+        const client = result.clientModule!;
+        expect(client).toContain(`import { helper } from './utils';`);
+        expect(client).not.toContain('serverSide');
+    });
+
     it('returns nothing for files without serverFn imports', () => {
         const result = extract(`export const x = 1;`, '/src/x.ts');
         expect(result.fns).toHaveLength(0);
