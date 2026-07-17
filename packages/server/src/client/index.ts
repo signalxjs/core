@@ -25,19 +25,61 @@ interface WireError {
     data?: unknown;
 }
 
+/**
+ * Runtime transport config (rfc-server rev 2, N.1) — how a native client
+ * (lynx, terminal) or a bearer-auth web SPA points its stubs at a remote
+ * backend. Stubs resolve it at CALL time, so one build serves
+ * dev/staging/prod and header factories can rotate credentials.
+ */
+export interface ServerFnTransport {
+    /** Absolute URL or path prefix; wins over the build-time endpoint. */
+    endpoint?: string;
+    /** Extra request headers — static map or (possibly async) factory. */
+    headers?:
+        | Record<string, string>
+        | (() => Record<string, string> | Promise<Record<string, string>>);
+    /** Fetch implementation; default is the global fetch. */
+    fetch?: typeof globalThis.fetch;
+}
+
+let transport: ServerFnTransport | null = null;
+
+/** Set (or with `null` clear) the transport every stub resolves at call time. */
+export function configureServerFn(config: ServerFnTransport | null): void {
+    transport = config;
+}
+
 /** Create the typed client stub for one extracted server function. */
 export function __serverFnStub(
     symbol: string,
     name: string,
-    base: string
+    endpoint: string
 ): (...args: unknown[]) => Promise<unknown> {
-    const prefix = base.endsWith('/') ? base.slice(0, -1) : base;
     return async (...args: unknown[]) => {
-        const res = await fetch(`${prefix}/${symbol}`, {
+        // Call-time resolution: configureServerFn endpoint > baked endpoint.
+        const config = transport;
+        const target = config?.endpoint ?? endpoint;
+        const prefix = target.endsWith('/') ? target.slice(0, -1) : target;
+        const extra =
+            typeof config?.headers === 'function' ? await config.headers() : config?.headers;
+        // content-type is NOT overridable (the endpoint 415s anything else;
+        // rfc-server N.1) — stripped case-insensitively, since Headers
+        // normalization would otherwise COMBINE `Content-Type: x` with ours.
+        const headers: Record<string, string> = {};
+        for (const key in extra) {
+            if (key.toLowerCase() !== 'content-type') headers[key] = extra[key];
+        }
+        headers['content-type'] = 'application/json';
+        const url = `${prefix}/${encodeURIComponent(symbol)}`;
+        const init: RequestInit = {
             method: 'POST',
-            headers: { 'content-type': 'application/json' },
+            headers,
             body: JSON.stringify({ args })
-        });
+        };
+        // Branch instead of aliasing the global fetch — an unbound alias is
+        // an illegal invocation in some runtimes, and the zero-config path
+        // must stay byte-identical to a plain `fetch(...)` call.
+        const res = config?.fetch ? await config.fetch(url, init) : await fetch(url, init);
         const text = await res.text();
         let payload: { data?: unknown; error?: WireError } | undefined;
         try {

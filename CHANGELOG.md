@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- **`@sigx/server`**: the runtime half of rfc-server rev 2 — native clients (#318, #320). `configureServerFn({ endpoint, headers, fetch })` in `@sigx/server/client`: stubs resolve their transport at **call time**, so a lynx/terminal app (or a bearer-auth web SPA) points every server function at a deployed backend with rotating credentials — one build serves dev/staging/prod; `content-type` merges last and is not overridable, zero config is byte-identical to v1, and the entry stays dependency-free. `origin: 'verify-when-present'` on both request handlers verifies the `Origin` header when present and admits header-less programmatic clients (browser CSRF stays independently blocked by the required JSON content-type; `Origin: null` is a present header and still rejected; the default stays `'same-origin'`). And the live-client guard: the real `serverFn` wrapper now throws when invoked in a declared live client — a native build that skipped the stub swap fails loudly instead of silently running server bodies locally against the detached context.
+- **`@sigx/runtime-core`**: `declareLiveClient()` additionally stamps `globalThis.__SIGX_LIVE_CLIENT__` — the marker `@sigx/server`'s live-client guard reads (a global, not an import, so `@sigx/server` stays runtime-free). The `typeof window` fallback deliberately does not stamp; web SSR is unaffected. (#320)
+
 ## [0.12.0] — 2026-07-17
 
 ### Added

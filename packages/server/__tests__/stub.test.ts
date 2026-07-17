@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { __serverFnStub, __serverOnly } from '../src/client/index';
+import { __serverFnStub, __serverOnly, configureServerFn } from '../src/client/index';
 import { isServerFnError } from '../src/errors';
 
 function stubFetch(status: number, body: unknown): ReturnType<typeof vi.fn> {
@@ -18,7 +18,10 @@ function stubFetch(status: number, body: unknown): ReturnType<typeof vi.fn> {
     return mock;
 }
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+    vi.unstubAllGlobals();
+    configureServerFn(null);
+});
 
 describe('__serverFnStub', () => {
     it('POSTs {"args"} to {base}/{symbol} and unwraps {data}', async () => {
@@ -85,6 +88,73 @@ describe('__serverFnStub', () => {
         stubFetch(200, '{"data":{"__proto__":{"polluted":true},"ok":1}}');
         const fn = __serverFnStub('e_fn_00000006', 'echo', '/_sigx/fn');
         await expect(fn()).resolves.toEqual({ ok: 1 });
+    });
+});
+
+describe('configureServerFn (rfc-server rev 2, N.1)', () => {
+    it('resolves the transport endpoint at CALL time, over the baked endpoint', async () => {
+        const mock = stubFetch(200, { data: 1 });
+        const fn = __serverFnStub('add_fn_00000001', 'add', '/_sigx/fn');
+        configureServerFn({ endpoint: 'https://api.example.com/_sigx/fn/' });
+        await fn();
+        // Trailing slash trimmed, symbol appended as a path segment.
+        expect(mock.mock.calls[0][0]).toBe('https://api.example.com/_sigx/fn/add_fn_00000001');
+    });
+
+    it('configureServerFn(null) restores the baked endpoint', async () => {
+        const mock = stubFetch(200, { data: 1 });
+        const fn = __serverFnStub('add_fn_00000001', 'add', '/_sigx/fn');
+        configureServerFn({ endpoint: 'https://api.example.com/_sigx/fn' });
+        configureServerFn(null);
+        await fn();
+        expect(mock.mock.calls[0][0]).toBe('/_sigx/fn/add_fn_00000001');
+    });
+
+    it('merges static headers, with content-type NOT overridable — any casing', async () => {
+        const mock = stubFetch(200, { data: 1 });
+        const fn = __serverFnStub('add_fn_00000001', 'add', '/_sigx/fn');
+        configureServerFn({
+            // 'Content-Type' must be stripped too — Headers normalization
+            // would otherwise COMBINE it with ours ('text/plain, application/json').
+            headers: { authorization: 'Bearer abc', 'Content-Type': 'text/plain' }
+        });
+        await fn(1);
+        expect(mock).toHaveBeenCalledWith('/_sigx/fn/add_fn_00000001', {
+            method: 'POST',
+            headers: { authorization: 'Bearer abc', 'content-type': 'application/json' },
+            body: '{"args":[1]}'
+        });
+    });
+
+    it('awaits an async header factory on every call', async () => {
+        const mock = stubFetch(200, { data: 1 });
+        const fn = __serverFnStub('add_fn_00000001', 'add', '/_sigx/fn');
+        let token = 'first';
+        configureServerFn({ headers: async () => ({ authorization: `Bearer ${token}` }) });
+        await fn();
+        token = 'second';
+        await fn();
+        expect(mock.mock.calls[0][1].headers.authorization).toBe('Bearer first');
+        expect(mock.mock.calls[1][1].headers.authorization).toBe('Bearer second');
+    });
+
+    it('uses an injected fetch and leaves the global untouched', async () => {
+        const globalMock = stubFetch(200, { data: 'global' });
+        const injected = vi.fn(async () => new Response('{"data":"injected"}', { status: 200 }));
+        const fn = __serverFnStub('add_fn_00000001', 'add', '/_sigx/fn');
+        configureServerFn({ fetch: injected as unknown as typeof globalThis.fetch });
+        await expect(fn()).resolves.toBe('injected');
+        expect(injected).toHaveBeenCalledTimes(1);
+        expect(globalMock).not.toHaveBeenCalled();
+    });
+
+    it('URL-encodes the symbol into a single path segment (stable symbols)', async () => {
+        const mock = stubFetch(200, { data: 1 });
+        const fn = __serverFnStub('@acme/api/src/cart.server.ts#add', 'add', '/_sigx/fn');
+        await fn();
+        expect(mock.mock.calls[0][0]).toBe(
+            '/_sigx/fn/%40acme%2Fapi%2Fsrc%2Fcart.server.ts%23add'
+        );
     });
 });
 
