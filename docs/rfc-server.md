@@ -203,10 +203,10 @@ loading/error/staleness UX to every call site.
 ```ts
 /** Request context — first parameter, sigx idiom (no `this`). */
 export interface ServerFnContext {
-    request: Request;                    // WinterCG Request
+    request: Request;                    // WinterCG Request (request headers live here)
     url: URL;
     signal: AbortSignal;                 // fires on client disconnect
-    headers: Headers;                    // mutable RESPONSE headers
+    responseHeaders: Headers;            // mutable response headers
     status(code: number): void;          // response status override
     locals: Record<string, unknown>;     // guard/middleware hand-off (auth results)
 }
@@ -218,8 +218,14 @@ export function serverFn<A extends unknown[], R>(
 
 /** Options form — the safety seams. */
 export function serverFn<S, A extends unknown[], R>(options: {
-    /** standard-schema validator; ALWAYS runs server-side before the handler. */
-    input?: StandardSchema<S>;
+    /**
+     * Input validator; ALWAYS runs server-side before the handler.
+     * Typed against the Standard Schema spec (`StandardSchemaV1` from
+     * `@standard-schema/spec`, the interface Zod/Valibot/ArkType all
+     * implement — a type-only dependency). Exact pin happens at
+     * implementation time.
+     */
+    input?: StandardSchemaV1<S>;
     /** Definition-level middleware — no transport can skip it (RPC, form POST, in-process SSR call). */
     use?: ServerFnGuard[];
     handler: (rq: ServerFnContext, input: S) => R | Promise<R>;
@@ -377,11 +383,14 @@ export interface ServerFnRequestOptions {
 }
 ```
 
-Serialization: v1 is JSON with the prototype-pollution discipline of the
-boundary pipeline — both parse sites (server args, client result) reject
-`DANGEROUS_KEYS` (`__proto__`/`constructor`/`prototype`, the same three
-keys as `server-renderer/src/server/serialize.ts`; duplicated as a
-three-entry set in `/client` to keep the stub dependency-free). **Rich
+Serialization: v1 is JSON, inheriting the boundary pipeline's key
+discipline — the serializer already refuses `DANGEROUS_KEYS`
+(`__proto__`/`constructor`/`prototype`,
+`server-renderer/src/server/serialize.ts`). That pipeline has no parse
+step (it emits script assignments); the RPC envelope *does* parse, so it
+**adds** reviver-based rejection of those same three keys at both parse
+sites (server args, client result; the set is duplicated in `/client` to
+keep the stub dependency-free). **Rich
 type-handler serialization (Date, Map, custom classes) is deferred** until
 the client *revive* side of the serializer seam exists —
 `runtime-core/src/ssr-serialize.ts` is explicitly serialize-only today
@@ -413,10 +422,10 @@ attacker with `curl`. Defaults, in order of the failure they prevent:
    in prod; `ServerFnError` is the deliberate channel.
 7. **Version skew** — content-hashed symbols; stale clients get a typed,
    actionable error (§3), never a silent wrong call.
-8. **Header/cookie races** — v1 responses are buffered JSON; `rq.headers` /
-   `rq.status()` apply before the body is written. (Qwik's
-   cookie-after-stream-start failure cannot occur.) The streaming form
-   (§6.1) documents that headers freeze at the first yield.
+8. **Header/cookie races** — v1 responses are buffered JSON;
+   `rq.responseHeaders` / `rq.status()` apply before the body is written.
+   (Qwik's cookie-after-stream-start failure cannot occur.) The streaming
+   form (§6.1) documents that headers freeze at the first yield.
 
 ## §6 Beyond parity — what the architecture uniquely enables
 
@@ -426,9 +435,14 @@ Phased (§7); designed here so the v1 envelope reserves the right fields.
 
 `serverStream(async function* …)` streams yields as NDJSON
 (`{"chunk":…}` lines, then `{"done":1}` or `{"error":…}`); the stub
-returns an `AsyncIterable`. Where Qwik hands you a raw iterator, sigx has a
-home for it: `useStream` (`runtime-core/src/use-stream.ts`) — the
-accumulating signal with SSR restoration:
+returns an `AsyncIterable<T>`. Where Qwik hands you a raw iterator, sigx
+has a home for the common case: `useStream`
+(`runtime-core/src/use-stream.ts`) is string-specific
+(`() => AsyncIterable<string>`), so a **string-yielding** `serverStream`
+plugs in as-is — no `useStream` API change in this RFC. Non-string streams
+are consumed manually with `for await`; whether `useStream` ever grows a
+generic accumulate form is a separate rfc-async follow-up, not designed
+here:
 
 ```tsx
 const text = useStream(`explain:${id}`, () => explain(id));
