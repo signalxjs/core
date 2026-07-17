@@ -257,6 +257,32 @@ const go = serverFn(async (rq) => 1);
         expect(viaExport.errors[0].message).toContain('collides');
     });
 
+    it('block-scoped lets do not mask module-scope captures used after the block', () => {
+        const result = extract(`
+import { serverFn } from '@sigx/server';
+const db = { query: () => 1 };
+const f = serverFn(async (rq) => {
+    { const db = 'local'; void db; }
+    return db.query();
+});
+`, '/src/api.ts');
+        expect(result.errors).toHaveLength(1);
+        expect(result.errors[0].message).toContain('module-scope binding "db"');
+    });
+
+    it('var hoisting still binds across blocks', () => {
+        const result = extract(`
+import { serverFn } from '@sigx/server';
+const f = serverFn(async (rq) => {
+    { var v = 1; }
+    return v;
+});
+export { f };
+`, '/src/api.ts');
+        expect(result.errors).toHaveLength(0);
+        expect(result.fns).toHaveLength(1);
+    });
+
     it('named function expressions do not mask module-scope captures', () => {
         const result = extract(`
 import { serverFn } from '@sigx/server';

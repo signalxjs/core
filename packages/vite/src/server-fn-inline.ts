@@ -135,7 +135,13 @@ function patternNames(pattern: Node, out: Set<string>): void {
 
 const FUNCTION_TYPES = new Set(['FunctionExpression', 'ArrowFunctionExpression', 'FunctionDeclaration']);
 
-/** Bindings declared directly in a function's own scope (function-level). */
+/**
+ * HOISTED bindings of a function's own scope: params, `var` declarations,
+ * and function-declaration names anywhere in the body (nested functions
+ * excluded). Lexical (`let`/`const`/`class`) bindings are per-BLOCK — a
+ * function-wide treatment would let an inner block's `const db` mask a
+ * module-scope `db` used after the block, hiding a capture violation.
+ */
 function functionScopeBindings(fn: Node): Set<string> {
     const bindings = new Set<string>();
     for (const param of (fn.params as Node[]) ?? []) patternNames(param, bindings);
@@ -150,16 +156,24 @@ function functionScopeBindings(fn: Node): Set<string> {
             }
             return false; // nested scope owns its own bindings
         }
-        if (node.type === 'VariableDeclaration') {
+        if (node.type === 'VariableDeclaration' && node.kind === 'var') {
             for (const decl of node.declarations as Node[]) patternNames(decl.id as Node, bindings);
         }
-        if (node.type === 'ClassDeclaration' && isNode(node.id)) {
-            bindings.add((node.id as Node).name as string);
-        }
-        if (node.type === 'CatchClause' && isNode(node.param)) {
-            patternNames(node.param as Node, bindings);
-        }
     });
+    return bindings;
+}
+
+/** Lexical bindings declared DIRECTLY by the statements of one block scope. */
+function lexicalBindings(statements: (Node | null | undefined)[]): Set<string> {
+    const bindings = new Set<string>();
+    for (const stmt of statements) {
+        if (!isNode(stmt)) continue;
+        if (stmt.type === 'VariableDeclaration' && stmt.kind !== 'var') {
+            for (const decl of stmt.declarations as Node[]) patternNames(decl.id as Node, bindings);
+        } else if (stmt.type === 'ClassDeclaration' && isNode(stmt.id)) {
+            bindings.add((stmt.id as Node).name as string);
+        }
+    }
     return bindings;
 }
 
@@ -233,12 +247,36 @@ function freeReferences(expr: Node): { refs: FreeRef[]; hasJsx: boolean } {
             }
             return;
         }
+        // Block-level lexical scopes (let/const/class bind per block, not
+        // per function): blocks, switch bodies, for-heads, catch params.
+        let inner = scopes;
+        if (node.type === 'BlockStatement' || node.type === 'StaticBlock') {
+            inner = [...scopes, lexicalBindings(node.body as Node[])];
+        } else if (node.type === 'SwitchStatement') {
+            const caseStatements = ((node.cases as Node[]) ?? []).flatMap(
+                (c) => (c.consequent as Node[]) ?? []
+            );
+            inner = [...scopes, lexicalBindings(caseStatements)];
+        } else if (
+            node.type === 'ForStatement' ||
+            node.type === 'ForInStatement' ||
+            node.type === 'ForOfStatement'
+        ) {
+            const head = (node.init ?? node.left) as Node | undefined;
+            if (isNode(head) && head.type === 'VariableDeclaration' && head.kind !== 'var') {
+                inner = [...scopes, lexicalBindings([head])];
+            }
+        } else if (node.type === 'CatchClause' && isNode(node.param)) {
+            const caught = new Set<string>();
+            patternNames(node.param as Node, caught);
+            inner = [...scopes, caught];
+        }
         for (const key of Object.keys(node)) {
             const value = node[key];
             if (Array.isArray(value)) {
-                for (const item of value) if (isNode(item)) visitScoped(item, node, scopes);
+                for (const item of value) if (isNode(item)) visitScoped(item, node, inner);
             } else if (isNode(value)) {
-                visitScoped(value as Node, node, scopes);
+                visitScoped(value as Node, node, inner);
             }
         }
     };
