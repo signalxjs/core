@@ -40,10 +40,13 @@ async function createServer() {
             ssr: createSSR().use(resumePlugin())
         }));
     } else {
-        // Prod: static assets + ONE handler, with BOTH manifests — Vite's
-        // client manifest feeds entry preloads, the resume manifest feeds
-        // per-component upgrade-chunk URLs into the boundary table.
+        // Prod: static assets + the server-function endpoint + ONE document
+        // handler, with BOTH manifests — Vite's client manifest feeds entry
+        // preloads, the resume manifest feeds per-component upgrade-chunk
+        // URLs into the boundary table. (In dev, vite.middlewares carries
+        // the fn endpoint — sigxServer()'s configureServer middleware.)
         const { createRequestHandler } = await import('@sigx/server-renderer/node');
+        const { createServerFnHandler } = await import('@sigx/server/node');
         const { collectAssets } = await import('@sigx/vite/ssr');
 
         const clientDir = resolve(__dirname, 'dist/client');
@@ -57,8 +60,12 @@ async function createServer() {
         const { createApp } = await import(
             new URL('./dist/server/entry-server.js', import.meta.url).href
         );
+        const { serverFns } = await import(
+            new URL('./dist/server/sigx-server-fns.js', import.meta.url).href
+        );
 
         app.use(express.static(clientDir, { index: false }));
+        app.use(createServerFnHandler({ functions: serverFns }));
         app.use(createRequestHandler({
             template,
             app: (url) => createApp(url),

@@ -61,6 +61,7 @@ Full guides, API reference and live examples → **<https://sigx.dev/core/>**
 | `@sigx/ssr-islands`    | [npm](https://www.npmjs.com/package/@sigx/ssr-islands)    | [docs](https://sigx.dev/server/)                              | Islands architecture — selective hydration via `client:*` directives (reference strategy pack) |
 | `@sigx/resume`         | [npm](https://www.npmjs.com/package/@sigx/resume)         | [docs](https://sigx.dev/server/)                              | Resumability — QRL event handlers, zero-JS pages, upgrade-on-write hydration |
 | `@sigx/cache`          | [npm](https://www.npmjs.com/package/@sigx/cache)          | [docs](https://sigx.dev/)                                     | Cache policy for value-first async — staleTime, revalidation, `invalidate()`, optimistic `mutate()` (rfc-async §7 pack) |
+| `@sigx/server`         | [npm](https://www.npmjs.com/package/@sigx/server)         | [docs](https://sigx.dev/server/)                              | Server functions (RPC) — `serverFn` in `*.server.ts` modules, typed fetch stubs, security-first endpoint (rfc-server) |
 | `@sigx/vite`           | [npm](https://www.npmjs.com/package/@sigx/vite)           | [docs](https://sigx.dev/vite/)                                | Vite plugin for dev/build with HMR |
 
 ## Part of SignalX

@@ -1,0 +1,129 @@
+# @sigx/server
+
+Server functions (RPC) for SignalX — typed client↔server calls, extracted at
+build time by `@sigx/vite/server`. The design RFC is
+[`docs/rfc-server.md`](../../docs/rfc-server.md).
+
+Not to be confused with `@sigx/server-renderer`, which renders documents —
+this package is how your app **talks to** the server.
+
+## The model
+
+A server function lives in a `*.server.ts` module. The whole module is
+server-only: it can import database clients, secrets, `node:` builtins —
+none of it ships. The client build swaps the module for typed fetch stubs;
+on the server the import is the real module, so a call is a direct
+invocation. Same import, both sides, types flow through untouched.
+
+```ts
+// src/cart.server.ts
+import { serverFn, ServerFnError } from '@sigx/server';
+import { db } from './db';
+import { sessionFrom } from './auth';
+
+export const addToCart = serverFn(async (rq, productId: string, qty: number) => {
+    const user = await sessionFrom(rq.request);
+    if (!user) throw new ServerFnError(401, 'sign in first');
+    return db.cart.add(user.id, productId, qty);
+});
+```
+
+```tsx
+// any component — it's just an async function
+import { useData, useAction } from 'sigx';
+import { getCart, addToCart } from './cart.server';
+
+const cart = useData(() => ['cart'], getCart, { cache: { staleTime: 30_000 } });
+const add  = useAction(addToCart,   { cache: { invalidates: [['cart']] } });
+```
+
+Because a wrapped function is a plain async function, `useData`/`useAction`
+and the whole `@sigx/cache` pack (staleTime, `invalidate()`, optimistic
+`mutate`) compose with zero integration code. And a resumed handler
+(`@sigx/resume`) that imports a server function works as-is — the handler
+chunk gets the stub, the page still ships ~1 KB of JS, and the first click
+POSTs to the server.
+
+There is **no closure serialization** — data crosses the boundary only as
+typed arguments (I consider Qwik's captured-value round-trip an injection
+surface, not a convenience). Validate them: the options form takes a
+[Standard Schema](https://standardschema.dev) validator that always runs
+server-side, plus a per-function middleware chain no transport can skip:
+
+```ts
+export const quote = serverFn({
+    input: QuoteInput,            // Zod/Valibot/ArkType — rejects with a 400
+    use: [requireAuth],           // runs on EVERY transport
+    async handler(rq, input) {
+        return priceQuote(rq.locals.user, input);
+    }
+});
+```
+
+## Context
+
+Every server function receives the request context as its **first
+parameter** — no `this`, no ambient globals:
+
+```ts
+serverFn(async (rq, ...args) => {
+    rq.request;          // WinterCG Request (headers, cookies via headers)
+    rq.url;              // parsed URL
+    rq.signal;           // fires on client disconnect
+    rq.responseHeaders;  // mutable response headers
+    rq.status(201);      // success status override
+    rq.locals;           // guard hand-off (auth results)
+});
+```
+
+In-process calls (during SSR) run the same pipeline against a detached
+context — no network hop; `rq.request` throws a descriptive error there
+(ambient request context is the designed v1.1 follow-up).
+
+## The endpoint
+
+`POST /_sigx/fn/<symbol>` with `{"args": [...]}` → `{"data": ...}` or
+`{"error": {message, status, data?}}`. Symbols are content-hashed, so a
+stale client gets a typed version-skew error, never a silent wrong call.
+
+Dev needs no wiring — the `sigxServer()` Vite plugin serves the endpoint
+from `vite.middlewares`. Production mounts the handler beside the document
+handler, fed by the build's registry chunk:
+
+```js
+import { createServerFnHandler } from '@sigx/server/node';
+
+const { serverFns } = await import('./dist/server/sigx-server-fns.js');
+app.use(createServerFnHandler({ functions: serverFns, guard: requireSession }));
+app.use(createRequestHandler({ /* documents, unchanged */ }));
+```
+
+On WinterCG runtimes (Cloudflare, Deno, Bun) skip the adapter —
+`handleServerFnRequest(request, options)` from `@sigx/server/server` is
+already fetch-handler-shaped.
+
+## Security defaults
+
+Every server function is a public HTTP endpoint; the defaults assume that:
+
+- **POST-only**, required `application/json` media type, and a same-origin
+  `Origin` check (CSRF posture — opt out per handler with `origin: false`
+  or an allowlist, which makes it a deliberate public API).
+- **`guard` hook** runs before every function, for every transport — the
+  app-wide auth seam. Per-function `use` chains compose on top.
+- **`maxBodyBytes`** (1 MiB default) enforced while reading.
+- **Error masking**: only `ServerFnError` crosses the wire verbatim; other
+  throws become a generic 500 in production.
+- **Prototype-pollution rejection** on both parse sites.
+
+## Entry points
+
+| Entry | Runs on | What |
+|---|---|---|
+| `@sigx/server` | server (browser condition throws) | `serverFn`, `ServerFnError`, `isServerFnError`, types |
+| `@sigx/server/client` | browser | the generated stubs' runtime (dependency-free, ~450 B) |
+| `@sigx/server/server` | anywhere (WinterCG) | `handleServerFnRequest(request, options)` |
+| `@sigx/server/node` | Node | `createServerFnHandler(options)` — connect-style |
+
+The runnable example is `examples/resume` (the "server function from a
+resumed handler" card).

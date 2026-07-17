@@ -29,6 +29,10 @@
         "./resume": {
             "types": "./dist/resume.d.ts",
             "import": "./dist/resume.js"
+        },
+        "./server": {
+            "types": "./dist/server-fn.d.ts",
+            "import": "./dist/server-fn.js"
         }
     },
     "bin": {
@@ -49,14 +53,16 @@
         "vite": ">=8.0.0",
         "@sigx/server-renderer": "*",
         "@sigx/ssr-islands": "*",
-        "@sigx/resume": "*"
+        "@sigx/resume": "*",
+        "@sigx/server": "*"
     },
     "devDependencies": {
         "@types/node": "^26.1.1",
         "sigx": "workspace:^",
         "typescript": "^7.0.2",
         "vite": "^8.1.4",
-        "@sigx/server-renderer": "workspace:^"
+        "@sigx/server-renderer": "workspace:^",
+        "@sigx/server": "workspace:^"
     },
     "keywords": [
         "SignalX"
@@ -83,6 +89,9 @@
             "optional": true
         },
         "@sigx/resume": {
+            "optional": true
+        },
+        "@sigx/server": {
             "optional": true
         }
     }

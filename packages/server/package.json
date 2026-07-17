@@ -1,0 +1,76 @@
+{
+    "name": "@sigx/server",
+    "version": "0.11.0",
+    "description": "Server functions (RPC) for SignalX — typed client↔server calls with security defaults, extracted by @sigx/vite/server",
+    "type": "module",
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+        ".": {
+            "types": "./dist/index.d.ts",
+            "browser": {
+                "development": "./dist/browser.js",
+                "production": "./dist/browser.prod.js",
+                "import": "./dist/browser.js"
+            },
+            "development": "./dist/index.js",
+            "production": "./dist/index.prod.js",
+            "import": "./dist/index.js"
+        },
+        "./client": {
+            "types": "./dist/client/index.d.ts",
+            "development": "./dist/client/index.js",
+            "production": "./dist/client/index.prod.js",
+            "import": "./dist/client/index.js"
+        },
+        "./server": {
+            "types": "./dist/server/index.d.ts",
+            "development": "./dist/server/index.js",
+            "production": "./dist/server/index.prod.js",
+            "import": "./dist/server/index.js"
+        },
+        "./node": {
+            "types": "./dist/node.d.ts",
+            "development": "./dist/node.js",
+            "production": "./dist/node.prod.js",
+            "import": "./dist/node.js"
+        }
+    },
+    "files": [
+        "dist",
+        "src"
+    ],
+    "sideEffects": false,
+    "scripts": {
+        "build": "vite build && vite build --mode prod-dist && tsc --emitDeclarationOnly",
+        "dev": "vite build --watch",
+        "prepublishOnly": "pnpm run build"
+    },
+    "keywords": [
+        "sigx",
+        "server-functions",
+        "rpc",
+        "server-actions",
+        "ssr"
+    ],
+    "author": "Andreas Ekdahl",
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/signalxjs/core.git",
+        "directory": "packages/server"
+    },
+    "homepage": "https://sigx.dev/server/",
+    "bugs": {
+        "url": "https://github.com/signalxjs/core/issues"
+    },
+    "devDependencies": {
+        "@sigx/vite": "workspace:^",
+        "@types/node": "^26.1.1",
+        "typescript": "^7.0.2",
+        "vite": "^8.1.4"
+    },
+    "publishConfig": {
+        "access": "public"
+    }
+}
