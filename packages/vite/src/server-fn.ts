@@ -82,8 +82,9 @@ const REGEX_SPECIALS = /[.*+?^${}()|[\]\\]/g;
 function callsServerFn(code: string): boolean {
     return serverFnAliases(code).some((alias) =>
         // Escape the alias ($ is a valid identifier char but a regex anchor)
-        // and use a lookbehind — \b misfires before a $-leading name.
-        new RegExp(`(?<![\\w$])${alias.replace(REGEX_SPECIALS, '\\$&')}\\s*\\(`).test(code)
+        // and use a lookbehind — \b misfires before a $-leading name; the
+        // dot exclusion keeps property calls (obj.serverFn()) from matching.
+        new RegExp(`(?<![\\w$.])${alias.replace(REGEX_SPECIALS, '\\$&')}\\s*\\(`).test(code)
     );
 }
 
@@ -194,9 +195,10 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
             // Rolldown can run the transform more than once per module (scan
             // + build phases), the later pass over our OWN stub output —
             // never let that echo clobber the real extraction (the shared
-            // registry cache feeds the SSR build). Stubs are precisely
-            // identifiable: only generated modules import the stub runtime.
-            if (/from\s*['"]@sigx\/server\/client['"]/.test(code)) return null;
+            // registry cache feeds the SSR build). Match the exact generated
+            // header, not any '@sigx/server/client' import — a real server
+            // module may legitimately import the client entry.
+            if (/^import \{ __server(?:FnStub|Only)/.test(code)) return null;
             // The incoming code is authoritative (dev edits arrive here before
             // any fs watcher) — re-extract and refresh the registry cache.
             const extraction = extractInto(clean, code);
