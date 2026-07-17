@@ -480,8 +480,8 @@ export function extractInlineServerFns(
             const idOption = readServerFnIdOption(call);
             if (idOption.nonLiteral) {
                 warnings.push(
-                    `serverFn "${name}": \`id\` must be a string literal (it is read statically) — ` +
-                    `falling back to the file-derived stable id.`
+                    `serverFn "${name}": \`id\` must be a non-empty string literal (it is read ` +
+                    `statically) — falling back to the file-derived stable id.`
                 );
             }
             const minted = mintSymbols(name, callSource, idOption.id, options.stableId);

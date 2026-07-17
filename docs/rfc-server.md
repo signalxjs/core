@@ -1,8 +1,8 @@
 # RFC: `@sigx/server` — server functions (RPC), the sigx way
 
 Status: **v1 implemented (v0.12.0 — #306, #308); rev 2 — native clients —
-implemented (#320: runtime half #329, build half follows it)**. Tracking:
-signalxjs/core#302 (v1), signalxjs/core#318 (rev 2).
+implemented (#320 — #329, #330)**. Tracking: signalxjs/core#302 (v1),
+signalxjs/core#318 (rev 2).
 Pre-1.0, no-compat (same stance as `rfc-async.md` and `rfc-ssr-platform.md`):
 one way to do it.
 

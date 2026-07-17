@@ -199,8 +199,9 @@ export function extractServerFns(
             const idOption = readServerFnIdOption(init);
             if (idOption.nonLiteral) {
                 warnings.push(
-                    `serverFn "${(declarator.id as Node).name as string}": \`id\` must be a string ` +
-                    `literal (it is read statically) — falling back to the file-derived stable id.`
+                    `serverFn "${(declarator.id as Node).name as string}": \`id\` must be a ` +
+                    `non-empty string literal (it is read statically) — falling back to the ` +
+                    `file-derived stable id.`
                 );
             }
             localFnSources.set((declarator.id as Node).name as string, {

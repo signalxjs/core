@@ -49,10 +49,12 @@ export type {
 /** The options form — validation and middleware as part of the definition. */
 export interface ServerFnOptions<S, R> {
     /**
-     * Explicit stable id (rfc-server rev 2, N.3) — a string LITERAL, read
-     * statically by the build; the runtime ignores it. Pins the function's
-     * routes (`<id>#<name>` and the hashed twin) across file moves — for
-     * published APIs long-lived native clients call.
+     * Explicit stable id (rfc-server rev 2, N.3) — a NON-EMPTY string
+     * literal, read statically by the build; the runtime ignores it, and
+     * anything else (a variable, a template, `''`) is warned about and falls
+     * back to the file-derived id. Pins the function's routes (`<id>#<name>`
+     * and the hashed twin) across file moves — for published APIs
+     * long-lived native clients call.
      */
     id?: string;
     /**
