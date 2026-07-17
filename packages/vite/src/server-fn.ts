@@ -143,7 +143,14 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
         }
     }
 
-    /** Cheap gate before parsing a non-matching file for inline serverFn. */
+    /**
+     * Cheap regex gate before PARSING a non-matching file for inline
+     * serverFn. Deliberately approximate: a false positive (the pattern in
+     * a comment/string) costs one parse — `extractInlineServerFns` is the
+     * AST-accurate authority and returns no fns. False negatives require
+     * indirection (re-exporting serverFn through another module), which is
+     * documented as out of scope for inline extraction.
+     */
     const inlineCandidate = (file: string, code: string): boolean =>
         /\.(ts|tsx|js|jsx|mts|mjs)$/.test(file) &&
         !file.includes('node_modules') &&
