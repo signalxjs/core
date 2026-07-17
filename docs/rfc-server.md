@@ -323,11 +323,14 @@ export interface ServerFnExtraction {
   posts an old symbol and gets a structured 404 the stub converts into a
   typed "stale build — reload?" error (never a silent wrong-function call).
   *(rev 2)* The path component of the seed becomes a **root-independent
-  stable id** — the file's path relative to its nearest enclosing
-  `package.json` directory, prefixed with that package's name
-  (`@acme/api\0src/cart.server.ts`; build-root-relative fallback when no
-  package.json exists) — so every app build of one solution mints the SAME
-  symbol for a shared server module. All symbols regenerate once at the
+  stable id** — a printable string joining the nearest enclosing package's
+  name with the file's package-relative path
+  (`@acme/api/src/cart.server.ts`; build-root-relative fallback when no
+  package.json exists). The `\0` remains purely a hash-seed FIELD separator
+  between id, name, and impl source (as in v1) and never appears in the
+  stable id itself — the id must survive URL routing in the stable symbol
+  below. This makes every app build of one solution mint the SAME symbol
+  for a shared server module. All symbols regenerate once at the
   seed change; client+server deploy together, so nothing at rest breaks.
   Alongside the hashed symbol, every function also gets a hash-free
   **stable symbol** (`<stableId>#<name>`) for long-lived clients — see
@@ -607,10 +610,17 @@ export interface ServerFnTransport {
 export function configureServerFn(transport: ServerFnTransport | null): void;
 ```
 
-A lynx or terminal app calls it once at startup —
-`configureServerFn({ endpoint: 'https://api.example.com/_sigx/fn', headers:
-() => ({ authorization: `Bearer ${token()}` }) })` — and every server
-function in the app targets the deployed backend with rotating credentials.
+A lynx or terminal app calls it once at startup:
+
+```ts
+configureServerFn({
+    endpoint: 'https://api.example.com/_sigx/fn',
+    headers: () => ({ authorization: `Bearer ${token()}` })
+});
+```
+
+— and every server function in the app targets the deployed backend with
+rotating credentials.
 One build serves dev/staging/prod (call-time resolution). Web apps benefit
 too: bearer-auth SPAs finally have a header seam. `content-type` merges LAST
 and is not overridable (the endpoint 415s anything else). Zero config is
@@ -630,9 +640,9 @@ target baked into stubs AND the server mount-path prefix. Rev 2 splits them:
 - **`role: 'auto' | 'client'`** (default `'auto'`) — `'auto'` keeps v1
   behavior (stub swap in the Vite `client` environment only; web SSR
   unchanged). `'client'` declares the WHOLE build a remote-server client:
-  every environment gets stubs (a terminal app building through the `ssr`
-  or a custom environment included) and **no registry chunk is emitted** —
-  there is no server in this build.
+  every environment gets stubs (including a terminal app building through
+  the `ssr` environment or a custom-named one) and **no registry chunk is
+  emitted** — there is no server in this build.
 
 **Live-client guard.** The remaining failure mode is a build that never runs
 the transform: Node resolves the real `@sigx/server` entry (the throwing
