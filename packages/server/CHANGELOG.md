@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING (pre-1.0)**: `ServerFnContext.signal` renamed to
+  **`abortSignal`** — in a signals framework, `signal` must always mean a
+  reactive signal; `rq.signal` beside `ctx.signal(...)` invited confusion.
+  The platform-named twin remains available as `rq.request.signal`. (#326)
+
 ### Added
 
 - Inline server functions (rfc-server §1.1(b), #305): a module-scope

@@ -113,7 +113,7 @@ function toWebRequest(req: IncomingMessage, res: ServerResponse): Request {
         else headers.set(key, value);
     }
 
-    // rq.signal fires when the client goes away before the response is done.
+    // rq.abortSignal fires when the client goes away before the response is done.
     const controller = new AbortController();
     res.once('close', () => {
         if (!res.writableEnded) controller.abort();

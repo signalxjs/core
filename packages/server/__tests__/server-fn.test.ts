@@ -119,10 +119,10 @@ describe('serverFn — detached (in-process) context', () => {
         await expect(fn()).rejects.toThrow(/in-process server-function call/);
     });
 
-    it('rq.locals and rq.signal work without a request', async () => {
+    it('rq.locals and rq.abortSignal work without a request', async () => {
         const fn = serverFn(async (rq) => {
             rq.locals.x = 1;
-            return rq.signal.aborted;
+            return rq.abortSignal.aborted;
         });
         await expect(fn()).resolves.toBe(false);
     });
