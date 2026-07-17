@@ -90,7 +90,8 @@ export const alsoClient = () => used(1);
         const result = extract(code, '/src/api.ts');
         expect(result.errors).toHaveLength(0);
         const client = result.clientModule!;
-        expect(client).toContain(`import { used } from './utils';`);
+        // Rebuilt statements keep JSON.stringify's double quotes.
+        expect(client).toContain(`import { used } from "./utils";`);
         expect(client).not.toContain('onlyServer');
     });
 
@@ -106,7 +107,7 @@ export { go };
         const result = extract(code, '/src/api.ts');
         expect(result.errors).toHaveLength(0);
         const client = result.clientModule!;
-        expect(client).toContain(`import { helper } from './utils';`);
+        expect(client).toContain(`import { helper } from "./utils";`);
         expect(client).not.toContain('serverSide');
     });
 
@@ -165,6 +166,24 @@ const bad = serverFn(async (rq) => (Helper as never));
         const result = extract(code, '/src/api.ts');
         expect(result.errors).toHaveLength(1);
         expect(result.errors[0].message).toContain('type-only import');
+    });
+
+    it('rejects captures of enums and named default exports too', () => {
+        const viaEnum = extract(`
+import { serverFn } from '@sigx/server';
+enum Mode { A, B }
+const pick = serverFn(async (rq) => Mode.A);
+`, '/src/api.ts');
+        expect(viaEnum.errors).toHaveLength(1);
+        expect(viaEnum.errors[0].message).toContain('module-scope binding "Mode"');
+
+        const viaDefault = extract(`
+import { serverFn } from '@sigx/server';
+export default function helper() { return 1; }
+const use = serverFn(async (rq) => helper());
+`, '/src/api.ts');
+        expect(viaDefault.errors).toHaveLength(1);
+        expect(viaDefault.errors[0].message).toContain('module-scope binding "helper"');
     });
 
     it('accepts params, locals, and nested function scopes', () => {

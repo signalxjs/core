@@ -175,6 +175,26 @@ describe('sigxServer — inline extraction (non-matching files)', () => {
         );
     });
 
+    it('never serves the original module when inline extraction fails to parse', () => {
+        const file = join(root, 'src/Live.tsx');
+        const good = `import { serverFn } from '@sigx/server';\nexport const ping = serverFn(async (rq) => 'SECRET_BODY');`;
+        const first = plugin.transform.call(ctx('client'), good, file);
+        expect(first.code).not.toContain('SECRET_BODY');
+
+        const broken = good + '\nconst oops = {';
+        const fallback = plugin.transform.call(ctx('client'), broken, file);
+        expect(fallback.code).toContain('__serverFnStub'); // last good client output
+        expect(fallback.code).not.toContain('SECRET_BODY');
+
+        const fresh = plugin.transform.call(
+            ctx('client'),
+            `import { serverFn } from '@sigx/server';\nconst x = serverFn(async (rq) => 'SECRET_BODY');\nconst broken = {`,
+            join(root, 'src/NeverSeen.tsx')
+        );
+        expect(fresh.code).toMatch(/^throw new Error/);
+        expect(fresh.code).not.toContain('SECRET_BODY');
+    });
+
     it('capture violations are hard errors', () => {
         const bad = `import { serverFn } from '@sigx/server';\nconst T = {};\nexport const leak = serverFn(async (rq) => T);`;
         expect(() =>

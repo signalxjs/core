@@ -238,7 +238,24 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
                 // '@sigx/server', so re-runs never pass this gate.)
                 if (!inlineCandidate(clean, code)) return null;
                 const extraction = extractInlineInto(clean, code);
-                if (!extraction) return null;
+                if (!extraction) {
+                    // Parse failure mid-edit: NEVER let the original module
+                    // (server body included) reach the browser — last good
+                    // client output, else a loud refusal.
+                    if (this.environment?.name === 'client') {
+                        const cached = inline.get(clean)?.clientModule;
+                        return {
+                            code:
+                                cached ??
+                                `throw new Error(${JSON.stringify(
+                                    `[sigx server] could not extract inline serverFn from ${relPath(clean)} ` +
+                                    `(syntax error?) — refusing to serve the module to the browser.`
+                                )});`,
+                            map: null
+                        };
+                    }
+                    return null;
+                }
                 if (extraction.errors.length > 0) {
                     // Capture violations are HARD errors, never a degrade.
                     const detail = extraction.errors

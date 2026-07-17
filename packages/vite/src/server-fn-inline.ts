@@ -294,12 +294,23 @@ export function extractInlineServerFns(
             }
             continue;
         }
-        const decl = stmt.type === 'ExportNamedDeclaration' && isNode(stmt.declaration)
-            ? (stmt.declaration as Node)
-            : stmt;
+        const decl =
+            (stmt.type === 'ExportNamedDeclaration' || stmt.type === 'ExportDefaultDeclaration') &&
+            isNode(stmt.declaration)
+                ? (stmt.declaration as Node)
+                : stmt;
         if (decl.type === 'VariableDeclaration') {
             for (const declarator of decl.declarations as Node[]) patternNames(declarator.id as Node, moduleLocals);
-        } else if ((decl.type === 'FunctionDeclaration' || decl.type === 'ClassDeclaration') && isNode(decl.id)) {
+        } else if (
+            // Every declaration form that creates a RUNTIME module binding —
+            // named default exports, enums, and namespaces included (a miss
+            // here lets a capture slip through as a "global").
+            (decl.type === 'FunctionDeclaration' ||
+                decl.type === 'ClassDeclaration' ||
+                decl.type === 'TSEnumDeclaration' ||
+                decl.type === 'TSModuleDeclaration') &&
+            isNode(decl.id)
+        ) {
             moduleLocals.add((decl.id as Node).name as string);
         }
     }
@@ -468,8 +479,10 @@ function stripUnusedImports(code: string, id: string): string {
             continue;
         }
         // Partial: rebuild the statement with the surviving specifiers.
+        // (JSON.stringify's double quotes are valid JS — no quote swapping,
+        // which would corrupt sources containing apostrophes.)
         const alive = specs.filter((spec) => referenced.has(((spec.local as Node).name as string) ?? ''));
-        const source = JSON.stringify((stmt.source as Node).value as string).replace(/"/g, "'");
+        const source = JSON.stringify((stmt.source as Node).value as string);
         const named = alive
             .filter((spec) => spec.type === 'ImportSpecifier')
             .map((spec) => {
