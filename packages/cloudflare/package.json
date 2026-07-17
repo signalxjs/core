@@ -1,0 +1,63 @@
+{
+    "name": "@sigx/cloudflare",
+    "version": "0.12.0",
+    "description": "Cloudflare Workers deployment adapter for SigX",
+    "type": "module",
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+        ".": {
+            "types": "./dist/index.d.ts",
+            "import": "./dist/index.js"
+        }
+    },
+    "files": [
+        "dist",
+        "src"
+    ],
+    "sideEffects": false,
+    "scripts": {
+        "build": "tsc",
+        "dev": "tsc --watch",
+        "prepublishOnly": "pnpm run build"
+    },
+    "keywords": [
+        "sigx",
+        "cloudflare",
+        "workers",
+        "workerd",
+        "deploy",
+        "adapter",
+        "ssr"
+    ],
+    "author": "Andreas Ekdahl",
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/signalxjs/core.git",
+        "directory": "packages/cloudflare"
+    },
+    "homepage": "https://sigx.dev/deploy/cloudflare/",
+    "bugs": {
+        "url": "https://github.com/signalxjs/core/issues"
+    },
+    "publishConfig": {
+        "access": "public"
+    },
+    "peerDependencies": {
+        "@sigx/vite": "*",
+        "vite": ">=8.0.0",
+        "wrangler": ">=4"
+    },
+    "peerDependenciesMeta": {
+        "wrangler": {
+            "optional": true
+        }
+    },
+    "devDependencies": {
+        "@sigx/vite": "workspace:^",
+        "@types/node": "^26.1.1",
+        "typescript": "^7.0.2",
+        "vite": "^8.1.4"
+    }
+}

@@ -1,2 +1,18 @@
 // The generated loader bootstrap provided by sigxResume() (side effects only).
 declare module 'virtual:sigx-resume/entry';
+
+// Build-emitted document artifacts (rfc-deploy §3.2) — resolved by
+// sigx({ ssr }) in the ssr environment; throws under dev.
+declare module 'virtual:sigx-app' {
+    import type { CollectedAssets, ViteManifest } from '@sigx/vite/ssr';
+    export const template: string;
+    export const assets: CollectedAssets;
+    export const manifest: ViteManifest;
+    export const islandsManifest: unknown | undefined;
+    export const resumeManifest: unknown | undefined;
+}
+
+// The server-fn registry (explicitly passed, never ambient).
+declare module 'virtual:sigx-server-fns' {
+    export const serverFns: Record<string, () => Promise<unknown>>;
+}

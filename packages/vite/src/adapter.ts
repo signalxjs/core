@@ -42,6 +42,15 @@ export interface SigxAdapter {
     target?: string;
 
     /**
+     * BEFORE any environment builds: scaffold-iff-absent build inputs — the
+     * platform entry, most importantly. The documented adapter-package
+     * convention (the `wrangler.jsonc` posture applied to the entry, PR
+     * #322 review): write it once when missing, then NEVER touch it — the
+     * file is user-owned from that moment.
+     */
+    setup?(ctx: AdapterSetupContext): void | Promise<void>;
+
+    /**
      * After BOTH environments have written: copy statics, write platform
      * config, validate. The `.vercel/output` assembly hook.
      */
@@ -49,6 +58,13 @@ export interface SigxAdapter {
 
     /** Dev-server hook for platform-binding proxies (rfc-deploy §4.6). */
     dev?(server: ViteDevServer): void | Promise<void>;
+}
+
+export interface AdapterSetupContext {
+    root: string;
+    /** The app's SSR entry (ssr.entry) — what a scaffolded platform entry imports. */
+    ssrEntry: string;
+    logger: { info(msg: string): void; warn(msg: string): void };
 }
 
 export interface AdapterGenerateContext {

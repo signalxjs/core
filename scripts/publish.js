@@ -46,6 +46,7 @@ const PACKAGES = [
     'packages/cache',
     'packages/server',
     'packages/vite',
+    'packages/cloudflare',
 ];
 
 const args = process.argv.slice(2);

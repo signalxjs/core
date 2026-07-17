@@ -166,6 +166,14 @@ free port automatically).
   (cloudflare/deno/bun) would be separate top-level packages — `./node` is
   interface bridging, not platform integration. Rides public seams only.
 - `packages/vite` → `@sigx/vite` — Vite plugin for dev/build/HMR.
+- `packages/cloudflare` → `@sigx/cloudflare` — Cloudflare Workers deployment
+  adapter (rfc-deploy §4.2): `cloudflare()` rides `@sigx/vite`'s public
+  `SigxAdapter` seam — fully bundled workerd-conditioned server build,
+  scaffold-iff-absent `entry.cloudflare.ts` + `wrangler.jsonc`, `devProxy`
+  binding proxies via wrangler's `getPlatformProxy`. Build-time-only Node
+  code: no size-limit entry (deliberate). The first platform adapter pack;
+  Deno/Bun stay docs + copyable entries, Vercel/Netlify follow the same
+  pattern in later phases.
 - `examples/` — runnable apps (`hello`, `spa`, `spa-ssr`, `ssr-islands`,
   `resume`, `storefront` — the resumability showcase).
 

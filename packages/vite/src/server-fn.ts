@@ -148,6 +148,7 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
 
     let root = process.cwd();
     let isServe = false;
+    let bundledServerBuild = false;
     /** Latest extraction per absolute module path (matching files only). */
     const extractions = new Map<string, ServerFnExtraction>();
     /** Inline extractions per absolute module path (non-matching files). */
@@ -274,6 +275,15 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
         configResolved(config) {
             root = config.root;
             isServe = config.command === 'serve';
+            // The sigx plugin's adapter seam (mirror of our api.role): in a
+            // BUNDLED server build the registry inlines into the one worker
+            // bundle via the entry's `virtual:sigx-server-fns` import — an
+            // emitted chunk would have no consumer (nothing imports dist
+            // files by path at runtime on edge platforms).
+            const sigxApi = config.plugins?.find((p) => p.name === 'sigx')?.api as
+                | { adapter?: { serverBuild?: string } }
+                | undefined;
+            bundledServerBuild = sigxApi?.adapter?.serverBuild === 'bundled';
             pkgCache.clear();
             discover();
         },
@@ -324,6 +334,8 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
             if (isServe) return;
             // A role:'client' build has no server — no registry, anywhere.
             if (role === 'client') return;
+            // Bundled builds inline the registry (rfc-deploy §3.1) — no chunk.
+            if (bundledServerBuild) return;
             if (this.environment?.name === 'client') return;
             let hasFns = false;
             for (const extraction of extractions.values()) {

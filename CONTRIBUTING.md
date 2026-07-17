@@ -20,7 +20,7 @@ The `build` step is optional for tests: `pnpm test` and `pnpm typecheck` resolve
 
 ## Workspace layout
 
-Seven packages live under `packages/`. See the table in the root `README.md` for what each one does.
+Eleven packages live under `packages/`. See the table in the root `README.md` for what each one does.
 
 ```
 packages/
@@ -32,7 +32,9 @@ packages/
   ssr-islands/     → @sigx/ssr-islands    (islands architecture strategy pack)
   resume/          → @sigx/resume         (resumability strategy pack)
   cache/           → @sigx/cache          (async cache policy pack)
+  server/          → @sigx/server         (server functions / RPC)
   vite/            → @sigx/vite           (Vite plugin)
+  cloudflare/      → @sigx/cloudflare     (Cloudflare Workers deploy adapter)
 ```
 
 ## Common tasks
