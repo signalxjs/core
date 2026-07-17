@@ -26,11 +26,23 @@ export function generateServeError(): string {
     );
 }
 
+/** Absent (ENOENT) → undefined; unreadable or invalid JSON → loud, named. */
 function readJsonIfExists(file: string): unknown | undefined {
+    let raw: string;
     try {
-        return JSON.parse(readFileSync(file, 'utf-8')) as unknown;
-    } catch {
-        return undefined;
+        raw = readFileSync(file, 'utf-8');
+    } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+        throw new Error(
+            `[sigx] virtual:sigx-app: failed to read ${file}: ${err instanceof Error ? err.message : String(err)}`
+        );
+    }
+    try {
+        return JSON.parse(raw) as unknown;
+    } catch (err) {
+        throw new Error(
+            `[sigx] virtual:sigx-app: invalid JSON in ${file}: ${err instanceof Error ? err.message : String(err)}`
+        );
     }
 }
 
@@ -43,7 +55,8 @@ export function generateAppModuleCode(clientDir: string, base: string): string {
     let template: string;
     try {
         template = readFileSync(join(clientDir, 'index.html'), 'utf-8');
-    } catch {
+    } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
         throw new Error(
             `[sigx] virtual:sigx-app: no index.html in the client outDir (${clientDir}). ` +
             `The client environment must build before the ssr environment - build with ` +

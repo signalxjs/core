@@ -147,6 +147,25 @@ describe('virtual:sigx-app in serve mode', () => {
     });
 });
 
+describe('virtual:sigx-app codegen error surfaces', () => {
+    it('treats a CORRUPT optional manifest as a loud, named error — not as absent', async () => {
+        const { mkdtempSync, writeFileSync, mkdirSync, rmSync } = await import('node:fs');
+        const { tmpdir } = await import('node:os');
+        const { join } = await import('node:path');
+        const { generateAppModuleCode } = await import('../src/app-module');
+        const dir = mkdtempSync(join(tmpdir(), 'sigx-app-corrupt-'));
+        try {
+            mkdirSync(join(dir, '.vite'), { recursive: true });
+            writeFileSync(join(dir, 'index.html'), '<!doctype html><div id="app"><!--ssr-outlet--></div>');
+            writeFileSync(join(dir, '.vite', 'manifest.json'), '{}');
+            writeFileSync(join(dir, '.vite', 'sigx-islands-manifest.json'), '{ not json');
+            expect(() => generateAppModuleCode(dir, '/')).toThrow(/invalid JSON.*sigx-islands-manifest\.json/s);
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
+    });
+});
+
 describe('buildApp ordering (rfc-deploy §3.1)', () => {
     function fakeBuilder(generateSpy?: SigxAdapter['generate']) {
         const order: string[] = [];
