@@ -497,11 +497,12 @@ function stripUnusedImports(code: string, id: string): string {
             splices.push({ start: stmt.start, end: stmt.end, text: '' });
             continue;
         }
-        // Partial: rebuild the statement with the surviving specifiers.
-        // (JSON.stringify's double quotes are valid JS — no quote swapping,
-        // which would corrupt sources containing apostrophes.)
+        // Partial: rebuild the statement with the surviving specifiers. The
+        // source-to-end slice of the ORIGINAL text preserves the literal's
+        // quoting, import attributes (`with { type: 'json' }`), and the
+        // terminating semicolon verbatim.
         const alive = specs.filter((spec) => referenced.has(((spec.local as Node).name as string) ?? ''));
-        const source = JSON.stringify((stmt.source as Node).value as string);
+        const sourceAndTrailer = code.slice((stmt.source as Node).start, stmt.end);
         const named = alive
             .filter((spec) => spec.type === 'ImportSpecifier')
             .map((spec) => {
@@ -517,7 +518,7 @@ function stripUnusedImports(code: string, id: string): string {
         if (defaultSpec) clauses.push(((defaultSpec.local as Node).name as string) ?? '');
         if (namespaceSpec) clauses.push(`* as ${((namespaceSpec.local as Node).name as string) ?? ''}`);
         if (named.length > 0) clauses.push(`{ ${named.join(', ')} }`);
-        splices.push({ start: stmt.start, end: stmt.end, text: `import ${clauses.join(', ')} from ${source};` });
+        splices.push({ start: stmt.start, end: stmt.end, text: `import ${clauses.join(', ')} from ${sourceAndTrailer}` });
     }
     return applySplices(code, splices);
 }

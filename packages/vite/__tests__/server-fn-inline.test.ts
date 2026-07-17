@@ -90,8 +90,8 @@ export const alsoClient = () => used(1);
         const result = extract(code, '/src/api.ts');
         expect(result.errors).toHaveLength(0);
         const client = result.clientModule!;
-        // Rebuilt statements keep JSON.stringify's double quotes.
-        expect(client).toContain(`import { used } from "./utils";`);
+        // Rebuilt statements preserve the original literal verbatim.
+        expect(client).toContain(`import { used } from './utils';`);
         expect(client).not.toContain('onlyServer');
     });
 
@@ -107,8 +107,24 @@ export { go };
         const result = extract(code, '/src/api.ts');
         expect(result.errors).toHaveLength(0);
         const client = result.clientModule!;
-        expect(client).toContain(`import { helper } from "./utils";`);
+        expect(client).toContain(`import { helper } from './utils';`);
         expect(client).not.toContain('serverSide');
+    });
+
+    it('preserves import attributes on rebuilt statements', () => {
+        const code = `
+import { serverFn } from '@sigx/server';
+import config, { serverBits } from './config.js' with { type: 'special' };
+
+const go = serverFn(async (rq) => serverBits());
+export const show = () => config;
+export { go };
+`;
+        const result = extract(code, '/src/api.ts');
+        expect(result.errors).toHaveLength(0);
+        const client = result.clientModule!;
+        expect(client).toContain(`import config from './config.js' with { type: 'special' };`);
+        expect(client).not.toContain('serverBits');
     });
 
     it('leaves type-only import statements untouched', () => {
