@@ -470,6 +470,9 @@ function stripUnusedImports(code: string, id: string): string {
     const splices: Splice[] = [];
     for (const stmt of program.body as Node[]) {
         if (stmt.type !== 'ImportDeclaration') continue;
+        // `import type { … }` erases later in the pipeline — leave it alone
+        // rather than risk rebuilding it as a value import.
+        if (stmt.importKind === 'type') continue;
         const specs = (stmt.specifiers as Node[]) ?? [];
         if (specs.length === 0) continue; // side-effect import — keep
         const dead = specs.filter((spec) => !referenced.has(((spec.local as Node).name as string) ?? ''));
@@ -488,7 +491,9 @@ function stripUnusedImports(code: string, id: string): string {
             .map((spec) => {
                 const imported = ((spec.imported as Node).name as string) ?? '';
                 const local = ((spec.local as Node).name as string) ?? '';
-                return imported === local ? imported : `${imported} as ${local}`;
+                // Preserve inline `type` modifiers on survivors.
+                const prefix = spec.importKind === 'type' ? 'type ' : '';
+                return prefix + (imported === local ? imported : `${imported} as ${local}`);
             });
         const defaultSpec = alive.find((spec) => spec.type === 'ImportDefaultSpecifier');
         const namespaceSpec = alive.find((spec) => spec.type === 'ImportNamespaceSpecifier');

@@ -111,6 +111,23 @@ export { go };
         expect(client).not.toContain('serverSide');
     });
 
+    it('leaves type-only import statements untouched', () => {
+        const code = `
+import { serverFn } from '@sigx/server';
+import type { Config } from './config';
+import { serverOnly } from './utils';
+
+const go = serverFn(async (rq) => serverOnly());
+export const shape = (c: Config) => c;
+export { go };
+`;
+        const result = extract(code, '/src/api.ts');
+        expect(result.errors).toHaveLength(0);
+        const client = result.clientModule!;
+        expect(client).toContain(`import type { Config } from './config';`);
+        expect(client).not.toContain('serverOnly');
+    });
+
     it('returns nothing for files without serverFn imports', () => {
         const result = extract(`export const x = 1;`, '/src/x.ts');
         expect(result.fns).toHaveLength(0);
