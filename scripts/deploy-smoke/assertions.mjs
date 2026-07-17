@@ -5,8 +5,10 @@
 
 export function assert(cond, message) {
     if (!cond) {
-        console.error(`❌ deploy-smoke: ${message}`);
-        process.exit(1);
+        // THROW, never process.exit(): the smoke scripts hold live workerd /
+        // child processes whose try/finally cleanup must run — an exit here
+        // would strand them and hang CI.
+        throw new Error(`deploy-smoke: ${message}`);
     }
     console.log(`✔ ${message}`);
 }

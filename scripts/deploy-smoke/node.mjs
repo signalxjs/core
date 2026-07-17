@@ -31,7 +31,9 @@ const child = spawn(
     {
         cwd: dir,
         env: { ...process.env, NODE_ENV: 'production', PORT: String(PORT) },
-        stdio: ['ignore', 'pipe', 'inherit']
+        // Inherit stdout too: a piped-but-never-drained stream fills its
+        // buffer and deadlocks the child.
+        stdio: ['ignore', 'inherit', 'inherit']
     }
 );
 
@@ -65,6 +67,9 @@ try {
     assert(/via v\d/.test(data), `${label}: fn ran under node (${data})`);
     await assertFallthrough(fetchFn, { label });
     console.log('\n✅ deploy-smoke: the external build serves documents, assets, and server functions under node');
+} catch (err) {
+    console.error(`\n❌ ${err instanceof Error ? err.message : err}`);
+    process.exitCode = 1;
 } finally {
     child.kill();
 }

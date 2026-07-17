@@ -51,6 +51,7 @@ async function withWorker(exampleDir, run) {
     }
 }
 
+try {
 // ---------------------------------------------------------------------------
 // 1) resume — the reference app: document + asset + server-fn + fallthrough.
 // ---------------------------------------------------------------------------
@@ -96,3 +97,8 @@ async function withWorker(exampleDir, run) {
 }
 
 console.log('\n✅ deploy-smoke: the built workers serve documents, assets, and server functions under real workerd');
+} catch (err) {
+    // Reached only after withWorker's finally has disposed workerd.
+    console.error(`\n❌ ${err instanceof Error ? err.message : err}`);
+    process.exitCode = 1;
+}

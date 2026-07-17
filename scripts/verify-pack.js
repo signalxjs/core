@@ -292,9 +292,11 @@ function main() {
     if (!serverBundles.includes('entry.cloudflare.js')) {
         throw new Error(`Bundled build did not produce entry.cloudflare.js (got: ${serverBundles.join(', ')})`);
     }
-    const importRe = /(?:from\s*|import\s*\(?\s*)["']([^"']+)["']/g;
     for (const f of serverBundles) {
         const content = readFileSync(join(serverDir, f), 'utf-8');
+        // Fresh regex per file — a shared /g regex carries lastIndex across
+        // iterations and silently skips matches.
+        const importRe = /(?:from\s*|import\s*\(?\s*)["']([^"']+)["']/g;
         for (const marker of FORBIDDEN) {
             if (content.includes(marker)) {
                 throw new Error(
