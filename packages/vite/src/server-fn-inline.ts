@@ -147,13 +147,16 @@ function functionScopeBindings(fn: Node): Set<string> {
     for (const param of (fn.params as Node[]) ?? []) patternNames(param, bindings);
     const body = fn.body as Node;
     if (!isNode(body)) return bindings;
+    // Function declarations hoist to the function scope only from the BODY
+    // TOP LEVEL — in ES modules (strict mode) a block-level function
+    // declaration is block-scoped (lexicalBindings covers those).
+    for (const stmt of (body.body as Node[]) ?? []) {
+        if (stmt.type === 'FunctionDeclaration' && isNode(stmt.id)) {
+            bindings.add((stmt.id as Node).name as string);
+        }
+    }
     walk(body, (node) => {
         if (FUNCTION_TYPES.has(node.type)) {
-            // Only DECLARATIONS bind their name in the enclosing scope; a
-            // named function EXPRESSION's name binds inside itself only.
-            if (node.type === 'FunctionDeclaration' && node.id && isNode(node.id)) {
-                bindings.add((node.id as Node).name as string);
-            }
             return false; // nested scope owns its own bindings
         }
         if (node.type === 'VariableDeclaration' && node.kind === 'var') {
@@ -163,14 +166,18 @@ function functionScopeBindings(fn: Node): Set<string> {
     return bindings;
 }
 
-/** Lexical bindings declared DIRECTLY by the statements of one block scope. */
+/** Lexical bindings declared DIRECTLY by the statements of one block scope
+ *  (let/const/class, and — strict-mode semantics — function declarations). */
 function lexicalBindings(statements: (Node | null | undefined)[]): Set<string> {
     const bindings = new Set<string>();
     for (const stmt of statements) {
         if (!isNode(stmt)) continue;
         if (stmt.type === 'VariableDeclaration' && stmt.kind !== 'var') {
             for (const decl of stmt.declarations as Node[]) patternNames(decl.id as Node, bindings);
-        } else if (stmt.type === 'ClassDeclaration' && isNode(stmt.id)) {
+        } else if (
+            (stmt.type === 'ClassDeclaration' || stmt.type === 'FunctionDeclaration') &&
+            isNode(stmt.id)
+        ) {
             bindings.add((stmt.id as Node).name as string);
         }
     }

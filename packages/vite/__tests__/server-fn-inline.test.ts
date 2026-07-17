@@ -270,6 +270,33 @@ const f = serverFn(async (rq) => {
         expect(result.errors[0].message).toContain('module-scope binding "db"');
     });
 
+    it('block-level function declarations are block-scoped (strict mode)', () => {
+        const result = extract(`
+import { serverFn } from '@sigx/server';
+const helper = 1;
+const f = serverFn(async (rq) => {
+    { function helper() { return 2; } void helper; }
+    return helper;
+});
+`, '/src/api.ts');
+        expect(result.errors).toHaveLength(1);
+        expect(result.errors[0].message).toContain('module-scope binding "helper"');
+    });
+
+    it('body-top-level function declarations hoist across the whole body', () => {
+        const result = extract(`
+import { serverFn } from '@sigx/server';
+const f = serverFn(async (rq) => {
+    const early = helper();
+    function helper() { return 1; }
+    return early;
+});
+export { f };
+`, '/src/api.ts');
+        expect(result.errors).toHaveLength(0);
+        expect(result.fns).toHaveLength(1);
+    });
+
     it('var hoisting still binds across blocks', () => {
         const result = extract(`
 import { serverFn } from '@sigx/server';
