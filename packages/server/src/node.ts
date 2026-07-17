@@ -68,10 +68,19 @@ export function createServerFnHandler(options: ServerFnHandlerOptions): NodeRequ
                 origin: options.origin,
                 maxBodyBytes: options.maxBodyBytes
             });
-            const headers: Record<string, string> = {};
+            // Accumulate duplicates (set-cookie!) into arrays — a plain
+            // string map would overwrite all but the last value.
+            const headers: Record<string, string | string[]> = {};
             response.headers.forEach((value, key) => {
-                headers[key] = value;
+                const existing = headers[key];
+                if (existing === undefined) headers[key] = value;
+                else if (Array.isArray(existing)) existing.push(value);
+                else headers[key] = [existing, value];
             });
+            const setCookie = (
+                response.headers as { getSetCookie?: () => string[] }
+            ).getSetCookie?.();
+            if (setCookie && setCookie.length > 0) headers['set-cookie'] = setCookie;
             res.writeHead(response.status, headers);
             res.end(Buffer.from(await response.arrayBuffer()));
         } catch (err) {

@@ -1,0 +1,78 @@
+/**
+ * @vitest-environment node
+ *
+ * createServerFnHandler() — the connect-style adapter, exercised over a real
+ * node:http round trip: request bridging, prefix routing, and duplicate
+ * response headers (multiple set-cookie values must all survive).
+ */
+
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { createServer, type Server } from 'node:http';
+import { once } from 'node:events';
+import { createServerFnHandler } from '../src/node';
+import { serverFn } from '../src/index';
+
+const twoCookies = serverFn(async (rq) => {
+    rq.responseHeaders.append('set-cookie', 'a=1; Path=/');
+    rq.responseHeaders.append('set-cookie', 'b=2; Path=/');
+    return 'ok';
+});
+const add = serverFn(async (_rq, a: number, b: number) => a + b);
+
+describe('createServerFnHandler over node:http', () => {
+    let server: Server;
+    let origin: string;
+
+    beforeAll(async () => {
+        const handler = createServerFnHandler({
+            functions: {
+                cookies_fn_00000001: async () => twoCookies,
+                add_fn_00000002: async () => add
+            }
+        });
+        server = createServer((req, res) => {
+            void handler(req, res, (err) => {
+                res.statusCode = err ? 500 : 404;
+                res.end(err ? 'error' : 'fallthrough');
+            });
+        });
+        server.listen(0, '127.0.0.1');
+        await once(server, 'listening');
+        const address = server.address();
+        if (typeof address === 'string' || address === null) throw new Error('no port');
+        origin = `http://127.0.0.1:${address.port}`;
+    });
+
+    afterAll(async () => {
+        server.close();
+        server.closeAllConnections();
+        await once(server, 'close');
+    });
+
+    it('bridges the request and returns the envelope', async () => {
+        const res = await fetch(`${origin}/_sigx/fn/add_fn_00000002`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', origin },
+            body: '{"args":[20,22]}'
+        });
+        expect(res.status).toBe(200);
+        await expect(res.json()).resolves.toEqual({ data: 42 });
+    });
+
+    it('preserves MULTIPLE set-cookie headers end to end', async () => {
+        const res = await fetch(`${origin}/_sigx/fn/cookies_fn_00000001`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', origin },
+            body: '{"args":[]}'
+        });
+        expect(res.status).toBe(200);
+        const cookies = res.headers.getSetCookie();
+        expect(cookies).toEqual(['a=1; Path=/', 'b=2; Path=/']);
+    });
+
+    it('passes non-matching URLs to next()', async () => {
+        const res = await fetch(`${origin}/somewhere-else`);
+        expect(res.status).toBe(404);
+        await expect(res.text()).resolves.toBe('fallthrough');
+    });
+});

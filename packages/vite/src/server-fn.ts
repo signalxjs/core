@@ -170,12 +170,23 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
             // The incoming code is authoritative (dev edits arrive here before
             // any fs watcher) — re-extract and refresh the registry cache.
             const extraction = extractInto(clean, code);
-            if (!extraction) return null;
-            for (const warning of extraction.warnings) {
+            for (const warning of extraction?.warnings ?? []) {
                 this.warn(`[sigx:server] ${relPath(clean)}: ${warning}`);
             }
             if (this.environment?.name === 'client') {
-                return { code: extraction.stubModule, map: null };
+                // NEVER serve the real module to the browser — on a failed
+                // extraction (mid-edit syntax error) fall back to the last
+                // good stub, and failing that, to a loud refusal.
+                const stub = (extraction ?? extractions.get(clean))?.stubModule;
+                return {
+                    code:
+                        stub ??
+                        `throw new Error(${JSON.stringify(
+                            `[sigx server] could not extract ${relPath(clean)} (syntax error?) — ` +
+                            `refusing to serve the server module to the browser.`
+                        )});`,
+                    map: null
+                };
             }
             return null;
         },

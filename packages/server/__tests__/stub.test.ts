@@ -58,6 +58,20 @@ describe('__serverFnStub', () => {
         expect((error as { status: number }).status).toBe(404);
     });
 
+    it('uses the skew hint even for the structured 404 envelope', async () => {
+        stubFetch(404, { error: { message: 'Unknown server function "old"', status: 404 } });
+        const fn = __serverFnStub('old_fn_00000007', 'oldFn', '/_sigx/fn');
+        const error = await fn().catch((e: unknown) => e);
+        expect((error as Error).message).toContain('stale build');
+    });
+
+    it('normalizes a base with a trailing slash', async () => {
+        const mock = stubFetch(200, { data: 1 });
+        const fn = __serverFnStub('x_fn_00000008', 'x', '/_sigx/fn/');
+        await fn();
+        expect(mock.mock.calls[0][0]).toBe('/_sigx/fn/x_fn_00000008');
+    });
+
     it('tolerates non-JSON error bodies (proxy pages)', async () => {
         stubFetch(502, '<html>Bad Gateway</html>');
         const fn = __serverFnStub('x_fn_00000005', 'x', '/_sigx/fn');

@@ -31,8 +31,9 @@ export function __serverFnStub(
     name: string,
     base: string
 ): (...args: unknown[]) => Promise<unknown> {
+    const prefix = base.endsWith('/') ? base.slice(0, -1) : base;
     return async (...args: unknown[]) => {
-        const res = await fetch(`${base}/${symbol}`, {
+        const res = await fetch(`${prefix}/${symbol}`, {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify({ args })
@@ -46,12 +47,14 @@ export function __serverFnStub(
         }
         if (!res.ok) {
             const wire = payload?.error;
+            // 404 always gets the skew hint — the endpoint's structured 404
+            // only ever means "unknown symbol", and the hint is what the
+            // user at a stale page can act on.
             const message =
-                wire?.message ??
-                (res.status === 404
+                res.status === 404
                     ? `server function "${name}" not found — the page may be a stale build ` +
                       `(version skew); reload to pick up the current one.`
-                    : `server function "${name}" failed (HTTP ${res.status})`);
+                    : wire?.message ?? `server function "${name}" failed (HTTP ${res.status})`;
             throw Object.assign(new Error(message), {
                 __sigxServerFnError: true,
                 status: wire?.status ?? res.status,

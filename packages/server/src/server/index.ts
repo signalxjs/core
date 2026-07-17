@@ -77,8 +77,8 @@ async function readBody(request: Request, maxBytes: number): Promise<string | nu
     const declared = request.headers.get('content-length');
     if (declared && Number(declared) > maxBytes) return null;
     if (!request.body) {
-        const text = await request.text();
-        return text.length > maxBytes ? null : text;
+        const buffer = await request.arrayBuffer();
+        return buffer.byteLength > maxBytes ? null : new TextDecoder().decode(buffer);
     }
     const reader = request.body.getReader();
     const chunks: Uint8Array[] = [];

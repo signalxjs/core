@@ -76,6 +76,29 @@ describe('sigxServer — transform', () => {
         expect(warnings[0]).toContain('export *');
     });
 
+    it('never serves the real module on a failed extraction', () => {
+        const file = join(root, 'src/cart.server.ts');
+        // A good pass first (cache), then a mid-edit syntax error.
+        plugin.transform.call({ environment: { name: 'client' }, warn: () => {} }, CART, file);
+        const broken = plugin.transform.call(
+            { environment: { name: 'client' }, warn: () => {} },
+            CART + '\nconst oops = {',
+            file
+        );
+        expect(broken.code).toContain('__serverFnStub'); // last good stub
+        expect(broken.code).not.toContain('db.cart.add');
+
+        // No cache at all → a loud refusal, still not the server body.
+        const fresh = join(root, 'src/never-seen.server.ts');
+        const refused = plugin.transform.call(
+            { environment: { name: 'client' }, warn: () => {} },
+            'const broken = {',
+            fresh
+        );
+        expect(refused.code).toContain('refusing to serve');
+        expect(refused.code).toMatch(/^throw new Error/);
+    });
+
     it('ignores non-matching files', () => {
         expect(
             plugin.transform.call(
