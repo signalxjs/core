@@ -43,7 +43,9 @@ export default [
   {
     name: '@sigx/server-renderer',
     path: 'packages/server-renderer/dist/index.prod.js',
-    limit: '13 KB',
+    // 13 → 13.25 KB when createFetchHandler landed on the root entry
+    // (rfc-deploy §2, Phase 1 — the RFC budgets its bytes here).
+    limit: '13.25 KB',
     ignore: ['sigx', 'sigx/*', '@sigx/*', 'node:stream'],
   },
   {

@@ -1,14 +1,18 @@
-// Edge smoke test (rfc-ssr-platform §2.3): render a streaming document
-// through the WinterCG-clean primitives — the built PRODUCTION dist, with
-// all Node builtin imports forbidden by edge-hooks.mjs. Exercises:
-// createSSR, renderDocumentChunks (shell promise + chunk generator),
-// renderDocumentToWebStream (bytes), useResponse, useHead, and a streamed
-// keyed useData read with its $SIGX_REPLACE replacement.
+// Edge smoke test (rfc-ssr-platform §2.3, rfc-deploy §6): render a streaming
+// document through the WinterCG-clean primitives — the built PRODUCTION
+// dist, with all Node builtin imports forbidden by edge-hooks.mjs.
+// Exercises: createSSR, renderDocumentChunks (shell promise + chunk
+// generator), renderDocumentToWebStream (bytes), useResponse, useHead, a
+// streamed keyed useData read with its $SIGX_REPLACE replacement, the full
+// Request → createFetchHandler → Response round-trip, and @sigx/server's
+// handleServerFnRequest under the same no-builtin hooks.
 //
 // Run via:  pnpm test:edge   (after pnpm build)
 import { jsx, component, useData, useHead } from 'sigx';
-import { createSSR, useResponse } from '@sigx/server-renderer';
+import { createSSR, useResponse, createFetchHandler } from '@sigx/server-renderer';
 import { resumePlugin } from '@sigx/resume/server';
+import { serverFn } from '@sigx/server';
+import { handleServerFnRequest } from '@sigx/server/server';
 
 const Stats = component(() => {
     const stats = useData('edge:stats', async () => {
@@ -83,4 +87,41 @@ function assert(cond, message) {
     assert(html.includes('"hydrate":"never"') && html.includes('"n":3'), 'resume record + state in the table');
 }
 
-console.log('✅ edge-smoke: WinterCG-clean document streaming verified (no Node builtins imported)');
+// 4) The fetch handler (rfc-deploy §2): full Request → Response round-trip
+// through the prod dist — the shape every fetch platform consumes.
+{
+    const handler = createFetchHandler({ template: TEMPLATE, app: () => App({}) });
+
+    const res = await handler(new Request('https://edge.test/'));
+    assert(res.status === 200, `fetch handler status 200, got ${res.status}`);
+    assert((res.headers.get('content-type') ?? '').includes('text/html'), 'fetch handler content-type set');
+    assert(res.headers.get('x-edge-smoke') === 'ok', 'useResponse header merged onto the Response');
+    const html = await res.text();
+    assert(html.includes('data-async-placeholder') && html.includes('42'), 'fetch handler streamed the document');
+    assert(html.includes('sigx:ready'), 'fetch handler emitted the completion script');
+
+    const bot = await handler(
+        new Request('https://edge.test/', { headers: { 'user-agent': 'Googlebot/2.1 (+http://www.google.com/bot.html)' } })
+    );
+    const botHtml = await bot.text();
+    assert(botHtml.includes('42') && !botHtml.includes('data-async-placeholder'), 'bot got a blocking document');
+}
+
+// 5) @sigx/server is WinterCG-clean too (rfc-deploy §6 — closing the
+// standing gap): a server-fn POST round-trip through the prod dist.
+{
+    const add = serverFn(async (_rq, a, b) => a + b);
+    const res = await handleServerFnRequest(
+        new Request('https://edge.test/_sigx/fn/add_fn_00000001', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', origin: 'https://edge.test' },
+            body: '{"args":[2,3]}'
+        }),
+        { resolve: () => add }
+    );
+    assert(res.status === 200, `server fn status 200, got ${res.status}`);
+    const envelope = await res.json();
+    assert(envelope.data === 5, 'server fn returned {data}');
+}
+
+console.log('✅ edge-smoke: WinterCG-clean document streaming, fetch handler, and server-fn endpoint verified (no Node builtins imported)');

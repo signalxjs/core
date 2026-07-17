@@ -10,6 +10,10 @@ import '../client-directives.js';
 
 export { renderToStream, renderToString, renderToStreamWithCallbacks } from './render-api';
 export { renderDocument, renderDocumentToWebStream } from './render-api';
+export { createFetchHandler } from './fetch-handler';
+export type { FetchHandlerOptions, FetchHandler } from './fetch-handler';
+export { defaultIsBot } from './bot';
+export { chunksToBytes } from './bytes';
 export type { DocumentOptions } from './document';
 export { renderVNodeToString, defaultRenderError } from './render-core';
 export { createSSRContext } from './context';
