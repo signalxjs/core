@@ -15,7 +15,7 @@
  *  here (a 3-entry set) to keep this entry dependency-free. */
 const DANGEROUS_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
-/** Reviver-based rejection of prototype-pollution keys (rfc-server §4). */
+/** Reviver DROPS prototype-pollution keys from the parsed value (rfc-server §4). */
 const reviver = (key: string, value: unknown): unknown =>
     DANGEROUS_KEYS.has(key) ? undefined : value;
 

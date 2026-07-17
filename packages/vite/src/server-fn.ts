@@ -60,7 +60,9 @@ const DEFAULT_EXCLUDE = ['**/node_modules/**', '**/dist/**'];
 const DEFAULT_BASE = '/_sigx/fn';
 
 /** `import … from '@sigx/server'` (not -renderer), excluding type-only. */
-const SERVER_IMPORT_RE = /import\s+(?!type\b)[^;'"]*from\s*['"]@sigx\/server['"]/;
+const SERVER_IMPORT_RE = /import\s*(?!type\b)[^;'"]*from\s*['"]@sigx\/server['"]/;
+/** A serverFn call site, tolerant of formatting (`serverFn (`, newline). */
+const SERVER_FN_CALL_RE = /\bserverFn\s*\(/;
 
 export function sigxServer(options: SigxServerOptions = {}): Plugin {
     const filter = createFilter(options.include ?? DEFAULT_INCLUDE, options.exclude ?? DEFAULT_EXCLUDE);
@@ -154,7 +156,7 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
                     !lintWarned.has(clean) &&
                     /\.(ts|tsx|js|jsx|mts|mjs)$/.test(clean) &&
                     !clean.includes('node_modules') &&
-                    code.includes('serverFn(') &&
+                    SERVER_FN_CALL_RE.test(code) &&
                     SERVER_IMPORT_RE.test(code)
                 ) {
                     lintWarned.add(clean);

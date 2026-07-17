@@ -5,8 +5,9 @@
  *
  * Security defaults (§5) are enforced HERE, unconditionally: POST-only,
  * required `application/json` media type, same-origin `Origin` check,
- * `maxBodyBytes` during the body read, reviver-based rejection of
- * prototype-pollution keys, and prod error masking. The `guard` hook runs
+ * `maxBodyBytes` during the body read, reviver-based DROPPING of
+ * prototype-pollution keys (they are removed from the parsed value, not a
+ * request error), and prod error masking. The `guard` hook runs
  * before EVERY function — the app-wide auth seam that no transport skips.
  */
 

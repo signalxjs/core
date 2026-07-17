@@ -86,6 +86,18 @@ describe('serverFn — options form', () => {
         expect(order).toEqual(['auth', 'rate']);
     });
 
+    it('rejects extra wire arguments (single-input signature)', async () => {
+        const fn = serverFn({ input: schema, handler: async (_rq, input) => input.id });
+        const ctx = createRequestContext(
+            new Request('http://localhost/_sigx/fn/x', { method: 'POST' })
+        );
+        const error = await fn
+            .__sigxFn(ctx, { symbol: '', name: '' }, [{ id: 'a' }, 'smuggled'])
+            .catch((e: unknown) => e);
+        expect(isServerFnError(error)).toBe(true);
+        expect((error as ServerFnError).status).toBe(400);
+    });
+
     it('a throwing guard vetoes the call', async () => {
         const fn = serverFn({
             use: [

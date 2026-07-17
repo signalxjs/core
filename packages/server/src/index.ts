@@ -85,6 +85,11 @@ export function serverFn(
             for (const guard of options.use ?? []) {
                 await guard(rq, info);
             }
+            // The options form takes ONE input (matching its signature) —
+            // extra wire args would silently bypass the declared shape.
+            if (args.length > 1) {
+                throw new ServerFnError(400, 'options-form server functions take a single input argument');
+            }
             let input = args[0];
             if (options.input) {
                 let result = options.input['~standard'].validate(input);

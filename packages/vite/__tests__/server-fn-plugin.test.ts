@@ -155,6 +155,16 @@ describe('sigxServer — dev lint', () => {
         expect(warnings[0]).toContain('will NOT be extracted');
     });
 
+    it('tolerates compact imports and spaced call sites', () => {
+        const warnings: string[] = [];
+        plugin.transform.call(
+            { environment: { name: 'client' }, warn: (m: string) => warnings.push(m) },
+            `import{ serverFn } from '@sigx/server';\nexport const leak = serverFn (async (rq) => 1);`,
+            join(root, 'src/Compact.tsx')
+        );
+        expect(warnings).toHaveLength(1);
+    });
+
     it('does not warn for @sigx/server-renderer imports or type-only imports', () => {
         const warnings: string[] = [];
         plugin.transform.call(
