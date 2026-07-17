@@ -7,7 +7,11 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { handleServerFnRequest, type ServerFnRequestOptions } from '../src/server/index';
+import {
+    handleServerFnRequest,
+    matchesServerFn,
+    type ServerFnRequestOptions
+} from '../src/server/index';
 import { serverFn, ServerFnError } from '../src/index';
 
 const ORIGIN = 'http://localhost';
@@ -55,6 +59,35 @@ function call(
         ...options
     });
 }
+
+describe('matchesServerFn (rfc-deploy §2)', () => {
+    const req = (path: string, method = 'POST') => new Request(`${ORIGIN}${path}`, { method });
+
+    it('matches requests under the default base, any method', () => {
+        expect(matchesServerFn(req('/_sigx/fn/add_fn_00000001'))).toBe(true);
+        expect(matchesServerFn(req('/_sigx/fn/%40acme%2Fapi%23add'))).toBe(true);
+        // Method deliberately unchecked — a GET should reach the 405, not
+        // fall through to the document handler.
+        expect(matchesServerFn(req('/_sigx/fn/add_fn_00000001', 'GET'))).toBe(true);
+    });
+
+    it('ignores query strings (pathname match)', () => {
+        expect(matchesServerFn(req('/_sigx/fn/add_fn_00000001?trace=1'))).toBe(true);
+    });
+
+    it('does not match other paths, the bare base, or prefix look-alikes', () => {
+        expect(matchesServerFn(req('/'))).toBe(false);
+        expect(matchesServerFn(req('/_sigx/fn'))).toBe(false);          // no symbol segment
+        expect(matchesServerFn(req('/_sigx/fnord/x'))).toBe(false);     // not a path segment
+        expect(matchesServerFn(req('/api/_sigx/fn/x'))).toBe(false);    // not under the mount
+    });
+
+    it('honors a custom base, with or without a trailing slash', () => {
+        expect(matchesServerFn(req('/rpc/add_fn_00000001'), '/rpc')).toBe(true);
+        expect(matchesServerFn(req('/rpc/add_fn_00000001'), '/rpc/')).toBe(true);
+        expect(matchesServerFn(req('/_sigx/fn/add_fn_00000001'), '/rpc')).toBe(false);
+    });
+});
 
 describe('handleServerFnRequest — happy path', () => {
     it('invokes the function and returns {data}', async () => {

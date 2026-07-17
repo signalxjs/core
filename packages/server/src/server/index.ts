@@ -65,6 +65,28 @@ function errorResponse(
     return new Response(JSON.stringify({ error }), { status, headers: merged });
 }
 
+/**
+ * True when REQUEST targets the server-fn endpoint mounted under BASE —
+ * the routing predicate platform entries compose with (rfc-deploy §2):
+ *
+ * ```ts
+ * if (matchesServerFn(request)) return handleServerFnRequest(request, opts);
+ * return renderDocument(request);
+ * ```
+ *
+ * Deliberately a predicate, not a combinator — composition stays in the
+ * user's entry. BASE is the server MOUNT path (rfc-server rev 2's
+ * `endpoint`/`base` split): stubs may fetch an absolute `endpoint`, but the
+ * deployed handler matches on `base`. The method is not checked — a
+ * non-POST to the endpoint should reach the handler's 405, not fall
+ * through to the document handler. The bare base with no symbol segment
+ * (`/_sigx/fn`) does not match, same as the `/node` adapter's routing.
+ */
+export function matchesServerFn(request: Request, base = '/_sigx/fn'): boolean {
+    const prefix = base.endsWith('/') ? base : base + '/';
+    return new URL(request.url).pathname.startsWith(prefix);
+}
+
 function checkOrigin(request: Request, policy: ServerFnRequestOptions['origin']): boolean {
     if (policy === false) return true;
     const origin = request.headers.get('origin');

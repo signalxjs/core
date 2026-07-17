@@ -283,6 +283,23 @@ describe('sigxServer — rev 2: role, endpoint, stable symbols, scan (#320)', ()
     const APP = { 'package.json': '{"name": "@test/app"}', 'src/cart.server.ts': CART };
     const noWarn = { warn: () => {} };
 
+    it('exposes { role, base, endpoint } on plugin.api for cross-plugin introspection', () => {
+        // rfc-deploy §3.3: the future `ssr.adapter` reads this to raise the
+        // role:'client' × adapter config error.
+        const defaults = sigxServer() as any;
+        expect(defaults.api).toEqual({ role: 'auto', base: '/_sigx/fn', endpoint: '/_sigx/fn' });
+        const client = sigxServer({
+            role: 'client',
+            base: '/rpc',
+            endpoint: 'https://api.example.com/rpc'
+        }) as any;
+        expect(client.api).toEqual({
+            role: 'client',
+            base: '/rpc',
+            endpoint: 'https://api.example.com/rpc'
+        });
+    });
+
     it('dual-registers hashed AND stable symbols to the same import record', () => {
         const { plugin, root } = makeProject(APP);
         try {

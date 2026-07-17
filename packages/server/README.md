@@ -132,7 +132,16 @@ app.use(createRequestHandler({ /* documents, unchanged */ }));
 
 On WinterCG runtimes (Cloudflare, Deno, Bun) skip the adapter —
 `handleServerFnRequest(request, options)` from `@sigx/server/server` is
-already fetch-handler-shaped.
+already fetch-handler-shaped. Route with its sibling predicate:
+
+```js
+if (matchesServerFn(request)) return handleServerFnRequest(request, opts);
+return renderDocument(request);   // your document handler
+```
+
+(`matchesServerFn(request, base?)` matches the pathname under the mount
+path — deliberately a predicate, not a combinator; composition stays in
+your entry.)
 
 ## Native clients — transport config
 
