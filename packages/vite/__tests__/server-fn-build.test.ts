@@ -208,3 +208,122 @@ export const Widget = component(() => {
         expect(combined).toContain(SECRET);
     }, 60_000);
 });
+
+describe('sigxServer end-to-end — rev 2: role:client + shared package (#320)', () => {
+    let solution: string;
+    const STABLE = '@acme/shared/src/cart.server.ts#addToCart';
+    const ENDPOINT = 'https://api.example.com/_sigx/fn';
+
+    const outputFiles = (dir: string): string[] => {
+        const files: string[] = [];
+        const walk = (d: string) => {
+            for (const entry of readdirSync(d, { withFileTypes: true })) {
+                const full = join(d, entry.name);
+                if (entry.isDirectory()) walk(full);
+                else files.push(full);
+            }
+        };
+        walk(dir);
+        return files;
+    };
+
+    beforeAll(() => {
+        // One solution: a shared server package + a native (terminal-style)
+        // app + a server app, both importing the SAME *.server.ts module.
+        solution = mkdtempSync(join(tmpdir(), 'sigx-native-e2e-'));
+        const write = (rel: string, content: string) => {
+            mkdirSync(join(solution, rel, '..'), { recursive: true });
+            writeFileSync(join(solution, rel), content);
+        };
+        write('packages/shared/package.json', JSON.stringify({ name: '@acme/shared' }));
+        write('packages/shared/src/cart.server.ts', `
+import { serverFn } from '@sigx/server';
+
+export const addToCart = serverFn(async (rq, id: string) => {
+    return '${SECRET}: ' + id;
+});
+`);
+        write('apps/native/src/entry.ts',
+            `import { addToCart } from '../../../packages/shared/src/cart.server';\n` +
+            `export const run = () => addToCart('sku-1');\n`);
+        write('apps/server/src/entry-server.ts',
+            `export { addToCart } from '../../../packages/shared/src/cart.server';\n`);
+
+        // Minimal @sigx/server at the SOLUTION root — both apps and the
+        // shared package resolve it by walk-up.
+        const dir = join(solution, 'node_modules', '@sigx', 'server');
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(join(dir, 'package.json'), JSON.stringify({
+            name: '@sigx/server',
+            version: '0.0.0',
+            type: 'module',
+            main: 'index.js',
+            exports: { '.': './index.js', './client': './client.js' }
+        }));
+        writeFileSync(join(dir, 'index.js'),
+            `export const serverFn = (impl) => Object.assign(` +
+            `(...args) => impl({}, ...args), ` +
+            `{ __sigxFn: (rq, info, args) => impl(rq, ...args), __sigxName: impl.name || '' });\n`);
+        writeFileSync(join(dir, 'client.js'),
+            `export function __serverFnStub(symbol, name, endpoint) { return async () => symbol + endpoint; }\n` +
+            `export function __serverOnly(name, file) { return () => { throw new Error(name); }; }\n`);
+    }, 60_000);
+
+    afterAll(() => {
+        rmSync(solution, { recursive: true, force: true });
+    });
+
+    it("role:'client' build (ssr-target): stable-symbol stubs, baked endpoint, no bodies, no registry", async () => {
+        const { build } = await import('vite');
+        const root = join(solution, 'apps/native');
+        await build({
+            root,
+            logLevel: 'error',
+            build: { ssr: 'src/entry.ts', outDir: 'dist' },
+            plugins: [sigxServer({
+                role: 'client',
+                endpoint: ENDPOINT,
+                scan: ['../../packages/shared']
+            })]
+        } as never);
+
+        const files = outputFiles(join(root, 'dist'));
+        // No registry chunk — there is no server in this build.
+        expect(files.some((f) => f.endsWith('sigx-server-fns.js'))).toBe(false);
+        const combined = files
+            .filter((f) => /\.(js|mjs)$/.test(f))
+            .map((f) => readFileSync(f, 'utf-8'))
+            .join('\n');
+        // The ssr-named environment STILL got stubs (role:'client'), baked
+        // with the stable symbol and the absolute endpoint.
+        expect(combined).toContain(STABLE);
+        expect(combined).toContain(ENDPOINT);
+        expect(combined).not.toContain(SECRET);
+    }, 60_000);
+
+    it("server app build: registry dual-registers the SAME stable symbol (cross-build coherence)", async () => {
+        const { build } = await import('vite');
+        const root = join(solution, 'apps/server');
+        await build({
+            root,
+            logLevel: 'error',
+            build: { ssr: 'src/entry-server.ts', outDir: 'dist' },
+            plugins: [sigxServer({ scan: ['../../packages/shared'] })]
+        } as never);
+
+        const registryPath = join(root, 'dist', 'sigx-server-fns.js');
+        expect(existsSync(registryPath)).toBe(true);
+        const registry = readFileSync(registryPath, 'utf-8');
+        // The exact stable symbol the native build baked into its stubs —
+        // an installed app keeps working across this backend's redeploys.
+        expect(registry).toContain(JSON.stringify(STABLE));
+        // …and the hashed twin is registered too (web skew detection).
+        expect(registry).toMatch(/addToCart_fn_[0-9a-f]{8}/);
+        // The real body ships in this build.
+        const combined = outputFiles(join(root, 'dist'))
+            .filter((f) => /\.(js|mjs)$/.test(f))
+            .map((f) => readFileSync(f, 'utf-8'))
+            .join('\n');
+        expect(combined).toContain(SECRET);
+    }, 60_000);
+});

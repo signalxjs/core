@@ -9,6 +9,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { extractInlineServerFns } from '../src/server-fn-inline';
+import type { ServerFnExtractOptions } from '../src/server-fn-extract';
 
 const BASE = '/_sigx/fn';
 
@@ -25,8 +26,16 @@ export const Search = component((ctx) => {
 });
 `;
 
-function extract(code: string, file = '/src/Search.tsx') {
-    return extractInlineServerFns(code, file, file.slice(1), BASE);
+function extract(
+    code: string,
+    file = '/src/Search.tsx',
+    extra?: Partial<ServerFnExtractOptions>
+) {
+    return extractInlineServerFns(code, file, {
+        stableId: file.slice(1),
+        endpoint: BASE,
+        ...extra
+    });
 }
 
 describe('extractInlineServerFns — happy path', () => {
@@ -361,5 +370,44 @@ export const ping = srv.serverFn(async (rq) => 'pong');
         const result = extract(code, '/src/api.ts');
         expect(result.errors).toHaveLength(0);
         expect(result.fns[0].name).toBe('ping');
+    });
+});
+
+describe('extractInlineServerFns — rev 2 (stable symbols, id, endpoint)', () => {
+    it('mints hashed + stable symbols off the stableId, in parity with the file form', () => {
+        const a = extract(SEARCH, '/appA/Search.tsx', { stableId: '@acme/web/src/Search.tsx' });
+        const b = extract(SEARCH, '/appB/Search.tsx', { stableId: '@acme/web/src/Search.tsx' });
+        expect(a.fns[0].symbol).toBe(b.fns[0].symbol);
+        expect(a.fns[0].stableSymbol).toBe('@acme/web/src/Search.tsx#search');
+    });
+
+    it('honors an explicit string-literal `id` and warns on a non-literal one', () => {
+        const withId = `
+import { serverFn } from '@sigx/server';
+const search = serverFn({ id: 'search/query', handler: async (rq, q) => q });
+export const use = () => search('x');
+`;
+        const result = extract(withId, '/src/api.ts');
+        expect(result.errors).toHaveLength(0);
+        expect(result.warnings).toHaveLength(0);
+        expect(result.fns[0].stableSymbol).toBe('search/query#search');
+
+        const dynamic = withId.replace(`'search/query'`, '`search/query`');
+        const warned = extract(dynamic, '/src/api.ts');
+        expect(warned.warnings).toHaveLength(1);
+        expect(warned.warnings[0]).toContain('string literal');
+        expect(warned.fns[0].stableSymbol).toBe('src/api.ts#search');
+    });
+
+    it("stubSymbols: 'stable' + endpoint bake into the client splice", () => {
+        const result = extract(SEARCH, '/src/Search.tsx', {
+            stableId: '@acme/web/src/Search.tsx',
+            stubSymbols: 'stable',
+            endpoint: 'https://api.example.com/_sigx/fn'
+        });
+        expect(result.clientModule).toContain(
+            `__serverFnStub("@acme/web/src/Search.tsx#search", "search", ` +
+            `"https://api.example.com/_sigx/fn")`
+        );
     });
 });

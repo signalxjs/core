@@ -34,7 +34,11 @@
  */
 
 import { parseAst } from 'vite';
-import { hash8 } from './resume-extract.js';
+import {
+    mintSymbols,
+    readServerFnIdOption,
+    type ServerFnExtractOptions
+} from './server-fn-extract.js';
 
 interface Node {
     type: string;
@@ -50,8 +54,10 @@ function isNode(value: unknown): value is Node {
 export interface InlineServerFn {
     /** The declared const name (the registry name). */
     name: string;
-    /** Transport symbol: `<name>_fn_<hash8>`. */
+    /** Content-hashed transport symbol: `<name>_fn_<hash8>`. */
     symbol: string;
+    /** Hash-free stable symbol: `<stableId>#<name>` (decoded form). */
+    stableSymbol: string;
     /** The appended SSR export the endpoint resolves. */
     mangled: string;
 }
@@ -65,6 +71,8 @@ export interface InlineExtractionError {
 export interface InlineServerFnExtraction {
     fns: InlineServerFn[];
     errors: InlineExtractionError[];
+    /** Non-fatal notes (e.g. a non-literal `id` option) — mirrors the file form. */
+    warnings: string[];
     /** Stub-swapped + import-stripped module, when fns exist and no errors. */
     clientModule: string | null;
     /** Original module + mangled exports, when fns exist and no errors. */
@@ -312,14 +320,12 @@ function applySplices(code: string, splices: Splice[]): string {
 /**
  * @param code    - module source (a component file, NOT a `*.server.ts`)
  * @param id      - absolute module path (parse lang from its extension)
- * @param relPath - Vite-root-relative path (hash seed + messages)
- * @param base    - the endpoint prefix baked into stubs
+ * @param options - stable id, baked endpoint, and stub symbol mode
  */
 export function extractInlineServerFns(
     code: string,
     id: string,
-    relPath: string,
-    base: string
+    options: ServerFnExtractOptions
 ): InlineServerFnExtraction {
     const clean = id.split('?')[0];
     const ext = clean.slice(clean.lastIndexOf('.'));
@@ -398,12 +404,13 @@ export function extractInlineServerFns(
     };
 
     if (serverFnLocals.size === 0 && namespaceLocals.size === 0) {
-        return { fns: [], errors: [], clientModule: null, ssrModule: null };
+        return { fns: [], errors: [], warnings: [], clientModule: null, ssrModule: null };
     }
 
     // -- find module-scope declarations and misplaced calls --
     const fns: InlineServerFn[] = [];
     const errors: InlineExtractionError[] = [];
+    const warnings: string[] = [];
     const clientSplices: Splice[] = [];
     /** Call nodes accepted as module-scope declarations. */
     const accepted = new Set<Node>();
@@ -470,7 +477,14 @@ export function extractInlineServerFns(
             if (bad) continue;
 
             const callSource = code.slice(call.start, call.end);
-            const symbol = `${name}_fn_${hash8(`${relPath}\0${name}\0${callSource}`)}`;
+            const idOption = readServerFnIdOption(call);
+            if (idOption.nonLiteral) {
+                warnings.push(
+                    `serverFn "${name}": \`id\` must be a string literal (it is read statically) — ` +
+                    `falling back to the file-derived stable id.`
+                );
+            }
+            const minted = mintSymbols(name, callSource, idOption.id, options.stableId);
             const mangled = MANGLE_PREFIX + name;
             if (moduleLocals.has(mangled) || imports.has(mangled) || exportedNames.has(mangled)) {
                 errors.push({
@@ -479,11 +493,12 @@ export function extractInlineServerFns(
                 });
                 continue;
             }
-            fns.push({ name, symbol, mangled });
+            fns.push({ ...minted, mangled });
+            const wireSymbol = options.stubSymbols === 'stable' ? minted.stableSymbol : minted.symbol;
             clientSplices.push({
                 start: call.start,
                 end: call.end,
-                text: `__serverFnStub(${JSON.stringify(symbol)}, ${JSON.stringify(name)}, ${JSON.stringify(base)})`
+                text: `__serverFnStub(${JSON.stringify(wireSymbol)}, ${JSON.stringify(name)}, ${JSON.stringify(options.endpoint)})`
             });
         }
     }
@@ -523,7 +538,7 @@ export function extractInlineServerFns(
     }
 
     if (errors.length > 0 || fns.length === 0) {
-        return { fns: errors.length > 0 ? [] : fns, errors, clientModule: null, ssrModule: null };
+        return { fns: errors.length > 0 ? [] : fns, errors, warnings, clientModule: null, ssrModule: null };
     }
 
     // -- client module: stub swap + strip imports orphaned by the swap --
@@ -539,7 +554,7 @@ export function extractInlineServerFns(
         fns.map((fn) => `export const ${fn.mangled} = ${fn.name};`).join('\n') +
         '\n';
 
-    return { fns, errors, clientModule, ssrModule };
+    return { fns, errors, warnings, clientModule, ssrModule };
 }
 
 /**

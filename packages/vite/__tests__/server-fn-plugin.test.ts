@@ -22,14 +22,15 @@ export const auditLog = (line: string) => { console.log(line); };
 
 function makeProject(
     files: Record<string, string>,
-    command: 'build' | 'serve' = 'build'
+    command: 'build' | 'serve' = 'build',
+    options?: Parameters<typeof sigxServer>[0]
 ): { plugin: any; root: string } {
     const root = mkdtempSync(join(tmpdir(), 'sigx-server-fn-'));
     for (const [rel, content] of Object.entries(files)) {
         mkdirSync(join(root, rel, '..'), { recursive: true });
         writeFileSync(join(root, rel), content);
     }
-    const plugin = sigxServer() as any;
+    const plugin = sigxServer(options) as any;
     plugin.configResolved({ root, command });
     return { plugin, root };
 }
@@ -273,5 +274,158 @@ describe('sigxServer — inline extraction (non-matching files)', () => {
             join(root, 'src/b.ts')
         );
         expect(warnings).toHaveLength(0);
+    });
+});
+
+describe('sigxServer — rev 2: role, endpoint, stable symbols, scan (#320)', () => {
+    // A named package.json in the project root makes stable ids
+    // deterministic (no dependence on manifests above the temp dir).
+    const APP = { 'package.json': '{"name": "@test/app"}', 'src/cart.server.ts': CART };
+    const noWarn = { warn: () => {} };
+
+    it('dual-registers hashed AND stable symbols to the same import record', () => {
+        const { plugin, root } = makeProject(APP);
+        try {
+            const registry = plugin.load(plugin.resolveId('virtual:sigx-server-fns'));
+            expect(registry).toMatch(/"addToCart_fn_[0-9a-f]{8}": \(\) => import\("\/src\/cart\.server\.ts"\)/);
+            expect(registry).toContain(
+                `"@test/app/src/cart.server.ts#addToCart": () => import("/src/cart.server.ts").then(m => m["addToCart"])`
+            );
+        } finally {
+            rmSync(root, { recursive: true, force: true });
+        }
+    });
+
+    it("role: 'client' stubs EVERY environment with STABLE symbols and the baked endpoint", () => {
+        const { plugin, root } = makeProject(APP, 'build', {
+            role: 'client',
+            endpoint: 'https://api.example.com/_sigx/fn'
+        });
+        try {
+            for (const env of ['ssr', 'custom-terminal', 'client']) {
+                const result = plugin.transform.call(
+                    { environment: { name: env }, ...noWarn },
+                    CART,
+                    join(root, 'src/cart.server.ts')
+                );
+                expect(result.code).toContain(
+                    `__serverFnStub("@test/app/src/cart.server.ts#addToCart", "addToCart", ` +
+                    `"https://api.example.com/_sigx/fn")`
+                );
+                expect(result.code).not.toContain('db.cart.add');
+            }
+        } finally {
+            rmSync(root, { recursive: true, force: true });
+        }
+    });
+
+    it("role: 'client' emits no registry chunk and mounts no dev endpoint", () => {
+        const { plugin, root } = makeProject(APP, 'build', { role: 'client' });
+        try {
+            const emitted: unknown[] = [];
+            plugin.buildStart.call({
+                environment: { name: 'ssr' },
+                emitFile: (f: unknown) => emitted.push(f)
+            });
+            expect(emitted).toHaveLength(0);
+
+            const used: unknown[] = [];
+            plugin.configureServer({
+                middlewares: { use: (fn: unknown) => used.push(fn) },
+                watcher: { add: () => {} }
+            });
+            expect(used).toHaveLength(0);
+        } finally {
+            rmSync(root, { recursive: true, force: true });
+        }
+    });
+
+    it("role: 'auto' still emits the registry for the ssr environment", () => {
+        const { plugin, root } = makeProject(APP);
+        try {
+            const emitted: any[] = [];
+            plugin.buildStart.call({
+                environment: { name: 'ssr' },
+                emitFile: (f: unknown) => emitted.push(f)
+            });
+            expect(emitted).toHaveLength(1);
+            expect(emitted[0].fileName).toBe('sigx-server-fns.js');
+        } finally {
+            rmSync(root, { recursive: true, force: true });
+        }
+    });
+
+    it('`endpoint` (distinct from `base`) is what stubs fetch', () => {
+        const { plugin, root } = makeProject(APP, 'build', {
+            endpoint: 'https://api.example.com/_sigx/fn'
+        });
+        try {
+            const result = plugin.transform.call(
+                { environment: { name: 'client' }, ...noWarn },
+                CART,
+                join(root, 'src/cart.server.ts')
+            );
+            expect(result.code).toMatch(
+                /__serverFnStub\("addToCart_fn_[0-9a-f]{8}", "addToCart", "https:\/\/api\.example\.com\/_sigx\/fn"\)/
+            );
+        } finally {
+            rmSync(root, { recursive: true, force: true });
+        }
+    });
+
+    it('`scan` discovers out-of-root packages: package-qualified ids, absolute specs, cross-build coherence', () => {
+        const shared = mkdtempSync(join(tmpdir(), 'sigx-shared-'));
+        const roots: string[] = [shared];
+        try {
+            mkdirSync(join(shared, 'src'), { recursive: true });
+            writeFileSync(join(shared, 'package.json'), '{"name": "@acme/shared"}');
+            writeFileSync(join(shared, 'src/cart.server.ts'), CART);
+
+            const load = (): string => {
+                const { plugin, root } = makeProject({ 'package.json': '{"name": "@test/app"}' }, 'build', {
+                    scan: [shared]
+                });
+                roots.push(root);
+                return plugin.load(plugin.resolveId('virtual:sigx-server-fns'));
+            };
+            const a = load();
+            const b = load();
+
+            const stableKey = '"@acme/shared/src/cart.server.ts#addToCart"';
+            expect(a).toContain(stableKey);
+            // Out-of-root module ⇒ absolute-path import spec, not '/src/…'.
+            const spec = /"@acme\/shared\/src\/cart\.server\.ts#addToCart": \(\) => import\("([^"]+)"\)/.exec(a)![1];
+            expect(spec).toContain('sigx-shared-');
+            expect(spec).not.toBe('/src/cart.server.ts');
+            // Two app builds (different roots) mint IDENTICAL registry keys
+            // for the shared module — the whole point of stable-id seeds.
+            const keys = (s: string): string[] => [...s.matchAll(/^\s+"([^"]+)":/gm)].map((m) => m[1]).sort();
+            expect(keys(a)).toEqual(keys(b));
+        } finally {
+            for (const dir of roots) rmSync(dir, { recursive: true, force: true });
+        }
+    });
+
+    it('warns when duplicate explicit `id`s collide on a stable symbol', () => {
+        const FN = (impl: string) =>
+            `import { serverFn } from '@sigx/server';\n` +
+            `export const add = serverFn({ id: 'cart/add', handler: async (rq, input) => ${impl} });`;
+        const { plugin, root } = makeProject({
+            'package.json': '{"name": "@test/app"}',
+            'src/a.server.ts': FN('1'),
+            'src/b.server.ts': FN('2')
+        });
+        try {
+            const warnings: string[] = [];
+            plugin.load.call(
+                { warn: (m: string) => warnings.push(m) },
+                plugin.resolveId('virtual:sigx-server-fns')
+            );
+            expect(warnings).toHaveLength(1);
+            expect(warnings[0]).toContain('cart/add#add');
+            expect(warnings[0]).toContain('duplicate explicit `id`');
+        } finally {
+            rmSync(root, { recursive: true, force: true });
+        }
     });
 });

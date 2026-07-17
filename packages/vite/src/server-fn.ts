@@ -27,6 +27,14 @@
  *
  * Symbols change when a function's body changes (content-hashed), so
  * `hotUpdate` re-extracts and invalidates the registry virtual module.
+ *
+ * rev 2 (native clients, #320): hash seeds use ROOT-INDEPENDENT stable ids
+ * (package-qualified — every app build of one solution mints identical
+ * symbols for shared server modules); the registry dual-registers hashed +
+ * hash-free STABLE symbols (`<stableId>#<name>`) so backend redeploys never
+ * break installed apps; `endpoint` (stub fetch target) splits from `base`
+ * (server mount path); `role: 'client'` stubs EVERY environment and emits
+ * no registry; `scan` discovers shared packages outside the Vite root.
  */
 
 import type { Plugin, ViteDevServer } from 'vite';
@@ -34,8 +42,13 @@ import { createFilter, normalizePath } from 'vite';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { extractServerFns, type ServerFnExtraction } from './server-fn-extract.js';
+import {
+    extractServerFns,
+    type ServerFnExtraction,
+    type ServerFnExtractOptions
+} from './server-fn-extract.js';
 import { extractInlineServerFns, type InlineServerFnExtraction } from './server-fn-inline.js';
+import { computeStableId, type PackageProbe } from './server-extract.js';
 import { offsetToLoc } from './resume-extract.js';
 import { walkFiles } from './islands.js';
 
@@ -44,8 +57,30 @@ export interface SigxServerOptions {
     include?: string | string[];
     /** Excluded from matching. Default: node_modules and dist. */
     exclude?: string | string[];
-    /** Endpoint prefix baked into stubs and served in dev. Default `/_sigx/fn`. */
+    /** SERVER mount path — the dev middleware and `createServerFnHandler`
+     *  prefix. Default `/_sigx/fn`. (rev 2 split it from `endpoint`.) */
     base?: string;
+    /**
+     * Fetch target baked into stubs — an absolute URL for builds that call a
+     * remote server. Default: `base`. Call-time precedence:
+     * `configureServerFn` endpoint > this > `base`.
+     */
+    endpoint?: string;
+    /**
+     * `'auto'` (default): stub swap in the Vite `client` environment only —
+     * the v1 web posture. `'client'`: this WHOLE build is a remote-server
+     * client (lynx, terminal) — every environment gets stubs (baked with
+     * STABLE symbols, deploy-durable for installed apps) and no registry
+     * chunk is emitted; there is no server in this build.
+     */
+    role?: 'auto' | 'client';
+    /**
+     * Extra directories (absolute or root-relative) scanned for server
+     * modules — shared workspace packages outside the Vite root
+     * (rfc-server rev 2, N.4). Registry entries for out-of-root modules use
+     * absolute-path specs; the dev resolver goes through `/@fs/`.
+     */
+    scan?: string[];
     /**
      * Dev guard: a Vite-root-relative module (e.g. '/src/fn-guard.ts') whose
      * `guard` export runs before every dev invocation — keep dev and prod
@@ -108,6 +143,8 @@ function callsServerFn(code: string): boolean {
 export function sigxServer(options: SigxServerOptions = {}): Plugin {
     const filter = createFilter(options.include ?? DEFAULT_INCLUDE, options.exclude ?? DEFAULT_EXCLUDE);
     const base = options.base ?? DEFAULT_BASE;
+    const endpoint = options.endpoint ?? base;
+    const role = options.role ?? 'auto';
 
     let root = process.cwd();
     let isServe = false;
@@ -115,8 +152,31 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
     const extractions = new Map<string, ServerFnExtraction>();
     /** Inline extractions per absolute module path (non-matching files). */
     const inline = new Map<string, InlineServerFnExtraction>();
+    /** Directory → nearest-package probe, for stable-id derivation. */
+    const pkgCache = new Map<string, PackageProbe>();
 
     const relPath = (file: string): string => path.relative(root, file).replace(/\\/g, '/');
+    const extractOptions = (file: string): ServerFnExtractOptions => ({
+        stableId: computeStableId(file, root, pkgCache),
+        endpoint,
+        stubSymbols: role === 'client' ? 'stable' : 'hashed'
+    });
+
+    /** Is FILE inside the Vite root? (Scanned packages may not be.) */
+    const inRoot = (file: string): boolean => {
+        const rel = path.relative(root, file);
+        return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
+    };
+    /** Registry import spec: root-relative in root, absolute outside (§3). */
+    const buildSpec = (file: string): string =>
+        inRoot(file) ? '/' + relPath(file) : normalizePath(file);
+    /** Dev-resolver spec: out-of-root modules load through `/@fs/`. */
+    const devSpec = (file: string): string =>
+        inRoot(file) ? '/' + relPath(file) : '/@fs/' + normalizePath(file);
+
+    /** Does this build role treat CTX's environment as client output? */
+    const isClientOut = (ctx: { environment?: { name?: string } }): boolean =>
+        role === 'client' || ctx.environment?.name === 'client';
 
     function extractInto(file: string, code: string): ServerFnExtraction | null {
         // One separator for map keys — discovery walks the fs (native
@@ -124,7 +184,7 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
         // forward-slash ids (#324).
         file = normalizePath(file);
         try {
-            const extraction = extractServerFns(code, file, relPath(file), base);
+            const extraction = extractServerFns(code, file, extractOptions(file));
             extractions.set(file, extraction);
             return extraction;
         } catch (error) {
@@ -138,7 +198,7 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
     function extractInlineInto(file: string, code: string): InlineServerFnExtraction | null {
         file = normalizePath(file); // see extractInto
         try {
-            const extraction = extractInlineServerFns(code, file, relPath(file), base);
+            const extraction = extractInlineServerFns(code, file, extractOptions(file));
             if (extraction.fns.length > 0) inline.set(file, extraction);
             else inline.delete(file);
             return extraction;
@@ -161,29 +221,40 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
         !file.includes('node_modules') &&
         callsServerFn(code);
 
+    /** Absolute scan roots (resolved against the Vite root once known). */
+    const scanDirs = (): string[] =>
+        (options.scan ?? []).map((dir) => path.resolve(root, dir));
+
     function discover(): void {
         extractions.clear();
         inline.clear();
-        for (const file of walkFiles(root)) {
-            if (filter(file)) {
-                extractInto(file, fs.readFileSync(file, 'utf-8'));
-                continue;
+        const visited = new Set<string>();
+        for (const dir of [root, ...scanDirs()]) {
+            for (const file of walkFiles(dir)) {
+                const key = normalizePath(file);
+                if (visited.has(key)) continue; // a scan dir may sit inside root
+                visited.add(key);
+                if (filter(file)) {
+                    extractInto(file, fs.readFileSync(file, 'utf-8'));
+                    continue;
+                }
+                // Inline candidates must be known BEFORE the registry virtual
+                // module loads — the SSR build reads it early.
+                if (!/\.(ts|tsx|js|jsx|mts|mjs)$/.test(file)) continue;
+                const code = fs.readFileSync(file, 'utf-8');
+                if (inlineCandidate(file, code)) extractInlineInto(file, code);
             }
-            // Inline candidates must be known BEFORE the registry virtual
-            // module loads — the SSR build reads it early.
-            if (!/\.(ts|tsx|js|jsx|mts|mjs)$/.test(file)) continue;
-            const code = fs.readFileSync(file, 'utf-8');
-            if (inlineCandidate(file, code)) extractInlineInto(file, code);
         }
     }
 
     function findSymbol(symbol: string): { file: string; exportName: string } | null {
+        // Dual routing (rev 2, N.3): hashed and stable symbols both resolve.
         for (const [file, extraction] of extractions) {
-            const fn = extraction.fns.find((f) => f.symbol === symbol);
+            const fn = extraction.fns.find((f) => f.symbol === symbol || f.stableSymbol === symbol);
             if (fn) return { file, exportName: fn.name };
         }
         for (const [file, extraction] of inline) {
-            const fn = extraction.fns.find((f) => f.symbol === symbol);
+            const fn = extraction.fns.find((f) => f.symbol === symbol || f.stableSymbol === symbol);
             if (fn) return { file, exportName: fn.mangled };
         }
         return null;
@@ -196,6 +267,7 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
         configResolved(config) {
             root = config.root;
             isServe = config.command === 'serve';
+            pkgCache.clear();
             discover();
         },
 
@@ -206,21 +278,35 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
         load(id) {
             if (id !== RESOLVED_VIRTUAL_ID) return;
             const lines: string[] = ['export const serverFns = {'];
-            for (const [file, extraction] of extractions) {
-                const moduleSpec = JSON.stringify('/' + relPath(file));
-                for (const fn of extraction.fns) {
-                    lines.push(
-                        `    ${JSON.stringify(fn.symbol)}: () => import(${moduleSpec}).then(m => m[${JSON.stringify(fn.name)}]),`
+            /** stableSymbol → file, to surface duplicate explicit `id`s. */
+            const stableOwners = new Map<string, string>();
+            const register = (
+                file: string,
+                fn: { symbol: string; stableSymbol: string },
+                exportName: string
+            ): void => {
+                const moduleSpec = JSON.stringify(buildSpec(file));
+                const record = `() => import(${moduleSpec}).then(m => m[${JSON.stringify(exportName)}])`;
+                // Dual registration (rev 2, N.3): hashed keys keep the web's
+                // skew detection; stable keys keep installed apps working
+                // across backend redeploys.
+                lines.push(`    ${JSON.stringify(fn.symbol)}: ${record},`);
+                lines.push(`    ${JSON.stringify(fn.stableSymbol)}: ${record},`);
+                const owner = stableOwners.get(fn.stableSymbol);
+                if (owner && owner !== file) {
+                    this.warn(
+                        `[sigx:server] stable symbol ${JSON.stringify(fn.stableSymbol)} is minted by both ` +
+                        `${relPath(owner)} and ${relPath(file)} (duplicate explicit \`id\`?) — ` +
+                        `the later registration wins.`
                     );
                 }
+                stableOwners.set(fn.stableSymbol, file);
+            };
+            for (const [file, extraction] of extractions) {
+                for (const fn of extraction.fns) register(file, fn, fn.name);
             }
             for (const [file, extraction] of inline) {
-                const moduleSpec = JSON.stringify('/' + relPath(file));
-                for (const fn of extraction.fns) {
-                    lines.push(
-                        `    ${JSON.stringify(fn.symbol)}: () => import(${moduleSpec}).then(m => m[${JSON.stringify(fn.mangled)}]),`
-                    );
-                }
+                for (const fn of extraction.fns) register(file, fn, fn.mangled);
             }
             lines.push('};');
             return lines.join('\n');
@@ -229,6 +315,8 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
         buildStart() {
             // The SSR build carries the registry chunk; serve resolves live.
             if (isServe) return;
+            // A role:'client' build has no server — no registry, anywhere.
+            if (role === 'client') return;
             if (this.environment?.name === 'client') return;
             let hasFns = false;
             for (const extraction of extractions.values()) {
@@ -242,7 +330,13 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
         },
 
         transform(code, id) {
-            const clean = normalizePath(id.split('?')[0]);
+            let clean = normalizePath(id.split('?')[0]);
+            // Out-of-root (scanned) modules arrive as /@fs/ URLs in dev —
+            // strip back to the fs path so map keys match discovery's.
+            if (clean.startsWith('/@fs/')) {
+                clean = clean.slice('/@fs/'.length);
+                if (!/^[a-zA-Z]:/.test(clean)) clean = '/' + clean;
+            }
             if (!filter(clean)) {
                 // Inline extraction (rfc-server §1.1(b)): module-scope
                 // serverFn declarations in any other client-reachable file.
@@ -254,7 +348,7 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
                     // Parse failure mid-edit: NEVER let the original module
                     // (server body included) reach the browser — last good
                     // client output, else a loud refusal.
-                    if (this.environment?.name === 'client') {
+                    if (isClientOut(this)) {
                         const cached = inline.get(clean)?.clientModule;
                         return {
                             code:
@@ -278,11 +372,11 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
                         .join('\n');
                     this.error(`[sigx:server] inline serverFn extraction failed:\n${detail}`);
                 }
+                for (const warning of extraction.warnings) {
+                    this.warn(`[sigx:server] ${relPath(clean)}: ${warning}`);
+                }
                 if (extraction.fns.length === 0) return null;
-                const out =
-                    this.environment?.name === 'client'
-                        ? extraction.clientModule
-                        : extraction.ssrModule;
+                const out = isClientOut(this) ? extraction.clientModule : extraction.ssrModule;
                 return out ? { code: out, map: null } : null;
             }
             // Rolldown can run the transform more than once per module (scan
@@ -298,7 +392,7 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
             for (const warning of extraction?.warnings ?? []) {
                 this.warn(`[sigx:server] ${relPath(clean)}: ${warning}`);
             }
-            if (this.environment?.name === 'client') {
+            if (isClientOut(this)) {
                 // NEVER serve the real module to the browser — on a failed
                 // extraction (mid-edit syntax error) fall back to the last
                 // good stub, and failing that, to a loud refusal.
@@ -334,6 +428,12 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
         },
 
         configureServer(server) {
+            // Out-of-root scanned packages are outside Vite's default watch
+            // scope — add them so hotUpdate sees their edits.
+            for (const dir of scanDirs()) server.watcher.add(dir);
+            // A role:'client' build has no server — nothing to mount; its
+            // functions live on the remote backend the stubs target.
+            if (role === 'client') return;
             const prefix = base.endsWith('/') ? base : base + '/';
             server.middlewares.use(async (req, res, next) => {
                 if (!req.url?.startsWith(prefix)) return next();
@@ -368,7 +468,7 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
                     resolve: async (symbol: string) => {
                         const record = findSymbol(symbol);
                         if (!record) return null;
-                        const mod = await devServer.ssrLoadModule('/' + relPath(record.file));
+                        const mod = await devServer.ssrLoadModule(devSpec(record.file));
                         return mod[record.exportName];
                     }
                 });

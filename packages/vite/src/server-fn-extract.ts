@@ -21,10 +21,17 @@
  * export const auditLog = __serverOnly("auditLog", "src/cart.server.ts");
  * ```
  *
- * Symbols are content-hashed (`<name>_fn_<hash8(relPath\0name\0implSource)>`,
+ * Symbols are content-hashed (`<name>_fn_<hash8(stableId\0name\0implSource)>`,
  * the resume discipline) so version skew is a detectable 404 — a stale client
  * posts an old symbol and the stub surfaces a typed "stale build" error,
- * never a silent wrong-function call.
+ * never a silent wrong-function call. The seed's path component is a
+ * ROOT-INDEPENDENT stable id (rfc-server rev 2, §3/N.4) — package-qualified
+ * (`@acme/api/src/cart.server.ts`), so every app build of one solution mints
+ * the SAME symbol for a shared server module. Alongside it every function
+ * gets a hash-free STABLE symbol (`<stableId>#<name>`, N.3) so backend
+ * redeploys never break installed native clients; the options form's
+ * `id: 'cart/add'` (string literal, read statically) replaces the file-derived
+ * id for published APIs that must survive file moves.
  *
  * Type-only exports pass through untouched at runtime (they erase), so
  * "types + fns in one file" stays a supported layout. Re-exports cannot be
@@ -49,8 +56,25 @@ function isNode(value: unknown): value is Node {
 export interface ExtractedServerFn {
     /** Export name — what the stub re-exports and callers import. */
     name: string;
-    /** Transport symbol: `<name>_fn_<hash8>`. */
+    /** Content-hashed transport symbol: `<name>_fn_<hash8>`. */
     symbol: string;
+    /** Hash-free stable symbol: `<stableId>#<name>` (decoded form). */
+    stableSymbol: string;
+}
+
+/** Shared options for both extractors (file form and inline). */
+export interface ServerFnExtractOptions {
+    /**
+     * Root-independent stable id for this module — the hash-seed path
+     * component, the stable-symbol prefix, and the id in messages. Vite
+     * builds derive it with `computeStableId` (`@sigx/vite/server-extract`);
+     * non-Vite bundlers may pass their own.
+     */
+    stableId: string;
+    /** Fetch target baked into stubs (the plugin's `endpoint`, default = `base`). */
+    endpoint: string;
+    /** Which symbol stubs carry: hashed (web, default) or stable (`role: 'client'`). */
+    stubSymbols?: 'hashed' | 'stable';
 }
 
 export interface ServerFnExtraction {
@@ -76,16 +100,62 @@ const LANG_BY_EXT: Record<string, 'ts' | 'tsx' | 'js' | 'jsx'> = {
 const TYPE_ONLY_DECLS = new Set(['TSTypeAliasDeclaration', 'TSInterfaceDeclaration']);
 
 /**
+ * Statically read the options-form `id` from a `serverFn({...})` call:
+ * string literal only (`nonLiteral` reports a present-but-dynamic `id` so
+ * callers can warn). Shared with the inline extractor.
+ */
+export function readServerFnIdOption(call: Node): { id?: string; nonLiteral: boolean } {
+    const args = (call.arguments as Node[]) ?? [];
+    if (args.length !== 1 || args[0]?.type !== 'ObjectExpression') return { nonLiteral: false };
+    for (const prop of (args[0].properties as Node[]) ?? []) {
+        if (prop.type !== 'Property' || prop.computed === true) continue;
+        const key = prop.key as Node;
+        const keyName =
+            key.type === 'Identifier' ? (key.name as string)
+            : key.type === 'Literal' ? String(key.value)
+            : '';
+        if (keyName !== 'id') continue;
+        const value = prop.value as Node;
+        if (value.type === 'Literal' && typeof value.value === 'string' && value.value !== '') {
+            return { id: value.value, nonLiteral: false };
+        }
+        return { nonLiteral: true };
+    }
+    return { nonLiteral: false };
+}
+
+/**
+ * Mint both transport symbols for one function (rfc-server rev 2, §3/N.3):
+ * hashed — `<name>_fn_<hash8(id\0name\0implSource)>` (`\0` is only ever a
+ * hash-seed FIELD separator; never part of the id) — and stable —
+ * `<id>#<name>`, stored DECODED (URL-encoding is the stub's request-time
+ * job; the endpoint decodes). An explicit options-form `id` replaces the
+ * file-derived stable id in BOTH, so id'd functions survive file moves with
+ * hashed and stable routes alike.
+ */
+export function mintSymbols(
+    name: string,
+    implSource: string,
+    explicitId: string | undefined,
+    stableId: string
+): ExtractedServerFn {
+    const fnStableId = explicitId ?? stableId;
+    return {
+        name,
+        symbol: `${name}_fn_${hash8(`${fnStableId}\0${name}\0${implSource}`)}`,
+        stableSymbol: `${fnStableId}#${name}`
+    };
+}
+
+/**
  * @param code    - module source
  * @param id      - absolute module path (parse lang from its extension)
- * @param relPath - Vite-root-relative path with forward slashes (hash seed + messages)
- * @param base    - the endpoint prefix baked into stubs (default '/_sigx/fn')
+ * @param options - stable id, baked endpoint, and stub symbol mode
  */
 export function extractServerFns(
     code: string,
     id: string,
-    relPath: string,
-    base: string
+    options: ServerFnExtractOptions
 ): ServerFnExtraction {
     const clean = id.split('?')[0];
     const ext = clean.slice(clean.lastIndexOf('.'));
@@ -105,8 +175,11 @@ export function extractServerFns(
         }
     }
 
-    /** local name → serverFn(...) call source, for `export { x }` resolution. */
-    const localFnSources = new Map<string, string>();
+    const warnings: string[] = [];
+
+    /** local name → serverFn(...) call source + explicit stable id, for
+     *  `export { x }` resolution. */
+    const localFnSources = new Map<string, { source: string; explicitId?: string }>();
     const isServerFnCall = (init: unknown): init is Node =>
         isNode(init) &&
         init.type === 'CallExpression' &&
@@ -123,22 +196,30 @@ export function extractServerFns(
             if ((declarator.id as Node).type !== 'Identifier') continue;
             if (!isServerFnCall(declarator.init)) continue;
             const init = declarator.init as Node;
-            localFnSources.set((declarator.id as Node).name as string, code.slice(init.start, init.end));
+            const idOption = readServerFnIdOption(init);
+            if (idOption.nonLiteral) {
+                warnings.push(
+                    `serverFn "${(declarator.id as Node).name as string}": \`id\` must be a string ` +
+                    `literal (it is read statically) — falling back to the file-derived stable id.`
+                );
+            }
+            localFnSources.set((declarator.id as Node).name as string, {
+                source: code.slice(init.start, init.end),
+                explicitId: idOption.id
+            });
         }
     }
 
     // -- pass 2: exports --
     const fns: ExtractedServerFn[] = [];
     const serverOnly: string[] = [];
-    const warnings: string[] = [];
-
-    const mintSymbol = (exportedName: string, implSource: string): string =>
-        `${exportedName}_fn_${hash8(`${relPath}\0${exportedName}\0${implSource}`)}`;
 
     const addExport = (exportedName: string, localName: string): void => {
-        const implSource = localFnSources.get(localName);
-        if (implSource !== undefined) {
-            fns.push({ name: exportedName, symbol: mintSymbol(exportedName, implSource) });
+        const record = localFnSources.get(localName);
+        if (record !== undefined) {
+            fns.push(
+                mintSymbols(exportedName, record.source, record.explicitId, options.stableId)
+            );
         } else {
             serverOnly.push(exportedName);
         }
@@ -221,16 +302,17 @@ export function extractServerFns(
         lines.push(`import { ${used.join(', ')} } from '@sigx/server/client';`);
     }
     for (const fn of fns) {
+        const wireSymbol = options.stubSymbols === 'stable' ? fn.stableSymbol : fn.symbol;
         lines.push(
-            `export const ${fn.name} = __serverFnStub(${JSON.stringify(fn.symbol)}, ` +
-            `${JSON.stringify(fn.name)}, ${JSON.stringify(base)});`
+            `export const ${fn.name} = __serverFnStub(${JSON.stringify(wireSymbol)}, ` +
+            `${JSON.stringify(fn.name)}, ${JSON.stringify(options.endpoint)});`
         );
     }
     for (const name of serverOnly) {
         lines.push(
             name === 'default'
-                ? `export default __serverOnly("default", ${JSON.stringify(relPath)});`
-                : `export const ${name} = __serverOnly(${JSON.stringify(name)}, ${JSON.stringify(relPath)});`
+                ? `export default __serverOnly("default", ${JSON.stringify(options.stableId)});`
+                : `export const ${name} = __serverOnly(${JSON.stringify(name)}, ${JSON.stringify(options.stableId)});`
         );
     }
     if (lines.length === 0) lines.push('export {};');

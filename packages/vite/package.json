@@ -33,6 +33,10 @@
         "./server": {
             "types": "./dist/server-fn.d.ts",
             "import": "./dist/server-fn.js"
+        },
+        "./server-extract": {
+            "types": "./dist/server-extract.d.ts",
+            "import": "./dist/server-extract.js"
         }
     },
     "bin": {
