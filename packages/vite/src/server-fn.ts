@@ -70,16 +70,20 @@ function serverFnAliases(code: string): string[] {
     for (const match of code.matchAll(SERVER_IMPORT_RE)) {
         const clause = match[1];
         if (/\btype\s+serverFn\b/.test(clause)) continue; // inline type import
-        const spec = /\bserverFn\b(?:\s+as\s+(\w+))?/.exec(clause);
+        const spec = /\bserverFn\b(?:\s+as\s+([\w$]+))?/.exec(clause);
         if (spec) aliases.push(spec[1] ?? 'serverFn');
     }
     return aliases;
 }
 
+const REGEX_SPECIALS = /[.*+?^${}()|[\]\\]/g;
+
 /** Does the code call any of the aliases (formatting-tolerant)? */
 function callsServerFn(code: string): boolean {
     return serverFnAliases(code).some((alias) =>
-        new RegExp(`\\b${alias}\\s*\\(`).test(code)
+        // Escape the alias ($ is a valid identifier char but a regex anchor)
+        // and use a lookbehind — \b misfires before a $-leading name.
+        new RegExp(`(?<![\\w$])${alias.replace(REGEX_SPECIALS, '\\$&')}\\s*\\(`).test(code)
     );
 }
 
@@ -187,6 +191,12 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
                 }
                 return null;
             }
+            // Rolldown can run the transform more than once per module (scan
+            // + build phases), the later pass over our OWN stub output —
+            // never let that echo clobber the real extraction (the shared
+            // registry cache feeds the SSR build). Stubs are precisely
+            // identifiable: only generated modules import the stub runtime.
+            if (/from\s*['"]@sigx\/server\/client['"]/.test(code)) return null;
             // The incoming code is authoritative (dev edits arrive here before
             // any fs watcher) — re-extract and refresh the registry cache.
             const extraction = extractInto(clean, code);

@@ -175,6 +175,35 @@ describe('sigxServer — dev lint', () => {
         expect(warnings).toHaveLength(1);
     });
 
+    it('handles $-containing aliases', () => {
+        const warnings: string[] = [];
+        plugin.transform.call(
+            { environment: { name: 'client' }, warn: (m: string) => warnings.push(m) },
+            `import { serverFn as server$ } from '@sigx/server';\nexport const leak = server$(async (rq) => 1);`,
+            join(root, 'src/Dollar.tsx')
+        );
+        expect(warnings).toHaveLength(1);
+    });
+
+    it('skips re-runs over its own stub output without clobbering the cache', () => {
+        const file = join(root, 'src/cart.server.ts');
+        const first = plugin.transform.call(
+            { environment: { name: 'client' }, warn: () => {} },
+            CART,
+            file
+        );
+        // Second pass over our own output: no re-transform, and the registry
+        // still knows the symbol afterwards.
+        const echo = plugin.transform.call(
+            { environment: { name: 'client' }, warn: () => {} },
+            first.code,
+            file
+        );
+        expect(echo).toBeNull();
+        const registry = plugin.load(plugin.resolveId('virtual:sigx-server-fns'));
+        expect(registry).toMatch(/addToCart_fn_[0-9a-f]{8}/);
+    });
+
     it('does not warn when only other values are imported', () => {
         const warnings: string[] = [];
         plugin.transform.call(
