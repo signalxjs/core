@@ -26,10 +26,17 @@ export interface ServerFnRequestOptions {
     guard?: ServerFnGuard;
     /**
      * Origin policy. Default `'same-origin'`: the `Origin` header must match
-     * the request URL's origin (browsers always send it on POST). An
-     * allowlist or `false` makes the endpoint a deliberate public API.
+     * the request URL's origin (browsers always send it on POST).
+     * `'verify-when-present'` additionally admits requests WITHOUT an
+     * `Origin` header — programmatic clients (native apps, CLIs,
+     * server-to-server) never send one, and an Origin-less request is not a
+     * mainstream browser's cross-site POST (browser CSRF stays blocked by
+     * the non-safelisted JSON content-type; this endpoint never emits CORS
+     * approval). Never deploy an Origin-stripping proxy in front of a
+     * cookie-authenticated app under this policy. An allowlist or `false`
+     * makes the endpoint a deliberate public API.
      */
-    origin?: 'same-origin' | string[] | false;
+    origin?: 'same-origin' | 'verify-when-present' | string[] | false;
     /** Request body cap in bytes, enforced while reading. Default 1 MiB. */
     maxBodyBytes?: number;
 }
@@ -61,8 +68,11 @@ function errorResponse(
 function checkOrigin(request: Request, policy: ServerFnRequestOptions['origin']): boolean {
     if (policy === false) return true;
     const origin = request.headers.get('origin');
-    if (!origin) return false;
+    if (origin === null) return policy === 'verify-when-present';
     if (Array.isArray(policy)) return policy.includes(origin);
+    // `Origin: null` (sandboxed iframe, some redirects) is a PRESENT header
+    // with the literal value "null" — it fails this comparison, so
+    // 'verify-when-present' still rejects it (rfc-server §5.2).
     return origin === new URL(request.url).origin;
 }
 
