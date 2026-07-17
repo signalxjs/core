@@ -30,7 +30,9 @@ describe('sigxServer end-to-end (real vite build)', () => {
             `<!doctype html><html><head></head><body><div id="app"></div>` +
             `<script type="module" src="/src/entry-client.ts"></script></body></html>`);
         writeFileSync(join(root, 'src', 'entry-client.ts'),
-            `import 'virtual:sigx-resume/entry';\n`);
+            `import 'virtual:sigx-resume/entry';\n` +
+            `import { Widget, stamp } from './Widget';\n` +
+            `(globalThis as never as Record<string, unknown>).__widget = { Widget, stamp };\n`);
         writeFileSync(join(root, 'src', 'api.server.ts'), `
 import { serverFn } from '@sigx/server';
 
@@ -51,8 +53,19 @@ export const Buy = component<{ sku: string }>((ctx) => {
     );
 });
 `);
+        // An INLINE serverFn co-located in a plain component file (§1.1(b)).
+        writeFileSync(join(root, 'src', 'Widget.tsx'), `
+import { component } from 'sigx';
+import { serverFn } from '@sigx/server';
+
+export const stamp = serverFn(async (rq) => 'INLINE_${SECRET}:' + rq.url.pathname);
+
+export const Widget = component(() => {
+    return () => <button onClick={() => stamp()}>stamp</button>;
+});
+`);
         writeFileSync(join(root, 'src', 'entry-server.ts'),
-            `export { addToCart } from './api.server';\n`);
+            `export { addToCart } from './api.server';\nexport { stamp } from './Widget';\n`);
 
         // Minimal stubs so the build resolves without the real workspace.
         const stub = (name: string, files: Record<string, string>) => {
@@ -135,14 +148,15 @@ export const Buy = component<{ sku: string }>((ctx) => {
 
         const allCode = chunkFiles.map((f) => readFileSync(f, 'utf-8'));
 
-        // (a) The server body never reaches ANY client chunk.
+        // (a) No server body — file-form OR inline — reaches ANY client chunk.
         for (const code of allCode) {
             expect(code).not.toContain(SECRET);
         }
 
-        // (b) The stub (with its content-hashed symbol) is in the bundle.
+        // (b) The stubs (with their content-hashed symbols) are in the bundle.
         const joined = allCode.join('\n');
         expect(joined).toMatch(/addToCart_fn_[0-9a-f]{8}/);
+        expect(joined).toMatch(/stamp_fn_[0-9a-f]{8}/); // inline form
         expect(joined).toContain('__stubCalls'); // the stub impl was bundled
 
         // (c) The resume handler chunk reaches addToCart through the stubbed
@@ -167,6 +181,7 @@ export const Buy = component<{ sku: string }>((ctx) => {
         await build({
             root,
             logLevel: 'error',
+            oxc: { jsx: { runtime: 'automatic', importSource: 'sigx' } },
             build: { ssr: 'src/entry-server.ts', outDir: 'dist/server' },
             plugins: [sigxServer()]
         } as never);
@@ -176,6 +191,9 @@ export const Buy = component<{ sku: string }>((ctx) => {
         const registry = readFileSync(registryPath, 'utf-8');
         expect(registry).toContain('serverFns');
         expect(registry).toMatch(/addToCart_fn_[0-9a-f]{8}/);
+        // Inline fns resolve through the mangled export of the SAME module.
+        expect(registry).toMatch(/stamp_fn_[0-9a-f]{8}/);
+        expect(registry).toContain('__sigxSrvFn_stamp');
         // The registry reaches the REAL module (its body, not a stub).
         const files: string[] = [];
         const walk = (dir: string) => {
