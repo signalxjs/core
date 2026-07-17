@@ -236,6 +236,7 @@ const go = serverFn(async (rq) => 2);
 `, '/src/api.ts');
         expect(result.errors).toHaveLength(1);
         expect(result.errors[0].message).toContain('reserved by the server-function transform');
+        expect(result.errors[0].offset).toBeGreaterThan(0); // points at the binding
     });
 
     it('rejects mangled-name collisions from imports and exports too', () => {

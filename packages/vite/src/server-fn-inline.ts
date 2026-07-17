@@ -508,8 +508,16 @@ export function extractInlineServerFns(
         fns.length > 0 &&
         (moduleLocals.has('__serverFnStub') || imports.has('__serverFnStub') || exportedNames.has('__serverFnStub'))
     ) {
+        // Point the error at the conflicting binding, not line 1.
+        let conflictOffset = 0;
+        walk(program, (node) => {
+            if (conflictOffset === 0 && node.type === 'Identifier' && node.name === '__serverFnStub') {
+                conflictOffset = node.start;
+                return false;
+            }
+        });
         errors.push({
-            offset: 0,
+            offset: conflictOffset,
             message: '"__serverFnStub" is reserved by the server-function transform — rename the binding.'
         });
     }
