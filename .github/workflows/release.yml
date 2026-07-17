@@ -95,3 +95,38 @@ jobs:
           else
             gh release create "$TAG" --generate-notes --latest
           fi
+
+  # After a successful publish, ping every consumer repo's core-sync.yml so each
+  # opens its own "align with core X.Y" PR. Purely additive: it runs only after
+  # publish-npm succeeds and per-repo dispatch failures are swallowed, so it can
+  # never affect the npm publish or the GitHub release above. See
+  # docs/MAINTAINERS.md → "Notifying consumer repos" for the token setup.
+  notify-consumers:
+    needs: publish-npm
+    # Tag releases only — a manual workflow_dispatch re-publish has no version tag
+    # to broadcast (github.ref_name would be a branch name like `main`).
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    # Authenticates with a PAT (ECOSYSTEM_DISPATCH_TOKEN), never GITHUB_TOKEN —
+    # which cannot dispatch to other repos anyway — so needs no repo permissions.
+    permissions: {}
+    steps:
+      - name: Fan out core-released to consumers
+        env:
+          GH_TOKEN: ${{ secrets.ECOSYSTEM_DISPATCH_TOKEN }}
+          # The tag that triggered this release, e.g. v0.13.0 -> 0.13.0
+          VERSION: ${{ github.ref_name }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "ECOSYSTEM_DISPATCH_TOKEN not set — skipping consumer dispatch."
+            echo "(Consumers still pick up this release via core-sync.yml's weekly cron.)"
+            exit 0
+          fi
+          VER="${VERSION#v}"
+          for repo in router store use lynx ssg pulse; do
+            echo "Dispatching core-released ($VER) to signalxjs/$repo"
+            gh api "repos/signalxjs/$repo/dispatches" \
+              -f event_type=core-released \
+              -F "client_payload[version]=$VER" \
+            || echo "  (dispatch to $repo failed — is core-sync.yml present & the token scoped for it?)"
+          done
