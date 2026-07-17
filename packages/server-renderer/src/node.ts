@@ -23,12 +23,11 @@ import { Readable } from 'node:stream';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { JSXElement, App } from 'sigx';
 import { createSSR } from './ssr';
+import { defaultSSR } from './server/render-api';
+import { defaultIsBot } from './server/bot';
 import type { SSRContext, SSRContextOptions } from './server/context';
 import type { DocumentOptions } from './server/document';
 import type { SSRResponse } from './response';
-
-/** Shared no-plugin instance — created once, reused for all standalone calls. */
-const _defaultSSR = createSSR();
 
 /**
  * Wrap an async chunk source (an `AsyncIterable<string>` such as
@@ -82,7 +81,7 @@ export function renderToNodeStream(
     input: JSXElement | App,
     context?: SSRContextOptions | SSRContext
 ): Readable {
-    return toNodeStream(_defaultSSR.renderChunks(input, context));
+    return toNodeStream(defaultSSR.renderChunks(input, context));
 }
 
 /**
@@ -105,7 +104,7 @@ export function renderDocumentToNodeStream(
     input: JSXElement | App,
     options: DocumentOptions
 ): { stream: Readable; shell: Promise<SSRResponse> } {
-    const { chunks, shell } = _defaultSSR.renderDocumentChunks(input, options);
+    const { chunks, shell } = defaultSSR.renderDocumentChunks(input, options);
     return {
         // Non-object mode: backpressure/highWaterMark measured in BYTES —
         // in object mode a few large HTML strings buffer far more memory
@@ -122,9 +121,6 @@ export function renderDocumentToNodeStream(
 // server repeats (bot → blocking document; everyone else → shell-first
 // streaming with the shell as the status/redirect decision point).
 // ============================================================================
-
-/** Default crawler detection for the blocking-mode dispatch. */
-const BOT_UA = /bot|crawl|spider|slurp|bingpreview|facebookexternalhit|embedly|quora link preview|outbrain|pinterest|vkshare|whatsapp|telegrambot/i;
 
 export interface RequestHandlerOptions {
     /**
@@ -192,8 +188,8 @@ export type NodeRequestHandler = (
  * available, else a minimal 500.
  */
 export function createRequestHandler(options: RequestHandlerOptions): NodeRequestHandler {
-    const ssr = options.ssr ?? _defaultSSR;
-    const isBot = options.isBot ?? ((ua) => BOT_UA.test(ua));
+    const ssr = options.ssr ?? defaultSSR;
+    const isBot = options.isBot ?? defaultIsBot;
 
     return async function handleRequest(req, res, next) {
         const url = req.url ?? '/';

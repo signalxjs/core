@@ -28,8 +28,12 @@ import type { DocumentOptions } from './document';
 // Re-export StreamCallbacks from shared types (avoids circular dependency)
 export type { StreamCallbacks } from './types';
 
-/** Shared no-plugin instance — created once, reused for all standalone calls. */
-const _defaultSSR = createSSR();
+/**
+ * Shared no-plugin instance — created once, reused for all standalone calls
+ * and as the default of the fetch/Node request handlers. Internal export;
+ * not part of the public barrel.
+ */
+export const defaultSSR = createSSR();
 
 /**
  * Render JSX element or App to a ReadableStream.
@@ -47,7 +51,7 @@ const _defaultSSR = createSSR();
  * ```
  */
 export function renderToStream(input: JSXElement | App, context?: SSRContext): ReadableStream<string> {
-    return _defaultSSR.renderStream(input, context);
+    return defaultSSR.renderStream(input, context);
 }
 
 /**
@@ -66,7 +70,7 @@ export async function renderToStreamWithCallbacks(
     callbacks: StreamCallbacks,
     context?: SSRContext
 ): Promise<void> {
-    return _defaultSSR.renderStreamWithCallbacks(input, callbacks, context);
+    return defaultSSR.renderStreamWithCallbacks(input, callbacks, context);
 }
 
 /**
@@ -83,7 +87,7 @@ export async function renderToStreamWithCallbacks(
  * ```
  */
 export async function renderToString(input: JSXElement | App, context?: SSRContext): Promise<string> {
-    return _defaultSSR.render(input, context);
+    return defaultSSR.render(input, context);
 }
 
 /**
@@ -97,7 +101,7 @@ export async function renderToString(input: JSXElement | App, context?: SSRConte
  * ```
  */
 export function renderDocument(input: JSXElement | App, options: DocumentOptions): Promise<string> {
-    return _defaultSSR.renderDocument(input, options);
+    return defaultSSR.renderDocument(input, options);
 }
 
 /** Stream a complete HTML document as UTF-8 bytes (edge runtimes / Response body). */
@@ -105,5 +109,5 @@ export function renderDocumentToWebStream(
     input: JSXElement | App,
     options: DocumentOptions
 ): ReadableStream<Uint8Array> {
-    return _defaultSSR.renderDocumentToWebStream(input, options);
+    return defaultSSR.renderDocumentToWebStream(input, options);
 }
