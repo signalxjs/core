@@ -49,6 +49,57 @@ export function configureServerFn(config: ServerFnTransport | null): void {
     transport = config;
 }
 
+/** POST the RPC envelope, resolving the transport at call time
+ *  (configureServerFn endpoint > baked endpoint; rfc-server N.1). */
+async function send(
+    endpoint: string,
+    symbol: string,
+    args: unknown[],
+    signal?: AbortSignal
+): Promise<Response> {
+    const config = transport;
+    const target = config?.endpoint ?? endpoint;
+    const prefix = target.endsWith('/') ? target.slice(0, -1) : target;
+    const extra =
+        typeof config?.headers === 'function' ? await config.headers() : config?.headers;
+    // content-type is NOT overridable (the endpoint 415s anything else;
+    // rfc-server N.1) — stripped case-insensitively, since Headers
+    // normalization would otherwise COMBINE `Content-Type: x` with ours.
+    const headers: Record<string, string> = {};
+    for (const key in extra) {
+        if (key.toLowerCase() !== 'content-type') headers[key] = extra[key];
+    }
+    headers['content-type'] = 'application/json';
+    const url = `${prefix}/${encodeURIComponent(symbol)}`;
+    const init: RequestInit = {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ args }),
+        ...(signal ? { signal } : {})
+    };
+    // Branch instead of aliasing the global fetch — an unbound alias is
+    // an illegal invocation in some runtimes, and the zero-config path
+    // must stay byte-identical to a plain `fetch(...)` call.
+    return config?.fetch ? config.fetch(url, init) : fetch(url, init);
+}
+
+/** Re-create a wire error with the `__sigxServerFnError` brand. */
+function wireFail(status: number, wire: WireError | undefined, message: string): Error {
+    return Object.assign(new Error(wire?.message ?? message), {
+        __sigxServerFnError: true,
+        status: wire?.status ?? status,
+        data: wire?.data
+    });
+}
+
+/** The version-skew hint for a 404 — the endpoint's structured 404 only
+ *  ever means "unknown symbol", and the hint is what a user can act on. */
+const skewHint = (name: string, status: number): string =>
+    status === 404
+        ? `server function "${name}" not found — the page may be a stale build ` +
+          `(version skew); reload to pick up the current one.`
+        : `server function "${name}" failed (HTTP ${status})`;
+
 /** Create the typed client stub for one extracted server function. */
 export function __serverFnStub(
     symbol: string,
@@ -56,30 +107,7 @@ export function __serverFnStub(
     endpoint: string
 ): (...args: unknown[]) => Promise<unknown> {
     return async (...args: unknown[]) => {
-        // Call-time resolution: configureServerFn endpoint > baked endpoint.
-        const config = transport;
-        const target = config?.endpoint ?? endpoint;
-        const prefix = target.endsWith('/') ? target.slice(0, -1) : target;
-        const extra =
-            typeof config?.headers === 'function' ? await config.headers() : config?.headers;
-        // content-type is NOT overridable (the endpoint 415s anything else;
-        // rfc-server N.1) — stripped case-insensitively, since Headers
-        // normalization would otherwise COMBINE `Content-Type: x` with ours.
-        const headers: Record<string, string> = {};
-        for (const key in extra) {
-            if (key.toLowerCase() !== 'content-type') headers[key] = extra[key];
-        }
-        headers['content-type'] = 'application/json';
-        const url = `${prefix}/${encodeURIComponent(symbol)}`;
-        const init: RequestInit = {
-            method: 'POST',
-            headers,
-            body: JSON.stringify({ args })
-        };
-        // Branch instead of aliasing the global fetch — an unbound alias is
-        // an illegal invocation in some runtimes, and the zero-config path
-        // must stay byte-identical to a plain `fetch(...)` call.
-        const res = config?.fetch ? await config.fetch(url, init) : await fetch(url, init);
+        const res = await send(endpoint, symbol, args);
         const text = await res.text();
         let payload: { data?: unknown; error?: WireError } | undefined;
         try {
@@ -89,21 +117,77 @@ export function __serverFnStub(
         }
         if (!res.ok) {
             const wire = payload?.error;
-            // 404 always gets the skew hint — the endpoint's structured 404
-            // only ever means "unknown symbol", and the hint is what the
-            // user at a stale page can act on.
-            const message =
-                res.status === 404
-                    ? `server function "${name}" not found — the page may be a stale build ` +
-                      `(version skew); reload to pick up the current one.`
-                    : wire?.message ?? `server function "${name}" failed (HTTP ${res.status})`;
-            throw Object.assign(new Error(message), {
-                __sigxServerFnError: true,
-                status: wire?.status ?? res.status,
-                data: wire?.data
-            });
+            const message = skewHint(name, res.status);
+            throw wireFail(res.status, res.status === 404 ? { ...wire, message } : wire, message);
         }
         return payload?.data;
+    };
+}
+
+/**
+ * Create the streaming client stub for one extracted `serverStream`
+ * (rfc-server §6.1): POSTs like a fn stub, consumes the NDJSON body, and
+ * yields each `{"chunk"}` value. `{"done"}` ends iteration; `{"error"}`
+ * throws the branded wire error. The request starts lazily on first
+ * iteration, and consumer `break`/`return()` aborts the fetch (the server
+ * generator's `finally` runs).
+ */
+export function __serverStreamStub(
+    symbol: string,
+    name: string,
+    endpoint: string
+): (...args: unknown[]) => AsyncIterable<unknown> {
+    return (...args: unknown[]) => {
+        const controller = new AbortController();
+        async function* stream(): AsyncGenerator<unknown> {
+            try {
+                const res = await send(endpoint, symbol, args, controller.signal);
+                if (!res.ok || !res.body) {
+                    let wire: WireError | undefined;
+                    try {
+                        wire = (JSON.parse(await res.text(), reviver) as { error?: WireError })
+                            ?.error;
+                    } catch {
+                        wire = undefined;
+                    }
+                    throw wireFail(res.status, wire, skewHint(name, res.status));
+                }
+                const reader = res.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+                for (;;) {
+                    const { value, done } = await reader.read();
+                    if (done) break;
+                    buffer += decoder.decode(value, { stream: true });
+                    let nl;
+                    while ((nl = buffer.indexOf('\n')) >= 0) {
+                        const text = buffer.slice(0, nl);
+                        buffer = buffer.slice(nl + 1);
+                        if (!text) continue;
+                        const obj = JSON.parse(text, reviver) as {
+                            chunk?: unknown;
+                            done?: number;
+                            error?: WireError;
+                        };
+                        if ('error' in obj) {
+                            throw wireFail(500, obj.error, `server stream "${name}" failed`);
+                        }
+                        if ('done' in obj) return;
+                        yield obj.chunk;
+                    }
+                }
+                // Body ended without a terminator line — a dropped
+                // connection, not a wire error: never mistake truncation
+                // for completion.
+                throw new Error(
+                    `[sigx server] stream "${name}" ended without a done/error terminator ` +
+                    `(connection lost?)`
+                );
+            } finally {
+                controller.abort(); // consumer break/return, error, or normal end
+            }
+        }
+        return stream();
     };
 }
 

@@ -190,19 +190,90 @@ export async function handleServerFnRequest(
     try {
         await options.guard?.(ctx as ServerFnContext, info);
         const result = await fn.__sigxFn(ctx, info, args);
+        if (fn.__sigxStream === true) {
+            // `await` matters: a pre-first-yield throw must land in THIS
+            // catch (buffered JSON error) — a bare `return promise` would
+            // bypass it.
+            return await streamResponse(result as AsyncGenerator<unknown>, ctx, info.name || symbol);
+        }
         const headers = new Headers(ctx.responseHeaders);
         headers.set('content-type', 'application/json');
         const payload = result === undefined ? '{}' : JSON.stringify({ data: result });
         return new Response(payload, { status: ctx._status ?? 200, headers });
     } catch (error) {
-        if (isServerFnError(error)) {
-            return errorResponse(error.status, error.message, error.data, ctx.responseHeaders);
-        }
-        if (__DEV__) {
-            const err = error as Error;
-            console.error(`[sigx server] "${info.name || symbol}" threw:`, error);
-            return errorResponse(500, err?.message ?? 'Internal error', { stack: err?.stack }, ctx.responseHeaders);
-        }
-        return errorResponse(500, 'Internal error', undefined, ctx.responseHeaders);
+        const shape = wireErrorShape(error, info.name || symbol);
+        return errorResponse(shape.status, shape.message, shape.data, ctx.responseHeaders);
     }
+}
+
+/**
+ * The §5 error-masking rules, in one place for both transports: a
+ * `ServerFnError` passes through verbatim; anything else is masked to a
+ * generic 500 in prod (`__DEV__` includes message + stack).
+ */
+function wireErrorShape(
+    error: unknown,
+    label: string
+): { message: string; status: number; data?: unknown } {
+    if (isServerFnError(error)) {
+        return { message: error.message, status: error.status, data: error.data };
+    }
+    if (__DEV__) {
+        const err = error as Error;
+        console.error(`[sigx server] "${label}" threw:`, error);
+        return { message: err?.message ?? 'Internal error', status: 500, data: { stack: err?.stack } };
+    }
+    return { message: 'Internal error', status: 500 };
+}
+
+/**
+ * NDJSON streaming for `serverStream` (rfc-server §6.1): one `{"chunk"}`
+ * line per yield, then `{"done":1}` — or `{"error":{…}}` (masked per §5)
+ * when the generator throws mid-stream. The FIRST chunk is pulled before
+ * the Response exists, so code before the first yield may still set
+ * `rq.responseHeaders`/`rq.status()`, and a pre-yield throw propagates to
+ * the caller's catch as an ordinary buffered JSON error. Client disconnect
+ * cancels the body stream, which returns the generator (its `finally`
+ * blocks run).
+ */
+async function streamResponse(
+    gen: AsyncGenerator<unknown>,
+    ctx: ReturnType<typeof createRequestContext>,
+    label: string
+): Promise<Response> {
+    const first = await gen.next();
+    const headers = new Headers(ctx.responseHeaders);
+    headers.set('content-type', 'application/x-ndjson');
+    const encoder = new TextEncoder();
+    const line = (obj: unknown): Uint8Array => encoder.encode(JSON.stringify(obj) + '\n');
+    const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+            if (first.done) {
+                controller.enqueue(line({ done: 1 }));
+                controller.close();
+                return;
+            }
+            controller.enqueue(line({ chunk: first.value }));
+        },
+        async pull(controller) {
+            try {
+                const next = await gen.next();
+                if (next.done) {
+                    controller.enqueue(line({ done: 1 }));
+                    controller.close();
+                    return;
+                }
+                controller.enqueue(line({ chunk: next.value }));
+            } catch (error) {
+                // The response has started — the error travels IN-BAND as
+                // the terminating NDJSON line (headers are long gone).
+                controller.enqueue(line({ error: wireErrorShape(error, label) }));
+                controller.close();
+            }
+        },
+        cancel() {
+            void gen.return(undefined);
+        }
+    });
+    return new Response(body, { status: ctx._status ?? 200, headers });
 }

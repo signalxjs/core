@@ -6,13 +6,17 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { serverFn, isServerFnError, ServerFnError } from '../src/browser';
+import { serverFn, serverStream, isServerFnError, ServerFnError } from '../src/browser';
 import { createDetachedContext } from '../src/context';
 
 describe('@sigx/server browser entry', () => {
     it('serverFn throws with a pointer at the transform config', () => {
         expect(() => serverFn()).toThrow(/reached the browser unextracted/);
         expect(() => serverFn()).toThrow(/include pattern/);
+    });
+
+    it('serverStream throws the same way', () => {
+        expect(() => serverStream()).toThrow(/serverStream\(\) reached the browser unextracted/);
     });
 
     it('the error channel is real in the browser build', () => {

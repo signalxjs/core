@@ -92,6 +92,32 @@ export const quote = serverFn({
 });
 ```
 
+### Streaming (`serverStream`)
+
+An async generator wrapped in `serverStream` streams its yields to the
+client as NDJSON; the stub is an `AsyncIterable`, and a **string-yielding**
+stream plugs straight into `useStream` — progressive text with no new
+client concept:
+
+```ts
+// src/ai.server.ts
+export const explain = serverStream(async function* (rq, id: string) {
+    for await (const token of llm.explain(id)) yield token;
+});
+```
+
+```tsx
+const text = useStream(`explain:${id}`, () => explain(id));
+// <p>{text.value}</p>
+```
+
+The request starts lazily on first iteration; consumer `break`/`return()`
+aborts the fetch and the server generator's `finally` runs (`rq.abortSignal`
+fires on disconnect too). Errors travel in-band: a mid-stream throw ends
+iteration with the branded wire error (masked in prod unless it's a
+`ServerFnError`). One caveat vs `serverFn`'s buffered JSON: response
+headers and status freeze at the **first yield** — set them before it.
+
 ## Context
 
 Every server function receives the request context as its **first

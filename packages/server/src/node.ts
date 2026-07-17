@@ -82,8 +82,33 @@ export function createServerFnHandler(options: ServerFnHandlerOptions): NodeRequ
             ).getSetCookie?.();
             if (setCookie && setCookie.length > 0) headers['set-cookie'] = setCookie;
             res.writeHead(response.status, headers);
-            res.end(Buffer.from(await response.arrayBuffer()));
+            if (!response.body) {
+                res.end();
+                return;
+            }
+            // Pump instead of buffering: serverStream responses are
+            // long-lived NDJSON bodies — buffering would stall progressive
+            // delivery (and never finish for long streams). Respect
+            // backpressure, and cancel the source on client disconnect (the
+            // stream's cancel() returns the server generator).
+            const reader = response.body.getReader();
+            res.on('close', () => {
+                if (!res.writableEnded) void reader.cancel();
+            });
+            for (;;) {
+                const { value, done } = await reader.read();
+                if (done) break;
+                if (!res.write(value)) {
+                    await new Promise<void>((resolve) => res.once('drain', () => resolve()));
+                }
+            }
+            res.end();
         } catch (err) {
+            if (res.headersSent) {
+                // Mid-body failure — the status is gone; just drop the socket.
+                res.destroy();
+                return;
+            }
             if (next) {
                 next(err);
                 return;

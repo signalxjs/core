@@ -10,7 +10,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createServer, type Server } from 'node:http';
 import { once } from 'node:events';
 import { createServerFnHandler } from '../src/node';
-import { serverFn } from '../src/index';
+import { serverFn, serverStream } from '../src/index';
 
 const twoCookies = serverFn(async (rq) => {
     rq.responseHeaders.append('set-cookie', 'a=1; Path=/');
@@ -18,6 +18,16 @@ const twoCookies = serverFn(async (rq) => {
     return 'ok';
 });
 const add = serverFn(async (_rq, a: number, b: number) => a + b);
+
+let releaseSecondTick: () => void = () => {};
+const tickGate = new Promise<void>((resolve) => {
+    releaseSecondTick = resolve;
+});
+const ticks = serverStream(async function* () {
+    yield 'first';
+    await tickGate;
+    yield 'second';
+});
 
 describe('createServerFnHandler over node:http', () => {
     let server: Server;
@@ -27,7 +37,8 @@ describe('createServerFnHandler over node:http', () => {
         const handler = createServerFnHandler({
             functions: {
                 cookies_fn_00000001: async () => twoCookies,
-                add_fn_00000002: async () => add
+                add_fn_00000002: async () => add,
+                ticks_fn_00000003: async () => ticks
             }
         });
         server = createServer((req, res) => {
@@ -102,5 +113,38 @@ describe('createServerFnHandler over node:http', () => {
         const res = await fetch(`${origin}/somewhere-else`);
         expect(res.status).toBe(404);
         await expect(res.text()).resolves.toBe('fallthrough');
+    });
+
+    it('streams serverStream NDJSON progressively — chunks arrive BEFORE the generator ends', async () => {
+        const res = await fetch(`${origin}/_sigx/fn/ticks_fn_00000003`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', origin },
+            body: '{"args":[]}'
+        });
+        expect(res.status).toBe(200);
+        expect(res.headers.get('content-type')).toBe('application/x-ndjson');
+        const reader = res.body!.getReader();
+        const decoder = new TextDecoder();
+        // The first line must arrive while the generator is still GATED on
+        // its second yield — a buffering adapter would hang right here.
+        let received = '';
+        while (!received.includes('\n')) {
+            const { value, done } = await reader.read();
+            if (done) throw new Error('stream ended before the first line');
+            received += decoder.decode(value, { stream: true });
+        }
+        expect(received).toContain('{"chunk":"first"}');
+        expect(received).not.toContain('second');
+        releaseSecondTick();
+        for (;;) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            received += decoder.decode(value, { stream: true });
+        }
+        expect(received.split('\n').filter(Boolean).map((l) => JSON.parse(l))).toEqual([
+            { chunk: 'first' },
+            { chunk: 'second' },
+            { done: 1 }
+        ]);
     });
 });

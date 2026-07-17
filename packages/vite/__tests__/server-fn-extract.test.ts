@@ -144,6 +144,65 @@ export { ping as default };
     });
 });
 
+describe('extractServerFns — serverStream (#310)', () => {
+    const STREAMY = `
+import { serverFn, serverStream } from '@sigx/server';
+import { db } from './db';
+
+export const addToCart = serverFn(async (rq, id: string) => db.cart.add(id));
+export const explain = serverStream(async function* (rq, id: string) {
+    yield* db.explain(id);
+});
+`;
+
+    it('extracts serverStream exports with the stream flag and stream stub', () => {
+        const result = extractServerFns(STREAMY, '/src/cart.server.ts', opts('src/cart.server.ts'));
+        expect(result.fns.map((f) => [f.name, f.stream])).toEqual([
+            ['addToCart', false],
+            ['explain', true]
+        ]);
+        expect(result.fns[1].symbol).toMatch(/^explain_fn_[0-9a-f]{8}$/);
+        expect(result.fns[1].stableSymbol).toBe('src/cart.server.ts#explain');
+        // Mixed module imports BOTH stub factories, each used for its kind.
+        expect(result.stubModule).toContain(
+            `import { __serverFnStub, __serverStreamStub } from '@sigx/server/client';`
+        );
+        expect(result.stubModule).toMatch(
+            /export const explain = __serverStreamStub\("explain_fn_[0-9a-f]{8}", "explain", "\/_sigx\/fn"\);/
+        );
+        expect(result.stubModule).not.toContain('db.explain');
+    });
+
+    it('a stream-only module imports only the stream stub', () => {
+        const code = `
+import { serverStream } from '@sigx/server';
+export const ticks = serverStream(async function* () { yield 1; });
+`;
+        const result = extractServerFns(code, '/src/t.server.ts', opts('src/t.server.ts'));
+        expect(result.stubModule).toContain(
+            `import { __serverStreamStub } from '@sigx/server/client';`
+        );
+        expect(result.stubModule).not.toContain('__serverFnStub(');
+    });
+
+    it('aliased serverStream imports are recognized; look-alikes are not', () => {
+        const aliased = `
+import { serverStream as stream } from '@sigx/server';
+export const ticks = stream(async function* () { yield 1; });
+`;
+        expect(
+            extractServerFns(aliased, '/src/a.server.ts', opts('src/a.server.ts')).fns[0].stream
+        ).toBe(true);
+        const lookAlike = `
+import { serverStream } from 'other-lib';
+export const nope = serverStream(async function* () { yield 1; });
+`;
+        const result = extractServerFns(lookAlike, '/src/b.server.ts', opts('src/b.server.ts'));
+        expect(result.fns).toHaveLength(0);
+        expect(result.serverOnly).toEqual(['nope']);
+    });
+});
+
 describe('extractServerFns — rev 2 (stable ids, stable symbols, endpoint)', () => {
     it('mints identical symbols for the same stableId regardless of build root', () => {
         // Two app builds of one solution see the same shared module under

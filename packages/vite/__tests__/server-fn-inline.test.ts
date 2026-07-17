@@ -373,6 +373,38 @@ export const ping = srv.serverFn(async (rq) => 'pong');
     });
 });
 
+describe('extractInlineServerFns — serverStream (#310)', () => {
+    it('swaps an inline serverStream for the stream stub and appends the mangled export', () => {
+        const code = `
+import { serverStream } from '@sigx/server';
+import { ticker } from './ticker';
+
+const ticks = serverStream(async function* (rq, id: string) { yield* ticker(id); });
+export const use = () => ticks('x');
+`;
+        const result = extract(code, '/src/Ticks.tsx');
+        expect(result.errors).toHaveLength(0);
+        expect(result.fns[0]).toMatchObject({ name: 'ticks', stream: true, mangled: '__sigxSrvFn_ticks' });
+        expect(result.clientModule).toContain(
+            `import { __serverStreamStub } from '@sigx/server/client';`
+        );
+        expect(result.clientModule).toMatch(/const ticks = __serverStreamStub\("ticks_fn_[0-9a-f]{8}"/);
+        expect(result.clientModule).not.toContain('ticker(');
+        expect(result.ssrModule).toContain('export const __sigxSrvFn_ticks = ticks;');
+    });
+
+    it('the imports-only capture rule applies to stream bodies too', () => {
+        const bad = `
+import { serverStream } from '@sigx/server';
+const SECRETS = ['a'];
+export const leak = serverStream(async function* () { yield SECRETS[0]; });
+`;
+        const result = extract(bad, '/src/Bad.tsx');
+        expect(result.errors).toHaveLength(1);
+        expect(result.errors[0].message).toContain('module-scope binding "SECRETS"');
+    });
+});
+
 describe('extractInlineServerFns — rev 2 (stable symbols, id, endpoint)', () => {
     it('mints hashed + stable symbols off the stableId, in parity with the file form', () => {
         const a = extract(SEARCH, '/appA/Search.tsx', { stableId: '@acme/web/src/Search.tsx' });
