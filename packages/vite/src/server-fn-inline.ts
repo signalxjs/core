@@ -277,6 +277,8 @@ export function extractInlineServerFns(
     /** import local → typeOnly */
     const imports = new Map<string, boolean>();
     const moduleLocals = new Set<string>();
+    /** Existing export NAMES (appending a duplicate would be a syntax error). */
+    const exportedNames = new Set<string>();
 
     for (const stmt of program.body as Node[]) {
         if (stmt.type === 'ImportDeclaration') {
@@ -293,6 +295,20 @@ export function extractInlineServerFns(
                 if (spec.type === 'ImportNamespaceSpecifier') namespaceLocals.add(local);
             }
             continue;
+        }
+        if (stmt.type === 'ExportNamedDeclaration') {
+            for (const spec of (stmt.specifiers as Node[]) ?? []) {
+                const exported = ((spec.exported as Node)?.name as string) ?? '';
+                if (exported) exportedNames.add(exported);
+            }
+            if (isNode(stmt.declaration)) {
+                const d = stmt.declaration as Node;
+                if (d.type === 'VariableDeclaration') {
+                    for (const declarator of d.declarations as Node[]) patternNames(declarator.id as Node, exportedNames);
+                } else if (isNode(d.id)) {
+                    exportedNames.add((d.id as Node).name as string);
+                }
+            }
         }
         const decl =
             (stmt.type === 'ExportNamedDeclaration' || stmt.type === 'ExportDefaultDeclaration') &&
@@ -398,7 +414,7 @@ export function extractInlineServerFns(
             const callSource = code.slice(call.start, call.end);
             const symbol = `${name}_fn_${hash8(`${relPath}\0${name}\0${callSource}`)}`;
             const mangled = MANGLE_PREFIX + name;
-            if (moduleLocals.has(mangled)) {
+            if (moduleLocals.has(mangled) || imports.has(mangled) || exportedNames.has(mangled)) {
                 errors.push({
                     offset: call.start,
                     message: `"${mangled}" collides with the reserved mangled export for serverFn "${name}".`

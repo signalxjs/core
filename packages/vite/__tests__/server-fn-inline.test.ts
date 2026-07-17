@@ -203,6 +203,25 @@ const use = serverFn(async (rq) => helper());
         expect(viaDefault.errors[0].message).toContain('module-scope binding "helper"');
     });
 
+    it('rejects mangled-name collisions from imports and exports too', () => {
+        const viaImport = extract(`
+import { serverFn } from '@sigx/server';
+import { __sigxSrvFn_go } from './weird';
+const go = serverFn(async (rq) => 1);
+`, '/src/api.ts');
+        expect(viaImport.errors).toHaveLength(1);
+        expect(viaImport.errors[0].message).toContain('collides');
+
+        const viaExport = extract(`
+import { serverFn } from '@sigx/server';
+const other = 1;
+export { other as __sigxSrvFn_go };
+const go = serverFn(async (rq) => 1);
+`, '/src/api.ts');
+        expect(viaExport.errors).toHaveLength(1);
+        expect(viaExport.errors[0].message).toContain('collides');
+    });
+
     it('accepts params, locals, and nested function scopes', () => {
         const code = `
 import { serverFn } from '@sigx/server';
