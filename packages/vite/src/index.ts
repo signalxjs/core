@@ -26,9 +26,11 @@ interface SigxPluginOptions {
      * server's websocket, gets a 400 token mismatch, and HMR breaks.
      *
      * When unset and the server runs in middleware mode, the plugin picks a
-     * free port automatically. Explicit `server.ws` settings (or the
-     * deprecated `server.hmr` spelling) in the Vite config always take
-     * precedence over this option.
+     * free port automatically. A user-pinned `server.ws.port` or
+     * `server.ws.server` — or `ws: false`, or the deprecated `server.hmr`
+     * spellings of the same — always takes precedence over this option;
+     * other `server.ws` settings (protocol, host, …) merge with the picked
+     * port.
      */
     hmrPort?: number;
 
