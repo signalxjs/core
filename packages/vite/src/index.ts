@@ -26,8 +26,11 @@ interface SigxPluginOptions {
      * server's websocket, gets a 400 token mismatch, and HMR breaks.
      *
      * When unset and the server runs in middleware mode, the plugin picks a
-     * free port automatically. Explicit `server.hmr` settings in the Vite
-     * config always take precedence over this option.
+     * free port automatically. A user-pinned `server.ws.port` or
+     * `server.ws.server` — or `ws: false`, or the deprecated `server.hmr`
+     * spellings of the same — always takes precedence over this option;
+     * other `server.ws` settings (protocol, host, …) merge with the picked
+     * port.
      */
     hmrPort?: number;
 
@@ -136,27 +139,32 @@ function getFreePort(): Promise<number> {
 /**
  * Decide whether to override Vite's HMR websocket port (see
  * `SigxPluginOptions.hmrPort`). Returns a partial `server` config to merge,
- * or undefined to leave the user's config alone.
+ * or undefined to leave the user's config alone. Emits `server.ws` (Vite 8
+ * deprecated `server.hmr.*` in its favor) while still deferring to settings
+ * a user supplied under either name.
  */
 async function resolveHmrPortOverride(
     userConfig: UserConfig,
     hmrPort: number | undefined
 ): Promise<UserConfig['server'] | undefined> {
+    // The user's websocket config wins under EITHER spelling — `server.ws`
+    // (current) or the deprecated `server.hmr` alias Vite still honors —
+    // and both are inspected (not `??`-chained), so a port pinned under one
+    // spelling defers even when the other spelling holds unrelated options.
+    const userWs = userConfig.server?.ws;
     const userHmr = userConfig.server?.hmr;
-    // HMR disabled, or the user already pinned a port / supplied a server —
-    // their config wins.
-    if (userHmr === false) return undefined;
-    if (typeof userHmr === 'object' && (userHmr.port != null || userHmr.server)) {
-        return undefined;
-    }
+    if (userWs === false || userHmr === false) return undefined;
+    const pinned = (value: typeof userWs | typeof userHmr): boolean =>
+        typeof value === 'object' && value != null && (value.port != null || !!value.server);
+    if (pinned(userWs) || pinned(userHmr)) return undefined;
     if (hmrPort != null) {
-        return { hmr: { port: hmrPort } };
+        return { ws: { port: hmrPort } };
     }
     // Without middleware mode the websocket shares the HTTP server's port —
     // nothing to fix. In middleware mode Vite would default to 24678, which
     // collides across concurrent dev servers; pick a free port instead.
     if (!userConfig.server?.middlewareMode) return undefined;
-    return { hmr: { port: await getFreePort() } };
+    return { ws: { port: await getFreePort() } };
 }
 
 // ============================================================================
