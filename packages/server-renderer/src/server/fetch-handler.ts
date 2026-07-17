@@ -71,7 +71,11 @@ export interface FetchHandlerOptions<TPlatform = unknown> {
 
 export type FetchHandler<TPlatform = unknown> = (
     request: Request,
-    platform?: TPlatform
+    // Optional for the default/`undefined`-admitting instantiations
+    // (Deno/Bun pass nothing); REQUIRED once the generic is instantiated
+    // with real bindings — omitting Cloudflare's `{ env, ctx }` is a
+    // compile error, and the callbacks' `platform: TPlatform` stays sound.
+    ...platform: undefined extends TPlatform ? [platform?: TPlatform] : [platform: TPlatform]
 ) => Promise<Response>;
 
 /**
@@ -103,12 +107,14 @@ export function createFetchHandler<TPlatform = unknown>(
     const ssr = options.ssr ?? defaultSSR;
     const isBot = options.isBot ?? defaultIsBot;
 
-    return async function handleFetch(request, platform) {
+    return async function handleFetch(request, ...rest) {
         const parsed = new URL(request.url);
         // Path + query, matching the Node/dev handlers' `req.url` — one
         // `createApp(url)` entry contract across all three.
         const url = parsed.pathname + parsed.search;
-        const p = platform as TPlatform;
+        // Internal-only cast: the FetchHandler tuple makes `platform`
+        // required whenever TPlatform doesn't admit undefined.
+        const p = rest[0] as TPlatform;
         try {
             const [template, input] = await Promise.all([
                 typeof options.template === 'function'
@@ -135,7 +141,10 @@ export function createFetchHandler<TPlatform = unknown>(
             const head = await shell;
 
             if (head.redirect) {
-                await chunks.return?.(undefined); // release the (empty) generator
+                // Release the (empty) generator without awaiting — the
+                // redirect is decided; its Response must not hinge on (or be
+                // converted to a 500 by) the release settling.
+                void chunks.return?.(undefined);
                 return new Response(null, {
                     status: head.redirect.status,
                     headers: { location: head.redirect.location }
