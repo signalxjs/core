@@ -240,7 +240,7 @@ export function serverStream<A extends unknown[], T>(
 export class ServerFnError extends Error {
     readonly __sigxServerFnError: true;  // brand, NOT instanceof — dev module
                                          // graphs differ between the Vite
-                                         // runner and Node (see vite/src/ssr.ts)
+                                         // runner and Node (see packages/vite/src/ssr.ts)
     constructor(status: number, message: string, data?: unknown);
 }
 ```
@@ -386,14 +386,15 @@ export interface ServerFnRequestOptions {
 Serialization: v1 is JSON, inheriting the boundary pipeline's key
 discipline — the serializer already refuses `DANGEROUS_KEYS`
 (`__proto__`/`constructor`/`prototype`,
-`server-renderer/src/server/serialize.ts`). That pipeline has no parse
+`packages/server-renderer/src/server/serialize.ts`). That pipeline has no
+parse
 step (it emits script assignments); the RPC envelope *does* parse, so it
 **adds** reviver-based rejection of those same three keys at both parse
 sites (server args, client result; the set is duplicated in `/client` to
 keep the stub dependency-free). **Rich
 type-handler serialization (Date, Map, custom classes) is deferred** until
 the client *revive* side of the serializer seam exists —
-`runtime-core/src/ssr-serialize.ts` is explicitly serialize-only today
+`packages/runtime-core/src/ssr-serialize.ts` is explicitly serialize-only today
 ("the client revive side ships with the cache-seed work"). When it lands,
 the RPC envelope adopts the same `SSRTypeHandler` registry on both
 directions; the envelope shape does not change.
@@ -437,7 +438,7 @@ Phased (§7); designed here so the v1 envelope reserves the right fields.
 (`{"chunk":…}` lines, then `{"done":1}` or `{"error":…}`); the stub
 returns an `AsyncIterable<T>`. Where Qwik hands you a raw iterator, sigx
 has a home for the common case: `useStream`
-(`runtime-core/src/use-stream.ts`) is string-specific
+(`packages/runtime-core/src/use-stream.ts`) is string-specific
 (`() => AsyncIterable<string>`), so a **string-yielding** `serverStream`
 plugs in as-is — no `useStream` API change in this RFC. Non-string streams
 are consumed manually with `for await`; whether `useStream` ever grows a
