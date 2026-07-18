@@ -449,10 +449,14 @@ Both consume the fetch handler natively; neither gets a package until
 friction proves otherwise.
 
 ```ts
-// Deno: server.ts
+// Deno: server.ts — the static tier is GET/HEAD-only: serveDir answers
+// other methods with 405 (not 404), which would swallow server-fn POSTs.
+// showIndex: false keeps the raw outlet template off '/'.
 Deno.serve(async (req) => {
-    const res = await serveDir(req, { fsRoot: 'dist/client' });
-    if (res.status !== 404) return res;
+    if (req.method === 'GET' || req.method === 'HEAD') {
+        const res = await serveDir(req, { fsRoot: 'dist/client', showIndex: false });
+        if (res.status !== 404) return res;
+    }
     if (matchesServerFn(req)) return handleServerFnRequest(req, { resolve });
     return handler(req);
 });

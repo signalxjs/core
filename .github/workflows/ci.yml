@@ -144,6 +144,60 @@ jobs:
       - name: Deploy smoke (node)
         run: pnpm deploy-smoke:node
 
+  deploy-smoke-deno:
+    # rfc-deploy §6: the BUNDLED build under deno (linux-only per the RFC —
+    # the cross-platform story is deploy-smoke-node's job).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+
+      - name: Deploy smoke (deno)
+        run: pnpm deploy-smoke:deno
+
+  deploy-smoke-bun:
+    # rfc-deploy §6: the EXTERNAL build under bun (the same dist/ the node
+    # server uses — export conditions honored via --conditions=production).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+
+      - name: Deploy smoke (bun)
+        run: pnpm deploy-smoke:bun
+
   bench-smoke:
     # The benchmark suite rots silently when it isn't run: the sigx adapter's
     # import broke in #202 and nobody noticed until #214. This job is a

@@ -16,3 +16,18 @@ declare module 'virtual:sigx-app' {
 declare module 'virtual:sigx-server-fns' {
     export const serverFns: Record<string, () => Promise<unknown>>;
 }
+
+// jsr: specifiers resolve at runtime in Deno (auto-fetched) — TypeScript's
+// resolver doesn't understand them, so the copyable entry.deno.ts gets its
+// types here.
+declare module 'jsr:@std/http@^1.0.0/file-server' {
+    export function serveDir(
+        request: Request,
+        options?: {
+            fsRoot?: string;
+            urlRoot?: string;
+            quiet?: boolean;
+            showIndex?: boolean;
+        }
+    ): Promise<Response>;
+}
