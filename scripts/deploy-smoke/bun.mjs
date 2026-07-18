@@ -63,13 +63,15 @@ try {
     await assertDocument(fetchFn, { label, appMarker: 'SignalX resumability' });
     await assertBotDocument(fetchFn, { label, appMarker: 'SignalX resumability' });
     await assertStaticAsset(fetchFn, { label, clientDir: join(dir, 'dist/client') });
-    await assertServerFn(fetchFn, {
+    const data = await assertServerFn(fetchFn, {
         label,
         origin: ORIGIN,
         symbol: '@sigx/resume-example/src/api.server.ts#getQuote',
         args: [1],
         expectInData: 'Named = transferred.'
     });
+    // Bun's node-compat process.version — proof the fn executed server-side.
+    assert(/via v\d/.test(data), `${label}: fn reported a runtime version (${data})`);
     await assertFallthrough(fetchFn, { label });
     console.log('\n✅ deploy-smoke: the external build serves documents, assets, and server functions under bun');
 } catch (err) {
