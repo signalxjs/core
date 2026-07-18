@@ -246,14 +246,32 @@ async function streamResponse(
     headers.set('content-type', 'application/x-ndjson');
     const encoder = new TextEncoder();
     const line = (obj: unknown): Uint8Array => encoder.encode(JSON.stringify(obj) + '\n');
+    // Fire-and-forget generator cleanup: a no-op on a finished generator, and
+    // a throwing `finally` must not become an unhandled rejection.
+    const dispose = (): void => void gen.return(undefined).catch(() => {});
+    /** Encode one chunk line; on unserializable values (BigInt, cycles) the
+     *  generator is DISPOSED before the error propagates — an advanced
+     *  generator must never leak its `finally`. */
+    const chunkLine = (value: unknown): Uint8Array => {
+        try {
+            return line({ chunk: value });
+        } catch (error) {
+            dispose();
+            throw error;
+        }
+    };
+    // Pre-encode the first line while a buffered error response is still
+    // possible — an unserializable FIRST chunk becomes an ordinary JSON
+    // error via the caller's catch.
+    const firstLine = first.done ? null : chunkLine(first.value);
     const body = new ReadableStream<Uint8Array>({
         start(controller) {
-            if (first.done) {
+            if (firstLine === null) {
                 controller.enqueue(line({ done: 1 }));
                 controller.close();
                 return;
             }
-            controller.enqueue(line({ chunk: first.value }));
+            controller.enqueue(firstLine);
         },
         async pull(controller) {
             try {
@@ -263,18 +281,25 @@ async function streamResponse(
                     controller.close();
                     return;
                 }
-                controller.enqueue(line({ chunk: next.value }));
+                controller.enqueue(chunkLine(next.value));
             } catch (error) {
                 // The response has started — the error travels IN-BAND as
                 // the terminating NDJSON line (headers are long gone).
-                controller.enqueue(line({ error: wireErrorShape(error, label) }));
+                dispose();
+                let payload: Uint8Array;
+                try {
+                    payload = line({ error: wireErrorShape(error, label) });
+                } catch {
+                    // Even the error shape was unserializable (ServerFnError
+                    // data with a BigInt, …) — fall back to the masked form.
+                    payload = line({ error: { message: 'Internal error', status: 500 } });
+                }
+                controller.enqueue(payload);
                 controller.close();
             }
         },
         cancel() {
-            // Fire-and-forget: a throwing generator `finally` must not
-            // become an unhandled rejection.
-            void gen.return(undefined).catch(() => {});
+            dispose();
         }
     });
     return new Response(body, { status: ctx._status ?? 200, headers });

@@ -99,12 +99,24 @@ export function createServerFnHandler(options: ServerFnHandlerOptions): NodeRequ
             });
             for (;;) {
                 const { value, done } = await reader.read();
-                if (done) break;
+                if (done || res.destroyed) break;
                 if (!res.write(value)) {
-                    await new Promise<void>((resolve) => res.once('drain', () => resolve()));
+                    // Race drain against close — a client that disconnects
+                    // while backpressured never emits 'drain', and an
+                    // unraced wait would pin this handler forever.
+                    await new Promise<void>((resolve) => {
+                        const settle = (): void => {
+                            res.off('drain', settle);
+                            res.off('close', settle);
+                            resolve();
+                        };
+                        res.once('drain', settle);
+                        res.once('close', settle);
+                    });
+                    if (res.destroyed) break;
                 }
             }
-            res.end();
+            if (!res.destroyed) res.end();
         } catch (err) {
             if (res.headersSent) {
                 // Mid-body failure — the status is gone; just drop the socket.

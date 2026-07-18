@@ -147,6 +147,44 @@ describe('serverStream — endpoint NDJSON', () => {
         expect(JSON.stringify(emitted)).not.toContain('secret internals');
     });
 
+    it('an unserializable FIRST chunk is a buffered error AND the generator is disposed', async () => {
+        vi.stubEnv('NODE_ENV', 'production');
+        let finallyRan = false;
+        const s = serverStream(async function* () {
+            try {
+                yield { big: 10n }; // BigInt — JSON.stringify throws
+                yield 'never';
+            } finally {
+                finallyRan = true;
+            }
+        });
+        const res = await post(s);
+        expect(res.status).toBe(500);
+        expect(res.headers.get('content-type')).toBe('application/json');
+        await expect(res.json()).resolves.toEqual({
+            error: { message: 'Internal error', status: 500 }
+        });
+        await vi.waitFor(() => expect(finallyRan).toBe(true));
+    });
+
+    it('an unserializable MID-STREAM chunk ends the stream in-band and disposes the generator', async () => {
+        vi.stubEnv('NODE_ENV', 'production');
+        let finallyRan = false;
+        const s = serverStream(async function* () {
+            try {
+                yield 'ok';
+                yield { big: 10n };
+                yield 'never';
+            } finally {
+                finallyRan = true;
+            }
+        });
+        const emitted = await lines(await post(s));
+        expect(emitted[0]).toEqual({ chunk: 'ok' });
+        expect(emitted[1]).toEqual({ error: { message: 'Internal error', status: 500 } });
+        await vi.waitFor(() => expect(finallyRan).toBe(true));
+    });
+
     it('cancelling the response body returns the generator (finally runs)', async () => {
         let finallyRan = false;
         const s = serverStream(async function* () {
