@@ -37,14 +37,28 @@ Bun.serve({
     async fetch(request: Request): Promise<Response> {
         const { pathname } = new URL(request.url);
 
-        // Static tier: exact file paths only (never index.html — the raw
-        // outlet template must not shadow the document render). The resolved
-        // prefix check guards ../ traversal.
-        if (pathname !== '/' && !pathname.endsWith('/')) {
-            const filePath = resolve(join(clientDir, decodeURIComponent(pathname)));
-            if (filePath.startsWith(clientDir + sep)) {
-                const file = Bun.file(filePath);
-                if (await file.exists()) return new Response(file);
+        // Static tier: GET/HEAD-only (consistent with every other tier —
+        // POSTs belong to the fn endpoint), exact file paths only (never
+        // index.html — the raw outlet template must not shadow the document
+        // render). The resolved prefix check guards ../ traversal; malformed
+        // percent-encoding falls through to the render instead of throwing.
+        if (
+            (request.method === 'GET' || request.method === 'HEAD') &&
+            pathname !== '/' &&
+            !pathname.endsWith('/')
+        ) {
+            let decoded: string | undefined;
+            try {
+                decoded = decodeURIComponent(pathname);
+            } catch {
+                // Malformed encoding (e.g. /%FF) — not a file path.
+            }
+            if (decoded) {
+                const filePath = resolve(join(clientDir, decoded));
+                if (filePath.startsWith(clientDir + sep)) {
+                    const file = Bun.file(filePath);
+                    if (await file.exists()) return new Response(file);
+                }
             }
         }
 
