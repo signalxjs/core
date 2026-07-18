@@ -44,8 +44,16 @@ export function createRequestContext(request: Request): InternalServerFnContext 
     return ctx;
 }
 
-/** Never-aborting signal shared by every detached context. */
-const detachedSignal = new AbortController().signal;
+/**
+ * Never-aborting signal shared by every detached context — created LAZILY:
+ * workerd forbids `new AbortController()` in module global scope (no request
+ * context), and this module lands in the bundled worker graph (rfc-deploy).
+ * First use always happens inside a handler, where it is allowed.
+ */
+let _detachedSignal: AbortSignal | undefined;
+function detachedSignal(): AbortSignal {
+    return (_detachedSignal ??= new AbortController().signal);
+}
 
 /**
  * The v1 context for IN-PROCESS calls (a server function invoked during SSR
@@ -69,7 +77,9 @@ export function createDetachedContext(): ServerFnContext {
         get url(): URL {
             return noRequest('rq.url');
         },
-        abortSignal: detachedSignal,
+        get abortSignal(): AbortSignal {
+            return detachedSignal();
+        },
         responseHeaders: new Headers(),
         status(code: number) {
             if (__DEV__) {

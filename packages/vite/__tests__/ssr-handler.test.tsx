@@ -133,4 +133,40 @@ describe('createDevRequestHandler', () => {
         expect((next.mock.calls[0][0] as Error).message).toContain('createApp');
         expect(vite.ssrFixStacktrace).toHaveBeenCalled();
     });
+
+    it('threads the platform option to the entry factory and function-form document (rfc-deploy §4.6)', async () => {
+        const platform = { env: { KV: 'binding' } };
+        const seen: unknown[] = [];
+        const vite = mockVite({
+            createApp: (_url: string, p: unknown) => {
+                seen.push(p);
+                return defineApp((Home as any)({}));
+            }
+        });
+        const handler = await createDevRequestHandler(vite, {
+            entry: '/src/entry-server.tsx',
+            platform,
+            document: (_url: string, _req: unknown, p: unknown) => {
+                seen.push(p);
+                return {};
+            }
+        });
+        const res = await run(handler, '/');
+        expect(res.body).toContain('dev page');
+        expect(seen).toHaveLength(2);
+        for (const p of seen) expect(p).toBe(platform);
+    });
+
+    it('omitting platform stays byte-compatible (undefined second arg)', async () => {
+        const args: unknown[][] = [];
+        const vite = mockVite({
+            createApp: (...a: unknown[]) => {
+                args.push(a);
+                return defineApp((Home as any)({}));
+            }
+        });
+        const handler = await createDevRequestHandler(vite, { entry: '/src/entry-server.tsx' });
+        await run(handler, '/');
+        expect(args[0][1]).toBeUndefined();
+    });
 });

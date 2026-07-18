@@ -91,6 +91,59 @@ jobs:
       - name: Edge smoke test
         run: pnpm test:edge
 
+  deploy-smoke-cloudflare:
+    # rfc-deploy §6: the built reference apps under REAL workerd (Miniflare,
+    # programmatic dispatchFetch — no ports, no login). Streamed document
+    # markers, a static asset through the assets config, a server-fn POST
+    # through the inlined registry.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+
+      - name: Deploy smoke (workerd)
+        run: pnpm deploy-smoke:cloudflare
+
+  deploy-smoke-node:
+    # rfc-deploy §6: the external build under `node --conditions production`
+    # — the SAME assertion set as the workerd tier ("serves identically" is
+    # the exit criterion). The Node path must stay cross-platform.
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+
+      - name: Deploy smoke (node)
+        run: pnpm deploy-smoke:node
+
   bench-smoke:
     # The benchmark suite rots silently when it isn't run: the sigx adapter's
     # import broke in #202 and nobody noticed until #214. This job is a

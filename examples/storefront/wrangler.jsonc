@@ -1,0 +1,9 @@
+{
+    "name": "sigx-storefront-example",
+    "main": "dist-cf/server/entry.cloudflare.js",
+    "compatibility_date": "2026-07-01",
+    "assets": {
+        "directory": "dist-cf/client",
+        "html_handling": "none"
+    }
+}

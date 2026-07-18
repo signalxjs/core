@@ -11,6 +11,8 @@
     "forceConsistentCasingInFileNames": true,
     "paths": {
       "@sigx/cache": ["./packages/cache/src/index.ts"],
+      "@sigx/cloudflare": ["./packages/cloudflare/src/index.ts"],
+      "@sigx/vite": ["./packages/vite/src/index.ts"],
       "@sigx/reactivity": ["./packages/reactivity/src/index.ts"],
       "@sigx/reactivity/internals": ["./packages/reactivity/src/internals.ts"],
       "@sigx/runtime-core": ["./packages/runtime-core/src/index.ts"],

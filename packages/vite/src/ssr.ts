@@ -45,6 +45,15 @@ export interface DevRequestHandlerOptions extends ForwardedHandlerOptions {
 
     /** Template path relative to the Vite root. Default: 'index.html'. */
     template?: string;
+
+    /**
+     * Opaque platform context (rfc-deploy §4.6) — e.g. Cloudflare's
+     * `{ env, ctx }` from a dev binding proxy. Forwarded verbatim: to the
+     * entry factory as its second argument (existing `createApp(url)`
+     * factories ignore it) and to a function-form `document` as its third —
+     * matching the fetch handler's callback shapes.
+     */
+    platform?: unknown;
 }
 
 type NodeRequestHandler = (
@@ -195,9 +204,16 @@ export async function createDevRequestHandler(
                             `(see the router SSR contract).`
                         );
                     }
-                    return factory(url);
+                    return factory(url, options.platform);
                 },
-                document: options.document as never,
+                document: (typeof options.document === 'function'
+                    ? (url: string, devReq: unknown) =>
+                          (options.document as (u: string, r: unknown, p: unknown) => unknown)(
+                              url,
+                              devReq,
+                              options.platform
+                          )
+                    : options.document) as never,
                 isBot: options.isBot as never,
                 ssr: options.ssr as never
             });

@@ -18,6 +18,8 @@ export const getQuote = serverFn(async (rq, index: number) => {
     if (!Number.isInteger(index)) {
         throw new ServerFnError(400, 'index must be an integer');
     }
-    // Proof this ran server-side: process.version does not exist in a browser.
-    return `${QUOTES[Math.abs(index) % QUOTES.length]} (via node ${process.version})`;
+    // Proof this ran server-side: neither value exists in a browser. The
+    // optional access keeps the fn runtime-agnostic — under workerd (no
+    // nodejs_compat) there is no process global.
+    return `${QUOTES[Math.abs(index) % QUOTES.length]} (via ${globalThis.process?.version ?? 'workerd'})`;
 });
