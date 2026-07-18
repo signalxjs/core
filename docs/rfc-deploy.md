@@ -474,10 +474,13 @@ caching) the platforms already own.
 Vercel's Build Output API v3 *is* a generation contract — hand-writing
 `.vercel/output` has no copyability value. `generate()` produces the full
 layout: `static/` (copied from the client outDir), `functions/_render.func`
-(the bundled server + `.vc-config.json`), and `config.json` routes —
-`filesystem` handle first, then the server-fn prefix and the catch-all to
-the function. Deploy is `vercel deploy --prebuilt`; the layout is
-inspectable offline, which is what CI asserts (§6).
+(the bundled server + `.vc-config.json`), and `config.json` routes — the
+server-fn prefix FIRST (before the `filesystem` handle: the static tier
+must never shadow fn POSTs — the same lesson §4.3's serveDir 405 taught),
+then `filesystem`, then the catch-all to the function. `static/` omits
+`index.html` (the filesystem handle would serve the raw outlet template
+for `/`). Deploy is `vercel deploy --prebuilt`; the layout is inspectable
+offline, which is what CI asserts (§6).
 
 ### 4.5 `@sigx/netlify` (`packages/netlify`)
 

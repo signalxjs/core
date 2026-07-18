@@ -9,7 +9,8 @@
         "build": "vite build --app",
         "start": "cross-env NODE_ENV=production node --conditions production server.mjs",
         "build:cloudflare": "vite build --app -c vite.config.cloudflare.ts",
-        "build:deno": "vite build --app -c vite.config.deno.ts"
+        "build:deno": "vite build --app -c vite.config.deno.ts",
+        "build:vercel": "vite build --app -c vite.config.vercel.ts"
     },
     "dependencies": {
         "sigx": "workspace:^",
@@ -23,6 +24,7 @@
     },
     "devDependencies": {
         "@sigx/cloudflare": "workspace:^",
+        "@sigx/vercel": "workspace:^",
         "@sigx/vite": "workspace:^",
         "@types/express": "^5.0.6",
         "@types/node": "^26.1.1",

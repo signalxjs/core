@@ -39,6 +39,7 @@ const PACKAGES = [
     'packages/ssr-islands',
     'packages/vite',
     'packages/cloudflare',
+    'packages/vercel',
 ];
 
 const sandbox = join(tmpdir(), `sigx-verify-pack-${Date.now()}`);

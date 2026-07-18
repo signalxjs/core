@@ -198,6 +198,31 @@ jobs:
       - name: Deploy smoke (bun)
         run: pnpm deploy-smoke:bun
 
+  deploy-smoke-vercel:
+    # rfc-deploy §6: STRUCTURAL verification of the generated Build Output
+    # API v3 layout + the render function's fetch export invoked directly
+    # under Node (WinterCG code; exactly what Vercel's launcher calls). No
+    # emulation, no live deploys.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+
+      - name: Deploy smoke (vercel, structural)
+        run: pnpm deploy-smoke:vercel
+
   bench-smoke:
     # The benchmark suite rots silently when it isn't run: the sigx adapter's
     # import broke in #202 and nobody noticed until #214. This job is a
