@@ -35,6 +35,7 @@ body:
         - "@sigx/vite"
         - "@sigx/cloudflare"
         - "@sigx/vercel"
+        - "@sigx/netlify"
         - Not sure / multiple
     validations:
       required: true

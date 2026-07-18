@@ -179,7 +179,14 @@ free port automatically).
   routes) — a generation contract, regenerated every build, unlike the
   scaffold-once wrangler posture. Structural verification only (layout +
   direct fetch invocation under Node); no emulation. Build-time-only Node
-  code: no size-limit entry. Netlify follows the same pattern in Phase 6.
+  code: no size-limit entry.
+- `packages/netlify` → `@sigx/netlify` — Netlify deployment adapter
+  (rfc-deploy §4.5, the last platform phase): `netlify()` emits the
+  Frameworks API channel (`.netlify/v1/functions/sigx-ssr` — a generated
+  Functions-v2 wrapper with `path: '/*'` + `preferStatic` over the bundled
+  server); publish dir = the client outDir (its raw `index.html` removed);
+  `netlify.toml` printed, never written. Same structural-verification
+  posture as vercel. Build-time-only Node code: no size-limit entry.
 - `examples/` — runnable apps (`hello`, `spa`, `spa-ssr`, `ssr-islands`,
   `resume`, `storefront` — the resumability showcase).
 

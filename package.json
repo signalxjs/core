@@ -22,7 +22,7 @@
         "bench:ssr:stream": "pnpm --filter @sigx/benchmarks bench:stream",
         "bench:ssr:quick": "pnpm --filter @sigx/benchmarks bench:quick",
         "bench:ssr:baseline": "pnpm --filter @sigx/benchmarks bench:baseline",
-        "build": "pnpm run build:core && pnpm --filter @sigx/server-renderer run build && pnpm --filter @sigx/ssr-islands run build && pnpm --filter @sigx/resume run build && pnpm --filter @sigx/cache run build && pnpm --filter @sigx/server run build && pnpm --filter @sigx/vite run build && pnpm --filter @sigx/cloudflare run build && pnpm --filter @sigx/vercel run build",
+        "build": "pnpm run build:core && pnpm --filter @sigx/server-renderer run build && pnpm --filter @sigx/ssr-islands run build && pnpm --filter @sigx/resume run build && pnpm --filter @sigx/cache run build && pnpm --filter @sigx/server run build && pnpm --filter @sigx/vite run build && pnpm --filter @sigx/cloudflare run build && pnpm --filter @sigx/vercel run build && pnpm --filter @sigx/netlify run build",
         "build:core": "pnpm --filter @sigx/reactivity run build && pnpm --filter @sigx/runtime-core run build && pnpm --filter @sigx/runtime-dom run build && pnpm --filter sigx run build",
         "build:sigx": "pnpm --filter sigx run build",
         "build:vite": "pnpm --filter @sigx/vite run build",
@@ -33,8 +33,8 @@
         "dev:sigx": "pnpm --filter sigx run dev",
         "dev:vite": "pnpm --filter @sigx/vite run dev",
         "typecheck": "tsc --noEmit",
-        "lint": "oxlint --deny-warnings packages/reactivity/src packages/runtime-core/src packages/runtime-dom/src packages/sigx/src packages/server-renderer/src packages/ssr-islands/src packages/resume/src packages/cache/src packages/server/src packages/vite/src packages/cloudflare/src packages/vercel/src",
-        "lint:fix": "oxlint --fix packages/reactivity/src packages/runtime-core/src packages/runtime-dom/src packages/sigx/src packages/server-renderer/src packages/ssr-islands/src packages/resume/src packages/cache/src packages/server/src packages/vite/src packages/cloudflare/src packages/vercel/src",
+        "lint": "oxlint --deny-warnings packages/reactivity/src packages/runtime-core/src packages/runtime-dom/src packages/sigx/src packages/server-renderer/src packages/ssr-islands/src packages/resume/src packages/cache/src packages/server/src packages/vite/src packages/cloudflare/src packages/vercel/src packages/netlify/src",
+        "lint:fix": "oxlint --fix packages/reactivity/src packages/runtime-core/src packages/runtime-dom/src packages/sigx/src packages/server-renderer/src packages/ssr-islands/src packages/resume/src packages/cache/src packages/server/src packages/vite/src packages/cloudflare/src packages/vercel/src packages/netlify/src",
         "publish:dry": "node scripts/publish.js --dry-run",
         "publish:all": "node scripts/publish.js",
         "publish:beta": "node scripts/publish.js --tag beta",
@@ -51,7 +51,8 @@
         "deploy-smoke:node": "node scripts/deploy-smoke/node.mjs",
         "deploy-smoke:bun": "node scripts/deploy-smoke/bun.mjs",
         "deploy-smoke:deno": "node scripts/deploy-smoke/deno.mjs",
-        "deploy-smoke:vercel": "node scripts/deploy-smoke/vercel.mjs"
+        "deploy-smoke:vercel": "node scripts/deploy-smoke/vercel.mjs",
+        "deploy-smoke:netlify": "node scripts/deploy-smoke/netlify.mjs"
     },
     "devDependencies": {
         "@size-limit/preset-small-lib": "^11",

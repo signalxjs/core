@@ -65,6 +65,7 @@ Full guides, API reference and live examples → **<https://sigx.dev/core/>**
 | `@sigx/vite`           | [npm](https://www.npmjs.com/package/@sigx/vite)           | [docs](https://sigx.dev/vite/)                                | Vite plugin for dev/build with HMR |
 | `@sigx/cloudflare`     | [npm](https://www.npmjs.com/package/@sigx/cloudflare)     | [docs](https://sigx.dev/deploy/cloudflare/)                   | Cloudflare Workers deployment adapter — bundled workerd build, `wrangler.jsonc` + entry scaffolding, dev binding proxies (rfc-deploy) |
 | `@sigx/vercel`         | [npm](https://www.npmjs.com/package/@sigx/vercel)         | [docs](https://sigx.dev/deploy/vercel/)                       | Vercel deployment adapter — Build Output API v3 generation: static/, the render function, config.json routes (rfc-deploy) |
+| `@sigx/netlify`        | [npm](https://www.npmjs.com/package/@sigx/netlify)        | [docs](https://sigx.dev/deploy/netlify/)                      | Netlify deployment adapter — Frameworks API function (`path: '/*'`, `preferStatic`) over the bundled server (rfc-deploy) |
 
 ## Part of SignalX
 
