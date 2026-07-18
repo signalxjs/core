@@ -123,27 +123,32 @@ export function vercel(options: VercelAdapterOptions = {}): SigxAdapter {
             // .vite/ (build manifests are not public assets).
             const copied = copyStatic(ctx.clientOutDir, staticDir, new Set(['index.html', '.vite']));
 
-            // The function: the bundled entry + its runtime config.
+            // The function: the WHOLE server outDir — the entry is usually a
+            // single self-contained bundle, but code-split sibling chunks
+            // (dynamic imports) must ride along or the deployed function
+            // fails with missing-module errors. Everything under .func is
+            // uploaded recursively; a package.json makes the .js files ESM
+            // (renaming files would break relative chunk imports).
+            copyStatic(ctx.serverOutDir, funcDir, new Set());
+            fs.writeFileSync(path.join(funcDir, 'package.json'), '{"type":"module"}\n');
             if (runtime === 'edge') {
                 // Edge entrypoints are bare default fetch fns — wrap the
                 // user's { fetch } export.
-                fs.copyFileSync(path.join(ctx.serverOutDir, builtEntry), path.join(funcDir, 'entry.js'));
-                fs.writeFileSync(path.join(funcDir, 'index.js'), edgeWrapper('entry.js'));
+                fs.writeFileSync(path.join(funcDir, '_sigx_edge.js'), edgeWrapper(builtEntry));
                 fs.writeFileSync(
                     path.join(funcDir, '.vc-config.json'),
-                    JSON.stringify({ runtime: 'edge', entrypoint: 'index.js' }, null, 4) + '\n'
+                    JSON.stringify({ runtime: 'edge', entrypoint: '_sigx_edge.js' }, null, 4) + '\n'
                 );
             } else {
                 // Node runtime: the launcher detects a WEB handler by the
                 // `fetch` METHOD on the default export — which is exactly
-                // the entry's shape. .mjs keeps it ESM without a package.json.
-                fs.copyFileSync(path.join(ctx.serverOutDir, builtEntry), path.join(funcDir, 'index.mjs'));
+                // the entry's shape, so the built entry IS the handler.
                 fs.writeFileSync(
                     path.join(funcDir, '.vc-config.json'),
                     JSON.stringify(
                         {
                             runtime: options.nodeVersion ?? DEFAULT_NODE_VERSION,
-                            handler: 'index.mjs',
+                            handler: builtEntry,
                             launcherType: 'Nodejs',
                             shouldAddHelpers: false,
                             supportsResponseStreaming: true

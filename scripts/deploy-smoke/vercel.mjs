@@ -49,7 +49,11 @@ try {
         readFileSync(join(output, 'functions/_render.func/.vc-config.json'), 'utf-8')
     );
     assert(/^nodejs\d+\.x$/.test(vcConfig.runtime), `${label}: node runtime (${vcConfig.runtime})`);
-    assert(vcConfig.handler === 'index.mjs' && vcConfig.launcherType === 'Nodejs', `${label}: launcher config`);
+    assert(
+        existsSync(join(output, 'functions/_render.func', vcConfig.handler)) &&
+            vcConfig.launcherType === 'Nodejs',
+        `${label}: launcher config (handler ${vcConfig.handler} exists)`
+    );
     assert(vcConfig.supportsResponseStreaming === true, `${label}: response streaming enabled`);
     assert(
         !existsSync(join(output, 'static/index.html')),
@@ -64,8 +68,9 @@ try {
     // 2) Behavioral: the function's fetch export, invoked as the launcher
     //    would, behind a fetchFn that mirrors the route phases.
     // ------------------------------------------------------------------
-    const fn = (await import(pathToFileURL(join(output, 'functions/_render.func/index.mjs')).href))
-        .default;
+    const fn = (
+        await import(pathToFileURL(join(output, 'functions/_render.func', vcConfig.handler)).href)
+    ).default;
     assert(typeof fn?.fetch === 'function', `${label}: default export has the fetch METHOD (web handler shape)`);
 
     const ORIGIN = 'http://localhost';

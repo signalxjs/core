@@ -78,8 +78,10 @@ describe('setup() — scaffold iff absent', () => {
 });
 
 describe('generate() — the Build Output API v3 layout', () => {
-    it('node runtime: static/ (no index.html, no .vite), index.mjs, vc-config, routes', async () => {
+    it('node runtime: static/ (no index.html, no .vite), full server copy, vc-config, routes', async () => {
         const ctx = fakeBuild();
+        // A code-split sibling chunk must ride along with the entry.
+        writeFileSync(join(root, 'out/server/chunk-abc.js'), 'export const x = 1;');
         await vercel().generate!(ctx as never);
         const output = join(root, '.vercel/output');
 
@@ -90,13 +92,17 @@ describe('generate() — the Build Output API v3 layout', () => {
         const vc = JSON.parse(readFileSync(join(output, 'functions/_render.func/.vc-config.json'), 'utf-8'));
         expect(vc).toEqual({
             runtime: 'nodejs22.x',
-            handler: 'index.mjs',
+            handler: 'entry.vercel.js',
             launcherType: 'Nodejs',
             shouldAddHelpers: false,
             supportsResponseStreaming: true
         });
-        expect(readFileSync(join(output, 'functions/_render.func/index.mjs'), 'utf-8')).toContain(
+        expect(readFileSync(join(output, 'functions/_render.func/entry.vercel.js'), 'utf-8')).toContain(
             'fetch:'
+        );
+        expect(existsSync(join(output, 'functions/_render.func/chunk-abc.js'))).toBe(true);
+        expect(JSON.parse(readFileSync(join(output, 'functions/_render.func/package.json'), 'utf-8'))).toEqual(
+            { type: 'module' }
         );
 
         const config = JSON.parse(readFileSync(join(output, 'config.json'), 'utf-8'));
@@ -122,11 +128,11 @@ describe('generate() — the Build Output API v3 layout', () => {
         await vercel({ runtime: 'edge' }).generate!(ctx as never);
         const funcDir = join(root, '.vercel/output/functions/_render.func');
         const vc = JSON.parse(readFileSync(join(funcDir, '.vc-config.json'), 'utf-8'));
-        expect(vc).toEqual({ runtime: 'edge', entrypoint: 'index.js' });
-        const wrapper = readFileSync(join(funcDir, 'index.js'), 'utf-8');
-        expect(wrapper).toContain("from './entry.js'");
+        expect(vc).toEqual({ runtime: 'edge', entrypoint: '_sigx_edge.js' });
+        const wrapper = readFileSync(join(funcDir, '_sigx_edge.js'), 'utf-8');
+        expect(wrapper).toContain("from './entry.vercel.js'");
         expect(wrapper).toContain('entry.fetch(request, event)');
-        expect(existsSync(join(funcDir, 'entry.js'))).toBe(true);
+        expect(existsSync(join(funcDir, 'entry.vercel.js'))).toBe(true);
     });
 
     it('regenerates from scratch (stale files from a previous layout removed)', async () => {
