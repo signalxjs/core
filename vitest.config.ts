@@ -30,6 +30,7 @@ export default defineConfig({
         alias: {
             '@sigx/cache': resolve(__dirname, 'packages/cache/src/index.ts'),
             '@sigx/cloudflare': resolve(__dirname, 'packages/cloudflare/src/index.ts'),
+            '@sigx/vercel': resolve(__dirname, 'packages/vercel/src/index.ts'),
             '@sigx/reactivity/internals': resolve(__dirname, 'packages/reactivity/src/internals.ts'),
             '@sigx/reactivity': resolve(__dirname, 'packages/reactivity/src/index.ts'),
             '@sigx/runtime-core/internals': resolve(__dirname, 'packages/runtime-core/src/internals.ts'),

@@ -1,0 +1,56 @@
+{
+    "name": "@sigx/vercel",
+    "version": "0.12.0",
+    "description": "Vercel deployment adapter for SigX (Build Output API v3)",
+    "type": "module",
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+        ".": {
+            "types": "./dist/index.d.ts",
+            "import": "./dist/index.js"
+        }
+    },
+    "files": [
+        "dist",
+        "src"
+    ],
+    "sideEffects": false,
+    "scripts": {
+        "build": "tsc",
+        "dev": "tsc --watch",
+        "prepublishOnly": "pnpm run build"
+    },
+    "keywords": [
+        "sigx",
+        "vercel",
+        "deploy",
+        "adapter",
+        "ssr",
+        "build-output-api"
+    ],
+    "author": "Andreas Ekdahl",
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/signalxjs/core.git",
+        "directory": "packages/vercel"
+    },
+    "homepage": "https://sigx.dev/deploy/vercel/",
+    "bugs": {
+        "url": "https://github.com/signalxjs/core/issues"
+    },
+    "publishConfig": {
+        "access": "public"
+    },
+    "peerDependencies": {
+        "@sigx/vite": "*",
+        "vite": ">=8.0.0"
+    },
+    "devDependencies": {
+        "@sigx/vite": "workspace:^",
+        "@types/node": "^26.1.1",
+        "typescript": "^7.0.2",
+        "vite": "^8.1.4"
+    }
+}

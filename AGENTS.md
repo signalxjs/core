@@ -172,8 +172,14 @@ free port automatically).
   scaffold-iff-absent `entry.cloudflare.ts` + `wrangler.jsonc`, `devProxy`
   binding proxies via wrangler's `getPlatformProxy`. Build-time-only Node
   code: no size-limit entry (deliberate). The first platform adapter pack;
-  Deno/Bun stay docs + copyable entries, Vercel/Netlify follow the same
-  pattern in later phases.
+  Deno/Bun stay docs + copyable entries (`examples/resume`).
+- `packages/vercel` → `@sigx/vercel` — Vercel deployment adapter (rfc-deploy
+  §4.4): `vercel()` generates the full Build Output API v3 layout
+  (`.vercel/output`: `static/`, `functions/_render.func`, `config.json`
+  routes) — a generation contract, regenerated every build, unlike the
+  scaffold-once wrangler posture. Structural verification only (layout +
+  direct fetch invocation under Node); no emulation. Build-time-only Node
+  code: no size-limit entry. Netlify follows the same pattern in Phase 6.
 - `examples/` — runnable apps (`hello`, `spa`, `spa-ssr`, `ssr-islands`,
   `resume`, `storefront` — the resumability showcase).
 

@@ -120,6 +120,9 @@ importers:
       '@sigx/cloudflare':
         specifier: workspace:^
         version: link:../../packages/cloudflare
+      '@sigx/vercel':
+        specifier: workspace:^
+        version: link:../../packages/vercel
       '@sigx/vite':
         specifier: workspace:^
         version: link:../../packages/vite
@@ -491,6 +494,21 @@ importers:
       sigx:
         specifier: workspace:^
         version: link:../sigx
+    devDependencies:
+      '@sigx/vite':
+        specifier: workspace:^
+        version: link:../vite
+      '@types/node':
+        specifier: ^26.1.1
+        version: 26.1.1
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+      vite:
+        specifier: ^8.1.4
+        version: 8.1.4(@types/node@26.1.1)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.1)
+
+  packages/vercel:
     devDependencies:
       '@sigx/vite':
         specifier: workspace:^
