@@ -20,7 +20,7 @@ The `build` step is optional for tests: `pnpm test` and `pnpm typecheck` resolve
 
 ## Workspace layout
 
-Eleven packages live under `packages/`. See the table in the root `README.md` for what each one does.
+Thirteen packages live under `packages/`. See the table in the root `README.md` for what each one does.
 
 ```
 packages/
@@ -35,6 +35,8 @@ packages/
   server/          → @sigx/server         (server functions / RPC)
   vite/            → @sigx/vite           (Vite plugin)
   cloudflare/      → @sigx/cloudflare     (Cloudflare Workers deploy adapter)
+  vercel/          → @sigx/vercel         (Vercel deploy adapter)
+  netlify/         → @sigx/netlify        (Netlify deploy adapter)
 ```
 
 ## Common tasks

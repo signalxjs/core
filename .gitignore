@@ -6,6 +6,11 @@ node_modules/
 # Build outputs
 dist/
 dist-cf/
+dist-vercel/
+dist-netlify/
+.netlify/
+.vercel/
+dist-deno/
 build/
 docs/dist/
 *.d.ts
@@ -67,3 +72,6 @@ bench-results.json
 # SSR benchmark results (pnpm bench:ssr) — only the committed baseline is kept
 benchmarks/results/*
 !benchmarks/results/baseline.json
+
+# Deno auto-creates a lockfile when running the deploy-smoke entries
+examples/*/deno.lock

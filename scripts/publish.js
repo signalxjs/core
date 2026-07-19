@@ -47,6 +47,8 @@ const PACKAGES = [
     'packages/server',
     'packages/vite',
     'packages/cloudflare',
+    'packages/vercel',
+    'packages/netlify',
 ];
 
 const args = process.argv.slice(2);

@@ -51,6 +51,8 @@ body:
         - "@sigx/server"
         - "@sigx/vite"
         - "@sigx/cloudflare"
+        - "@sigx/vercel"
+        - "@sigx/netlify"
         - Not sure
     validations:
       required: true
