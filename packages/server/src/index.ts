@@ -69,6 +69,25 @@ export interface ServerFnOptions<S, R> {
      * route-level middleware can. Veto by throwing; hand off via `rq.locals`.
      */
     use?: ServerFnGuard[];
+    /**
+     * Server-declared cache invalidation (rfc-server §6.2): which cache
+     * keys this mutation invalidates, computed WHERE the data changed so
+     * it cannot drift from the mutation. Runs after the handler resolves;
+     * the endpoint attaches the keys to the response envelope as
+     * `$cache.invalidates`, and `@sigx/cache` feeds them to `invalidate()`
+     * on arrival. Patterns follow `invalidate()`'s contract: a canonical
+     * string, or a tuple prefix (`['cart']` matches every cart key).
+     * Wire-only — in-process calls skip it (there is no envelope).
+     * TypeScript note: write it AFTER `handler` in the options literal —
+     * context-sensitive members infer in textual order, so `result` falls
+     * to `unknown` when this precedes the handler.
+     */
+    invalidates?(
+        input: S,
+        result: Awaited<R>
+    ):
+        | ReadonlyArray<string | readonly unknown[]>
+        | Promise<ReadonlyArray<string | readonly unknown[]>>;
     handler(rq: ServerFnContext, input: S): R | Promise<R>;
 }
 
@@ -108,6 +127,9 @@ export function serverFn(
                 }
                 input = result.value;
             }
+            // Stash the VALIDATED input for the endpoint's `invalidates`
+            // call (§6.2) — per-request context, so concurrency-safe.
+            (rq as { _input?: unknown })._input = input;
             return options.handler(rq, input);
         };
         name = options.handler.name || '';
@@ -119,7 +141,14 @@ export function serverFn(
         assertNotLiveClient(name);
         return invoke(createDetachedContext(), { symbol: '', name }, args);
     };
-    return Object.assign(wrapper, { __sigxFn: invoke, __sigxName: name });
+    // The §6.2 seam for the ENDPOINT (wire-only — the wrapper above never
+    // computes directives): validated input + settled result → keys.
+    const invalidates = typeof arg === 'function' ? undefined : arg.invalidates;
+    return Object.assign(wrapper, {
+        __sigxFn: invoke,
+        __sigxName: name,
+        ...(invalidates ? { __sigxInvalidates: invalidates } : {})
+    });
 }
 
 /**

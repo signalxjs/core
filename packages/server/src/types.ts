@@ -42,6 +42,18 @@ export interface WrappedServerFn {
      * JSON envelope (rfc-server §6.1).
      */
     __sigxStream?: boolean;
+    /**
+     * Present when the options form declared `invalidates` (rfc-server
+     * §6.2): VALIDATED input (stashed on the request context by the
+     * pipeline) + settled result → cache keys the endpoint attaches to the
+     * envelope as `$cache.invalidates`.
+     */
+    __sigxInvalidates?(
+        input: unknown,
+        result: unknown
+    ):
+        | ReadonlyArray<string | readonly unknown[]>
+        | Promise<ReadonlyArray<string | readonly unknown[]>>;
 }
 
 /**

@@ -27,6 +27,9 @@ export interface ServerFnContext {
 /** Internal view: the HTTP handler reads the status override back out. */
 export interface InternalServerFnContext extends ServerFnContext {
     _status?: number;
+    /** The options form's VALIDATED input, stashed per-request so the
+     *  endpoint feeds `invalidates` exactly what the handler saw (§6.2). */
+    _input?: unknown;
 }
 
 /** Build the live context for one HTTP invocation. */

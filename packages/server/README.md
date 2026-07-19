@@ -92,6 +92,29 @@ export const quote = serverFn({
 });
 ```
 
+### Server-declared invalidation
+
+A mutation declares which cache keys it invalidates **where the data
+changed**, so the declaration cannot drift from the mutation — the keys
+ride the response envelope (`$cache.invalidates`) and `@sigx/cache` feeds
+them to `invalidate()` on arrival, with zero wiring:
+
+```ts
+export const addToCart = serverFn({
+    input: AddInput,
+    async handler(rq, input) {
+        return db.cart.add(input);
+    },
+    // Runs after the handler, on the VALIDATED input + the result.
+    invalidates: (input, result) => [['cart', input.cartId], ['totals']]
+});
+```
+
+Client-side `cache.invalidates` on `useAction` still works; the
+server-declared form is the better default for server-owned data.
+(Declare it after `handler` in the literal — TypeScript infers `result`
+in textual order.)
+
 ### Streaming (`serverStream`)
 
 An async generator wrapped in `serverStream` streams its yields to the

@@ -198,8 +198,18 @@ export async function handleServerFnRequest(
         }
         const headers = new Headers(ctx.responseHeaders);
         headers.set('content-type', 'application/json');
-        const payload = result === undefined ? '{}' : JSON.stringify({ data: result });
-        return new Response(payload, { status: ctx._status ?? 200, headers });
+        const envelope: Record<string, unknown> = {};
+        if (result !== undefined) envelope.data = result;
+        // Server-declared cache directives (rfc-server §6.2) — computed
+        // where the data changed, from the VALIDATED input the pipeline
+        // stashed; a throw here is a fn error (masked per §5).
+        if (fn.__sigxInvalidates) {
+            const invalidates = await fn.__sigxInvalidates(ctx._input, result);
+            if (Array.isArray(invalidates) && invalidates.length > 0) {
+                envelope.$cache = { invalidates };
+            }
+        }
+        return new Response(JSON.stringify(envelope), { status: ctx._status ?? 200, headers });
     } catch (error) {
         const shape = wireErrorShape(error, info.name || symbol);
         return errorResponse(shape.status, shape.message, shape.data, ctx.responseHeaders);

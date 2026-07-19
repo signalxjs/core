@@ -5,6 +5,15 @@ repository-root `CHANGELOG.md`.
 
 ## [Unreleased]
 
+### Added
+
+- Server-declared invalidation (rfc-server §6.2, core#311): `cachePlugin()`
+  now installs the `__SIGX_SERVERFN_CACHE__` envelope seam — when a
+  `serverFn` response carries `$cache.invalidates`, each pattern feeds
+  `store.invalidate()` directly (tuple prefixes included). No wiring, no
+  dependency on `@sigx/server` (a global seam, not an import); disposal
+  removes only the app's own handler.
+
 ### Changed
 
 - Production builds now log a compact coded error when the focus-revalidation
