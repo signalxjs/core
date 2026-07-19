@@ -11,6 +11,9 @@
  * the `__sigxServerFnError` brand so `isServerFnError` matches them.
  */
 
+// Type-only — erased at build, so the entry stays dependency-free.
+import type { ServerFnCallOptions } from '../types';
+
 /** Same three keys as the boundary serializer's DANGEROUS_KEYS — duplicated
  *  here (a 3-entry set) to keep this entry dependency-free. */
 const DANGEROUS_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
@@ -132,7 +135,7 @@ export function __serverFnStub(
     name: string,
     endpoint: string
 ): ((...args: unknown[]) => Promise<unknown>) & {
-    with(options?: { signal?: AbortSignal }): (...args: unknown[]) => Promise<unknown>;
+    with(options?: ServerFnCallOptions): (...args: unknown[]) => Promise<unknown>;
 } {
     const call = async (args: unknown[], signal?: AbortSignal): Promise<unknown> => {
         const res = await send(endpoint, symbol, args, signal);
@@ -158,7 +161,7 @@ export function __serverFnStub(
     // exactly the user's args (no trailing-argument sniffing).
     return Object.assign((...args: unknown[]) => call(args), {
         with:
-            (options?: { signal?: AbortSignal }) =>
+            (options?: ServerFnCallOptions) =>
             (...args: unknown[]) =>
                 call(args, options?.signal)
     });
