@@ -298,6 +298,22 @@ describe('createDevRequestHandler', () => {
         expect(transformRequest).not.toHaveBeenCalled();
     });
 
+    it('never emits styles before the doctype (no quirks mode) on a head-less template', async () => {
+        // A template without </head> must still keep <!doctype html> first —
+        // prepending would drop the browser into quirks mode.
+        const headless = join(root, 'headless.html');
+        writeFileSync(headless, '<!doctype html><html><body><div id="app"><!--ssr-outlet--></div></body></html>');
+        const { vite } = styledVite(mod(ENTRY, [mod('/src/styles.css')]), {
+            '/src/styles.css': '.q{}'
+        });
+        const handler = await createDevRequestHandler(vite, { entry: ENTRY, template: 'headless.html' });
+        const res = await run(handler, '/');
+        expect(res.body.startsWith('<!doctype html>')).toBe(true);
+        expect(res.body).toContain('.q{}');
+        // Placed before </body>, not after the document.
+        expect(res.body.indexOf('.q{}')).toBeLessThan(res.body.indexOf('</body>'));
+    });
+
     it('is a no-op when the graph holds no CSS (inline-<style> templates)', async () => {
         const { vite } = styledVite(mod(ENTRY, [mod('/src/App.tsx')]), {});
         const handler = await createDevRequestHandler(vite, { entry: ENTRY });

@@ -383,10 +383,16 @@ export async function createDevRequestHandler(
                     // full of `$`, which a string replacement would expand.
                     const styles = await collectDevStyles(vite, options.entry, loadEntry);
                     if (!styles) return html;
-                    const close = html.indexOf('</head>');
-                    return close === -1
-                        ? styles + html
-                        : html.slice(0, close) + styles + html.slice(close);
+                    // `</head>` normally; `</body>` for a head-less template.
+                    // NEVER prepend — that would put markup ahead of the
+                    // doctype and drop the browser into quirks mode.
+                    const close = (() => {
+                        const head = html.indexOf('</head>');
+                        if (head !== -1) return head;
+                        const body = html.indexOf('</body>');
+                        return body !== -1 ? body : html.length;
+                    })();
+                    return html.slice(0, close) + styles + html.slice(close);
                 },
                 app: async (url) => {
                     const mod = await loadEntry();
