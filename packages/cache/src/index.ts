@@ -91,7 +91,18 @@ export function cachePlugin(defaults?: CacheDefaults): Plugin {
             const onDirectives: NonNullable<typeof seam.__SIGX_SERVERFN_CACHE__> = (
                 directives
             ) => {
-                for (const pattern of directives.invalidates ?? []) store.invalidate(pattern);
+                for (const pattern of directives.invalidates ?? []) {
+                    // Isolate per pattern: wire patterns are JSON-safe by
+                    // construction, but the seam is a global — one bad
+                    // pattern from another caller must not starve the rest.
+                    try {
+                        store.invalidate(pattern);
+                    } catch (error) {
+                        if (__DEV__) {
+                            console.error('[sigx cache] $cache pattern failed to invalidate:', pattern, error);
+                        }
+                    }
+                }
             };
             seam.__SIGX_SERVERFN_CACHE__ = onDirectives;
             app._context.disposables.add(() => {

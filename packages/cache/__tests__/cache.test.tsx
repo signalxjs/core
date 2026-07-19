@@ -803,6 +803,28 @@ describe('@sigx/cache', () => {
         expect(fetcher).toHaveBeenCalledTimes(2);
     });
 
+    it('one bad pattern does not starve the rest of a directive batch', async () => {
+        let calls = 0;
+        const fetcher = vi.fn(async () => ({ v: ++calls }));
+        let cell!: AsyncState<{ v: number }>;
+        const Root = component(() => {
+            cell = useData(() => ['cart', '42'], fetcher, { cache: { staleTime: 60_000 } });
+            return () => <div>{cell.value?.v}</div>;
+        });
+        mountWith(cachePlugin(), jsx(Root, {}));
+        await settle();
+        expect(fetcher).toHaveBeenCalledTimes(1);
+
+        const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+        // Wire patterns are JSON-safe by construction, but the seam is a
+        // global — an unstringifiable pattern from another caller throws
+        // inside invalidate() and must not abort the batch.
+        seam()!({ invalidates: [[10n as unknown as string], ['cart']] });
+        await settle();
+        expect(fetcher).toHaveBeenCalledTimes(2);
+        spy.mockRestore();
+    });
+
     it('unmount removes its OWN seam handler, and a later install supersedes', async () => {
         const Root = component(() => () => <div />);
         mountWith(cachePlugin(), jsx(Root, {}));

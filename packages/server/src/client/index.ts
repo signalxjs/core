@@ -120,7 +120,9 @@ function deliverCacheDirectives(directives: ServerFnCacheDirectives): void {
     try {
         hook(directives);
     } catch (error) {
-        console.error('[sigx server] $cache envelope hook threw:', error);
+        // Swallowed either way — a cache-pack bug must not break the RPC
+        // result; the detail is dev-only, matching the package's posture.
+        if (__DEV__) console.error('[sigx server] $cache envelope hook threw:', error);
     }
 }
 
