@@ -116,21 +116,50 @@ export function serverFn(
     // In-process (SSR-time) calls run the same pipeline against a detached
     // context — no network hop, and no transport symbol (rfc-server §7 v1).
     const wrapper = (...args: unknown[]) => {
-        // A declared live client (lynx/terminal — `declareLiveClient()` stamps
-        // the global; rfc-server rev 2 N.2) must never execute server bodies
-        // locally: reaching this wrapper there means the build skipped the
-        // stub swap. Checked at CALL time (robust to declaration ordering)
-        // and not __DEV__-gated, matching the browser-condition posture.
-        // A global marker, not a runtime-core import — this package stays
-        // dependency-free of the runtime.
-        if ((globalThis as { __SIGX_LIVE_CLIENT__?: unknown }).__SIGX_LIVE_CLIENT__ === true) {
-            throw new Error(
-                `[sigx server] server function ${name ? `"${name}" ` : ''}reached a live client ` +
-                `unextracted — this app must call its backend over stubs (set role: 'client' in ` +
-                `sigxServer(), or fix the bundler integration).`
-            );
-        }
+        assertNotLiveClient(name);
         return invoke(createDetachedContext(), { symbol: '', name }, args);
     };
     return Object.assign(wrapper, { __sigxFn: invoke, __sigxName: name });
+}
+
+/**
+ * A declared live client (lynx/terminal — `declareLiveClient()` stamps the
+ * global; rfc-server rev 2 N.2) must never execute server bodies locally:
+ * reaching a real wrapper there means the build skipped the stub swap.
+ * Checked at CALL time (robust to declaration ordering) and not
+ * __DEV__-gated, matching the browser-condition posture. A global marker,
+ * not a runtime-core import — this package stays dependency-free of the
+ * runtime.
+ */
+function assertNotLiveClient(name: string): void {
+    if ((globalThis as { __SIGX_LIVE_CLIENT__?: unknown }).__SIGX_LIVE_CLIENT__ === true) {
+        throw new Error(
+            `[sigx server] server function ${name ? `"${name}" ` : ''}reached a live client ` +
+            `unextracted — this app must call its backend over stubs (set role: 'client' in ` +
+            `sigxServer(), or fix the bundler integration).`
+        );
+    }
+}
+
+/**
+ * Wrap a server-only async generator (rfc-server §6.1). Client callers get
+ * `(...args) => AsyncIterable<T>`: over the wire each yield is an NDJSON
+ * `{"chunk"}` line (then `{"done"}` / `{"error"}`); in-process the call is
+ * the generator itself — no transport, same pipeline discipline. A
+ * string-yielding stream plugs into `useStream` as-is. Response headers
+ * freeze at the first yield (unlike `serverFn`'s buffered JSON, where
+ * `rq.responseHeaders`/`rq.status()` apply until the body is written).
+ */
+export function serverStream<A extends unknown[], T>(
+    impl: (rq: ServerFnContext, ...args: A) => AsyncGenerator<T>
+): ((...args: A) => AsyncIterable<T>) & WrappedServerFn {
+    const name = impl.name || '';
+    // Async so transports get a settled value to marker-check; the resolved
+    // value is the (not-yet-started) generator.
+    const invoke: ServerFnInvoke = async (rq, _info, args) => impl(rq, ...(args as A));
+    const wrapper = (...args: A): AsyncIterable<T> => {
+        assertNotLiveClient(name);
+        return impl(createDetachedContext(), ...args);
+    };
+    return Object.assign(wrapper, { __sigxFn: invoke, __sigxName: name, __sigxStream: true as const });
 }

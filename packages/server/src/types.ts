@@ -36,6 +36,12 @@ export type ServerFnInvoke = (
 export interface WrappedServerFn {
     __sigxFn: ServerFnInvoke;
     __sigxName: string;
+    /**
+     * Present (true) on `serverStream` wrappers: `__sigxFn` resolves to an
+     * AsyncGenerator and the endpoint streams NDJSON instead of buffering a
+     * JSON envelope (rfc-server §6.1).
+     */
+    __sigxStream?: boolean;
 }
 
 /**

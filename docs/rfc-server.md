@@ -732,11 +732,11 @@ option (revisit only if that proves painful).
   right behind, within the same milestone.
 - **v1.1**: AsyncLocalStorage ambient request context (`/node`) so SSR-time
   calls see the real request; per-fn guard overrides.
-- **v2**: `serverStream` → `useStream` (6.1); server-declared cache
-  directives (6.2) with `@sigx/cache`; zero-JS forms (6.4); per-call
-  options (AbortSignal pass-through, headers); GET + cache semantics for
-  idempotent reads; rich type-handler wire serialization once the revive
-  side of the serializer seam ships.
+- **v2**: `serverStream` → `useStream` (6.1 — **shipped**, #310);
+  server-declared cache directives (6.2) with `@sigx/cache`; zero-JS forms
+  (6.4); per-call options (AbortSignal pass-through, headers); GET + cache
+  semantics for idempotent reads; rich type-handler wire serialization once
+  the revive side of the serializer seam ships.
 - **v2+**: single-flight boundary refresh (6.3) once the envelope and the
   per-request re-render path are proven.
 - **Native clients (rev 2, one milestone, independent of v2)**:

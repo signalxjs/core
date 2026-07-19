@@ -110,9 +110,10 @@ const REGEX_SPECIALS = /[.*+?^${}()|[\]\\]/g;
 const escapeRe = (name: string): string => name.replace(REGEX_SPECIALS, '\\$&');
 
 /**
- * Call-site patterns for `serverFn` as value-imported from '@sigx/server' —
- * named (aliased or not) and namespace imports. Best-effort dev lint, not
- * an analysis: re-exports and indirections are out of scope.
+ * Call-site patterns for `serverFn`/`serverStream` as value-imported from
+ * '@sigx/server' — named (aliased or not) and namespace imports.
+ * Best-effort dev lint, not an analysis: re-exports and indirections are
+ * out of scope.
  */
 function serverFnCallPatterns(code: string): RegExp[] {
     const patterns: RegExp[] = [];
@@ -120,22 +121,28 @@ function serverFnCallPatterns(code: string): RegExp[] {
         const clause = match[1];
         const namespace = /\*\s*as\s+([\w$]+)/.exec(clause);
         if (namespace) {
-            patterns.push(new RegExp(`(?<![\\w$.])${escapeRe(namespace[1])}\\s*\\.\\s*serverFn\\s*\\(`));
+            patterns.push(
+                new RegExp(
+                    `(?<![\\w$.])${escapeRe(namespace[1])}\\s*\\.\\s*server(?:Fn|Stream)\\s*\\(`
+                )
+            );
             continue;
         }
-        if (/\btype\s+serverFn\b/.test(clause)) continue; // inline type import
-        const spec = /\bserverFn\b(?:\s+as\s+([\w$]+))?/.exec(clause);
-        if (spec) {
-            // Escape the alias ($ is a valid identifier char but a regex
-            // anchor); the lookbehind's dot exclusion keeps unrelated
-            // property calls (obj.serverFn()) from matching.
-            patterns.push(new RegExp(`(?<![\\w$.])${escapeRe(spec[1] ?? 'serverFn')}\\s*\\(`));
+        for (const wrapper of ['serverFn', 'serverStream']) {
+            if (new RegExp(`\\btype\\s+${wrapper}\\b`).test(clause)) continue; // inline type import
+            const spec = new RegExp(`\\b${wrapper}\\b(?:\\s+as\\s+([\\w$]+))?`).exec(clause);
+            if (spec) {
+                // Escape the alias ($ is a valid identifier char but a regex
+                // anchor); the lookbehind's dot exclusion keeps unrelated
+                // property calls (obj.serverFn()) from matching.
+                patterns.push(new RegExp(`(?<![\\w$.])${escapeRe(spec[1] ?? wrapper)}\\s*\\(`));
+            }
         }
     }
     return patterns;
 }
 
-/** Does the code call serverFn under any of its imported names? */
+/** Does the code call serverFn/serverStream under any of its imported names? */
 function callsServerFn(code: string): boolean {
     return serverFnCallPatterns(code).some((pattern) => pattern.test(code));
 }
@@ -406,7 +413,7 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
             // registry cache feeds the SSR build). Match the exact generated
             // header, not any '@sigx/server/client' import — a real server
             // module may legitimately import the client entry.
-            if (/^import \{ __server(?:FnStub|Only)/.test(code)) return null;
+            if (/^import \{ __server(?:FnStub|StreamStub|Only)/.test(code)) return null;
             // The incoming code is authoritative (dev edits arrive here before
             // any fs watcher) — re-extract and refresh the registry cache.
             const extraction = extractInto(clean, code);

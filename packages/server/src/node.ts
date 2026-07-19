@@ -82,8 +82,47 @@ export function createServerFnHandler(options: ServerFnHandlerOptions): NodeRequ
             ).getSetCookie?.();
             if (setCookie && setCookie.length > 0) headers['set-cookie'] = setCookie;
             res.writeHead(response.status, headers);
-            res.end(Buffer.from(await response.arrayBuffer()));
+            if (!response.body) {
+                res.end();
+                return;
+            }
+            // Pump instead of buffering: serverStream responses are
+            // long-lived NDJSON bodies — buffering would stall progressive
+            // delivery (and never finish for long streams). Respect
+            // backpressure, and cancel the source on client disconnect (the
+            // stream's cancel() returns the server generator).
+            const reader = response.body.getReader();
+            res.on('close', () => {
+                // Fire-and-forget: cancel() rejects if the stream already
+                // errored — never let that surface as an unhandled rejection.
+                if (!res.writableEnded) void reader.cancel().catch(() => {});
+            });
+            for (;;) {
+                const { value, done } = await reader.read();
+                if (done || res.destroyed) break;
+                if (!res.write(value)) {
+                    // Race drain against close — a client that disconnects
+                    // while backpressured never emits 'drain', and an
+                    // unraced wait would pin this handler forever.
+                    await new Promise<void>((resolve) => {
+                        const settle = (): void => {
+                            res.off('drain', settle);
+                            res.off('close', settle);
+                            resolve();
+                        };
+                        res.once('drain', settle);
+                        res.once('close', settle);
+                    });
+                    if (res.destroyed) break;
+                }
+            }
+            if (!res.destroyed) res.end();
         } catch (err) {
+            if (res.headersSent) {
+                // Mid-body failure — the status is gone; just drop the socket.
+                res.destroy();
+                return;
+            }
             if (next) {
                 next(err);
                 return;

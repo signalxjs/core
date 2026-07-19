@@ -11,6 +11,16 @@
 
 ### Added
 
+- `serverStream()` (rfc-server §6.1, #310): async-generator server
+  functions. Yields stream to the client as NDJSON
+  (`{"chunk"}` lines, then `{"done":1}` / in-band `{"error"}` with the §5
+  masking rules); the stub returns a lazy `AsyncIterable` — consumer
+  `break`/`return()` aborts the fetch and the server generator's `finally`
+  runs. String-yielding streams plug into `useStream` unchanged. Response
+  headers/status freeze at the first yield; pre-yield throws are ordinary
+  buffered JSON errors. The `/node` adapter now PUMPS response bodies with
+  backpressure instead of buffering (long streams deliver progressively),
+  and both authoring forms extract via `@sigx/vite/server`.
 - `matchesServerFn(request, base = '/_sigx/fn')` on `@sigx/server/server`
   (rfc-deploy §2, #320/#321): the routing predicate platform entries compose
   with — pathname-under-mount-path match, method deliberately unchecked (a

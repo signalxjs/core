@@ -58,6 +58,8 @@ export interface InlineServerFn {
     symbol: string;
     /** Hash-free stable symbol: `<stableId>#<name>` (decoded form). */
     stableSymbol: string;
+    /** True for `serverStream` (NDJSON transport, AsyncIterable stub). */
+    stream: boolean;
     /** The appended SSR export the endpoint resolves. */
     mangled: string;
 }
@@ -332,7 +334,7 @@ export function extractInlineServerFns(
     const program = parseAst(code, { lang: LANG_BY_EXT[ext] ?? 'tsx' }, clean) as unknown as Node;
 
     // -- module scan: serverFn aliases, imports, module-scope locals --
-    const serverFnLocals = new Set<string>();
+    const wrapperLocals = new Map<string, 'fn' | 'stream'>();
     const namespaceLocals = new Set<string>();
     /** import local → typeOnly */
     const imports = new Map<string, boolean>();
@@ -349,8 +351,10 @@ export function extractInlineServerFns(
                 const typeOnly = stmtTypeOnly || spec.importKind === 'type';
                 imports.set(local, typeOnly);
                 if (typeOnly || source !== '@sigx/server') continue;
-                if (spec.type === 'ImportSpecifier' && ((spec.imported as Node).name as string) === 'serverFn') {
-                    serverFnLocals.add(local);
+                if (spec.type === 'ImportSpecifier') {
+                    const imported = (spec.imported as Node).name as string;
+                    if (imported === 'serverFn') wrapperLocals.set(local, 'fn');
+                    else if (imported === 'serverStream') wrapperLocals.set(local, 'stream');
                 }
                 if (spec.type === 'ImportNamespaceSpecifier') namespaceLocals.add(local);
             }
@@ -391,19 +395,24 @@ export function extractInlineServerFns(
         }
     }
 
-    const isServerFnCallee = (callee: Node): boolean => {
-        if (callee.type === 'Identifier') return serverFnLocals.has(callee.name as string);
-        return (
+    const calleeKind = (callee: Node): 'fn' | 'stream' | undefined => {
+        if (callee.type === 'Identifier') return wrapperLocals.get(callee.name as string);
+        if (
             callee.type === 'MemberExpression' &&
             callee.computed !== true &&
             (callee.object as Node).type === 'Identifier' &&
             namespaceLocals.has(((callee.object as Node).name as string) ?? '') &&
-            isNode(callee.property) &&
-            ((callee.property as Node).name as string) === 'serverFn'
-        );
+            isNode(callee.property)
+        ) {
+            const prop = (callee.property as Node).name as string;
+            if (prop === 'serverFn') return 'fn';
+            if (prop === 'serverStream') return 'stream';
+        }
+        return undefined;
     };
+    const isServerFnCallee = (callee: Node): boolean => calleeKind(callee) !== undefined;
 
-    if (serverFnLocals.size === 0 && namespaceLocals.size === 0) {
+    if (wrapperLocals.size === 0 && namespaceLocals.size === 0) {
         return { fns: [], errors: [], warnings: [], clientModule: null, ssrModule: null };
     }
 
@@ -450,7 +459,7 @@ export function extractInlineServerFns(
             }
             let bad = false;
             for (const ref of refs) {
-                if (serverFnLocals.has(ref.name)) continue; // the wrapper itself
+                if (wrapperLocals.has(ref.name)) continue; // the wrapper itself
                 const typeOnly = imports.get(ref.name);
                 if (typeOnly === false) continue;           // value import — legal
                 if (typeOnly === true) {
@@ -477,14 +486,19 @@ export function extractInlineServerFns(
             if (bad) continue;
 
             const callSource = code.slice(call.start, call.end);
-            const idOption = readServerFnIdOption(call);
+            const stream = calleeKind(call.callee as Node) === 'stream';
+            // Explicit `id` is the OPTIONS form's field — serverStream is
+            // direct-form only, so only serverFn calls are probed.
+            const idOption = stream
+                ? { id: undefined, nonLiteral: false as const }
+                : readServerFnIdOption(call);
             if (idOption.nonLiteral) {
                 warnings.push(
                     `serverFn "${name}": \`id\` must be a non-empty string literal (it is read ` +
                     `statically) — falling back to the file-derived stable id.`
                 );
             }
-            const minted = mintSymbols(name, callSource, idOption.id, options.stableId);
+            const minted = mintSymbols(name, callSource, idOption.id, options.stableId, stream);
             const mangled = MANGLE_PREFIX + name;
             if (moduleLocals.has(mangled) || imports.has(mangled) || exportedNames.has(mangled)) {
                 errors.push({
@@ -495,10 +509,11 @@ export function extractInlineServerFns(
             }
             fns.push({ ...minted, mangled });
             const wireSymbol = options.stubSymbols === 'stable' ? minted.stableSymbol : minted.symbol;
+            const factory = stream ? '__serverStreamStub' : '__serverFnStub';
             clientSplices.push({
                 start: call.start,
                 end: call.end,
-                text: `__serverFnStub(${JSON.stringify(wireSymbol)}, ${JSON.stringify(name)}, ${JSON.stringify(options.endpoint)})`
+                text: `${factory}(${JSON.stringify(wireSymbol)}, ${JSON.stringify(name)}, ${JSON.stringify(options.endpoint)})`
             });
         }
     }
@@ -517,23 +532,26 @@ export function extractInlineServerFns(
         }
     });
 
-    // The stub runtime's identifier is injected into the client output —
+    // The stub runtime's identifiers are injected into the client output —
     // a same-named binding in the source would collide with the import.
-    if (
-        fns.length > 0 &&
-        (moduleLocals.has('__serverFnStub') || imports.has('__serverFnStub') || exportedNames.has('__serverFnStub'))
-    ) {
+    const usedFactories: string[] = [];
+    if (fns.some((fn) => !fn.stream)) usedFactories.push('__serverFnStub');
+    if (fns.some((fn) => fn.stream)) usedFactories.push('__serverStreamStub');
+    for (const factory of usedFactories) {
+        if (!moduleLocals.has(factory) && !imports.has(factory) && !exportedNames.has(factory)) {
+            continue;
+        }
         // Point the error at the conflicting binding, not line 1.
         let conflictOffset = 0;
         walk(program, (node) => {
-            if (conflictOffset === 0 && node.type === 'Identifier' && node.name === '__serverFnStub') {
+            if (conflictOffset === 0 && node.type === 'Identifier' && node.name === factory) {
                 conflictOffset = node.start;
                 return false;
             }
         });
         errors.push({
             offset: conflictOffset,
-            message: '"__serverFnStub" is reserved by the server-function transform — rename the binding.'
+            message: `"${factory}" is reserved by the server-function transform — rename the binding.`
         });
     }
 
@@ -543,7 +561,7 @@ export function extractInlineServerFns(
 
     // -- client module: stub swap + strip imports orphaned by the swap --
     const swapped =
-        `import { __serverFnStub } from '@sigx/server/client';\n` +
+        `import { ${usedFactories.join(', ')} } from '@sigx/server/client';\n` +
         applySplices(code, clientSplices);
     const clientModule = stripUnusedImports(swapped, clean);
 

@@ -60,6 +60,8 @@ export interface ExtractedServerFn {
     symbol: string;
     /** Hash-free stable symbol: `<stableId>#<name>` (decoded form). */
     stableSymbol: string;
+    /** True for `serverStream` (NDJSON transport, AsyncIterable stub). */
+    stream: boolean;
 }
 
 /** Shared options for both extractors (file form and inline). */
@@ -137,13 +139,15 @@ export function mintSymbols(
     name: string,
     implSource: string,
     explicitId: string | undefined,
-    stableId: string
+    stableId: string,
+    stream = false
 ): ExtractedServerFn {
     const fnStableId = explicitId ?? stableId;
     return {
         name,
         symbol: `${name}_fn_${hash8(`${fnStableId}\0${name}\0${implSource}`)}`,
-        stableSymbol: `${fnStableId}#${name}`
+        stableSymbol: `${fnStableId}#${name}`,
+        stream
     };
 }
 
@@ -161,31 +165,61 @@ export function extractServerFns(
     const ext = clean.slice(clean.lastIndexOf('.'));
     const program = parseAst(code, { lang: LANG_BY_EXT[ext] ?? 'ts' }, clean) as unknown as Node;
 
-    // -- pass 1: locals — `serverFn` aliases and module-level serverFn decls --
-    const serverFnLocals = new Set<string>();
+    // -- pass 1: locals — `serverFn`/`serverStream` aliases (named or
+    // namespace imports) and their module-level declarations --
+    const wrapperLocals = new Map<string, 'fn' | 'stream'>();
+    const namespaceLocals = new Set<string>();
     for (const stmt of program.body as Node[]) {
         if (stmt.type !== 'ImportDeclaration') continue;
         if (((stmt.source as Node).value as string) !== '@sigx/server') continue;
         if (stmt.importKind === 'type') continue;
         for (const spec of (stmt.specifiers as Node[]) ?? []) {
-            if (spec.type !== 'ImportSpecifier' || spec.importKind === 'type') continue;
-            if (((spec.imported as Node).name as string) === 'serverFn') {
-                serverFnLocals.add((spec.local as Node).name as string);
+            if (spec.importKind === 'type') continue;
+            if (spec.type === 'ImportNamespaceSpecifier') {
+                namespaceLocals.add((spec.local as Node).name as string);
+                continue;
+            }
+            if (spec.type !== 'ImportSpecifier') continue;
+            const imported = (spec.imported as Node).name as string;
+            if (imported === 'serverFn') {
+                wrapperLocals.set((spec.local as Node).name as string, 'fn');
+            } else if (imported === 'serverStream') {
+                wrapperLocals.set((spec.local as Node).name as string, 'stream');
             }
         }
     }
 
     const warnings: string[] = [];
 
-    /** local name → serverFn(...) call source + explicit stable id, for
+    /** local name → wrapped call source + kind + explicit stable id, for
      *  `export { x }` resolution. */
-    const localFnSources = new Map<string, { source: string; explicitId?: string }>();
-    const isServerFnCall = (init: unknown): init is Node =>
-        isNode(init) &&
-        init.type === 'CallExpression' &&
-        isNode(init.callee) &&
-        (init.callee as Node).type === 'Identifier' &&
-        serverFnLocals.has(((init.callee as Node).name as string) ?? '');
+    const localFnSources = new Map<
+        string,
+        { source: string; stream: boolean; explicitId?: string }
+    >();
+    const wrapperKind = (init: unknown): 'fn' | 'stream' | undefined => {
+        if (!isNode(init) || init.type !== 'CallExpression' || !isNode(init.callee)) {
+            return undefined;
+        }
+        const callee = init.callee as Node;
+        if (callee.type === 'Identifier') {
+            return wrapperLocals.get((callee.name as string) ?? '');
+        }
+        // Namespace form: `srv.serverFn(...)` / `srv.serverStream(...)`.
+        if (
+            callee.type === 'MemberExpression' &&
+            callee.computed !== true &&
+            (callee.object as Node).type === 'Identifier' &&
+            namespaceLocals.has(((callee.object as Node).name as string) ?? '') &&
+            isNode(callee.property)
+        ) {
+            const prop = (callee.property as Node).name as string;
+            if (prop === 'serverFn') return 'fn';
+            if (prop === 'serverStream') return 'stream';
+        }
+        return undefined;
+    };
+    const isServerFnCall = (init: unknown): init is Node => wrapperKind(init) !== undefined;
 
     for (const stmt of program.body as Node[]) {
         const decl = stmt.type === 'ExportNamedDeclaration' && isNode(stmt.declaration)
@@ -194,9 +228,15 @@ export function extractServerFns(
         if (decl.type !== 'VariableDeclaration') continue;
         for (const declarator of decl.declarations as Node[]) {
             if ((declarator.id as Node).type !== 'Identifier') continue;
-            if (!isServerFnCall(declarator.init)) continue;
+            const kind = wrapperKind(declarator.init);
+            if (kind === undefined) continue;
             const init = declarator.init as Node;
-            const idOption = readServerFnIdOption(init);
+            // Explicit `id` is the OPTIONS form's field — serverStream is
+            // direct-form only, so only serverFn calls are probed.
+            const idOption =
+                kind === 'fn'
+                    ? readServerFnIdOption(init)
+                    : { id: undefined, nonLiteral: false as const };
             if (idOption.nonLiteral) {
                 warnings.push(
                     `serverFn "${(declarator.id as Node).name as string}": \`id\` must be a ` +
@@ -206,6 +246,7 @@ export function extractServerFns(
             }
             localFnSources.set((declarator.id as Node).name as string, {
                 source: code.slice(init.start, init.end),
+                stream: kind === 'stream',
                 explicitId: idOption.id
             });
         }
@@ -219,7 +260,13 @@ export function extractServerFns(
         const record = localFnSources.get(localName);
         if (record !== undefined) {
             fns.push(
-                mintSymbols(exportedName, record.source, record.explicitId, options.stableId)
+                mintSymbols(
+                    exportedName,
+                    record.source,
+                    record.explicitId,
+                    options.stableId,
+                    record.stream
+                )
             );
         } else {
             serverOnly.push(exportedName);
@@ -298,14 +345,16 @@ export function extractServerFns(
     const lines: string[] = [];
     if (fns.length > 0 || serverOnly.length > 0) {
         const used: string[] = [];
-        if (fns.length > 0) used.push('__serverFnStub');
+        if (fns.some((fn) => !fn.stream)) used.push('__serverFnStub');
+        if (fns.some((fn) => fn.stream)) used.push('__serverStreamStub');
         if (serverOnly.length > 0) used.push('__serverOnly');
         lines.push(`import { ${used.join(', ')} } from '@sigx/server/client';`);
     }
     for (const fn of fns) {
         const wireSymbol = options.stubSymbols === 'stable' ? fn.stableSymbol : fn.symbol;
+        const factory = fn.stream ? '__serverStreamStub' : '__serverFnStub';
         lines.push(
-            `export const ${fn.name} = __serverFnStub(${JSON.stringify(wireSymbol)}, ` +
+            `export const ${fn.name} = ${factory}(${JSON.stringify(wireSymbol)}, ` +
             `${JSON.stringify(fn.name)}, ${JSON.stringify(options.endpoint)});`
         );
     }

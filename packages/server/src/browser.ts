@@ -28,3 +28,11 @@ export function serverFn(): never {
         '(default **/*.server.{ts,tsx})?'
     );
 }
+
+export function serverStream(): never {
+    throw new Error(
+        '[sigx server] serverStream() reached the browser unextracted — is the @sigx/vite/server ' +
+        'plugin configured, and does this file match its include pattern ' +
+        '(default **/*.server.{ts,tsx})?'
+    );
+}
