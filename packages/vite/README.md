@@ -86,6 +86,23 @@ import { collectAssets } from '@sigx/vite/ssr';
 const assets = collectAssets(manifest, ['index.html']);
 ```
 
+### Styles in dev
+
+There is no manifest in dev, and Vite serves JS-imported CSS
+(`import './styles.css'`) as a *module* that injects a `<style>` at runtime —
+so a server-rendered document would carry no styles in its head and paint
+unstyled until the client entry executes.
+
+`createDevRequestHandler` closes that gap: it walks the SSR module graph and
+inlines the reachable CSS into `<head>` as `<style data-vite-dev-id="…">`,
+the shape Vite's client adopts on boot and rewrites in place on HMR — so
+there is no flash, no duplicated rules, and CSS HMR is unaffected. Nothing to
+configure; production is untouched (the built template carries real `<link>`
+tags).
+
+Pass `devStyles: false` to opt out if your template already ships its own
+stylesheet link.
+
 ## Deployment artifacts — `ssr.adapter` and `virtual:sigx-app`
 
 The build seam of the deployment RFC (`docs/rfc-deploy.md` §3). `ssr.adapter`
