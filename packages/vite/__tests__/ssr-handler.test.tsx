@@ -71,6 +71,39 @@ function mockVite(entryModule: Record<string, unknown>): ViteDevServer {
     } as unknown as ViteDevServer;
 }
 
+/** A module-graph node shaped like Vite's (id + url + importedModules Set). */
+function mod(url: string, imports: any[] = [], type?: string) {
+    return { id: url.startsWith('/') ? '/abs' + url : url, url, type, importedModules: new Set(imports) };
+}
+
+/**
+ * Extend a mock with the SSR module graph + client transform that
+ * `collectDevStyles` walks. `css` maps a served url to its stylesheet text.
+ */
+function withGraph(
+    vite: ViteDevServer,
+    entry: string,
+    root: any,
+    css: Record<string, string>,
+    transformImpl?: (url: string) => Promise<{ code?: string } | null>
+) {
+    const transformRequest = vi.fn(transformImpl ?? (async (url: string) => {
+        const bare = url.replace(/[?&]direct\b/, '').replace(/\?$/, '');
+        return bare in css ? { code: css[bare] } : null;
+    }));
+    Object.assign(vite as any, {
+        environments: {
+            ssr: {
+                moduleGraph: {
+                    getModuleByUrl: vi.fn(async (url: string) => (url === entry ? root : undefined))
+                }
+            },
+            client: { transformRequest }
+        }
+    });
+    return transformRequest;
+}
+
 async function run(handler: Awaited<ReturnType<typeof createDevRequestHandler>>, url: string, next?: (e?: unknown) => void) {
     const res = new MockRes();
     await handler(
@@ -155,6 +188,165 @@ describe('createDevRequestHandler', () => {
         expect(res.body).toContain('dev page');
         expect(seen).toHaveLength(2);
         for (const p of seen) expect(p).toBe(platform);
+    });
+
+    // ------------------------------------------------------------------
+    // Dev styles (#359): dev has no manifest, and Vite serves JS-imported
+    // CSS as a runtime-injecting module — so without this the SSR head is
+    // empty of styles and the whole document paints unstyled.
+    // ------------------------------------------------------------------
+
+    const ENTRY = '/src/entry-server.tsx';
+
+    function styledVite(root: any, css: Record<string, string>, impl?: any) {
+        const vite = mockVite({ createApp: () => defineApp((Home as any)({})) });
+        const transformRequest = withGraph(vite, ENTRY, root, css, impl);
+        return { vite, transformRequest };
+    }
+
+    it('inlines the SSR graph CSS into <head> as an adoptable style tag', async () => {
+        const { vite } = styledVite(
+            mod(ENTRY, [mod('/src/App.tsx', [mod('/src/styles.css')])]),
+            { '/src/styles.css': '.btn{color:red}' }
+        );
+        const handler = await createDevRequestHandler(vite, { entry: ENTRY });
+        const res = await run(handler, '/');
+        expect(res.body).toContain('.btn{color:red}');
+        // The attribute is what makes Vite ADOPT this tag instead of adding a
+        // second one — and it must carry the module id, not the url.
+        expect(res.body).toContain('data-vite-dev-id="/abs/src/styles.css"');
+        // Before </head>, after /@vite/client.
+        const head = res.body.slice(0, res.body.indexOf('</head>'));
+        expect(head).toContain('.btn{color:red}');
+        expect(head.indexOf('/@vite/client')).toBeLessThan(head.indexOf('.btn{color:red}'));
+    });
+
+    it('preserves import order and collapses duplicates', async () => {
+        const shared = mod('/src/base.css');
+        const { vite } = styledVite(
+            mod(ENTRY, [
+                mod('/src/a.tsx', [shared, mod('/src/a.css')]),
+                mod('/src/b.tsx', [shared, mod('/src/b.css')])
+            ]),
+            { '/src/base.css': '.base{}', '/src/a.css': '.a{}', '/src/b.css': '.b{}' }
+        );
+        const handler = await createDevRequestHandler(vite, { entry: ENTRY });
+        const res = await run(handler, '/');
+        // Cascade order is load-bearing.
+        expect(res.body.indexOf('.base{}')).toBeLessThan(res.body.indexOf('.a{}'));
+        expect(res.body.indexOf('.a{}')).toBeLessThan(res.body.indexOf('.b{}'));
+        expect(res.body.match(/\.base\{\}/g)).toHaveLength(1);
+    });
+
+    it('skips ?url / ?raw imports — those are strings, not applied styles', async () => {
+        const { vite } = styledVite(
+            mod(ENTRY, [mod('/src/theme.css?url'), mod('/src/real.css')]),
+            { '/src/theme.css': '.nope{}', '/src/real.css': '.yes{}' }
+        );
+        const handler = await createDevRequestHandler(vite, { entry: ENTRY });
+        const res = await run(handler, '/');
+        expect(res.body).toContain('.yes{}');
+        expect(res.body).not.toContain('.nope{}');
+    });
+
+    it('escapes a </style> sequence so the element cannot be closed early', async () => {
+        const { vite } = styledVite(mod(ENTRY, [mod('/src/x.css')]), {
+            '/src/x.css': '.a{content:"</style><script>bad()</script>"}'
+        });
+        const handler = await createDevRequestHandler(vite, { entry: ENTRY });
+        const res = await run(handler, '/');
+        expect(res.body).toContain('<\\/style');
+        // `</style` is the only sequence an HTML parser honours inside a
+        // style element — with it escaped, the `<script>` payload stays inert
+        // CSS text. Assert the element opens once and closes once, so the
+        // payload provably never escapes into markup.
+        expect(res.body.match(/<style\b/g)).toHaveLength(1);
+        expect(res.body.match(/<\/style>/g)).toHaveLength(1);
+    });
+
+    it('warms the graph before walking it (first request must not flash)', async () => {
+        const { vite } = styledVite(mod(ENTRY, [mod('/src/styles.css')]), {
+            '/src/styles.css': '.warm{}'
+        });
+        const handler = await createDevRequestHandler(vite, { entry: ENTRY });
+        // The template callback can run before the app callback loads the
+        // entry, so collectDevStyles must load it itself — otherwise the
+        // graph is empty on every cold start and the flash simply moves.
+        const res = await run(handler, '/');
+        expect(res.body).toContain('.warm{}');
+    });
+
+    it('serves an unstyled page rather than a 500 when the transform throws', async () => {
+        const { vite } = styledVite(mod(ENTRY, [mod('/src/styles.css')]), {}, async () => {
+            throw new Error('postcss exploded');
+        });
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const handler = await createDevRequestHandler(vite, { entry: ENTRY });
+        const res = await run(handler, '/');
+        warn.mockRestore();
+        expect(res.status).toBe(200);
+        expect(res.body).toContain('dev page');
+    });
+
+    it('devStyles: false opts out (template already ships its own <link>)', async () => {
+        const { vite, transformRequest } = styledVite(mod(ENTRY, [mod('/src/styles.css')]), {
+            '/src/styles.css': '.btn{}'
+        });
+        const handler = await createDevRequestHandler(vite, { entry: ENTRY, devStyles: false });
+        const res = await run(handler, '/');
+        expect(res.body).not.toContain('.btn{}');
+        expect(transformRequest).not.toHaveBeenCalled();
+    });
+
+    it('never emits styles before the doctype (no quirks mode) on a head-less template', async () => {
+        // A template without </head> must still keep <!doctype html> first —
+        // prepending would drop the browser into quirks mode.
+        const headless = join(root, 'headless.html');
+        writeFileSync(headless, '<!doctype html><html><body><div id="app"><!--ssr-outlet--></div></body></html>');
+        const { vite } = styledVite(mod(ENTRY, [mod('/src/styles.css')]), {
+            '/src/styles.css': '.q{}'
+        });
+        const handler = await createDevRequestHandler(vite, { entry: ENTRY, template: 'headless.html' });
+        const res = await run(handler, '/');
+        expect(res.body.startsWith('<!doctype html>')).toBe(true);
+        expect(res.body).toContain('.q{}');
+        // Placed before </body>, not after the document.
+        expect(res.body.indexOf('.q{}')).toBeLessThan(res.body.indexOf('</body>'));
+    });
+
+    it('falls back to the legacy moduleGraph / transformRequest (pre-environments Vite)', async () => {
+        const vite = mockVite({ createApp: () => defineApp((Home as any)({})) });
+        const root = mod(ENTRY, [mod('/src/legacy.css')]);
+        // No `environments` at all — only the flat server-level API.
+        Object.assign(vite as any, {
+            moduleGraph: {
+                getModuleByUrl: vi.fn(async (url: string, ssr?: boolean) =>
+                    url === ENTRY && ssr === true ? root : undefined)
+            },
+            transformRequest: vi.fn(async (url: string, opts?: { ssr?: boolean }) =>
+                url.includes('/src/legacy.css') && opts?.ssr === false ? { code: '.legacy{}' } : null)
+        });
+        const handler = await createDevRequestHandler(vite, { entry: ENTRY });
+        const res = await run(handler, '/');
+        expect(res.body).toContain('.legacy{}');
+        expect(res.body).toContain('data-vite-dev-id="/abs/src/legacy.css"');
+    });
+
+    it('serves the page when the Vite build exposes no module graph at all', async () => {
+        const vite = mockVite({ createApp: () => defineApp((Home as any)({})) });
+        const handler = await createDevRequestHandler(vite, { entry: ENTRY });
+        const res = await run(handler, '/');
+        expect(res.status).toBe(200);
+        expect(res.body).toContain('dev page');
+        expect(res.body).not.toContain('data-vite-dev-id');
+    });
+
+    it('is a no-op when the graph holds no CSS (inline-<style> templates)', async () => {
+        const { vite } = styledVite(mod(ENTRY, [mod('/src/App.tsx')]), {});
+        const handler = await createDevRequestHandler(vite, { entry: ENTRY });
+        const res = await run(handler, '/');
+        expect(res.body).not.toContain('data-vite-dev-id');
+        expect(res.body).toContain('dev page');
     });
 
     it('omitting platform stays byte-compatible (undefined second arg)', async () => {
