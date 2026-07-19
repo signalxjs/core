@@ -314,6 +314,33 @@ describe('createDevRequestHandler', () => {
         expect(res.body.indexOf('.q{}')).toBeLessThan(res.body.indexOf('</body>'));
     });
 
+    it('falls back to the legacy moduleGraph / transformRequest (pre-environments Vite)', async () => {
+        const vite = mockVite({ createApp: () => defineApp((Home as any)({})) });
+        const root = mod(ENTRY, [mod('/src/legacy.css')]);
+        // No `environments` at all — only the flat server-level API.
+        Object.assign(vite as any, {
+            moduleGraph: {
+                getModuleByUrl: vi.fn(async (url: string, ssr?: boolean) =>
+                    url === ENTRY && ssr === true ? root : undefined)
+            },
+            transformRequest: vi.fn(async (url: string, opts?: { ssr?: boolean }) =>
+                url.includes('/src/legacy.css') && opts?.ssr === false ? { code: '.legacy{}' } : null)
+        });
+        const handler = await createDevRequestHandler(vite, { entry: ENTRY });
+        const res = await run(handler, '/');
+        expect(res.body).toContain('.legacy{}');
+        expect(res.body).toContain('data-vite-dev-id="/abs/src/legacy.css"');
+    });
+
+    it('serves the page when the Vite build exposes no module graph at all', async () => {
+        const vite = mockVite({ createApp: () => defineApp((Home as any)({})) });
+        const handler = await createDevRequestHandler(vite, { entry: ENTRY });
+        const res = await run(handler, '/');
+        expect(res.status).toBe(200);
+        expect(res.body).toContain('dev page');
+        expect(res.body).not.toContain('data-vite-dev-id');
+    });
+
     it('is a no-op when the graph holds no CSS (inline-<style> templates)', async () => {
         const { vite } = styledVite(mod(ENTRY, [mod('/src/App.tsx')]), {});
         const handler = await createDevRequestHandler(vite, { entry: ENTRY });
