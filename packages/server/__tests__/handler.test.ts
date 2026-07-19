@@ -378,3 +378,200 @@ describe('handleServerFnRequest — pollution reviver', () => {
         expect(({} as { polluted?: boolean }).polluted).toBeUndefined();
     });
 });
+
+describe('handleServerFnRequest — onError observability seam (#349)', () => {
+    it('fires for a masked throw in production, before the response, with (error, info, ctx)', async () => {
+        vi.stubEnv('NODE_ENV', 'production');
+        try {
+            const seen: unknown[][] = [];
+            const res = await call('boom_fn_00000002', { args: [] }, {}, {
+                onError: (error, info, ctx) => {
+                    seen.push([error, info, ctx]);
+                }
+            });
+            expect(res.status).toBe(500);
+            await expect(res.json()).resolves.toEqual({
+                error: { message: 'Internal error', status: 500 }
+            });
+            expect(seen).toHaveLength(1);
+            expect((seen[0][0] as Error).message).toBe('secret internals');
+            expect(seen[0][1]).toMatchObject({ symbol: 'boom_fn_00000002', name: 'boom' });
+            expect(seen[0][2]).toMatchObject({ locals: {} });
+        } finally {
+            vi.unstubAllEnvs();
+        }
+    });
+
+    it('fires in dev too', async () => {
+        const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+        const onError = vi.fn();
+        await call('boom_fn_00000002', { args: [] }, {}, { onError });
+        expect(onError).toHaveBeenCalledTimes(1);
+        spy.mockRestore();
+    });
+
+    it('does NOT fire for a ServerFnError (expected, client-visible)', async () => {
+        const onError = vi.fn();
+        const res = await call('polite_fn_00000003', { args: [] }, {}, { onError });
+        expect(res.status).toBe(418);
+        expect(onError).not.toHaveBeenCalled();
+    });
+
+    it('is awaited (async work completes before the response returns)', async () => {
+        let flag = false;
+        await call('boom_fn_00000002', { args: [] }, {}, {
+            onError: async () => {
+                await new Promise((r) => setTimeout(r, 5));
+                flag = true;
+            }
+        });
+        expect(flag).toBe(true);
+    });
+
+    it('its own throws are swallowed — response unchanged', async () => {
+        vi.stubEnv('NODE_ENV', 'production');
+        try {
+            const res = await call('boom_fn_00000002', { args: [] }, {}, {
+                onError: () => {
+                    throw new Error('telemetry down');
+                }
+            });
+            expect(res.status).toBe(500);
+            await expect(res.json()).resolves.toEqual({
+                error: { message: 'Internal error', status: 500 }
+            });
+            const rejected = await call('boom_fn_00000002', { args: [] }, {}, {
+                onError: async () => Promise.reject(new Error('async telemetry down'))
+            });
+            expect(rejected.status).toBe(500);
+        } finally {
+            vi.unstubAllEnvs();
+        }
+    });
+
+    it('fires for masked GUARD throws too', async () => {
+        const onError = vi.fn();
+        const res = await call('add_fn_00000001', { args: [1, 2] }, {}, {
+            onError,
+            guard: () => {
+                throw new Error('guard exploded');
+            }
+        });
+        expect(res.status).toBe(500);
+        expect(onError).toHaveBeenCalledTimes(1);
+    });
+});
+
+describe('handleServerFnRequest — timeoutMs (#350)', () => {
+    const hang = serverFn(async (rq) => {
+        await new Promise<void>((resolve) => {
+            // Resolves only via abort — a cooperative hung handler.
+            rq.abortSignal.addEventListener('abort', () => resolve(), { once: true });
+        });
+        return 'aborted-cleanly';
+    });
+    const never = serverFn(async () => new Promise(() => {}));
+    FNS['hang_fn_00000006'] = hang;
+    FNS['never_fn_00000007'] = never;
+
+    it('a hung handler gets a 504 and onError receives the timeout error', async () => {
+        const onError = vi.fn();
+        const res = await call('never_fn_00000007', { args: [] }, {}, { timeoutMs: 25, onError });
+        expect(res.status).toBe(504);
+        await expect(res.json()).resolves.toEqual({
+            error: { message: 'Server function timed out', status: 504 }
+        });
+        expect(onError).toHaveBeenCalledTimes(1);
+        expect((onError.mock.calls[0][0] as Error).message).toContain('timed out after 25ms');
+    });
+
+    it('rq.abortSignal fires on timeout (cooperative handlers cancel cleanly)', async () => {
+        const res = await call('hang_fn_00000006', { args: [] }, {}, { timeoutMs: 25 });
+        // The race wins with the 504 even though the handler then resolves.
+        expect(res.status).toBe(504);
+    });
+
+    it('a fast handler under a generous timeout is unaffected', async () => {
+        const res = await call('add_fn_00000001', { args: [2, 3] }, {}, { timeoutMs: 5000 });
+        expect(res.status).toBe(200);
+        await expect(res.json()).resolves.toEqual({ data: 5 });
+    });
+
+    it('absent timeoutMs keeps the exact current behavior', async () => {
+        const res = await call('add_fn_00000001', { args: [2, 3] });
+        expect(res.status).toBe(200);
+    });
+});
+
+describe('handleServerFnRequest — dev warning for non-JSON-safe results (#351)', () => {
+    class Basket {
+        items = 3;
+    }
+    const returnsDate = serverFn(async () => ({ createdAt: new Date() }));
+    const returnsMap = serverFn(async () => new Map([['a', 1]]));
+    const returnsNestedUndefined = serverFn(async () => ({ a: { b: undefined } }));
+    const returnsInstance = serverFn(async () => new Basket());
+    const returnsToJson = serverFn(async () => ({ range: { toJSON: () => [1, 2] } }));
+    const returnsPlain = serverFn(async () => ({ ok: [1, 2, { deep: true }] }));
+    Object.assign(FNS, {
+        date_fn_00000008: returnsDate,
+        map_fn_00000009: returnsMap,
+        undef_fn_0000000a: returnsNestedUndefined,
+        inst_fn_0000000b: returnsInstance,
+        tojson_fn_0000000c: returnsToJson,
+        plain_fn_0000000d: returnsPlain
+    });
+
+    function withWarnSpy(fn: () => Promise<void>): Promise<void> {
+        const spy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        return fn().finally(() => spy.mockRestore());
+    }
+
+    it('warns once for a Date, naming the path', () =>
+        withWarnSpy(async () => {
+            const res = await call('date_fn_00000008', { args: [] });
+            expect(res.status).toBe(200);
+            expect(console.warn).toHaveBeenCalledTimes(1);
+            expect(vi.mocked(console.warn).mock.calls[0][0]).toContain('a Date');
+            expect(vi.mocked(console.warn).mock.calls[0][0]).toContain('data.createdAt');
+        }));
+
+    it('warns for Map results', () =>
+        withWarnSpy(async () => {
+            await call('map_fn_00000009', { args: [] });
+            expect(vi.mocked(console.warn).mock.calls[0][0]).toContain('a Map');
+        }));
+
+    it('names the dotted path of a nested undefined property', () =>
+        withWarnSpy(async () => {
+            await call('undef_fn_0000000a', { args: [] });
+            expect(vi.mocked(console.warn).mock.calls[0][0]).toContain('data.a.b');
+        }));
+
+    it('flags class instances but skips objects with toJSON', () =>
+        withWarnSpy(async () => {
+            await call('inst_fn_0000000b', { args: [] });
+            expect(vi.mocked(console.warn).mock.calls[0][0]).toContain('Basket');
+            vi.mocked(console.warn).mockClear();
+            await call('tojson_fn_0000000c', { args: [] });
+            expect(console.warn).not.toHaveBeenCalled();
+        }));
+
+    it('stays silent for plain JSON-safe data', () =>
+        withWarnSpy(async () => {
+            await call('plain_fn_0000000d', { args: [] });
+            expect(console.warn).not.toHaveBeenCalled();
+        }));
+
+    it('stays silent in production', async () => {
+        vi.stubEnv('NODE_ENV', 'production');
+        const spy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        try {
+            await call('date_fn_00000008', { args: [] });
+            expect(spy).not.toHaveBeenCalled();
+        } finally {
+            spy.mockRestore();
+            vi.unstubAllEnvs();
+        }
+    });
+});

@@ -154,3 +154,45 @@ describe('serverFn — detached (in-process) context', () => {
         await expect(fn()).resolves.toBe(false);
     });
 });
+
+describe('serverFn — .with({ signal }) per-call options (#353)', () => {
+    it('the provided signal becomes rq.abortSignal on an in-process call', async () => {
+        const fn = serverFn(async (rq) => rq.abortSignal);
+        const controller = new AbortController();
+        await expect(fn.with({ signal: controller.signal })()).resolves.toBe(controller.signal);
+    });
+
+    it('an aborted per-call signal is observable by the handler', async () => {
+        const fn = serverFn(async (rq) => rq.abortSignal.aborted);
+        const controller = new AbortController();
+        controller.abort();
+        await expect(fn.with({ signal: controller.signal })()).resolves.toBe(true);
+    });
+
+    it('the optionless call keeps the never-aborting detached default', async () => {
+        const fn = serverFn(async (rq) => rq.abortSignal.aborted);
+        await expect(fn()).resolves.toBe(false);
+        await expect(fn.with()()).resolves.toBe(false);
+    });
+
+    it('the options-form pipeline (validation) still runs under .with()', async () => {
+        const fn = serverFn({
+            input: {
+                '~standard': {
+                    version: 1 as const,
+                    vendor: 'test',
+                    validate: (value: unknown) =>
+                        typeof value === 'number'
+                            ? { value }
+                            : { issues: [{ message: 'not a number' }] }
+                }
+            },
+            handler: async (_rq, input: number) => input * 2
+        });
+        const controller = new AbortController();
+        await expect(fn.with({ signal: controller.signal })(21)).resolves.toBe(42);
+        await expect(fn.with({ signal: controller.signal })('nope' as never)).rejects.toThrow(
+            /Invalid input/
+        );
+    });
+});

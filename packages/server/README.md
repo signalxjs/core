@@ -194,6 +194,56 @@ return renderDocument(request);   // your document handler
 path — deliberately a predicate, not a combinator; composition stays in
 your entry.)
 
+### Operations: `onError` and `timeoutMs`
+
+Two opt-in endpoint options harden a real deployment (both flow through the
+node adapter unchanged):
+
+```js
+app.use(createServerFnHandler({
+    functions: serverFns,
+    // EVERY masked failure — any non-ServerFnError throw, timeouts
+    // included — in dev AND prod, before the response. Awaited; its own
+    // throws never affect the response. Wire it to Sentry/OTel/logs.
+    onError: (error, info) => log.error({ fn: info.name, error }),
+    // Upper bound on guard + handler (+ a stream's first chunk). On
+    // expiry: 504 to the caller, rq.abortSignal fires, onError sees the
+    // timeout. A STARTED stream is not bounded (time-to-first-byte only).
+    timeoutMs: 10_000
+}));
+```
+
+`ServerFnError`s are expected, client-visible errors — they do not fire
+`onError`. Prod masking is unchanged: the caller still sees a generic 500.
+
+### Cancellation — `.with({ signal })`
+
+Every wrapped function carries a per-call options channel. Inside a
+`useData`/`useAction` fetcher the async engine already hands you an
+`AbortSignal` that fires when the query is superseded or unmounted — pass
+it through and the fetch aborts, firing `rq.abortSignal` server-side:
+
+```ts
+const results = useData(
+    ['search', q.value],
+    (arg, ctx) => search.with({ signal: ctx.signal })(arg)
+);
+```
+
+Explicit by design (no trailing-argument sniffing — the wire args stay
+exactly your args); on an in-process (SSR) call the signal becomes
+`rq.abortSignal` directly. This is rfc-server v2's per-call options channel
+pulled forward — `headers` joins it there.
+
+### Dev guardrail — non-JSON-safe results
+
+The v1 envelope is plain JSON: a returned `Date` becomes a string, a
+`Map`/`Set` becomes `{}`, and `undefined` properties are dropped — while
+TypeScript still reports the declared type. Until rich type serialization
+ships with the revive seam (rfc-server §4), the endpoint warns **in dev
+only** when a result contains such a value, naming the path. The wire is
+never transformed.
+
 ## Native clients — transport config
 
 A lynx or terminal app calling a remote sigx server — or a bearer-auth web

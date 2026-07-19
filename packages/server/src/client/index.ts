@@ -131,9 +131,11 @@ export function __serverFnStub(
     symbol: string,
     name: string,
     endpoint: string
-): (...args: unknown[]) => Promise<unknown> {
-    return async (...args: unknown[]) => {
-        const res = await send(endpoint, symbol, args);
+): ((...args: unknown[]) => Promise<unknown>) & {
+    with(options?: { signal?: AbortSignal }): (...args: unknown[]) => Promise<unknown>;
+} {
+    const call = async (args: unknown[], signal?: AbortSignal): Promise<unknown> => {
+        const res = await send(endpoint, symbol, args, signal);
         const text = await res.text();
         let payload:
             | { data?: unknown; error?: WireError; $cache?: ServerFnCacheDirectives }
@@ -151,6 +153,15 @@ export function __serverFnStub(
         if (payload?.$cache) deliverCacheDirectives(payload.$cache);
         return payload?.data;
     };
+    // `.with(options)` — the per-call options channel (#353, the rfc-server
+    // v2 per-call bullet pulled forward): explicit, so the wire args stay
+    // exactly the user's args (no trailing-argument sniffing).
+    return Object.assign((...args: unknown[]) => call(args), {
+        with:
+            (options?: { signal?: AbortSignal }) =>
+            (...args: unknown[]) =>
+                call(args, options?.signal)
+    });
 }
 
 /**

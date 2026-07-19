@@ -30,6 +30,8 @@
 import { createDetachedContext, type ServerFnContext } from './context';
 import { ServerFnError } from './errors';
 import type {
+    ServerFnCallOptions,
+    ServerFnCallable,
     ServerFnGuard,
     ServerFnInvoke,
     StandardSchemaV1,
@@ -39,6 +41,8 @@ import type {
 export { ServerFnError, isServerFnError, type ServerFnErrorShape } from './errors';
 export type { ServerFnContext } from './context';
 export type {
+    ServerFnCallOptions,
+    ServerFnCallable,
     ServerFnGuard,
     ServerFnInfo,
     ServerFnInvoke,
@@ -94,13 +98,11 @@ export interface ServerFnOptions<S, R> {
 /** Wrap a server-only function. Client callers get `(...args) => Promise<R>`. */
 export function serverFn<A extends unknown[], R>(
     impl: (rq: ServerFnContext, ...args: A) => R | Promise<R>
-): ((...args: A) => Promise<Awaited<R>>) & WrappedServerFn;
-export function serverFn<S, R>(
-    options: ServerFnOptions<S, R>
-): ((input: S) => Promise<Awaited<R>>) & WrappedServerFn;
+): ServerFnCallable<A, Awaited<R>>;
+export function serverFn<S, R>(options: ServerFnOptions<S, R>): ServerFnCallable<[S], Awaited<R>>;
 export function serverFn(
     arg: ((rq: ServerFnContext, ...args: unknown[]) => unknown) | ServerFnOptions<unknown, unknown>
-): ((...args: unknown[]) => Promise<unknown>) & WrappedServerFn {
+): ServerFnCallable<unknown[], unknown> {
     let invoke: ServerFnInvoke;
     let name: string;
 
@@ -137,14 +139,20 @@ export function serverFn(
 
     // In-process (SSR-time) calls run the same pipeline against a detached
     // context — no network hop, and no transport symbol (rfc-server §7 v1).
-    const wrapper = (...args: unknown[]) => {
-        assertNotLiveClient(name);
-        return invoke(createDetachedContext(), { symbol: '', name }, args);
-    };
+    // `.with(options)` is the per-call options channel (#353): explicit, so
+    // the wire args stay exactly the user's args.
+    const callWith =
+        (options?: ServerFnCallOptions) =>
+        (...args: unknown[]) => {
+            assertNotLiveClient(name);
+            return invoke(createDetachedContext(options?.signal), { symbol: '', name }, args);
+        };
+    const wrapper = callWith();
     // The §6.2 seam for the ENDPOINT (wire-only — the wrapper above never
     // computes directives): validated input + settled result → keys.
     const invalidates = typeof arg === 'function' ? undefined : arg.invalidates;
     return Object.assign(wrapper, {
+        with: callWith,
         __sigxFn: invoke,
         __sigxName: name,
         ...(invalidates ? { __sigxInvalidates: invalidates } : {})

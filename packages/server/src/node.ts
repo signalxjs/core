@@ -66,7 +66,9 @@ export function createServerFnHandler(options: ServerFnHandlerOptions): NodeRequ
                 resolve,
                 guard: options.guard,
                 origin: options.origin,
-                maxBodyBytes: options.maxBodyBytes
+                maxBodyBytes: options.maxBodyBytes,
+                onError: options.onError,
+                timeoutMs: options.timeoutMs
             });
             // Accumulate duplicates (set-cookie!) into arrays — a plain
             // string map would overwrite all but the last value.

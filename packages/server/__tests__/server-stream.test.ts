@@ -147,6 +147,55 @@ describe('serverStream — endpoint NDJSON', () => {
         expect(JSON.stringify(emitted)).not.toContain('secret internals');
     });
 
+    it('a mid-stream masked throw still reaches the onError seam (#349)', async () => {
+        vi.stubEnv('NODE_ENV', 'production');
+        const errors: unknown[] = [];
+        const s = serverStream(async function* () {
+            yield 'ok';
+            throw new Error('secret internals');
+        });
+        const res = await handleServerFnRequest(
+            new Request(`${ORIGIN}/_sigx/fn/s_fn_00000001`, {
+                method: 'POST',
+                headers: { 'content-type': 'application/json', origin: ORIGIN },
+                body: '{"args":[]}'
+            }),
+            {
+                resolve: () => s,
+                onError: (error) => {
+                    errors.push(error);
+                }
+            }
+        );
+        const emitted = await lines(res);
+        expect(emitted[1]).toEqual({ error: { message: 'Internal error', status: 500 } });
+        expect(errors).toHaveLength(1);
+        expect((errors[0] as Error).message).toBe('secret internals');
+    });
+
+    it('a mid-stream ServerFnError does NOT fire onError', async () => {
+        const errors: unknown[] = [];
+        const s = serverStream(async function* () {
+            yield 'ok';
+            throw new ServerFnError(410, 'source gone');
+        });
+        const res = await handleServerFnRequest(
+            new Request(`${ORIGIN}/_sigx/fn/s_fn_00000001`, {
+                method: 'POST',
+                headers: { 'content-type': 'application/json', origin: ORIGIN },
+                body: '{"args":[]}'
+            }),
+            {
+                resolve: () => s,
+                onError: (error) => {
+                    errors.push(error);
+                }
+            }
+        );
+        await lines(res);
+        expect(errors).toHaveLength(0);
+    });
+
     it('an unserializable FIRST chunk is a buffered error AND the generator is disposed', async () => {
         vi.stubEnv('NODE_ENV', 'production');
         let finallyRan = false;

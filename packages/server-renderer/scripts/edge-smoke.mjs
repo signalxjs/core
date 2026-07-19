@@ -122,6 +122,32 @@ function assert(cond, message) {
     assert(res.status === 200, `server fn status 200, got ${res.status}`);
     const envelope = await res.json();
     assert(envelope.data === 5, 'server fn returned {data}');
+
+    // timeoutMs (#350) under the same discipline: per-request AbortController
+    // + AbortSignal.any + setTimeout must all be WinterCG-clean, and a fast
+    // fn must be unaffected while a hung fn 504s with onError fired.
+    const fast = await handleServerFnRequest(
+        new Request('https://edge.test/_sigx/fn/add_fn_00000001', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', origin: 'https://edge.test' },
+            body: '{"args":[4,5]}'
+        }),
+        { resolve: () => add, timeoutMs: 1000 }
+    );
+    assert(fast.status === 200 && (await fast.json()).data === 9, 'timeoutMs leaves a fast fn unaffected');
+
+    const never = serverFn(async () => new Promise(() => {}));
+    const masked = [];
+    const hung = await handleServerFnRequest(
+        new Request('https://edge.test/_sigx/fn/never_fn_00000002', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', origin: 'https://edge.test' },
+            body: '{"args":[]}'
+        }),
+        { resolve: () => never, timeoutMs: 20, onError: (error) => masked.push(error) }
+    );
+    assert(hung.status === 504, `hung fn 504s under timeoutMs, got ${hung.status}`);
+    assert(masked.length === 1, 'onError observed the timeout');
 }
 
 console.log('✅ edge-smoke: WinterCG-clean document streaming, fetch handler, and server-fn endpoint verified (no Node builtins imported)');

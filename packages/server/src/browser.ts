@@ -13,6 +13,8 @@
 export { ServerFnError, isServerFnError, type ServerFnErrorShape } from './errors';
 export type { ServerFnContext } from './context';
 export type {
+    ServerFnCallOptions,
+    ServerFnCallable,
     ServerFnGuard,
     ServerFnInfo,
     ServerFnInvoke,

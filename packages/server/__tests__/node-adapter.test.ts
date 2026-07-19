@@ -148,3 +148,52 @@ describe('createServerFnHandler over node:http', () => {
         ]);
     });
 });
+
+
+describe('createServerFnHandler — onError/timeoutMs forwarding (#349/#350)', () => {
+    let server: Server;
+    let origin: string;
+    const errors: unknown[] = [];
+
+    beforeAll(async () => {
+        const never = serverFn(async () => new Promise(() => {}));
+        const handler = createServerFnHandler({
+            functions: { never_fn_00000009: async () => never },
+            timeoutMs: 30,
+            onError: (error) => {
+                errors.push(error);
+            }
+        });
+        server = createServer((req, res) => {
+            void handler(req, res, (err) => {
+                res.statusCode = err ? 500 : 404;
+                res.end(err ? 'error' : 'fallthrough');
+            });
+        });
+        server.listen(0, '127.0.0.1');
+        await once(server, 'listening');
+        const address = server.address();
+        if (typeof address === 'string' || address === null) throw new Error('no port');
+        origin = `http://127.0.0.1:${address.port}`;
+    });
+
+    afterAll(async () => {
+        server.close();
+        server.closeAllConnections();
+        await once(server, 'close');
+    });
+
+    it('a hung fn 504s over real http and the onError hook captured the timeout', async () => {
+        const res = await fetch(`${origin}/_sigx/fn/never_fn_00000009`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', origin },
+            body: '{"args":[]}'
+        });
+        expect(res.status).toBe(504);
+        await expect(res.json()).resolves.toEqual({
+            error: { message: 'Server function timed out', status: 504 }
+        });
+        expect(errors).toHaveLength(1);
+        expect((errors[0] as Error).message).toContain('timed out after 30ms');
+    });
+});
