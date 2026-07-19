@@ -524,6 +524,12 @@ mutation. TanStack makes the client declare this; Qwik has nothing here.
 
 ### 6.3 Single-flight boundary refresh
 
+> **Now designed in full: `rfc-single-flight.md` (signalxjs/core#313).** This
+> subsection is the origin sketch (it is why the v1 envelope reserves
+> `$boundaries`); the committed design — automatic targeting from `invalidates`,
+> the server-side surgical re-render bridge, SSR subscription capture, and the
+> client patching model — lives there.
+
 Boundary records are self-describing — `SSRBoundaryRecord` carries the
 component registry key, `props`, and `state`
 (`packages/server-renderer/src/boundary.ts`). So a mutation call can name
