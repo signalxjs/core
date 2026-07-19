@@ -218,7 +218,9 @@ app.use(createServerFnHandler({
 
 ### Cancellation — `.with({ signal })`
 
-Every wrapped function carries a per-call options channel. Inside a
+Every `serverFn` callable carries a per-call options channel
+(`serverStream` deliberately doesn't — a stream consumer's
+`break`/`return()` already aborts the fetch). Inside a
 `useData`/`useAction` fetcher the async engine already hands you an
 `AbortSignal` that fires when the query is superseded or unmounted — pass
 it through and the fetch aborts, firing `rq.abortSignal` server-side:

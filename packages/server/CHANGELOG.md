@@ -17,7 +17,9 @@
   client disconnect via `AbortSignal.any`), and `onError` receives the
   timeout error. A started NDJSON stream is not bounded — the timeout
   covers time-to-first-byte only. (#350)
-- **`.with(options)` per-call channel** on every wrapped function —
+- **`.with(options)` per-call channel** on every `serverFn` callable
+  (`serverStream` deliberately excluded — consumer `break`/`return()`
+  already aborts its fetch) —
   `search.with({ signal: ctx.signal })(arg)` forwards an `AbortSignal` into
   the stub's fetch (aborting fires `rq.abortSignal` server-side) and, on
   in-process (SSR) calls, becomes `rq.abortSignal` directly. Explicit by
