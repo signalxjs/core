@@ -28,11 +28,21 @@ console.log('[deploy-smoke] starting the bun production server…');
 // No shell wrapper: bun is a real executable, and killing a cmd.exe
 // wrapper on Windows would orphan the server (which then holds the
 // inherited stdio pipes open forever).
-const child = spawn('bun', ['--conditions=production', 'server.bun.ts'], {
-    cwd: dir,
-    env: { ...process.env, PORT: String(PORT) },
-    stdio: ['ignore', 'inherit', 'inherit']
-});
+// --tsconfig-override: Bun applies the WORKSPACE-ROOT tsconfig paths at
+// runtime, which map @sigx/* to package SOURCE — the override (an empty
+// tsconfig committed beside the entry) makes bun resolve node_modules
+// dists like a real consumer. NODE_ENV=production (like the node tier):
+// bun enables the `development` export condition when NODE_ENV is unset,
+// which would pick the dev dists despite --conditions=production.
+const child = spawn(
+    'bun',
+    ['--conditions=production', '--tsconfig-override=tsconfig.bun.json', 'server.bun.ts'],
+    {
+        cwd: dir,
+        env: { ...process.env, NODE_ENV: 'production', PORT: String(PORT) },
+        stdio: ['ignore', 'inherit', 'inherit']
+    }
+);
 
 function stop() {
     if (process.platform === 'win32') {

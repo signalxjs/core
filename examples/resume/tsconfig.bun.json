@@ -1,0 +1,8 @@
+{
+    // Monorepo-only shield for `bun server.bun.ts` (used by the deploy
+    // smoke): Bun applies the WORKSPACE-ROOT tsconfig paths at runtime,
+    // which map @sigx/* to package SOURCE - this empty config makes bun
+    // resolve node_modules dists like a real consumer. Apps outside this
+    // repo do not need it.
+    "compilerOptions": {}
+}
