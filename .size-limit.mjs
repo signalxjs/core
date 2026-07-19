@@ -125,8 +125,11 @@ export default [
     // The fetch stubs the server-fn transform emits imports of. NO ignore
     // list — this entry doubles as the "stubs import nothing" guard (resume
     // handler chunks replicate stub imports; they must stay dependency-free).
+    // 1 KB → 1.25 KB with #311: the entry absorbed the rev-2 transport
+    // config (#329), the stream stub (#340), and $cache delivery (#311) —
+    // all semantics, no dependencies (the ceiling #320 pre-approved).
     name: '@sigx/server/client (fetch stubs)',
     path: 'packages/server/dist/client/index.prod.js',
-    limit: '1 KB',
+    limit: '1.25 KB',
   },
 ];

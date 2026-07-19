@@ -11,6 +11,13 @@
 
 ### Added
 
+- Server-declared cache directives (rfc-server §6.2, #311): the options
+  form gains `invalidates(input, result)` — computed after the handler on
+  the VALIDATED input, attached to the envelope as `$cache.invalidates`,
+  and delivered by the fn stub to the `__SIGX_SERVERFN_CACHE__` global seam
+  (stamped by `@sigx/cache`'s plugin — no import in either direction, the
+  live-client-marker pattern). Wire-only: in-process calls skip it. A
+  throwing seam never breaks the RPC result.
 - `serverStream()` (rfc-server §6.1, #310): async-generator server
   functions. Yields stream to the client as NDJSON
   (`{"chunk"}` lines, then `{"done":1}` / in-band `{"error"}` with the §5

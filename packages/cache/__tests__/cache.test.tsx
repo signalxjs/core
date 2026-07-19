@@ -769,4 +769,79 @@ describe('@sigx/cache', () => {
         expect(fetcher).not.toHaveBeenCalled();
         expect(container.querySelector('.out')?.textContent).toBe('pending');
     });
+
+    // ====================================================================
+    // server-declared cache directives (rfc-server §6.2, #311)
+    // ====================================================================
+
+    const seam = () =>
+        (globalThis as { __SIGX_SERVERFN_CACHE__?: (d: { invalidates?: unknown[] }) => void })
+            .__SIGX_SERVERFN_CACHE__;
+
+    it('installs the $cache envelope seam and feeds invalidate() — tuple prefixes included', async () => {
+        let calls = 0;
+        const fetcher = vi.fn(async () => ({ v: ++calls }));
+        let cell!: AsyncState<{ v: number }>;
+
+        const Root = component(() => {
+            cell = useData(() => ['cart', '42'], fetcher, { cache: { staleTime: 60_000 } });
+            return () => <div>{cell.value?.v}</div>;
+        });
+        mountWith(cachePlugin(), jsx(Root, {}));
+        await settle();
+        expect(fetcher).toHaveBeenCalledTimes(1);
+
+        // What @sigx/server's fn stub does when an envelope carries $cache:
+        seam()!({ invalidates: [['cart']] }); // tuple PREFIX matches ['cart','42']
+        await settle();
+        expect(fetcher).toHaveBeenCalledTimes(2);
+        expect(cell.value).toEqual({ v: 2 });
+
+        // Unrelated keys don't refetch.
+        seam()!({ invalidates: [['orders']] });
+        await settle();
+        expect(fetcher).toHaveBeenCalledTimes(2);
+    });
+
+    it('one bad pattern does not starve the rest of a directive batch', async () => {
+        let calls = 0;
+        const fetcher = vi.fn(async () => ({ v: ++calls }));
+        let cell!: AsyncState<{ v: number }>;
+        const Root = component(() => {
+            cell = useData(() => ['cart', '42'], fetcher, { cache: { staleTime: 60_000 } });
+            return () => <div>{cell.value?.v}</div>;
+        });
+        mountWith(cachePlugin(), jsx(Root, {}));
+        await settle();
+        expect(fetcher).toHaveBeenCalledTimes(1);
+
+        const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+        // Wire patterns are JSON-safe by construction, but the seam is a
+        // global — an unstringifiable pattern from another caller throws
+        // inside invalidate() and must not abort the batch.
+        seam()!({ invalidates: [[10n as unknown as string], ['cart']] });
+        await settle();
+        expect(fetcher).toHaveBeenCalledTimes(2);
+        spy.mockRestore();
+    });
+
+    it('unmount removes its OWN seam handler, and a later install supersedes', async () => {
+        const Root = component(() => () => <div />);
+        mountWith(cachePlugin(), jsx(Root, {}));
+        await settle();
+        const first = seam();
+        expect(typeof first).toBe('function');
+
+        // A second app supersedes; disposing the first must not clobber it.
+        mountWith(cachePlugin(), jsx(Root, {}));
+        const second = seam();
+        expect(second).not.toBe(first);
+
+        apps[0].unmount();
+        expect(seam()).toBe(second);
+
+        apps[1].unmount();
+        expect(seam()).toBeUndefined();
+        apps.splice(0); // already unmounted — keep afterEach idempotent
+    });
 });

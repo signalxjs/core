@@ -100,6 +100,32 @@ const skewHint = (name: string, status: number): string =>
           `(version skew); reload to pick up the current one.`
         : `server function "${name}" failed (HTTP ${status})`;
 
+/** Cache directives the server attached to an envelope (rfc-server §6.2). */
+export interface ServerFnCacheDirectives {
+    /** Patterns for `invalidate()`: canonical strings or tuple prefixes. */
+    invalidates?: ReadonlyArray<string | readonly unknown[]>;
+}
+
+/**
+ * Surface `$cache` to the installed cache pack. The seam is a GLOBAL
+ * (`__SIGX_SERVERFN_CACHE__`, stamped by `@sigx/cache`'s plugin install) —
+ * no import in either direction, the live-client-marker pattern, keeping
+ * this entry dependency-free. A hook failure never breaks the RPC result.
+ */
+function deliverCacheDirectives(directives: ServerFnCacheDirectives): void {
+    const hook = (
+        globalThis as { __SIGX_SERVERFN_CACHE__?: (d: ServerFnCacheDirectives) => void }
+    ).__SIGX_SERVERFN_CACHE__;
+    if (!hook) return;
+    try {
+        hook(directives);
+    } catch (error) {
+        // Swallowed either way — a cache-pack bug must not break the RPC
+        // result; the detail is dev-only, matching the package's posture.
+        if (__DEV__) console.error('[sigx server] $cache envelope hook threw:', error);
+    }
+}
+
 /** Create the typed client stub for one extracted server function. */
 export function __serverFnStub(
     symbol: string,
@@ -109,7 +135,9 @@ export function __serverFnStub(
     return async (...args: unknown[]) => {
         const res = await send(endpoint, symbol, args);
         const text = await res.text();
-        let payload: { data?: unknown; error?: WireError } | undefined;
+        let payload:
+            | { data?: unknown; error?: WireError; $cache?: ServerFnCacheDirectives }
+            | undefined;
         try {
             payload = text ? JSON.parse(text, reviver) : undefined;
         } catch {
@@ -120,6 +148,7 @@ export function __serverFnStub(
             const message = skewHint(name, res.status);
             throw wireFail(res.status, res.status === 404 ? { ...wire, message } : wire, message);
         }
+        if (payload?.$cache) deliverCacheDirectives(payload.$cache);
         return payload?.data;
     };
 }

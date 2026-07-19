@@ -75,6 +75,41 @@ export function cachePlugin(defaults?: CacheDefaults): Plugin {
             provideAsyncEngine(app._context, createCacheEngine(store));
             // Silence core's unknown-option dev warning for our key.
             registerHandledAsyncOptionKeys('cache');
+            // Server-declared invalidation (rfc-server §6.2): @sigx/server's
+            // fn stubs surface the envelope's `$cache` through this global
+            // seam — a global, not an import in either direction (the
+            // live-client-marker pattern), so neither pack depends on the
+            // other. Each pattern goes straight to `invalidate()` — the
+            // server declared it where the data changed. One live client =
+            // one app; a later install supersedes an earlier one, and
+            // disposal only removes its OWN handler.
+            const seam = globalThis as {
+                __SIGX_SERVERFN_CACHE__?: (directives: {
+                    invalidates?: ReadonlyArray<string | readonly unknown[]>;
+                }) => void;
+            };
+            const onDirectives: NonNullable<typeof seam.__SIGX_SERVERFN_CACHE__> = (
+                directives
+            ) => {
+                for (const pattern of directives.invalidates ?? []) {
+                    // Isolate per pattern: wire patterns are JSON-safe by
+                    // construction, but the seam is a global — one bad
+                    // pattern from another caller must not starve the rest.
+                    try {
+                        store.invalidate(pattern);
+                    } catch (error) {
+                        if (__DEV__) {
+                            console.error('[sigx cache] $cache pattern failed to invalidate:', pattern, error);
+                        }
+                    }
+                }
+            };
+            seam.__SIGX_SERVERFN_CACHE__ = onDirectives;
+            app._context.disposables.add(() => {
+                if (seam.__SIGX_SERVERFN_CACHE__ === onDirectives) {
+                    delete seam.__SIGX_SERVERFN_CACHE__;
+                }
+            });
             // Timers and focus listeners die with the app.
             app._context.disposables.add(() => store.destroy());
         },
