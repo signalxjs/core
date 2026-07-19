@@ -32,6 +32,30 @@ export type ServerFnInvoke = (
     args: unknown[]
 ) => Promise<unknown>;
 
+/**
+ * Per-call options — the explicit channel (`fn.with({ signal })(…args)`)
+ * that keeps the wire args exactly the user's args (no trailing-argument
+ * sniffing). `signal` today; rev-2 `headers` and the SSR-context escape
+ * hatch extend the same bag later.
+ */
+export interface ServerFnCallOptions {
+    /**
+     * Aborts the in-flight call: on the client the fetch is aborted; on an
+     * in-process (SSR) call it becomes `rq.abortSignal`.
+     */
+    signal?: AbortSignal;
+}
+
+/**
+ * The public callable shape of a wrapped server function — identical on the
+ * server wrapper, the generated client stub, and the browser entry (the
+ * build transform swaps values, never types).
+ */
+export type ServerFnCallable<A extends unknown[], R> = ((...args: A) => Promise<R>) & {
+    /** Bind per-call options; returns the same callable signature. */
+    with(options?: ServerFnCallOptions): (...args: A) => Promise<R>;
+} & WrappedServerFn;
+
 /** A wrapped server function, as transports and registries see it. */
 export interface WrappedServerFn {
     __sigxFn: ServerFnInvoke;

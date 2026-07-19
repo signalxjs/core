@@ -731,11 +731,18 @@ option (revisit only if that proves painful).
   direct invocation). Implementation may sequence file-form first, inline
   right behind, within the same milestone.
 - **v1.1**: AsyncLocalStorage ambient request context (`/node`) so SSR-time
-  calls see the real request; per-fn guard overrides.
+  calls see the real request; per-fn guard overrides. **Shipped early from
+  the #349–#357 review sweep**: `onError` observability hook and
+  `timeoutMs` on the endpoint options (post-RFC additive surface — the RFC
+  originally promised neither; #349/#350), the `__DEV__` non-JSON-safe
+  result warning (the §4 interim guardrail, removed when the revive seam
+  lands; #351), and AbortSignal pass-through via the `.with(options)`
+  per-call channel (pulled forward from v2; #353).
 - **v2**: `serverStream` → `useStream` (6.1 — **shipped**, #310);
   server-declared cache directives with `@sigx/cache` (6.2 — **shipped**,
-  #311); zero-JS forms (6.4); per-call options (AbortSignal pass-through,
-  headers); GET + cache semantics for idempotent reads; rich type-handler
+  #311); zero-JS forms (6.4); per-call options (`headers` — the
+  `.with(options)` channel itself shipped in v1.1 with AbortSignal, #353);
+  GET + cache semantics for idempotent reads; rich type-handler
   wire serialization once the revive side of the serializer seam ships.
 - **v2+**: single-flight boundary refresh (6.3) once the envelope and the
   per-request re-render path are proven.

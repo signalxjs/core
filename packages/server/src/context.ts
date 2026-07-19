@@ -65,7 +65,7 @@ function detachedSignal(): AbortSignal {
  * ambient-request upgrade (AsyncLocalStorage) is the designed v1.1
  * follow-up.
  */
-export function createDetachedContext(): ServerFnContext {
+export function createDetachedContext(signal?: AbortSignal): ServerFnContext {
     const noRequest = (what: string): never => {
         throw new Error(
             `[sigx server] ${what} is not available on an in-process server-function call — ` +
@@ -81,7 +81,9 @@ export function createDetachedContext(): ServerFnContext {
             return noRequest('rq.url');
         },
         get abortSignal(): AbortSignal {
-            return detachedSignal();
+            // Per-call signal (fn.with({ signal })) or the shared
+            // never-aborting default.
+            return signal ?? detachedSignal();
         },
         responseHeaders: new Headers(),
         status(code: number) {

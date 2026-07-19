@@ -2,6 +2,38 @@
 
 ## [Unreleased]
 
+### Added
+
+- **`onError` observability hook** on the endpoint options (`/server` +
+  `/node`): called for every MASKED failure — any non-`ServerFnError` throw
+  from guard or handler, mid-stream `serverStream` throws, and timeouts —
+  in dev AND prod, awaited before the response; its own throws are
+  swallowed. Prod masking itself is unchanged (the caller still sees the
+  generic 500); this is the server-side trace that previously did not exist
+  outside `__DEV__`. (#349)
+- **`timeoutMs`** on the endpoint options: an opt-in upper bound on
+  guard + handler (+ a stream's first chunk). On expiry the caller gets a
+  504 `Server function timed out`, `rq.abortSignal` fires (merged with
+  client disconnect via `AbortSignal.any`), and `onError` receives the
+  timeout error. A started NDJSON stream is not bounded — the timeout
+  covers time-to-first-byte only. (#350)
+- **`.with(options)` per-call channel** on every `serverFn` callable
+  (`serverStream` deliberately excluded — consumer `break`/`return()`
+  already aborts its fetch) —
+  `search.with({ signal: ctx.signal })(arg)` forwards an `AbortSignal` into
+  the stub's fetch (aborting fires `rq.abortSignal` server-side) and, on
+  in-process (SSR) calls, becomes `rq.abortSignal` directly. Explicit by
+  design: the wire args stay exactly your args, no trailing-argument
+  sniffing. This is rfc-server v2's "per-call options" channel pulled
+  forward with its first option; `headers` joins it in v2. New exported
+  types: `ServerFnCallOptions`, `ServerFnCallable`. (#353)
+- **Dev warning for non-JSON-safe results**: until rich type serialization
+  ships with the revive seam (rfc-server §4), a result containing a `Date`,
+  `Map`/`Set`, class instance (without `toJSON`), or `undefined`-valued
+  property triggers a single `__DEV__`-only `console.warn` naming the path
+  — the silent Date-becomes-string prod bug becomes a visible dev nudge.
+  The wire is never transformed. (#351)
+
 ### Changed
 
 - **BREAKING (pre-1.0)**: `ServerFnContext.signal` renamed to

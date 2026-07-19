@@ -164,3 +164,46 @@ describe('__serverOnly', () => {
         expect(() => stub()).toThrow(/"auditLog" from src\/cart\.server\.ts is server-only/);
     });
 });
+
+describe('__serverFnStub — .with({ signal }) per-call options (#353)', () => {
+    it('forwards the signal into the fetch init; the wire args stay the args', async () => {
+        const mock = stubFetch(200, { data: 5 });
+        const add = __serverFnStub('add_fn_00000001', 'add', '/_sigx/fn');
+        const controller = new AbortController();
+        await expect(add.with({ signal: controller.signal })(2, 3)).resolves.toBe(5);
+
+        expect(mock).toHaveBeenCalledWith('/_sigx/fn/add_fn_00000001', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: '{"args":[2,3]}',
+            signal: controller.signal
+        });
+    });
+
+    it('an aborted signal rejects the call', async () => {
+        const mock = vi.fn(async (_url: string, init?: RequestInit) => {
+            init?.signal?.throwIfAborted();
+            return new Response('{"data":1}', { status: 200 });
+        });
+        vi.stubGlobal('fetch', mock);
+        const add = __serverFnStub('add_fn_00000001', 'add', '/_sigx/fn');
+        const controller = new AbortController();
+        controller.abort();
+        await expect(add.with({ signal: controller.signal })(2, 3)).rejects.toThrow();
+    });
+
+    it('.with({}) and a plain call keep the zero-config init byte-identical', async () => {
+        const mock = stubFetch(200, { data: 1 });
+        const add = __serverFnStub('add_fn_00000001', 'add', '/_sigx/fn');
+        await add.with({})(1);
+        await add(1);
+        for (const [, init] of mock.mock.calls as [string, RequestInit][]) {
+            expect(init).toEqual({
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: '{"args":[1]}'
+            });
+            expect('signal' in init).toBe(false);
+        }
+    });
+});
