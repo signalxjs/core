@@ -150,7 +150,7 @@ POST /_sigx/fn/addToCart_fn_9f3a01cc
   "args": [{ "id": "sku-42" }],
   "$refresh": [
     { "id": 7, "component": "CartBadge#a1b2c3", "props": {},
-      "keys": ["[\"cart\"]"], "token": "…hmac…" }
+      "subscribes": ["[\"cart\"]"], "token": "…hmac…" }
   ]
 }
 ```
