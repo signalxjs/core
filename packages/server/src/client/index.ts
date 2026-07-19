@@ -176,6 +176,26 @@ export function __serverStreamStub(
                         yield obj.chunk;
                     }
                 }
+                // EOF: flush the decoder (a buffered partial code point) and
+                // honor a final line missing its trailing newline — proxies
+                // may strip it, and NDJSON does not require it.
+                buffer += decoder.decode();
+                const tail = buffer.trim();
+                if (tail) {
+                    let obj: { chunk?: unknown; done?: number; error?: WireError } | null = null;
+                    try {
+                        obj = JSON.parse(tail, reviver);
+                    } catch {
+                        obj = null; // a partial line — genuine truncation
+                    }
+                    if (obj) {
+                        if ('error' in obj) {
+                            throw wireFail(500, obj.error, `server stream "${name}" failed`);
+                        }
+                        if ('done' in obj) return;
+                        yield obj.chunk; // complete chunk — but still no terminator
+                    }
+                }
                 // Body ended without a terminator line — a dropped
                 // connection, not a wire error: never mistake truncation
                 // for completion.

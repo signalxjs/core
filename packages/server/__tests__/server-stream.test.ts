@@ -303,6 +303,42 @@ describe('__serverStreamStub', () => {
         const stub = __serverStreamStub('s_fn_00000001', 'cutOff', '/_sigx/fn');
         const error = await collect(stub()).catch((e: unknown) => e);
         expect((error as Error).message).toContain('without a done/error terminator');
+
+        // …and a PARTIAL final line is truncation too, not a crash.
+        vi.stubGlobal('fetch', vi.fn(async () => ndjsonResponse('{"chunk":"a"}\n{"chu')));
+        const partial = await collect(stub()).catch((e: unknown) => e);
+        expect((partial as Error).message).toContain('without a done/error terminator');
+    });
+
+    it('honors a final terminator line WITHOUT a trailing newline', async () => {
+        vi.stubGlobal('fetch', vi.fn(async () => ndjsonResponse('{"chunk":"a"}\n{"done":1}')));
+        const stub = __serverStreamStub('s_fn_00000001', 'noTrailingNl', '/_sigx/fn');
+        await expect(collect(stub())).resolves.toEqual(['a']);
+
+        vi.stubGlobal('fetch', vi.fn(async () =>
+            ndjsonResponse('{"error":{"message":"gone","status":410}}')
+        ));
+        const error = await collect(stub()).catch((e: unknown) => e);
+        expect(isServerFnError(error)).toBe(true);
+        expect((error as { status: number }).status).toBe(410);
+    });
+
+    it('reassembles a multi-byte code point split across reads', async () => {
+        const encoder = new TextEncoder();
+        const bytes = encoder.encode('{"chunk":"héllo"}\n{"done":1}\n');
+        const splitAt = 12; // inside the two-byte é sequence
+        vi.stubGlobal('fetch', vi.fn(async () => {
+            const body = new ReadableStream<Uint8Array>({
+                start(controller) {
+                    controller.enqueue(bytes.slice(0, splitAt));
+                    controller.enqueue(bytes.slice(splitAt));
+                    controller.close();
+                }
+            });
+            return new Response(body, { status: 200 });
+        }));
+        const stub = __serverStreamStub('s_fn_00000001', 'utf8', '/_sigx/fn');
+        await expect(collect(stub())).resolves.toEqual(['héllo']);
     });
 
     it('resolves the configureServerFn transport at call time', async () => {
