@@ -232,13 +232,15 @@ export async function runWithServerFnContext<T>(
     fn: () => T | Promise<T>
 ): Promise<T> {
     const store = await ensureContextStore();
-    return store.run(context, fn) as Promise<T>;
+    // No cast: `run` hands back exactly what `fn` returned — a value or a
+    // promise — and this function being async settles either into Promise<T>.
+    return store.run(context, fn);
 }
 
 /** The slice of AsyncLocalStorage this uses — typed here so the entry needs
  *  no `node:async_hooks` types at build time. */
 interface ContextStore {
-    run(ctx: ServerFnContextInit, fn: () => unknown): unknown;
+    run<R>(ctx: ServerFnContextInit, fn: () => R): R;
     getStore(): ServerFnContextInit | undefined;
 }
 let _storePromise: Promise<ContextStore> | undefined;
