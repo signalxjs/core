@@ -46,18 +46,33 @@ Two **optional** further arguments carry per-request context, identically in
 dev and production:
 
 ```ts
-export function createApp(url: string, req?: IncomingMessage, platform?: unknown) {
+export function createApp(
+    url: string,
+    req?: IncomingMessage | Request,
+    platform?: unknown
+) {
     const session = req && sessionFrom(req);   // cookies, headers, auth
     // …
 }
 ```
 
-- **`req`** — the incoming request. `IncomingMessage` under
-  `createDevRequestHandler` and `createRequestHandler`; a WHATWG `Request`
-  under `createFetchHandler`. This is how a factory reads a session cookie
-  without reaching for AsyncLocalStorage.
+Which handler supplies what:
+
+| Handler | `req` | `platform` |
+|---|---|---|
+| `createDevRequestHandler` (`@sigx/vite/ssr`) | `IncomingMessage` | — |
+| `createRequestHandler` (`@sigx/server-renderer/node`) | `IncomingMessage` | — |
+| `createFetchHandler` (`@sigx/server-renderer/server`) | `Request` | ✓ |
+
+- **`req`** — the incoming request. Node's `IncomingMessage` under both Node
+  handlers, a WHATWG `Request` under `createFetchHandler` — hence the union in
+  the signature above. Narrow it before use if your factory touches
+  runtime-specific fields; reading a cookie header works on either. This is how
+  a factory reads a session cookie without reaching for AsyncLocalStorage.
 - **`platform`** — opaque platform context (rfc-deploy §4.6), e.g.
-  Cloudflare's `{ env, ctx }`.
+  Cloudflare's `{ env, ctx }`. **Only `createFetchHandler` passes it**; under
+  the two Node handlers the third argument is always `undefined`, so a factory
+  that needs platform bindings must be served by the fetch handler.
 
 A factory that declares only `(url)` is unaffected — extra arguments are
 ignored. Dev used to drop `req` and pass `platform` second, so an app with
