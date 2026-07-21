@@ -247,11 +247,22 @@ export function hydrateNode(vnode: VNode, dom: Node | null, parent: Node): Node 
             // This recovers from minor cursor drift without falling back to
             // mount-fresh, which would otherwise duplicate content.
             let scan: Node | null = dom;
+            // Track whether anything we skipped was REAL content. Whitespace
+            // text and comment artifacts are markup formatting, not drift —
+            // warning on those would fire for every element on an indented
+            // page and drown the signal this warning exists to carry.
+            let skippedRealContent = false;
             while (scan && !matchesTag(scan)) {
+                if (
+                    scan.nodeType !== Node.COMMENT_NODE
+                    && !(scan.nodeType === Node.TEXT_NODE && !/\S/.test((scan as globalThis.Text).data))
+                ) {
+                    skippedRealContent = true;
+                }
                 scan = scan.nextSibling;
             }
             if (scan) {
-                if (__DEV__ && scan !== dom) {
+                if (__DEV__ && scan !== dom && skippedRealContent) {
                     // Skipped over orphan siblings on the way to a matching
                     // element. Surface SSR drift instead of silently papering
                     // over it — the skipped nodes stay in the DOM as visible
