@@ -79,6 +79,30 @@ agents the issue-first flow below is required.)
    doesn't re-trigger on its own, re-request it: `gh pr edit <pr> --add-reviewer @copilot`.
    Repeat until Copilot has no remaining actionable feedback.
 
+   **Then resolve the threads — this is a merge requirement, not politeness.**
+   `main`'s ruleset sets `required_review_thread_resolution`, so a PR carrying
+   an unresolved **inline** comment cannot merge no matter how green it is.
+   Pushing the fix does not resolve a thread, and neither does replying at PR
+   level. There is no `gh pr` porcelain for it — reply on each thread and
+   resolve it over GraphQL:
+   ```sh
+   # list the open threads
+   gh api graphql -f query='query { repository(owner:"signalxjs", name:"core") {
+     pullRequest(number:<pr>) { reviewThreads(first:20) { nodes {
+       id isResolved comments(first:1){nodes{body}} } } } } }' \
+     -q '.data.repository.pullRequest.reviewThreads.nodes[]
+         | select(.isResolved==false) | "\(.id) \(.comments.nodes[0].body[0:60])"'
+
+   # reply (say which commit fixed it), then resolve — pass the body as a
+   # GraphQL variable, not string-interpolated: quotes and backslashes in a
+   # review reply otherwise break the query
+   gh api graphql -f query='mutation($t:ID!,$b:String!){
+     addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$t, body:$b}){ comment { id } } }' \
+     -f t="<thread-id>" -f b="Fixed in <sha>. <what changed>"
+   gh api graphql -f query='mutation($t:ID!){
+     resolveReviewThread(input:{threadId:$t}){ thread { isResolved } } }' -f t="<thread-id>"
+   ```
+
 6. **Queue the merge yourself.** Once Copilot's feedback is resolved, CI is
    green, and — for user-facing changes — the docs issue is filed on the docs
    repo and linked from the PR (see "Documentation"), add the PR to `main`'s
@@ -86,8 +110,24 @@ agents the issue-first flow below is required.)
    ```sh
    pr=123                                     # your PR number (digits only)
    gh pr checks "$pr"                         # must be all green first
-   gh pr merge "$pr" --squash --auto --delete-branch
+   gh pr merge "$pr" --squash --auto          # NOT --delete-branch: rejected
+                                              # outright when a queue is enabled
+                                              # ("Cannot use `-d` or
+                                              # `--delete-branch` when merge
+                                              # queue enabled"). The queue
+                                              # deletes the branch itself.
    ```
+   Then confirm it actually entered the queue — armed auto-merge is not the
+   same as queued:
+   ```sh
+   gh api graphql -f query='query { repository(owner:"signalxjs", name:"core") {
+     pullRequest(number:'"$pr"') { mergeQueueEntry { state position } } } }'
+   ```
+   `mergeQueueEntry: null` with `mergeStateStatus: BLOCKED` and every check
+   green means something the checks don't show is blocking — in practice an
+   unresolved review thread (step 5). Nothing will happen until you clear it;
+   the PR just sits there.
+
    The queue serializes concurrent sessions' merges: it updates the PR
    against the latest `main`, re-runs the required checks on the merge-group
    ref (ci.yml's `merge_group` trigger — never remove it, queued PRs would
