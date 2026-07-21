@@ -470,14 +470,21 @@ unsupported shape and still fail — which is also why #351's interim
 JSON-only wire's silent corruption visible, and the wire carries those types
 for real now.
 
-`@sigx/server` **reimplements** the codec (`packages/server/src/wire-codec.ts`)
-rather than importing runtime-core. The package has zero dependencies — not
-even `sigx` — because `@sigx/server/client` is dependency-free by contract
-(size-limit checks it with no ignore list, since resume handler chunks
-replicate stub imports). Importing the shared module would move those bytes
-out of the measurement and quietly weaken the guard. Same posture as the
-duplicated `DANGEROUS_KEYS`; the vocabulary above is the spec both copies
-obey, and changing one means changing the other.
+The codec is **shared, not reimplemented**: `@sigx/server` imports
+`@sigx/serialize`, and `packages/server/src/wire-codec.ts` is only the
+transport binding (where this boundary's handlers come from). `@sigx/serialize`
+is dependency-free for exactly this reason — `@sigx/server/client` is itself
+dependency-free by contract, since resume handler chunks replicate stub
+imports and a zero-JS page must not pull the framework to make one RPC call.
+size-limit still measures that entry with **no ignore list**, so every byte
+the stub reaches is counted; sharing costs ~80 B over an inlined copy, which
+is the deliberate price of one implementation instead of two that drift.
+
+The alternative was tried and rejected during implementation: a duplicated
+codec in `@sigx/server` (the `DANGEROUS_KEYS` posture) grew the same `$esc`
+bug in both copies before either shipped. Measurement settled it — importing
+and tree-shaking the codec costs 909 B, not the runtime-sized cliff the
+dependency-free rule is there to prevent.
 
 ## §5 Security — first-class design content
 
