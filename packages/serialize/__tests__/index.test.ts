@@ -278,3 +278,80 @@ describe('BUILTIN_TYPE_HANDLERS', () => {
         for (const t of tags) expect(t.startsWith('$')).toBe(true);
     });
 });
+
+describe('revive is idempotent — safe on already-live values', () => {
+    // The hydration blob is a MIXED store: the server writes encoded values,
+    // and a client fetch writes LIVE ones back beside them
+    // (runtime-core/src/async/restore.ts writeBack). A decode-on-read that
+    // rebuilt live values from their enumerable keys would flatten every one
+    // of them to {} — Object.keys(new Date()) is [].
+    class Basket {
+        items = 3;
+    }
+
+    it('returns a live Date, Map and Set untouched', () => {
+        const d = new Date(5);
+        const m = new Map([['a', 1]]);
+        const s = new Set([1]);
+        expect(reviveWithHandlers(d)).toBe(d);
+        expect(reviveWithHandlers(m)).toBe(m);
+        expect(reviveWithHandlers(s)).toBe(s);
+    });
+
+    it('returns live URL, RegExp and class instances untouched', () => {
+        const u = new URL('https://example.com/');
+        const r = /ab+c/gi;
+        const b = new Basket();
+        expect(reviveWithHandlers(u)).toBe(u);
+        expect(reviveWithHandlers(r)).toBe(r);
+        expect(reviveWithHandlers(b)).toBe(b);
+    });
+
+    it('preserves live values nested in plain objects and arrays', () => {
+        const d = new Date(5);
+        const out = reviveWithHandlers({ at: d, rows: [{ at: d }] }) as any;
+        expect(out.at).toBe(d);
+        expect(out.rows[0].at).toBe(d);
+    });
+
+    it('handles a blob mixing encoded and live entries', () => {
+        // Exactly the __SIGX_ASYNC__ shape after SSR seeded one key and a
+        // client fetch wrote another back.
+        const live = new Date(2);
+        const blob = { fromServer: { $date: 1 }, fromClient: live };
+        const out = reviveWithHandlers(blob) as any;
+        expect(out.fromServer).toBeInstanceOf(Date);
+        expect(out.fromServer.getTime()).toBe(1);
+        expect(out.fromClient).toBe(live);
+    });
+
+    it('revive(revive(x)) equals revive(x) for every built-in tag', () => {
+        const encoded = encodeWithHandlers({
+            at: new Date(5),
+            index: new Map([['k', 1]]),
+            tags: new Set(['a']),
+            total: 7n,
+            home: new URL('https://example.com/'),
+            pattern: /ab+c/gi,
+            nothing: undefined,
+        });
+        const once = reviveWithHandlers(JSON.parse(JSON.stringify(encoded))) as any;
+        const twice = reviveWithHandlers(once) as any;
+        expect(twice.at).toBeInstanceOf(Date);
+        expect(twice.at.getTime()).toBe(5);
+        expect(twice.index).toBeInstanceOf(Map);
+        expect(twice.tags).toBeInstanceOf(Set);
+        expect(twice.total).toBe(7n);
+        expect(twice.home).toBeInstanceOf(URL);
+        expect(twice.pattern).toBeInstanceOf(RegExp);
+        expect('nothing' in twice).toBe(true);
+        expect(twice.nothing).toBeUndefined();
+    });
+
+    it('still revives a null-prototype object (the blob is one)', () => {
+        // assignmentJs builds __SIGX_ASYNC__ with Object.create(null).
+        const blob = Object.assign(Object.create(null), { at: { $date: 5 } });
+        const out = reviveWithHandlers(blob) as any;
+        expect(out.at).toBeInstanceOf(Date);
+    });
+});

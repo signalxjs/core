@@ -230,6 +230,15 @@ function revive(value: unknown, handlers: readonly TypeHandler[]): unknown {
     if (value === null || typeof value !== 'object') return value;
     if (Array.isArray(value)) return value.map((item) => revive(item, handlers));
 
+    // Only walk what JSON.parse can actually produce. Anything else is
+    // already a live value — a Date, Map, Set, or class instance — and
+    // rebuilding it from its own enumerable keys would flatten it to `{}`
+    // (Object.keys(new Date()) is []). Returning it untouched is what makes
+    // revive IDEMPOTENT, which matters because the hydration blob mixes
+    // server-encoded values with live ones written back after client fetches.
+    const proto = Object.getPrototypeOf(value);
+    if (proto !== Object.prototype && proto !== null) return value;
+
     const keys = Object.keys(value);
     if (keys.length === 1) {
         const key = keys[0]!;
