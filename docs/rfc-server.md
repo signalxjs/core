@@ -274,11 +274,12 @@ Notes:
 
 - **Ctx-first parameter** is the sigx idiom (`component((ctx) => …)`,
   extracted handlers `($scope, e) => …`). No `this` (Qwik), no ambient
-  `getRequestEvent()` global (Solid) in v1 — explicit beats ambient, and it
-  makes the in-process SSR call semantics obvious (§7 v1: a detached
-  context whose `request` throws a descriptive dev error; AsyncLocalStorage
-  ambient context is the v1.1 follow-up for SSR-time calls that need the
-  real request).
+  `getRequestEvent()` global (Solid) at the CALL site — the context is always
+  a parameter, which is what makes the in-process SSR call semantics obvious.
+  Where its value comes from is resolved per call (**v1.1**): explicit
+  `fn.with({ context })` → the ambient `runWithServerFnContext` scope → the
+  detached context, whose `request`/`url` throw a descriptive error naming
+  both remedies.
 - **`use` guards are part of the function's definition**, so they run for
   every transport — the structural fix for Qwik's "layout middleware does
   not run for `server$`" auth trap. App-wide auth belongs in the handler's
@@ -772,7 +773,10 @@ option (revisit only if that proves painful).
   direct invocation). Implementation may sequence file-form first, inline
   right behind, within the same milestone.
 - **v1.1**: AsyncLocalStorage ambient request context (`/node`) so SSR-time
-  calls see the real request; per-fn guard overrides. **Shipped early from
+  calls see the real request — **shipped** (#309, `runWithServerFnContext`),
+  together with the explicit `fn.with({ context })` channel (#352) that
+  needs no ALS and so works on every runtime. Still open: per-fn guard
+  overrides. **Shipped early from
   the #349–#357 review sweep**: `onError` observability hook and
   `timeoutMs` on the endpoint options (post-RFC additive surface — the RFC
   originally promised neither; #349/#350), the `__DEV__` non-JSON-safe

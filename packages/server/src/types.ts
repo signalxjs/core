@@ -2,7 +2,7 @@
  * Shared server-function types — split from index.ts so the WinterCG request
  * handler (`./server`) can import them without pulling the marker module in.
  */
-import type { ServerFnContext } from './context';
+import type { ServerFnContext, ServerFnContextInit } from './context';
 
 /** Identity of the function being invoked, as the transports know it. */
 export interface ServerFnInfo {
@@ -44,6 +44,24 @@ export interface ServerFnCallOptions {
      * in-process (SSR) call it becomes `rq.abortSignal`.
      */
     signal?: AbortSignal;
+    /**
+     * The request context for an IN-PROCESS (SSR-time) call — a `Request`,
+     * or a partial context to override more (#352).
+     *
+     * Without it, `rq.request`/`rq.url` throw on an in-process call, so a
+     * function shaped `sessionFrom(rq.request)` works over RPC and breaks
+     * during SSR. Hand the real request in:
+     *
+     * ```ts
+     * await getCart.with({ context: ssrRequest })(cartId);
+     * ```
+     *
+     * Wins over the ambient context `runWithServerFnContext` installs
+     * (`@sigx/server/node`, #309) — explicit beats ambient. **Ignored on the
+     * client**: a stub's context is the HTTP request it makes, and silently
+     * accepting one there would imply it travelled.
+     */
+    context?: ServerFnContextInit;
 }
 
 /**

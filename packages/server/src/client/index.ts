@@ -170,8 +170,18 @@ export function __serverFnStub(
     return Object.assign((...args: unknown[]) => call(args), {
         with:
             (options?: ServerFnCallOptions) =>
-            (...args: unknown[]) =>
-                call(args, options?.signal)
+            (...args: unknown[]) => {
+                if (__DEV__ && options && 'context' in options) {
+                    // Stripped from the prod dist, so this costs the
+                    // size-limited stub entry nothing.
+                    console.warn(
+                        `[sigx server] .with({ context }) is ignored on the client — a stub's ` +
+                        `context is the HTTP request it makes. It only applies to in-process ` +
+                        `(SSR-time) calls; passing it here does not send anything.`
+                    );
+                }
+                return call(args, options?.signal);
+            }
     });
 }
 
