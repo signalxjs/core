@@ -108,6 +108,12 @@ export function isSerializable(key: string, value: unknown, what = 'useAsync'): 
  * JSON.stringify with the type-handler chain applied. Handlers receive the
  * RAW value (read off the holder, before toJSON) so types like Date — whose
  * toJSON would otherwise run first — are still matchable.
+ *
+ * NOTE: this still uses the registry chain ONLY — it deliberately does not
+ * apply the built-in `$date`/`$map`/… vocabulary from `encodeWithHandlers`.
+ * Emitting tags the client cannot yet revive would corrupt the state blob;
+ * the switch happens together with wiring `reviveWithHandlers` into the
+ * hydration read paths (`async/restore.ts`, resume scope, cache store).
  */
 export function stringifyWithHandlers(
     value: unknown,
