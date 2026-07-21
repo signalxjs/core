@@ -132,13 +132,24 @@ export default [
   },
   {
     // The fetch stubs the server-fn transform emits imports of. NO ignore
-    // list — this entry doubles as the "stubs import nothing" guard (resume
-    // handler chunks replicate stub imports; they must stay dependency-free).
+    // list — this entry doubles as the "stubs drag no runtime" guard (resume
+    // handler chunks replicate stub imports, and a zero-JS page must not pull
+    // the framework to make one RPC call). The absent ignore list is what
+    // makes that real: esbuild follows every import, so anything the stub
+    // reaches is counted here.
     // 1 KB → 1.25 KB with #311: the entry absorbed the rev-2 transport
     // config (#329), the stream stub (#340), and $cache delivery (#311) —
     // all semantics, no dependencies (the ceiling #320 pre-approved).
+    // 1.25 KB → 1.9 KB with #364: the rfc-server §4 wire codec (encode +
+    // revive, seven built-in tags, both directions). It is IMPORTED from
+    // @sigx/serialize, not inlined — that package is dependency-free for
+    // exactly this reason, and the bytes land in this measurement either way.
+    // Sits at 1.81 KB. An inlined copy measured 1.73 KB: sharing costs ~80 B
+    // because the module boundary blocks some inlining, and that is the
+    // deliberate trade — one implementation instead of two that drift (the
+    // duplicated pair had already grown the same $esc bug twice).
     name: '@sigx/server/client (fetch stubs)',
     path: 'packages/server/dist/client/index.prod.js',
-    limit: '1.25 KB',
+    limit: '1.9 KB',
   },
 ];

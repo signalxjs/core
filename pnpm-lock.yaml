@@ -461,6 +461,10 @@ importers:
         version: 8.1.4(@types/node@26.1.1)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.1)
 
   packages/server:
+    dependencies:
+      '@sigx/serialize':
+        specifier: workspace:^
+        version: link:../serialize
     devDependencies:
       '@sigx/vite':
         specifier: workspace:^

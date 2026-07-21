@@ -4,6 +4,32 @@
 
 ### Added
 
+- **Rich wire serialization, both directions** (rfc-server §4, #364). A
+  returned `Date` used to arrive as a string — while TypeScript still
+  reported `Date`, so `.getTime()` threw in production. `Map`/`Set` arrived
+  as `{}`, explicit `undefined` properties vanished, and a `BigInt` threw in
+  `JSON.stringify` and became a masked 500. All of those now round-trip, on
+  **arguments as well as results**, plus stream chunks and
+  `ServerFnError.data`. Built-in vocabulary, zero configuration: `$date`,
+  `$map`, `$set`, `$bigint`, `$url`, `$regexp`, `$undef`. Custom classes
+  register through `globalThis.__SIGX_SERVERFN_CODEC__` (the `$cache`
+  global-seam pattern) and are consulted *before* the built-ins. **The
+  envelope shape is unchanged** — tags live inside the values, so
+  `{"args": […]}` / `{"data": …}` and the `$cache` sidecar are untouched, and
+  no version field is needed: an unrecognized tag passes through rather than
+  throwing, so peers on different versions degrade instead of breaking. A
+  user object shaped like a tag (`{ $date: 'a string' }`) is escaped and
+  comes back intact. Decoding runs *after* the prototype-pollution reviver,
+  and a malformed tag payload in a request is a **400**, not a masked 500.
+  Circular structures remain the one unsupported shape and still fail.
+
+### Removed
+
+- **`warnNonJsonSafe`, the #351 dev guardrail.** It existed only to make the
+  JSON-only wire's silent corruption visible in dev; the wire now carries
+  those types for real, so the warning is gone rather than misleading. No API
+  change — it was never part of the public surface.
+
 - **`onError` observability hook** on the endpoint options (`/server` +
   `/node`): called for every MASKED failure — any non-`ServerFnError` throw
   from guard or handler, mid-stream `serverStream` throws, and timeouts —

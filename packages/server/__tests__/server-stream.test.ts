@@ -196,12 +196,19 @@ describe('serverStream — endpoint NDJSON', () => {
         expect(errors).toHaveLength(0);
     });
 
+    /** A cycle is the one shape the §4 codec still cannot encode. */
+    const cyclic = (): Record<string, unknown> => {
+        const c: Record<string, unknown> = { a: 1 };
+        c.self = c;
+        return c;
+    };
+
     it('an unserializable FIRST chunk is a buffered error AND the generator is disposed', async () => {
         vi.stubEnv('NODE_ENV', 'production');
         let finallyRan = false;
         const s = serverStream(async function* () {
             try {
-                yield { big: 10n }; // BigInt — JSON.stringify throws
+                yield cyclic(); // circular — still unencodable
                 yield 'never';
             } finally {
                 finallyRan = true;
@@ -222,7 +229,7 @@ describe('serverStream — endpoint NDJSON', () => {
         const s = serverStream(async function* () {
             try {
                 yield 'ok';
-                yield { big: 10n };
+                yield cyclic();
                 yield 'never';
             } finally {
                 finallyRan = true;
@@ -232,6 +239,20 @@ describe('serverStream — endpoint NDJSON', () => {
         expect(emitted[0]).toEqual({ chunk: 'ok' });
         expect(emitted[1]).toEqual({ error: { message: 'Internal error', status: 500 } });
         await vi.waitFor(() => expect(finallyRan).toBe(true));
+    });
+
+    it('a BigInt chunk now streams instead of killing the stream (§4)', async () => {
+        // Both of these used to be the failure cases above: BigInt threw in
+        // JSON.stringify, so it terminated the stream either buffered or
+        // in-band depending on position.
+        const s = serverStream(async function* () {
+            yield { big: 10n };
+            yield { at: new Date(5) };
+        });
+        const emitted = await lines(await post(s));
+        expect(emitted[0]).toEqual({ chunk: { big: { $bigint: '10' } } });
+        expect(emitted[1]).toEqual({ chunk: { at: { $date: 5 } } });
+        expect(emitted[2]).toEqual({ done: 1 });
     });
 
     it('cancelling the response body returns the generator (finally runs)', async () => {

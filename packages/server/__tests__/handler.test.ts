@@ -503,75 +503,113 @@ describe('handleServerFnRequest — timeoutMs (#350)', () => {
     });
 });
 
-describe('handleServerFnRequest — dev warning for non-JSON-safe results (#351)', () => {
+describe('handleServerFnRequest — rich wire serialization (rfc-server §4)', () => {
     class Basket {
         items = 3;
     }
-    const returnsDate = serverFn(async () => ({ createdAt: new Date() }));
+    const returnsDate = serverFn(async () => ({ createdAt: new Date(1_700_000_000_000) }));
     const returnsMap = serverFn(async () => new Map([['a', 1]]));
     const returnsNestedUndefined = serverFn(async () => ({ a: { b: undefined } }));
     const returnsInstance = serverFn(async () => new Basket());
     const returnsToJson = serverFn(async () => ({ range: { toJSON: () => [1, 2] } }));
     const returnsPlain = serverFn(async () => ({ ok: [1, 2, { deep: true }] }));
+    const returnsRich = serverFn(async () => ({
+        at: new Date(5),
+        tags: new Set(['a']),
+        total: 42n,
+        home: new URL('https://example.com/'),
+        pattern: /ab+c/gi
+    }));
+    const returnsTagLike = serverFn(async () => ({ $date: 'just a string' }));
+    const echoes = serverFn(async (_rq, value: unknown) => value);
+    const returnsCircular = serverFn(async () => {
+        const c: Record<string, unknown> = { a: 1 };
+        c.self = c;
+        return c;
+    });
     Object.assign(FNS, {
         date_fn_00000008: returnsDate,
         map_fn_00000009: returnsMap,
         undef_fn_0000000a: returnsNestedUndefined,
         inst_fn_0000000b: returnsInstance,
         tojson_fn_0000000c: returnsToJson,
-        plain_fn_0000000d: returnsPlain
+        plain_fn_0000000d: returnsPlain,
+        rich_fn_0000000e: returnsRich,
+        taglike_fn_0000000f: returnsTagLike,
+        echo_fn_00000010: echoes,
+        circular_fn_00000011: returnsCircular
     });
 
-    function withWarnSpy(fn: () => Promise<void>): Promise<void> {
-        const spy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-        return fn().finally(() => spy.mockRestore());
-    }
+    const dataOf = async (symbol: string, args: unknown[] = []): Promise<unknown> =>
+        ((await (await call(symbol, { args })).json()) as { data?: unknown }).data;
 
-    it('warns once for a Date, naming the path', () =>
-        withWarnSpy(async () => {
-            const res = await call('date_fn_00000008', { args: [] });
-            expect(res.status).toBe(200);
-            expect(console.warn).toHaveBeenCalledTimes(1);
-            expect(vi.mocked(console.warn).mock.calls[0][0]).toContain('a Date');
-            expect(vi.mocked(console.warn).mock.calls[0][0]).toContain('data.createdAt');
-        }));
+    it('tags a Date instead of flattening it to a string', async () => {
+        expect(await dataOf('date_fn_00000008')).toEqual({
+            createdAt: { $date: 1_700_000_000_000 }
+        });
+    });
 
-    it('warns for Map results', () =>
-        withWarnSpy(async () => {
-            await call('map_fn_00000009', { args: [] });
-            expect(vi.mocked(console.warn).mock.calls[0][0]).toContain('a Map');
-        }));
+    it('tags a Map instead of emitting {}', async () => {
+        expect(await dataOf('map_fn_00000009')).toEqual({ $map: [['a', 1]] });
+    });
 
-    it('names the dotted path of a nested undefined property', () =>
-        withWarnSpy(async () => {
-            await call('undef_fn_0000000a', { args: [] });
-            expect(vi.mocked(console.warn).mock.calls[0][0]).toContain('data.a.b');
-        }));
+    it('keeps a nested undefined property instead of dropping it', async () => {
+        expect(await dataOf('undef_fn_0000000a')).toEqual({ a: { b: { $undef: 0 } } });
+    });
 
-    it('flags class instances but skips objects with toJSON', () =>
-        withWarnSpy(async () => {
-            await call('inst_fn_0000000b', { args: [] });
-            expect(vi.mocked(console.warn).mock.calls[0][0]).toContain('Basket');
-            vi.mocked(console.warn).mockClear();
-            await call('tojson_fn_0000000c', { args: [] });
-            expect(console.warn).not.toHaveBeenCalled();
-        }));
+    it('covers every built-in tag in one payload', async () => {
+        expect(await dataOf('rich_fn_0000000e')).toEqual({
+            at: { $date: 5 },
+            tags: { $set: ['a'] },
+            total: { $bigint: '42' },
+            home: { $url: 'https://example.com/' },
+            pattern: { $regexp: ['ab+c', 'gi'] }
+        });
+    });
 
-    it('stays silent for plain JSON-safe data', () =>
-        withWarnSpy(async () => {
-            await call('plain_fn_0000000d', { args: [] });
-            expect(console.warn).not.toHaveBeenCalled();
-        }));
+    it('escapes a user object that would be mistaken for a tag', async () => {
+        expect(await dataOf('taglike_fn_0000000f')).toEqual({
+            $esc: { $date: 'just a string' }
+        });
+    });
 
-    it('stays silent in production', async () => {
-        vi.stubEnv('NODE_ENV', 'production');
-        const spy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-        try {
-            await call('date_fn_00000008', { args: [] });
-            expect(spy).not.toHaveBeenCalled();
-        } finally {
-            spy.mockRestore();
-            vi.unstubAllEnvs();
-        }
+    it('still flattens a class instance and honors toJSON', async () => {
+        // Prototypes are NOT recovered — a class instance needs a registered
+        // handler, which is what the registry seam is for.
+        expect(await dataOf('inst_fn_0000000b')).toEqual({ items: 3 });
+        expect(await dataOf('tojson_fn_0000000c')).toEqual({ range: [1, 2] });
+    });
+
+    it('leaves plain JSON-safe data byte-identical', async () => {
+        expect(await dataOf('plain_fn_0000000d')).toEqual({ ok: [1, 2, { deep: true }] });
+    });
+
+    it('decodes rich types in ARGUMENTS, not just results', async () => {
+        // The direction that had no coverage at all before §4 landed.
+        const echoed = await dataOf('echo_fn_00000010', [{ $date: 5 }]);
+        expect(echoed).toEqual({ $date: 5 });
+    });
+
+    it('revives an argument into a live instance for the handler', async () => {
+        let seen: unknown;
+        Object.assign(FNS, {
+            seen_fn_00000012: serverFn(async (_rq, v: unknown) => {
+                seen = v;
+                return null;
+            })
+        });
+        await call('seen_fn_00000012', { args: [{ $map: [['k', { $date: 1 }]] }] });
+        expect(seen).toBeInstanceOf(Map);
+        expect((seen as Map<string, unknown>).get('k')).toBeInstanceOf(Date);
+    });
+
+    it('rejects a malformed encoded argument as a 400, not a 500', async () => {
+        const res = await call('echo_fn_00000010', { args: [{ $bigint: 'not a number' }] });
+        expect(res.status).toBe(400);
+    });
+
+    it('still fails on a circular result — the one unsupported shape', async () => {
+        const res = await call('circular_fn_00000011', { args: [] });
+        expect(res.status).toBe(500);
     });
 });

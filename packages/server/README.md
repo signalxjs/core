@@ -237,14 +237,52 @@ exactly your args); on an in-process (SSR) call the signal becomes
 `rq.abortSignal` directly. This is rfc-server v2's per-call options channel
 pulled forward — `headers` joins it there.
 
-### Dev guardrail — non-JSON-safe results
+### What survives the wire
 
-The v1 envelope is plain JSON: a returned `Date` becomes a string, a
-`Map`/`Set` becomes `{}`, and `undefined` properties are dropped — while
-TypeScript still reports the declared type. Until rich type serialization
-ships with the revive seam (rfc-server §4), the endpoint warns **in dev
-only** when a result contains such a value, naming the path. The wire is
-never transformed.
+Rich types cross in **both** directions — arguments, results, stream chunks
+and `ServerFnError.data` — with no configuration:
+
+| Type | Round-trips |
+|---|---|
+| `Date` | ✅ a live `Date`, not an ISO string |
+| `Map` / `Set` | ✅ |
+| `BigInt` | ✅ (it used to throw) |
+| `URL`, `RegExp` | ✅ |
+| explicit `undefined` property | ✅ preserved, not dropped |
+| plain objects, arrays, primitives | ✅ unchanged |
+| **circular structures** | ❌ still an error — the one unsupported shape |
+
+```ts
+export const getOrder = serverFn(async (rq, id: string) => ({
+    id,
+    createdAt: new Date(),          // arrives as a Date
+    tags: new Set(['priority']),    // arrives as a Set
+    total: 1999n                    // arrives as a BigInt
+}));
+```
+
+Class instances lose their prototype unless a handler is registered for
+them. Register custom types on `globalThis.__SIGX_SERVERFN_CODEC__` (the
+same global-seam pattern `$cache` uses, so the stub entry stays
+dependency-free):
+
+```ts
+globalThis.__SIGX_SERVERFN_CODEC__ = [{
+    name: 'money', tag: '$money',
+    test: (v) => v instanceof Money,
+    serialize: (v) => v.cents,
+    revive: (c) => new Money(c)
+}];
+```
+
+Registered handlers are consulted **before** the built-ins, so a pack can own
+a type they also cover. Encoded values take the form
+`{ $date: 1700000000000 }` (epoch **milliseconds**, straight from
+`Date#getTime()`);
+a user object that happens to look like one (`{ $date: 'a string' }`) is
+escaped and comes back intact, and an unrecognized tag is passed through
+rather than throwing — so a client and server on different versions degrade
+instead of breaking. See rfc-server §4.
 
 ## Native clients — transport config
 

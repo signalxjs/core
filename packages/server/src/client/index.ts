@@ -13,6 +13,10 @@
 
 // Type-only — erased at build, so the entry stays dependency-free.
 import type { ServerFnCallOptions } from '../types';
+// In-package module (no external dependency): the rfc-server §4 wire codec,
+// shared with the `/server` entry. size-limit's esbuild pass follows the
+// import, so its bytes still count against this entry's ceiling.
+import { encodeWire, reviveWire } from '../wire-codec';
 
 /** Same three keys as the boundary serializer's DANGEROUS_KEYS — duplicated
  *  here (a 3-entry set) to keep this entry dependency-free. */
@@ -77,7 +81,7 @@ async function send(
     const init: RequestInit = {
         method: 'POST',
         headers,
-        body: JSON.stringify({ args }),
+        body: JSON.stringify({ args: encodeWire(args) }),
         ...(signal ? { signal } : {})
     };
     // Branch instead of aliasing the global fetch — an unbound alias is
@@ -86,12 +90,13 @@ async function send(
     return config?.fetch ? config.fetch(url, init) : fetch(url, init);
 }
 
-/** Re-create a wire error with the `__sigxServerFnError` brand. */
+/** Re-create a wire error with the `__sigxServerFnError` brand. `data` is
+ *  revived like any payload — a `ServerFnError` may carry rich types too. */
 function wireFail(status: number, wire: WireError | undefined, message: string): Error {
     return Object.assign(new Error(wire?.message ?? message), {
         __sigxServerFnError: true,
         status: wire?.status ?? status,
-        data: wire?.data
+        data: wire && 'data' in wire ? reviveWire(wire.data) : undefined
     });
 }
 
@@ -154,7 +159,10 @@ export function __serverFnStub(
             throw wireFail(res.status, res.status === 404 ? { ...wire, message } : wire, message);
         }
         if (payload?.$cache) deliverCacheDirectives(payload.$cache);
-        return payload?.data;
+        // Revive `data` specifically, not the whole envelope: `$cache` is a
+        // reserved sidecar, and a `$`-prefixed sole key would otherwise look
+        // like an unrecognized tag.
+        return 'data' in (payload ?? {}) ? reviveWire(payload!.data) : undefined;
     };
     // `.with(options)` — the per-call options channel (#353, the rfc-server
     // v2 per-call bullet pulled forward): explicit, so the wire args stay
@@ -216,7 +224,7 @@ export function __serverStreamStub(
                             throw wireFail(500, obj.error, `server stream "${name}" failed`);
                         }
                         if ('done' in obj) return;
-                        yield obj.chunk;
+                        yield reviveWire(obj.chunk);
                     }
                 }
                 // EOF: flush the decoder (a buffered partial code point) and
@@ -236,7 +244,7 @@ export function __serverStreamStub(
                             throw wireFail(500, obj.error, `server stream "${name}" failed`);
                         }
                         if ('done' in obj) return;
-                        yield obj.chunk; // complete chunk — but still no terminator
+                        yield reviveWire(obj.chunk); // complete chunk — but still no terminator
                     }
                 }
                 // Body ended without a terminator line — a dropped

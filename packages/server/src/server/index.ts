@@ -14,6 +14,7 @@
 import { createRequestContext, type ServerFnContext } from '../context';
 import { isServerFnError } from '../errors';
 import type { ServerFnGuard, ServerFnInfo, WrappedServerFn } from '../types';
+import { encodeWire, reviveWire } from '../wire-codec';
 
 export interface ServerFnRequestOptions {
     /**
@@ -197,14 +198,23 @@ export async function handleServerFnRequest(
     if (body === null) {
         return errorResponse(413, 'Request body too large');
     }
-    let args: unknown;
+    let parsed: unknown;
     try {
-        args = body ? (JSON.parse(body, reviver) as { args?: unknown }).args : undefined;
+        parsed = body ? (JSON.parse(body, reviver) as { args?: unknown }).args : undefined;
     } catch {
         return errorResponse(400, 'Malformed JSON body');
     }
-    if (!Array.isArray(args)) {
+    if (!Array.isArray(parsed)) {
         return errorResponse(400, 'Body must be {"args": [...]}');
+    }
+    // Rich types on the way IN (rfc-server §4) — decoded AFTER the
+    // prototype-pollution reviver, so dangerous keys are already gone. A
+    // malformed tag payload is the caller's bad request, not a 500.
+    let args: unknown[];
+    try {
+        args = parsed.map((arg) => reviveWire(arg));
+    } catch {
+        return errorResponse(400, 'Malformed encoded value in body');
     }
 
     const ctx = createRequestContext(request);
@@ -235,11 +245,10 @@ export async function handleServerFnRequest(
                 info
             );
         }
-        if (__DEV__) warnNonJsonSafe(result, info.name || symbol);
         const headers = new Headers(ctx.responseHeaders);
         headers.set('content-type', 'application/json');
         const envelope: Record<string, unknown> = {};
-        if (result !== undefined) envelope.data = result;
+        if (result !== undefined) envelope.data = encodeWire(result);
         // Server-declared cache directives (rfc-server §6.2) — computed
         // where the data changed, from the VALIDATED input the pipeline
         // stashed; a throw here is a fn error (masked per §5).
@@ -313,7 +322,23 @@ function wireErrorShape(
     label: string
 ): { message: string; status: number; data?: unknown } {
     if (isServerFnError(error)) {
-        return { message: error.message, status: error.status, data: error.data };
+        // `data` is user payload and may carry rich types like any result.
+        // An unencodable one (circular) must not turn a clean 4xx into a 500.
+        // An ABSENT `data` stays absent — encoding it would emit `$undef`
+        // where the envelope's contract is that the key is simply missing.
+        let data: unknown;
+        try {
+            data = error.data === undefined ? undefined : encodeWire(error.data);
+        } catch {
+            data = undefined;
+            if (__DEV__) {
+                console.warn(
+                    `[sigx server] "${label}" threw a ServerFnError whose \`data\` ` +
+                    `cannot be encoded (circular?) — the error is sent without it.`
+                );
+            }
+        }
+        return { message: error.message, status: error.status, data };
     }
     if (__DEV__) {
         const err = error as Error;
@@ -348,12 +373,13 @@ async function streamResponse(
     // Fire-and-forget generator cleanup: a no-op on a finished generator, and
     // a throwing `finally` must not become an unhandled rejection.
     const dispose = (): void => void gen.return(undefined).catch(() => {});
-    /** Encode one chunk line; on unserializable values (BigInt, cycles) the
-     *  generator is DISPOSED before the error propagates — an advanced
-     *  generator must never leak its `finally`. */
+    /** Encode one chunk line, rich types included (rfc-server §4). On values
+     *  that still cannot be encoded (cycles) the generator is DISPOSED before
+     *  the error propagates — an advanced generator must never leak its
+     *  `finally`. */
     const chunkLine = (value: unknown): Uint8Array => {
         try {
-            return line({ chunk: value });
+            return line({ chunk: encodeWire(value) });
         } catch (error) {
             dispose();
             throw error;
@@ -409,58 +435,7 @@ async function streamResponse(
     return new Response(body, { status: ctx._status ?? 200, headers });
 }
 
-/**
- * #351 — the interim guardrail for the v1 JSON-only wire (rfc-server §4):
- * rich type-handler serialization (Date, Map, custom classes) is DEFERRED
- * until the client revive seam ships, so until then those values silently
- * corrupt (Date → string, Map/Set → {}, undefined props dropped) while
- * TypeScript still reports the declared type. This dev-only scan turns the
- * silent prod bug into a visible dev nudge. Never transforms the wire;
- * removed when real type handlers land.
- */
-function warnNonJsonSafe(value: unknown, label: string): void {
-    const offense = findNonJsonSafe(value, '', 0, { budget: 500 });
-    if (offense) {
-        console.warn(
-            `[sigx server] "${label}" returned a value that will not survive the JSON wire: ` +
-            `${offense.what} at data${offense.path || ''}. The v1 envelope is plain JSON - ` +
-            `rich type serialization ships with the revive seam (docs/rfc-server.md §4). ` +
-            `Convert to a JSON-safe shape (e.g. ISO strings, arrays, plain objects).`
-        );
-    }
-}
-
-function findNonJsonSafe(
-    value: unknown,
-    path: string,
-    depth: number,
-    state: { budget: number }
-): { path: string; what: string } | null {
-    if (depth > 6 || state.budget-- <= 0) return null;
-    if (value === null || typeof value !== 'object') return null;
-    if (value instanceof Date) return { path, what: 'a Date (serializes to an ISO string)' };
-    if (value instanceof Map) return { path, what: 'a Map (serializes to {})' };
-    if (value instanceof Set) return { path, what: 'a Set (serializes to {})' };
-    if (Array.isArray(value)) {
-        for (let i = 0; i < value.length; i++) {
-            const hit = findNonJsonSafe(value[i], `${path}[${i}]`, depth + 1, state);
-            if (hit) return hit;
-        }
-        return null;
-    }
-    const proto = Object.getPrototypeOf(value);
-    if (proto !== Object.prototype && proto !== null) {
-        // Objects with a callable toJSON opted into JSON — not an offense.
-        if (typeof (value as { toJSON?: unknown }).toJSON === 'function') return null;
-        return { path, what: `a class instance (${proto?.constructor?.name ?? 'unknown'})` };
-    }
-    for (const key of Object.keys(value)) {
-        const entry = (value as Record<string, unknown>)[key];
-        if (entry === undefined) {
-            return { path: `${path}.${key}`, what: 'an undefined property (dropped by JSON)' };
-        }
-        const hit = findNonJsonSafe(entry, `${path}.${key}`, depth + 1, state);
-        if (hit) return hit;
-    }
-    return null;
-}
+// #351's interim guardrail (`warnNonJsonSafe`) is GONE: it existed only to
+// make the JSON-only wire's silent corruption visible in dev, and the wire
+// now carries those types for real (rfc-server §4). The one shape still
+// unsupported — a circular structure — surfaces as an error, not a warning.
