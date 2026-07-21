@@ -222,7 +222,8 @@ function toWebRequest(req: IncomingMessage, res: ServerResponse): Request {
  * ambient, and with neither, `rq.request` keeps throwing its descriptive
  * error rather than returning undefined.
  *
- * **Runtime support.** This entry imports `node:async_hooks`, so it needs
+ * **Runtime support.** CALLING this loads `node:async_hooks` (the import is
+ * dynamic — importing `@sigx/server/node` itself pulls nothing), so it needs
  * Node, Deno, or workerd with `nodejs_compat`. Runtimes without it use
  * `fn.with({ context })`, which needs no ALS and behaves identically — that
  * is the WinterCG-portable form.
