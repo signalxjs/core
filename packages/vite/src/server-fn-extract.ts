@@ -80,6 +80,13 @@ export interface ExtractedServerFn {
      * the wrapper.
      */
     refreshes: boolean;
+    /**
+     * True when the options form declares the LITERAL `form: true`
+     * (rfc-server §6.4) — the fn is a declared form target, and the resume
+     * transform may stamp `action`/`method` onto a `<form>` whose submit
+     * handler calls it. Same no-hash-seed-change reasoning as `get`.
+     */
+    form: boolean;
 }
 
 /** Shared options for both extractors (file form and inline). */
@@ -183,6 +190,31 @@ function hasServerFnOptionKey(call: Node, keyName: string): boolean {
 }
 
 /**
+ * Statically detect the options-form `form: true` declaration (rfc-server
+ * §6.4) — stricter than `cache`'s presence-only rule: the LITERAL `true`
+ * is required, because this bit gates a build-stamped `action` attribute,
+ * and a stamped action pointing at a fn whose runtime mark resolved false
+ * would 415 with no JS on the page to recover. Shared with the inline
+ * extractor.
+ */
+export function readServerFnFormOption(call: Node): boolean {
+    const args = (call.arguments as Node[]) ?? [];
+    if (args.length !== 1 || args[0]?.type !== 'ObjectExpression') return false;
+    for (const prop of (args[0].properties as Node[]) ?? []) {
+        if (prop.type !== 'Property' || prop.computed === true) continue;
+        const key = prop.key as Node;
+        const keyName =
+            key.type === 'Identifier' ? (key.name as string)
+            : key.type === 'Literal' ? String(key.value)
+            : '';
+        if (keyName !== 'form') continue;
+        const value = prop.value as Node;
+        return value.type === 'Literal' && value.value === true;
+    }
+    return false;
+}
+
+/**
  * Mint both transport symbols for one function (rfc-server rev 2, §3/N.3):
  * hashed — `<name>_fn_<hash8(id\0name\0implSource)>` (`\0` is only ever a
  * hash-seed FIELD separator; never part of the id) — and stable —
@@ -198,7 +230,8 @@ export function mintSymbols(
     stableId: string,
     stream = false,
     get = false,
-    refreshes = false
+    refreshes = false,
+    form = false
 ): ExtractedServerFn {
     const fnStableId = explicitId ?? stableId;
     return {
@@ -207,7 +240,8 @@ export function mintSymbols(
         stableSymbol: `${fnStableId}#${name}`,
         stream,
         get,
-        refreshes
+        refreshes,
+        form
     };
 }
 
@@ -266,7 +300,14 @@ export function extractServerFns(
      *  mark, for `export { x }` resolution. */
     const localFnSources = new Map<
         string,
-        { source: string; stream: boolean; explicitId?: string; get: boolean; refreshes: boolean }
+        {
+            source: string;
+            stream: boolean;
+            explicitId?: string;
+            get: boolean;
+            refreshes: boolean;
+            form: boolean;
+        }
     >();
     const wrapperKind = (init: unknown): 'fn' | 'stream' | undefined => {
         if (!isNode(init) || init.type !== 'CallExpression' || !isNode(init.callee)) {
@@ -320,7 +361,8 @@ export function extractServerFns(
                 stream: kind === 'stream',
                 explicitId: idOption.id,
                 get: kind === 'fn' && readServerFnCacheOption(init),
-                refreshes: kind === 'fn' && readServerFnRefreshesOption(init)
+                refreshes: kind === 'fn' && readServerFnRefreshesOption(init),
+                form: kind === 'fn' && readServerFnFormOption(init)
             });
         }
     }
@@ -340,7 +382,8 @@ export function extractServerFns(
                     options.stableId,
                     record.stream,
                     record.get,
-                    record.refreshes
+                    record.refreshes,
+                    record.form
                 )
             );
         } else {

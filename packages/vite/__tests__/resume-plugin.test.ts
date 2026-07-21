@@ -11,6 +11,7 @@ import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { sigxResume } from '../src/resume';
+import { sigxServer } from '../src/server-fn';
 
 const COUNTER = `
 import { component } from 'sigx';
@@ -270,5 +271,70 @@ export const TsForm = component((ctx) => {
         } finally {
             rmSync(root, { recursive: true, force: true });
         }
+    });
+});
+
+describe('sigxResume × sigxServer — form-action stamping wiring (rfc-server §6.4, #312)', () => {
+    const API = `
+import { serverFn } from '@sigx/server';
+export const submitFeedback = serverFn({
+    form: true,
+    handler: async (rq, input) => input
+});
+`;
+    const FEEDBACK = `
+import { component } from 'sigx';
+import { submitFeedback } from './api.server';
+export const Feedback = component((ctx) => {
+    const sent = ctx.signal(false);
+    return () => (
+        <form onSubmit={async (e) => {
+            e.preventDefault();
+            await submitFeedback({ message: 'x' });
+            sent.value = true;
+        }}>
+            <input name="message" />
+        </form>
+    );
+});
+`;
+
+    function makeWiredProject(serverOptions?: Record<string, unknown>) {
+        const root = mkdtempSync(join(tmpdir(), 'sigx-resume-wired-'));
+        mkdirSync(join(root, 'src'), { recursive: true });
+        writeFileSync(join(root, 'src/api.server.ts'), API);
+        writeFileSync(join(root, 'src/Feedback.resume.tsx'), FEEDBACK);
+        const server = sigxServer(serverOptions) as any;
+        const resume = sigxResume() as any;
+        // Both plugins see the resolved config, sigx:server first — the
+        // resume plugin finds it by name via config.plugins (the seam).
+        const config = { root, command: 'build' as const, plugins: [server, resume] };
+        server.configResolved(config);
+        resume.configResolved(config);
+        return { resume, root };
+    }
+
+    it('stamps the action through the live sigx:server api', () => {
+        const { resume, root } = makeWiredProject();
+        const file = join(root, 'src/Feedback.resume.tsx');
+        const result = resume.transform.call(
+            { environment: { name: 'ssr' }, warn: () => {} },
+            FEEDBACK,
+            file
+        );
+        const encoded = encodeURIComponent('src/api.server.ts#submitFeedback');
+        expect(result.code).toContain(` action="/_sigx/fn/${encoded}" method="post"`);
+        expect(result.code).toContain('data-sigx-pd:submit=""');
+    });
+
+    it("role: 'client' builds never stamp", () => {
+        const { resume, root } = makeWiredProject({ role: 'client' });
+        const file = join(root, 'src/Feedback.resume.tsx');
+        const result = resume.transform.call(
+            { environment: { name: 'ssr' }, warn: () => {} },
+            FEEDBACK,
+            file
+        );
+        expect(result.code).not.toContain('action=');
     });
 });

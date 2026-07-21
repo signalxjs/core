@@ -89,6 +89,26 @@ export interface ResumeExtraction {
     components: ResumeComponent[];
     /** Union of extracted event names — feeds the loader's delegation list. */
     events: string[];
+    /** §6.4 stamping notes (ambiguous targets, author-provided action) —
+     *  surfaced by the plugin via this.warn. */
+    warnings: string[];
+}
+
+/** §6.4 hooks the resume plugin threads in (both optional — absent means
+ *  no form-action stamping, today's behavior exactly). */
+export interface ResumeExtractOptions {
+    /**
+     * Resolve a handler's captured serverFn import — (specifier as written,
+     * export name; `default` for default imports) — to its stable transport
+     * symbol and form mark. The sigx:server plugin's `api.resolveServerFn`,
+     * pre-bound with the importing file. Null = not a known serverFn.
+     */
+    resolveServerFn?(
+        specifier: string,
+        exportName: string
+    ): { stableSymbol: string; form: boolean } | null;
+    /** The endpoint base baked into stamped actions (sigx:server's `api.endpoint`). */
+    endpoint?: string;
 }
 
 /**
@@ -739,7 +759,11 @@ const LANG_BY_EXT: Record<string, 'ts' | 'tsx' | 'js' | 'jsx'> = {
     '.mts': 'ts'
 };
 
-export function extractResumeHandlers(code: string, id: string): ResumeExtraction {
+export function extractResumeHandlers(
+    code: string,
+    id: string,
+    opts: ResumeExtractOptions = {}
+): ResumeExtraction {
     const clean = id.split('?')[0];
     const ext = clean.slice(clean.lastIndexOf('.'));
     const program = parseAst(code, { lang: LANG_BY_EXT[ext] ?? 'tsx' }, clean) as unknown as Node;
@@ -754,6 +778,65 @@ export function extractResumeHandlers(code: string, id: string): ResumeExtractio
     const handlerExports = new Map<string, string>(); // symbol → export statement
     const replicatedImports = new Map<string, Set<string>>(); // source → clause pieces
     const events = new Set<string>();
+    const warnings: string[] = [];
+
+    /** The JSX tag of a host element's opening node, or null for components. */
+    const tagNameOf = (element: Node): string | null => {
+        const tag = element.name as Node;
+        return tag.type === 'JSXIdentifier' ? ((tag.name as string) ?? null) : null;
+    };
+    /** Does ELEMENT carry any of these plain JSX attributes already? */
+    const hasJsxAttr = (element: Node, names: string[]): boolean =>
+        (element.attributes as Node[]).some((attr) => {
+            if (attr.type !== 'JSXAttribute') return false;
+            const name = attr.name as Node;
+            return name.type === 'JSXIdentifier' && names.includes(name.name as string);
+        });
+
+    /**
+     * §6.4: when a resume-mode submit handler on a host <form> captures
+     * EXACTLY ONE form-marked serverFn, return the action/method splice for
+     * the same element (the STABLE symbol, percent-encoded — a printed page
+     * must survive redeploys) plus whether `data-sigx-pd:submit` must be
+     * FORCED: the loader cancels the native submit synchronously only on
+     * that attribute, and without it a JS-loaded page would double-submit
+     * (RPC and native POST). Ambiguity and author-provided action/method
+     * warn and skip — zero form-marked captures is silently today's page.
+     */
+    const formActionFor = (
+        component: string,
+        site: HandlerSite,
+        imports: ImportedBinding[]
+    ): string | null => {
+        if (!opts.resolveServerFn || site.event !== 'submit') return null;
+        if (tagNameOf(site.element) !== 'form') return null;
+        const seen = new Set<string>();
+        for (const imp of imports) {
+            if (imp.typeOnly || imp.kind === 'namespace') continue;
+            const exportName = imp.kind === 'default' ? 'default' : imp.imported ?? imp.local;
+            const hit = opts.resolveServerFn(imp.source, exportName);
+            if (hit?.form) seen.add(hit.stableSymbol);
+        }
+        if (seen.size === 0) return null;
+        if (seen.size > 1) {
+            warnings.push(
+                `${component}: a <form> submit handler captures ${seen.size} form-marked ` +
+                `server functions — the no-JS target is ambiguous, action not stamped ` +
+                `(rfc-server §6.4).`
+            );
+            return null;
+        }
+        if (hasJsxAttr(site.element, ['action', 'method'])) {
+            warnings.push(
+                `${component}: a <form> already carries an author-written action/method — ` +
+                `it wins, action not stamped (rfc-server §6.4).`
+            );
+            return null;
+        }
+        const symbol: string = seen.values().next().value!;
+        const endpoint = opts.endpoint ?? '/_sigx/fn';
+        return ` action="${endpoint}/${encodeURIComponent(symbol)}" method="post"`;
+    };
 
     for (const comp of components) {
         let anyIneligible = false;
@@ -941,8 +1024,15 @@ export function extractResumeHandlers(code: string, id: string): ResumeExtractio
                 }
                 events.add(entry.site.event);
 
+                const formAction = formActionFor(comp.exported, entry.site, entry.imports);
                 let attrs = ` data-sigx-on:${entry.site.event}="${symbol}"`;
-                if (entry.preventDefault) attrs += ` data-sigx-pd:${entry.site.event}=""`;
+                // A stamped action FORCES the pd attribute (§6.4): with a
+                // real action present, an uncancelled native submit would
+                // fire alongside the replayed RPC.
+                if (entry.preventDefault || formAction !== null) {
+                    attrs += ` data-sigx-pd:${entry.site.event}=""`;
+                }
+                if (formAction !== null) attrs += formAction;
                 attrs += stampBoundary(entry.site);
                 componentSplices.push({ start: entry.site.attr.end, end: entry.site.attr.end, text: attrs });
             }
@@ -1034,6 +1124,7 @@ export function extractResumeHandlers(code: string, id: string): ResumeExtractio
         handlers,
         ineligible,
         components: componentResults,
-        events: [...events].sort()
+        events: [...events].sort(),
+        warnings
     };
 }

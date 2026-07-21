@@ -76,6 +76,22 @@ export function sigxResume(options: SigxResumeOptions = {}): Plugin {
     let isServe = false;
     /** Latest extraction per absolute module path (files with components only). */
     const extractions = new Map<string, ResumeExtraction>();
+    /**
+     * §6.4: sigx:server's public `api`, grabbed in configResolved. When
+     * present (and not a `role: 'client'` build — a live client posts
+     * cross-origin, which the Origin check would 403), submit handlers on
+     * <form> elements that capture a form-marked serverFn get real
+     * action/method attributes stamped.
+     */
+    let serverApi: {
+        role?: string;
+        endpoint?: string;
+        resolveServerFn?(
+            importer: string,
+            specifier: string,
+            exportName: string
+        ): { stableSymbol: string; form: boolean } | null;
+    } | null = null;
 
     const relPath = (file: string): string => path.relative(root, file).replace(/\\/g, '/');
     const handlersIdFor = (file: string): string => HANDLERS_PREFIX + relPath(file) + HANDLERS_SUFFIX;
@@ -90,7 +106,18 @@ export function sigxResume(options: SigxResumeOptions = {}): Plugin {
         file = normalizePath(file);
         let extraction: ResumeExtraction;
         try {
-            extraction = extractResumeHandlers(code, file);
+            const resolve = serverApi?.resolveServerFn;
+            extraction = extractResumeHandlers(
+                code,
+                file,
+                resolve
+                    ? {
+                          resolveServerFn: (specifier, exportName) =>
+                              resolve(file, specifier, exportName),
+                          endpoint: serverApi?.endpoint
+                      }
+                    : {}
+            );
         } catch (error) {
             // Unparsable source (mid-edit, syntax error) keeps the last good
             // extraction — but say so: silence here would also hide real
@@ -160,6 +187,11 @@ export function sigxResume(options: SigxResumeOptions = {}): Plugin {
         configResolved(config) {
             root = config.root;
             isServe = config.command === 'serve';
+            const server = config.plugins?.find((p) => p.name === 'sigx:server');
+            const api = (server?.api ?? null) as typeof serverApi;
+            // role 'client' never stamps (§6.4) — drop the api entirely so
+            // extraction takes the no-stamping path.
+            serverApi = api && api.role !== 'client' ? api : null;
             discover();
         },
 
@@ -243,6 +275,11 @@ export function sigxResume(options: SigxResumeOptions = {}): Plugin {
                         `affected components fall back to interaction hydration.`
                     );
                 }
+            }
+            // §6.4 stamping notes (ambiguous form target, author action) —
+            // never errors: the page still works, just without the stamp.
+            for (const note of extraction.warnings) {
+                this.warn(`[sigx:resume] ${relPath(clean)}: ${note}`);
             }
 
             const stamps = stampable(extraction)

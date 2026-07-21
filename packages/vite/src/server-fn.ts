@@ -211,6 +211,43 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
         }
     }
 
+    /**
+     * The §6.4 cross-plugin seam: map a handler's captured serverFn import
+     * — (importer, specifier, exportName) — to its stable transport symbol
+     * and form mark, so the resume transform can stamp
+     * `action="{endpoint}/{symbol}"` on a `<form>` at build time. Public
+     * via `plugin.api`; SYNCHRONOUS by design (callable from a sync
+     * transform). Relative/absolute specifiers only — bare (scanned
+     * package) specifiers return null in v1, a documented stamping gap.
+     * Reads the live maps, so it tolerates being called before discovery
+     * populated them (returns null; the resume transform re-extracts
+     * authoritatively in its own transform hook).
+     */
+    function resolveServerFn(
+        importer: string,
+        specifier: string,
+        exportName: string
+    ): { stableSymbol: string; form: boolean } | null {
+        if (!specifier.startsWith('.') && !path.isAbsolute(specifier)) return null;
+        const resolved = normalizePath(
+            path.isAbsolute(specifier)
+                ? specifier
+                : path.resolve(path.dirname(importer.split('?')[0]), specifier)
+        );
+        // The import may omit the extension; probe the same family the
+        // fs walk and Vite resolution produce.
+        const candidates = /\.[cm]?[jt]sx?$/.test(resolved)
+            ? [resolved, resolved.replace(/\.js$/, '.ts'), resolved.replace(/\.jsx$/, '.tsx')]
+            : ['.ts', '.tsx', '.js', '.jsx', '.mts', '.mjs'].map((ext) => resolved + ext);
+        for (const candidate of candidates) {
+            const fns =
+                extractions.get(candidate)?.fns ?? inline.get(candidate)?.fns ?? null;
+            const fn = fns?.find((f) => f.name === exportName);
+            if (fn) return { stableSymbol: fn.stableSymbol, form: fn.form };
+        }
+        return null;
+    }
+
     function extractInlineInto(file: string, code: string): InlineServerFnExtraction | null {
         file = normalizePath(file); // see extractInto
         try {
@@ -285,7 +322,7 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
         // build with no server in it, so an adapter (which shapes the server
         // build) cannot apply. The error lands with `adapter`; the seam
         // lands with `role` (here).
-        api: { role, base, endpoint },
+        api: { role, base, endpoint, resolveServerFn },
 
         configResolved(config) {
             root = config.root;

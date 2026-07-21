@@ -496,3 +496,23 @@ export const use = () => search('x');
         );
     });
 });
+
+describe('extractInlineServerFns — form targets (rfc-server §6.4, #312)', () => {
+    it('marks an inline literal form: true fn; stub output unchanged', () => {
+        const code = `
+import { serverFn } from '@sigx/server';
+const submit = serverFn({ form: true, handler: async (rq, input) => input });
+export const Widget = () => submit;
+`;
+        const result = extract(code, '/src/Widget.ts');
+        expect(result.errors).toHaveLength(0);
+        expect(result.fns[0].form).toBe(true);
+        // No extra stub flag for form (only get/refreshes ride the stub).
+        expect(result.clientModule).toContain(`"${BASE}")`);
+    });
+
+    it('an unmarked inline fn stays form: false', () => {
+        const result = extract(SEARCH);
+        expect(result.fns[0].form).toBe(false);
+    });
+});
