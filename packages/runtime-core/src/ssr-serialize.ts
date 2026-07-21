@@ -1,56 +1,53 @@
 /**
- * SSR serializer type-handler seam — the per-app registry packs use to teach
- * the server renderer's state/boundary serialization about non-JSON types
- * (Date, Map, custom classes, …).
+ * Serializer DI glue — the per-app registry packs use to teach the boundary
+ * codec about their own types (a domain class, a branded value, …).
  *
- * This file is deliberately SSR-free (a token and a Map write) and lives in
- * runtime-core so packs can register from `install(app)` in client bundles
- * without importing `@sigx/server-renderer`. Mirrors the async engine seam
- * (`ASYNC_ENGINE_TOKEN` / `provideAsyncEngine`).
+ * The codec ITSELF lives in `@sigx/serialize`: it is used on both sides of
+ * every boundary and by packs that must never depend on the renderer or the
+ * RPC layer, so it is not a runtime-core concern. What stays here is only the
+ * part that genuinely needs runtime-core — `createToken` and the app context.
  *
- * Phase 1 covers the serialize side only; the client revive side ships with
- * the cache-seed work (rfc-async §7).
+ * Deliberately SSR-free (a token and a Map write) so packs can register from
+ * `install(app)` in client bundles without importing `@sigx/server-renderer`.
+ * Mirrors the async engine seam (`ASYNC_ENGINE_TOKEN` / `provideAsyncEngine`).
  */
 
+import type { TypeHandler } from '@sigx/serialize';
 import { createToken, getProvided, setProvided } from './di/token.js';
 
-/** One pluggable serializer for a non-JSON-representable type. */
-export interface SSRTypeHandler {
-    /** Identifies the handler (dev warnings, dedupe by consumers). */
-    name: string;
-    /** Whether this handler owns the value. Receives the RAW value (before any toJSON). */
-    test(value: unknown): boolean;
-    /** Return a JSON-safe representation — the handler owns its encoding (e.g. `{ $date: n }`). */
-    serialize(value: unknown): unknown;
-}
-
 /**
- * DI token under which serializer handlers are provided at app level.
+ * DI token under which type handlers are provided at app level.
  * @internal
  */
-export const SSR_SERIALIZER_TOKEN = createToken<SSRTypeHandler[]>('sigx:ssrSerializer');
+export const TYPE_HANDLER_TOKEN = createToken<TypeHandler[]>('sigx:typeHandlers');
 
 /**
- * Append serializer handlers on an app context at install time.
+ * Append type handlers on an app context at install time.
  *
  * Accumulating: multiple packs can each contribute handlers; earlier-installed
- * handlers are consulted first. The parameter is structurally typed so packs
- * don't need the AppContext type:
+ * handlers are consulted first, and all of them before `@sigx/serialize`'s
+ * built-in vocabulary — so a pack can own a type the built-ins also cover. The
+ * parameter is structurally typed so packs don't need the AppContext type:
  *
  * ```ts
  * install(app) {
- *     provideSSRSerializerHandlers(app._context, [dateHandler]);
+ *     provideTypeHandlers(app._context, [{
+ *         name: 'money', tag: '$money',
+ *         test: (v) => v instanceof Money,
+ *         serialize: (v) => (v as Money).cents,
+ *         revive: (c) => new Money(c as number),
+ *     }]);
  * }
  * ```
  */
-export function provideSSRSerializerHandlers(
+export function provideTypeHandlers(
     appContext: { provides: Map<symbol, unknown> },
-    handlers: SSRTypeHandler[]
+    handlers: TypeHandler[]
 ): void {
-    const existing = getProvided(appContext.provides, SSR_SERIALIZER_TOKEN);
+    const existing = getProvided(appContext.provides, TYPE_HANDLER_TOKEN);
     setProvided(
         appContext.provides,
-        SSR_SERIALIZER_TOKEN,
+        TYPE_HANDLER_TOKEN,
         existing ? [...existing, ...handlers] : [...handlers]
     );
 }

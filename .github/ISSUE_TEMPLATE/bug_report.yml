@@ -25,6 +25,7 @@ body:
       options:
         - sigx
         - "@sigx/reactivity"
+        - "@sigx/serialize"
         - "@sigx/runtime-core"
         - "@sigx/runtime-dom"
         - "@sigx/server-renderer"

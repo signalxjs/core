@@ -31,6 +31,10 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootDir = join(__dirname, '..');
 
 const PACKAGES = [
+    // Must be packed: @sigx/runtime-core depends on it, so without a local
+    // tarball the scratch app resolves @sigx/serialize from the registry —
+    // a 404 until the first publish lands.
+    'packages/serialize',
     'packages/reactivity',
     'packages/runtime-core',
     'packages/runtime-dom',

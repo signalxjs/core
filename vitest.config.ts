@@ -34,6 +34,7 @@ export default defineConfig({
             '@sigx/netlify': resolve(__dirname, 'packages/netlify/src/index.ts'),
             '@sigx/reactivity/internals': resolve(__dirname, 'packages/reactivity/src/internals.ts'),
             '@sigx/reactivity': resolve(__dirname, 'packages/reactivity/src/index.ts'),
+            '@sigx/serialize': resolve(__dirname, 'packages/serialize/src/index.ts'),
             '@sigx/runtime-core/internals': resolve(__dirname, 'packages/runtime-core/src/internals.ts'),
             '@sigx/runtime-core': resolve(__dirname, 'packages/runtime-core/src/index.ts'),
             '@sigx/runtime-dom/internals': resolve(__dirname, 'packages/runtime-dom/src/internals.ts'),

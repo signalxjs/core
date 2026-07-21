@@ -138,6 +138,16 @@ free port automatically).
 ## Packages
 
 - `packages/reactivity` → `@sigx/reactivity` — signals, computed, effects.
+- `packages/serialize` → `@sigx/serialize` — the boundary codec: how `Date`,
+  `Map`, `Set`, `BigInt` and custom types survive every server↔client
+  boundary (SSR state blob, resume boundary props, cache seed, server-fn RPC
+  wire). Both halves run on both sides — encode on the server for the state
+  blob and on the client for RPC arguments, revive the mirror. **Zero
+  dependencies, permanently**: `@sigx/server/client` imports it, and that
+  entry is the size-limited "stubs import nothing" guard, so anything added
+  here lands in chunks resume replicates. The per-app handler registry
+  (`provideTypeHandlers`) lives in `@sigx/runtime-core` instead, since it
+  needs `createToken` — this package stays a pure pair of functions.
 - `packages/runtime-core` → `@sigx/runtime-core` — component model, renderer base.
 - `packages/runtime-dom` → `@sigx/runtime-dom` — DOM renderer.
 - `packages/sigx` → `sigx` — umbrella public package.

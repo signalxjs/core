@@ -16,6 +16,7 @@
       "@sigx/netlify": ["./packages/netlify/src/index.ts"],
       "@sigx/vite": ["./packages/vite/src/index.ts"],
       "@sigx/reactivity": ["./packages/reactivity/src/index.ts"],
+      "@sigx/serialize": ["./packages/serialize/src/index.ts"],
       "@sigx/reactivity/internals": ["./packages/reactivity/src/internals.ts"],
       "@sigx/runtime-core": ["./packages/runtime-core/src/index.ts"],
       "@sigx/runtime-core/internals": ["./packages/runtime-core/src/internals.ts"],
