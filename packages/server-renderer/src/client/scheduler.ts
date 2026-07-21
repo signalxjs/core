@@ -96,6 +96,34 @@ export function getBoundaryRecord(id: number): SSRBoundaryRecord | undefined {
     return getBoundaryTable()[String(id)];
 }
 
+/**
+ * Install (or overwrite) boundary records — the write half of the table
+ * accessor pair. A single-flight refresh envelope's `records` patch
+ * (rfc-server §6.3) enters the table through here, exactly as a streamed
+ * `boundaryPatchJs` assignment would. Same null-prototype-target discipline
+ * as `assignmentJs`: keys can be user-derived, so `__proto__` must land as
+ * plain data, never as a prototype write.
+ */
+export function installBoundaryRecords(
+    patch: Record<string | number, SSRBoundaryRecord>
+): void {
+    if (typeof window === 'undefined') return;
+    const w = window as unknown as { __SIGX_BOUNDARIES__?: Record<string, SSRBoundaryRecord> };
+    w.__SIGX_BOUNDARIES__ = Object.assign(Object.create(null), w.__SIGX_BOUNDARIES__, patch);
+}
+
+/**
+ * Remove a retired boundary's record — a refresh swapped its DOM for a
+ * fresh id, and a stale entry would satisfy later lookups for a boundary
+ * that no longer exists.
+ */
+export function removeBoundaryRecord(id: number): void {
+    if (typeof window === 'undefined') return;
+    const table = (window as unknown as { __SIGX_BOUNDARIES__?: Record<string, SSRBoundaryRecord> })
+        .__SIGX_BOUNDARIES__;
+    if (table) delete table[String(id)];
+}
+
 // ============= Cleanup registry =============
 
 /**

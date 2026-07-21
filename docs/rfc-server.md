@@ -776,22 +776,58 @@ Boundary records are self-describing — `SSRBoundaryRecord` carries the
 component registry key, `props`, and `state`
 (`packages/server-renderer/src/boundary.ts`). So a mutation call can name
 boundaries to refresh; the server re-renders **just those components**
-through the same per-request app + resume plugin (fresh HTML *and* fresh
-state via the existing tracking-signal capture), and the envelope returns
-`{"data": …, "$boundaries": [{id, html, state}]}`:
+through the same machinery as the original request (the SSR instance's
+plugin set — fresh HTML *and* fresh state via the existing tracking-signal
+capture), and the envelope returns them next to `$cache`:
 
 - **Resumed (never-hydrated) boundaries:** DOM swap between the boundary
-  element and its marker + `record.state` overwrite + scope refresh. The
+  element and its marker + record replacement + scope refresh. The
   component updates **without ever loading its chunk** — the server does
   the thinking, the client patches pixels. Qwik cannot do this; Solid's
   single-flight re-runs whole route loaders.
 - **Upgraded boundaries:** skip the HTML; write `state` through the live
   signals — fine-grained reactivity patches the DOM.
-- Boundaries with non-serializable DI needs decline (`refreshable: false`)
-  and fall back to §6.2 invalidation. A refresh landing mid-upgrade is
-  dropped (the upgrade's live state wins).
+- Boundaries that a re-render cannot reproduce decline and fall back to
+  §6.2 invalidation. A refresh landing mid-upgrade is dropped (the
+  upgrade's live state wins).
 
 One request: mutation + fresh UI.
+
+Three corrections from building the mechanism (#313) against the real
+code — the shipped design where it deviates from the sketch above:
+
+- **Ids are per-request, so fresh HTML cannot reuse the page's id.** The
+  re-render runs a new context whose `<!--$c:N-->` markers would collide
+  with the page's (nested components especially). Instead the client
+  sends an unused id floor `base`; the render context seeds its counter
+  with it (`SSRContextOptions.baseComponentId`); the envelope entry is
+  `{for, id, html, state, records}` — `for` names the page boundary being
+  replaced, `id` is the fresh render's root id (its marker id in `html`),
+  and `records` is the re-render's full boundary-table patch, nested
+  boundaries included. The client installs the records, swaps the DOM,
+  and retires the old id. Nested-boundary refresh works instead of
+  declining.
+- **The server is stateless — descriptors come from the client.** Props
+  live only in the browser's table, so the request carries
+  `{id, component, props}` per boundary (props verbatim in encoded form).
+  Descriptors are attacker-controlled; three constraints bound them: the
+  fn's `refreshes` allowlist filters by component key, the explicit
+  server-side `components` registry must know the key
+  (`createBoundaryRefresh` in `@sigx/resume/server` — same explicit-pass
+  posture as the fn registry), and the endpoint `guard` has already run.
+  The re-render also re-checks its own record: a smuggled `children` prop
+  turns it lossy (`refreshable: false`, stamped at initial SSR whenever
+  the props snapshot cannot reproduce the render — children/slots/render
+  props) and it declines. Declines are **omission**, never errors — the
+  mutation already succeeded; declined boundaries converge via `$cache`.
+  A component failure during the re-render declines the same way
+  (fresh-but-broken must not replace stale-but-consistent).
+- **`$boundaries` rides the boundary codec, not the RPC wire codec.**
+  `state`/`records` are encoded with the table's own
+  `encodeWithHandlers` discipline — the client table already holds
+  encoded values, the stub passes the sidecar through untouched (exactly
+  like `$cache`), and resume's idempotent `reviveFromServer` decodes at
+  the existing read sites.
 
 ### 6.4 Zero-JS form actions
 
@@ -1004,7 +1040,12 @@ option (revisit only if that proves painful).
   wire serialization (**shipped**, #364 — the revive side of the serializer
   seam landed with it).
 - **v2+**: single-flight boundary refresh (6.3) once the envelope and the
-  per-request re-render path are proven.
+  per-request re-render path are proven — in progress as three PRs
+  (#313): **mechanism shipped** (`baseComponentId`, `refreshable`
+  stamping, `createBoundaryRefresh`, table write accessors); wire next
+  (`refreshes` option, `renderBoundaries` endpoint option, stub sidecar +
+  `__SIGX_SERVERFN_BOUNDARIES__` seam); client apply last (status-gated
+  swap/live-write, examples/resume proof).
 - **Native clients (rev 2, one milestone, independent of v2)**:
   `configureServerFn` + stub call-time resolution; `'verify-when-present'`;
   plugin `endpoint`/`role`/`scan`; stable-id seeds + stable symbols + dual

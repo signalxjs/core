@@ -53,6 +53,13 @@ interface ResumePluginData {
      * only proves that SOME plugin won the consult.
      */
     claimed: Set<number>;
+    /**
+     * Claimed ids whose usage-site props the snapshot could not fully carry
+     * (children/slots/render props/…) — a server re-render from the record
+     * would produce different HTML. Stamped `refreshable: false` onto the
+     * record in afterRenderComponent (rfc-server §6.3 decline).
+     */
+    lossy: Set<number>;
 }
 
 const PLUGIN_NAME = 'resume';
@@ -94,7 +101,8 @@ export function resumePlugin(options?: ResumePluginOptions): SSRPlugin & { insta
             setup(ctx: SSRContext) {
                 ctx.setPluginData<ResumePluginData>(PLUGIN_NAME, {
                     signalMaps: new Map(),
-                    claimed: new Set()
+                    claimed: new Set(),
+                    lossy: new Set()
                 });
             },
 
@@ -133,7 +141,31 @@ export function resumePlugin(options?: ResumePluginOptions): SSRPlugin & { insta
                 // Remember the claim — the component id is already at the
                 // stack top when resolveBoundary runs.
                 const id = ctx._componentStack[ctx._componentStack.length - 1];
-                ctx.getPluginData<ResumePluginData>(PLUGIN_NAME)?.claimed.add(id);
+                const data = ctx.getPluginData<ResumePluginData>(PLUGIN_NAME);
+                data?.claimed.add(id);
+
+                // Would a server re-render from this snapshot reproduce the
+                // HTML? children/slots/$models never serialize, and any
+                // other dropped prop (render props, symbols, circulars)
+                // shaped this render but cannot reach a refresh render.
+                // Dropped on* handlers are fine — they never shape server
+                // HTML — and so are undefined values (absent on re-render).
+                let lossy =
+                    _children !== undefined || _slots !== undefined || _models !== undefined;
+                if (!lossy) {
+                    for (const key in propsData) {
+                        const value = propsData[key];
+                        if (value === undefined || key === 'key' || key === 'ref') continue;
+                        if (key.startsWith('on') && key.length > 2 && key[2] === key[2].toUpperCase()) {
+                            continue;
+                        }
+                        if (!props || !(key in props)) {
+                            lossy = true;
+                            break;
+                        }
+                    }
+                }
+                if (lossy) data?.lossy.add(id);
 
                 // ALL resume boundaries opt out of core scheduling — the
                 // pack's delegation wakes them (QRL replay for 'resume'
@@ -188,6 +220,10 @@ export function resumePlugin(options?: ResumePluginOptions): SSRPlugin & { insta
                 if (!data?.claimed.has(id)) return;
                 const record = ctx.getBoundary(id);
                 if (!record) return;
+
+                // The lossy-snapshot verdict from resolveBoundary lands on
+                // the record here (the record doesn't exist yet up there).
+                if (data.lossy.has(id)) record.refreshable = false;
 
                 const signalMap = data.signalMaps.get(id);
                 if (signalMap && signalMap.size > 0) {

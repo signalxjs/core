@@ -64,6 +64,15 @@ export interface SSRContextOptions {
      * and the completion script. Apps pass their per-request CSP nonce.
      */
     nonce?: string;
+
+    /**
+     * Seed for the component-id counter (default 0 — the first id is 1).
+     * A single-flight boundary refresh (rfc-server §6.3) re-renders one
+     * component in a fresh context; seeding a high floor guarantees the
+     * fresh HTML's `<!--$c:N-->` markers and `data-sigx-b` ids can never
+     * collide with ids already live on the page it patches into.
+     */
+    baseComponentId?: number;
 }
 
 export interface RenderOptions {
@@ -254,7 +263,7 @@ export interface SSRContext {
  * Create a new SSR context for rendering
  */
 export function createSSRContext(options: SSRContextOptions = {}): SSRContext {
-    let componentId = 0;
+    let componentId = options.baseComponentId ?? 0;
     const componentStack: number[] = [];
     const head: string[] = [];
     const pluginData = new Map<string, any>();

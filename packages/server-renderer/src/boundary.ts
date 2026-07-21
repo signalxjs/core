@@ -85,6 +85,14 @@ export interface SSRBoundaryRecord {
      * cleanly and `retry` performs the remount the server could not.
      */
     errorScope?: { message: string };
+    /**
+     * Stamped `false` at initial SSR when a server re-render from the
+     * serialized snapshot could not reproduce this boundary's HTML — the
+     * usage site carried props the snapshot drops (children/slots/render
+     * props/…). Single-flight boundary refresh (rfc-server §6.3) skips
+     * offering these; they converge via cache invalidation instead.
+     */
+    refreshable?: false;
 }
 
 /**

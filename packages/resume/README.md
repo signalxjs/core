@@ -37,6 +37,32 @@ replay). A component used with a `client:*` directive belongs to
 `@sigx/ssr-islands` — register `islandsPlugin()` first when combining the
 packs.
 
+### Single-flight boundary refresh (rfc-server §6.3)
+
+`createBoundaryRefresh` builds the server half of single-flight refresh: a
+mutation server function names boundaries to refresh, and the endpoint hands
+their client descriptors here to be re-rendered — fresh HTML plus fresh
+tracking-signal state in one response, so a never-hydrated boundary can
+update without ever loading its chunk.
+
+```ts
+import { createBoundaryRefresh } from '@sigx/resume/server';
+
+const renderBoundaries = createBoundaryRefresh({
+    ssr,                              // the instance with resumePlugin()
+    components: { Tracker, Cart }     // registry key → server component
+});
+// handleServerFnRequest(request, { fns, renderBoundaries })  (wire phase of #313)
+```
+
+The registry is explicit — same posture as the server-fn registry, never
+ambient. Descriptors the re-render cannot honor (unknown key, a snapshot the
+render can't reproduce, a component failure) are omitted, never errors: the
+mutation already succeeded, and declined boundaries converge through
+`$cache` invalidation. Boundaries whose usage-site props don't serialize
+(children/slots/render props) are stamped `refreshable: false` at initial
+SSR and decline the same way.
+
 ## Writing resumable components
 
 Ordinary sigx components in resume modules (`*.resume.tsx` or under a
