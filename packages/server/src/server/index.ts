@@ -6,8 +6,11 @@
  * Security defaults (§5) are enforced HERE, unconditionally: POST for
  * everything except cache-marked idempotent reads (which may GET, §4.1
  * with its own posture, §5.2a), required `application/json` media type on
- * POST, same-origin `Origin` check, `maxBodyBytes` during the body read
- * (`maxUrlBytes` for a GET's query string), reviver-based DROPPING of
+ * POST — except declared form targets, which additionally accept the two
+ * native-form media types under §5.2b's posture (Origin at full strength,
+ * per-fn opt-in, validator load-bearing) — same-origin `Origin` check,
+ * `maxBodyBytes` during the body read (`maxUrlBytes` for a GET's query
+ * string; content-length for a form body), reviver-based DROPPING of
  * prototype-pollution keys (they are removed from the parsed value, not a
  * request error), and prod error masking. The `guard` hook runs
  * before EVERY function — the app-wide auth seam that no transport skips.
@@ -214,6 +217,79 @@ function isJsonContentType(request: Request): boolean {
     return raw.split(';')[0].trim().toLowerCase() === 'application/json';
 }
 
+/** The two media types a native <form> can send (rfc-server §6.4) —
+ *  multipart always carries a `; boundary=` parameter, so the split
+ *  matters here, not just tolerance. */
+function isFormContentType(request: Request): boolean {
+    const raw = request.headers.get('content-type');
+    if (!raw) return false;
+    const media = raw.split(';')[0].trim().toLowerCase();
+    return media === 'application/x-www-form-urlencoded' || media === 'multipart/form-data';
+}
+
+/** 303's default target (§6.4): back to the submitting page — but only a
+ *  SAME-ORIGIN Referer is trusted (its path + search), else `/`. An
+ *  attacker-controlled Referer must never become an open redirect. */
+function safeReferer(request: Request): string {
+    const referer = request.headers.get('referer');
+    if (referer) {
+        try {
+            const url = new URL(referer);
+            if (url.origin === new URL(request.url).origin) return url.pathname + url.search;
+        } catch {
+            // Unparseable Referer — fall through to '/'.
+        }
+    }
+    return '/';
+}
+
+const escapeHtml = (value: string): string =>
+    value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+/**
+ * Error rendering for the form path (§6.4): the requester by definition
+ * has no JS to interpret a JSON envelope, so every error renders as a
+ * minimal, self-contained HTML page. `__DEV__` shows the message plus any
+ * validator issues (ESCAPED — issues echo attacker-typed field values);
+ * prod stays generic, matching the §5 masking posture. Always `no-store`.
+ */
+function formErrorResponse(status: number, message: string, data?: unknown): Response {
+    let detail = '';
+    let heading = `Something went wrong (${status}).`;
+    if (status === 400) {
+        heading = 'This form could not be submitted — please go back and correct it.';
+    }
+    if (__DEV__) {
+        heading = `${status} — ${escapeHtml(message)}`;
+        const issues = (data as { issues?: Array<{ message: string; path?: unknown[] }> })?.issues;
+        if (Array.isArray(issues)) {
+            const items = issues
+                .map((issue) => {
+                    const path = Array.isArray(issue.path)
+                        ? issue.path.map((p) => (typeof p === 'object' && p !== null && 'key' in p ? (p as { key: unknown }).key : p)).join('.')
+                        : '';
+                    return `<li>${path ? `<code>${escapeHtml(path)}</code>: ` : ''}${escapeHtml(String(issue.message))}</li>`;
+                })
+                .join('');
+            detail = `<ul>${items}</ul>`;
+        }
+        const stack = (data as { stack?: string })?.stack;
+        if (typeof stack === 'string') detail += `<pre>${escapeHtml(stack)}</pre>`;
+    }
+    const body =
+        `<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">` +
+        `<title>${status}</title>` +
+        `<style>body{font:16px/1.5 system-ui,sans-serif;max-width:36rem;margin:15vh auto;padding:0 1rem;color:#333}pre{overflow-x:auto;background:#f6f6f6;padding:.75rem}</style>` +
+        `<h1>${heading}</h1>${detail}`;
+    return new Response(body, {
+        status,
+        headers: {
+            'content-type': 'text/html; charset=utf-8',
+            'cache-control': 'no-store'
+        }
+    });
+}
+
 /** Read the body, enforcing the byte cap DURING the read. Null ⇒ over cap. */
 async function readBody(request: Request, maxBytes: number): Promise<string | null> {
     const declared = request.headers.get('content-length');
@@ -262,17 +338,25 @@ export async function handleServerFnRequest(
             ...NO_STORE
         });
     }
-    if (!isGet && !isJsonContentType(request)) {
+    // §6.4: a native <form> POST. From here on, the error SHAPE forks on
+    // this bit — a form requester has no JS to render a JSON error.
+    const isForm = !isGet && isFormContentType(request);
+    if (!isGet && !isForm && !isJsonContentType(request)) {
         return errorResponse(415, 'Content-Type must be application/json');
     }
     if (!checkOrigin(request, options.origin, isGet)) {
-        return errorResponse(
-            403,
-            'Cross-origin server-function calls are not allowed',
-            undefined,
-            undefined,
-            isGet ? NO_STORE : undefined
-        );
+        // NOT relaxed for forms (§5.2b): browsers send Origin on every
+        // POST, form submissions included — with the content-type layer
+        // deliberately gone on this path, Origin is the CSRF defense.
+        return isForm
+            ? formErrorResponse(403, 'Cross-origin form submissions are not allowed')
+            : errorResponse(
+                  403,
+                  'Cross-origin server-function calls are not allowed',
+                  undefined,
+                  undefined,
+                  isGet ? NO_STORE : undefined
+              );
     }
 
     const url = new URL(request.url);
@@ -282,13 +366,21 @@ export async function handleServerFnRequest(
     if (!fn || typeof fn.__sigxFn !== 'function') {
         // GET 404s are no-store like every non-2xx: a CDN-cached miss must
         // not shadow a redeploy's fresh symbols (§4.1).
-        return errorResponse(
-            404,
-            `Unknown server function "${symbol}"`,
-            undefined,
-            undefined,
-            isGet ? NO_STORE : undefined
-        );
+        return isForm
+            ? formErrorResponse(404, `Unknown server function "${symbol}"`)
+            : errorResponse(
+                  404,
+                  `Unknown server function "${symbol}"`,
+                  undefined,
+                  undefined,
+                  isGet ? NO_STORE : undefined
+              );
+    }
+    if (isForm && (fn.__sigxForm !== true || fn.__sigxStream === true)) {
+        // 415, not 405 (§6.4): POST is an allowed method on this resource —
+        // the MEDIA TYPE is what a non-form-target refuses. Also keeps the
+        // endpoint from ever becoming globally form-accepting (§5.2b).
+        return formErrorResponse(415, 'Content-Type must be application/json');
     }
     if (
         isGet &&
@@ -335,6 +427,42 @@ export async function handleServerFnRequest(
         } catch {
             return errorResponse(400, 'Malformed args query value', undefined, undefined, NO_STORE);
         }
+    } else if (isForm) {
+        // §6.4: FormData → the options form's single input. The body is
+        // parsed by the platform (`request.formData()` handles urlencoded
+        // AND multipart, WinterCG-natively) — which also means the
+        // `maxBodyBytes` cap can only be enforced via content-length up
+        // front, not mid-stream; platform body limits are the backstop.
+        // Unlike readBody's cap (enforced DURING the stream), content-length
+        // is the only gate here — so a malformed value must not slip past
+        // as `NaN > cap === false`. Reject it outright; absent stays the
+        // documented pass-through (platform limits are the backstop).
+        const declared = request.headers.get('content-length');
+        if (declared !== null) {
+            const bytes = Number(declared);
+            if (!Number.isFinite(bytes) || bytes < 0) {
+                return formErrorResponse(400, 'Malformed Content-Length');
+            }
+            if (bytes > (options.maxBodyBytes ?? DEFAULT_MAX_BODY)) {
+                return formErrorResponse(413, 'Request body too large');
+            }
+        }
+        let formData: FormData;
+        try {
+            formData = await request.formData();
+        } catch {
+            return formErrorResponse(400, 'Malformed form body');
+        }
+        // Flat object; repeated names → array; File passes through; values
+        // stay strings (Standard Schema coercion is the mapping tool).
+        // Dangerous field names are DROPPED, the JSON reviver's posture.
+        const input: Record<string, unknown> = {};
+        for (const key of new Set(formData.keys())) {
+            if (DANGEROUS_KEYS.has(key)) continue;
+            const values = formData.getAll(key);
+            input[key] = values.length > 1 ? values : values[0];
+        }
+        parsed = [input];
     } else {
         const body = await readBody(request, options.maxBodyBytes ?? DEFAULT_MAX_BODY);
         if (body === null) {
@@ -361,18 +489,24 @@ export async function handleServerFnRequest(
     }
     // Rich types on the way IN (rfc-server §4) — decoded AFTER the
     // prototype-pollution reviver, so dangerous keys are already gone. A
-    // malformed tag payload is the caller's bad request, not a 500.
+    // malformed tag payload is the caller's bad request, not a 500. Form
+    // input is NEVER wire-decoded: its values are strings and Files, and a
+    // field literally named like a tag must stay what the user typed.
     let args: unknown[];
-    try {
-        args = parsed.map((arg) => reviveWire(arg));
-    } catch {
-        return errorResponse(
-            400,
-            isGet ? 'Malformed encoded value in args' : 'Malformed encoded value in body',
-            undefined,
-            undefined,
-            isGet ? NO_STORE : undefined
-        );
+    if (isForm) {
+        args = parsed;
+    } else {
+        try {
+            args = parsed.map((arg) => reviveWire(arg));
+        } catch {
+            return errorResponse(
+                400,
+                isGet ? 'Malformed encoded value in args' : 'Malformed encoded value in body',
+                undefined,
+                undefined,
+                isGet ? NO_STORE : undefined
+            );
+        }
     }
 
     const ctx = createRequestContext(request);
@@ -412,6 +546,21 @@ export async function handleServerFnRequest(
                 options,
                 info
             );
+        }
+        if (isForm) {
+            // §6.4 success is a 303 PRG: handler-set Location wins; default
+            // is back to the (same-origin-validated) submitting page. No
+            // envelope, no encodeWire, and no `invalidates` — directives
+            // are wire-only (§6.2) and no cache client is listening; the
+            // redirected GET re-renders from source. A handler-set non-3xx
+            // status is honored verbatim with no default Location — that is
+            // the handler taking full ownership of the response.
+            const headers = new Headers(ctx.responseHeaders);
+            const status = ctx._status ?? 303;
+            if (status >= 300 && status < 400 && !headers.has('location')) {
+                headers.set('location', safeReferer(request));
+            }
+            return new Response(null, { status, headers });
         }
         const headers = new Headers(ctx.responseHeaders);
         headers.set('content-type', 'application/json');
@@ -509,25 +658,29 @@ export async function handleServerFnRequest(
             // rejection when it eventually settles.
             void work.catch(() => {});
             await reportMasked(options, timeoutError, info, ctx);
-            return errorResponse(
-                504,
-                'Server function timed out',
-                undefined,
-                ctx.responseHeaders,
-                isGet ? NO_STORE : undefined
-            );
+            return isForm
+                ? formErrorResponse(504, 'Server function timed out')
+                : errorResponse(
+                      504,
+                      'Server function timed out',
+                      undefined,
+                      ctx.responseHeaders,
+                      isGet ? NO_STORE : undefined
+                  );
         }
         if (!isServerFnError(error)) {
             await reportMasked(options, error, info, ctx);
         }
         const shape = wireErrorShape(error, info.name || symbol);
-        return errorResponse(
-            shape.status,
-            shape.message,
-            shape.data,
-            ctx.responseHeaders,
-            isGet ? NO_STORE : undefined
-        );
+        return isForm
+            ? formErrorResponse(shape.status, shape.message, shape.data)
+            : errorResponse(
+                  shape.status,
+                  shape.message,
+                  shape.data,
+                  ctx.responseHeaders,
+                  isGet ? NO_STORE : undefined
+              );
     } finally {
         if (timer !== undefined) clearTimeout(timer);
     }

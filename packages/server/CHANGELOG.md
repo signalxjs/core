@@ -19,6 +19,30 @@
   entries (with a dispatch-order seq) on the way in — both throw-swallowed,
   both no-ops until `@sigx/resume/client` stamps the seam. Stub entry
   ceiling 2 KB → 2.1 KB (sits at 2.01 KB).
+- **Zero-JS form actions — the endpoint half** (rfc-server §6.4/§5.2b,
+  #312). `serverFn({ form: true, input, handler })` declares a **form
+  target**: `handleServerFnRequest` accepts
+  `application/x-www-form-urlencoded` and `multipart/form-data` for it —
+  and only it; a form POST to anything else is a 415 (POST is an allowed
+  method; the media type is what a non-target refuses). FormData
+  normalizes to the options form's single input (flat object; repeated
+  names → array; `File` passed through; values stay strings — Standard
+  Schema coercion like `z.coerce.number()` is the mapping tool; dangerous
+  field names dropped), runs the identical guard → validate → handler
+  pipeline, and answers **303 POST-redirect-GET**: a handler-set
+  `Location` wins, else back to the same-origin-validated `Referer`, else
+  `/`. Every error on the form path renders as a minimal self-contained
+  HTML page (`__DEV__` lists escaped validator issues; prod is generic) —
+  the shape forks on the request content-type, so JSON callers of the
+  same fn keep the envelope byte-for-byte. CSRF posture per §5.2b: the
+  content-type layer is deliberately given up for declared form targets;
+  Origin stays at full strength (an Origin-less form POST is 403 under
+  the default policy). Form bodies are size-gated by `content-length`
+  (413 over `maxBodyBytes`). `invalidates` never runs on the form branch
+  (wire-only, §6.2). `__DEV__` warns on `form`+`cache` (a form target is
+  a mutation) and on `form` without `input` (the validator is
+  load-bearing, §5.2b). The build-stamped `action`/`method` attributes
+  ship with the transform half.
 
 - **Per-call `headers` and `fresh` on `.with(options)`** (rfc-server v2
   per-call options, #315 — completes the channel #353 opened with
