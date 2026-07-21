@@ -88,7 +88,7 @@ agents the issue-first flow below is required.)
    ```sh
    # list the open threads
    gh api graphql -f query='query { repository(owner:"signalxjs", name:"core") {
-     pullRequest(number:<pr>) { reviewThreads(first:20) { nodes {
+     pullRequest(number:<pr>) { reviewThreads(first:100) { nodes {
        id isResolved comments(first:1){nodes{body}} } } } } }' \
      -q '.data.repository.pullRequest.reviewThreads.nodes[]
          | select(.isResolved==false) | "\(.id) \(.comments.nodes[0].body[0:60])"'
@@ -121,7 +121,8 @@ agents the issue-first flow below is required.)
    same as queued:
    ```sh
    gh api graphql -f query='query { repository(owner:"signalxjs", name:"core") {
-     pullRequest(number:'"$pr"') { mergeQueueEntry { state position } } } }'
+     pullRequest(number:'"$pr"') {
+       mergeStateStatus mergeQueueEntry { state position } } } }'
    ```
    `mergeQueueEntry: null` with `mergeStateStatus: BLOCKED` and every check
    green means something the checks don't show is blocking — in practice an
