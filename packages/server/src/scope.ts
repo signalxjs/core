@@ -41,13 +41,22 @@ export interface ServerFnScope {
     run<T>(source: ScopeSource, fn: () => T | Promise<T>): Promise<T>;
 }
 
-/** A node request is the one shape whose `headers` is a plain object. */
+/**
+ * A node request is the one shape whose `headers` is a plain object (a
+ * `Request`'s is a `Headers`, and a partial context usually has none).
+ *
+ * The `!== null` is load-bearing, not defensive noise: `typeof null` is
+ * `'object'`, so without it a `{ headers: null }` source would be classified
+ * as a node request and blow up in `Object.entries` instead of passing
+ * through as a partial context.
+ */
 function isNodeRequest(value: unknown): value is NodeRequestLike {
+    if (typeof value !== 'object' || value === null) return false;
+    const headers = (value as { headers?: unknown }).headers;
     return (
-        typeof value === 'object' &&
-        value !== null &&
-        typeof (value as { headers?: unknown }).headers === 'object' &&
-        typeof (value as { headers?: { get?: unknown } }).headers?.get !== 'function'
+        typeof headers === 'object' &&
+        headers !== null &&
+        typeof (headers as { get?: unknown }).get !== 'function'
     );
 }
 

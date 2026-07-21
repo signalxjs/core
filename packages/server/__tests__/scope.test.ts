@@ -77,6 +77,13 @@ describe('node requests', () => {
         const partial = { locals: { user: 'ada' } };
         expect(toContextInit(partial)).toBe(partial);
     });
+
+    it('does not mistake a null-headers object for a node request', () => {
+        // typeof null === 'object', so a sloppier check would classify this
+        // as a node request and throw in Object.entries instead.
+        const partial = { headers: null } as never;
+        expect(toContextInit(partial)).toBe(partial);
+    });
 });
 
 describe('scoping', () => {
