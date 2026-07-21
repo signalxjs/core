@@ -148,7 +148,7 @@ fallback. Wire-only, like `invalidates`; meaningless with `cache`.
 ### Zero-JS form actions — `form: true`
 
 The mutation-side twin of `cache` (rfc-server §6.4): declaring `form: true`
-marks a function a **form target**. The endpoint then accepts native form
+marks a function as a **form target**. The endpoint then accepts native form
 POSTs (`application/x-www-form-urlencoded` / `multipart/form-data`) for it,
 and — when a resume `<form>`'s submit handler calls it — the build stamps a
 real `action="/_sigx/fn/<symbol>" method="post"` onto the form:
@@ -181,7 +181,7 @@ export const submitFeedback = serverFn({
 ### Cacheable reads — GET + `Cache-Control`
 
 The read-side twin of `invalidates` (rfc-server §4.1): declaring `cache`
-marks a function a **side-effect-free idempotent read**. The stub then
+marks a function as a **side-effect-free idempotent read**. The stub then
 calls it with `GET {endpoint}/{symbol}?args=…` and the endpoint emits
 `Cache-Control` from the declaration — the browser and any edge cache can
 absorb repeats without touching the origin:
