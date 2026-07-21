@@ -785,13 +785,25 @@ export function extractResumeHandlers(
         const tag = element.name as Node;
         return tag.type === 'JSXIdentifier' ? ((tag.name as string) ?? null) : null;
     };
-    /** Does ELEMENT carry any of these plain JSX attributes already? */
-    const hasJsxAttr = (element: Node, names: string[]): boolean =>
-        (element.attributes as Node[]).some((attr) => {
-            if (attr.type !== 'JSXAttribute') return false;
+    /**
+     * Why ELEMENT may already own its action/method: an explicit JSX
+     * attribute, or a spread (`{...props}`) that could carry either —
+     * unprovable statically, so a spread is treated as author-provided too.
+     */
+    const authorOwnsAction = (element: Node): 'attribute' | 'spread' | null => {
+        for (const attr of element.attributes as Node[]) {
+            if (attr.type === 'JSXSpreadAttribute') return 'spread';
+            if (attr.type !== 'JSXAttribute') continue;
             const name = attr.name as Node;
-            return name.type === 'JSXIdentifier' && names.includes(name.name as string);
-        });
+            if (
+                name.type === 'JSXIdentifier' &&
+                (name.name === 'action' || name.name === 'method')
+            ) {
+                return 'attribute';
+            }
+        }
+        return null;
+    };
 
     /**
      * §6.4: when a resume-mode submit handler on a host <form> captures
@@ -812,9 +824,11 @@ export function extractResumeHandlers(
         if (tagNameOf(site.element) !== 'form') return null;
         const seen = new Set<string>();
         for (const imp of imports) {
-            if (imp.typeOnly || imp.kind === 'namespace') continue;
-            const exportName = imp.kind === 'default' ? 'default' : imp.imported ?? imp.local;
-            const hit = opts.resolveServerFn(imp.source, exportName);
+            // Namespace imports are opaque here, and default-exported
+            // serverFns are never extracted (the server transform warns
+            // and stubs them serverOnly) — neither can be a stamp target.
+            if (imp.typeOnly || imp.kind === 'namespace' || imp.kind === 'default') continue;
+            const hit = opts.resolveServerFn(imp.source, imp.imported ?? imp.local);
             if (hit?.form) seen.add(hit.stableSymbol);
         }
         if (seen.size === 0) return null;
@@ -826,10 +840,15 @@ export function extractResumeHandlers(
             );
             return null;
         }
-        if (hasJsxAttr(site.element, ['action', 'method'])) {
+        const owned = authorOwnsAction(site.element);
+        if (owned !== null) {
             warnings.push(
-                `${component}: a <form> already carries an author-written action/method — ` +
-                `it wins, action not stamped (rfc-server §6.4).`
+                owned === 'attribute'
+                    ? `${component}: a <form> already carries an author-written ` +
+                      `action/method — it wins, action not stamped (rfc-server §6.4).`
+                    : `${component}: a <form> carries spread props ({...}) that could ` +
+                      `include action/method — cannot prove otherwise statically, ` +
+                      `action not stamped (rfc-server §6.4).`
             );
             return null;
         }

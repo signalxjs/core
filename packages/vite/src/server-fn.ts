@@ -219,9 +219,12 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
      * via `plugin.api`; SYNCHRONOUS by design (callable from a sync
      * transform). Relative/absolute specifiers only — bare (scanned
      * package) specifiers return null in v1, a documented stamping gap.
-     * Reads the live maps, so it tolerates being called before discovery
-     * populated them (returns null; the resume transform re-extracts
-     * authoritatively in its own transform hook).
+     * `'default'` also always misses: default-exported serverFns are not
+     * extracted (the extractor warns and stubs them serverOnly), so a
+     * default import can never be a stamp target. Reads the live maps, so
+     * it tolerates being called before discovery populated them (returns
+     * null; the resume transform re-extracts authoritatively in its own
+     * transform hook).
      */
     function resolveServerFn(
         importer: string,

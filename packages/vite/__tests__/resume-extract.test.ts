@@ -746,3 +746,42 @@ export const Dup = component((ctx) => {
         expect(result.warnings).toHaveLength(0);
     });
 });
+
+describe('form-action stamping — spread props and default imports (#312 review)', () => {
+    it('spread props on the form are treated as author-provided — warning, no stamp', () => {
+        const result = extractResumeHandlers(`
+import { component } from 'sigx';
+import { submitFeedback } from './api.server';
+export const Spread = component((ctx) => {
+    const n = ctx.signal(0);
+    const extra = { class: 'x' };
+    return () => <form {...extra} onSubmit={(e) => { e.preventDefault(); submitFeedback({}); }}>x</form>;
+});
+`, '/src/Spread.tsx', {
+            resolveServerFn: () => ({ stableSymbol: 'app#submitFeedback', form: true })
+        });
+        expect(result.code).not.toContain('action=');
+        expect(result.warnings).toHaveLength(1);
+        expect(result.warnings[0]).toContain('spread props');
+    });
+
+    it('a default-imported serverFn is never a stamp target (not extracted server-side)', () => {
+        const resolved: string[] = [];
+        const result = extractResumeHandlers(`
+import { component } from 'sigx';
+import submitDefault from './api.server';
+export const Def = component((ctx) => {
+    const n = ctx.signal(0);
+    return () => <form onSubmit={(e) => { e.preventDefault(); submitDefault({}); }}>x</form>;
+});
+`, '/src/Def.tsx', {
+            resolveServerFn: (spec, name) => {
+                resolved.push(`${spec}#${name}`);
+                return { stableSymbol: 'should-not-happen', form: true };
+            }
+        });
+        expect(result.code).not.toContain('action=');
+        // The resolver is never even consulted for default imports.
+        expect(resolved).toHaveLength(0);
+    });
+});
