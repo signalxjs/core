@@ -151,8 +151,12 @@ export default [
     // 1.9 KB → 2 KB with #354: the GET branch for cache-marked reads
     // (query-string args + the dev URL-length warning) landed the entry at
     // 1.89 KB — 10 B of headroom is a CI hair-trigger, not a budget.
+    // 2 KB → 2.1 KB with #313: the §6.3 boundary-refresh sidecar
+    // (collect/apply through the __SIGX_SERVERFN_BOUNDARIES__ seam + the
+    // body merge + dispatch seq) landed at 2.01 KB — pure seam calls, no
+    // dependencies; the patch logic itself lives in @sigx/resume/client.
     name: '@sigx/server/client (fetch stubs)',
     path: 'packages/server/dist/client/index.prod.js',
-    limit: '2 KB',
+    limit: '2.1 KB',
   },
 ];

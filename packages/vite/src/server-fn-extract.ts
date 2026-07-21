@@ -72,6 +72,14 @@ export interface ExtractedServerFn {
      * server half does not accept GET.
      */
     get: boolean;
+    /**
+     * True when the options form declares `refreshes` (rfc-server §6.3) —
+     * the stub sends the page's boundary inventory up with the call and
+     * applies the envelope's fresh entries. Presence-only detection, same
+     * rationale as `get`: the KEYS are runtime data the endpoint reads off
+     * the wrapper.
+     */
+    refreshes: boolean;
 }
 
 /** Shared options for both extractors (file form and inline). */
@@ -145,16 +153,31 @@ export function readServerFnIdOption(call: Node): { id?: string; nonLiteral: boo
  * degradation. Shared with the inline extractor.
  */
 export function readServerFnCacheOption(call: Node): boolean {
+    return hasServerFnOptionKey(call, 'cache');
+}
+
+/**
+ * Statically detect the options-form `refreshes` declaration (rfc-server
+ * §6.3) — presence only, like `cache`: the component keys are runtime data
+ * the endpoint reads off the wrapper; the stub needs just the one bit that
+ * makes it send the boundary inventory. Shared with the inline extractor.
+ */
+export function readServerFnRefreshesOption(call: Node): boolean {
+    return hasServerFnOptionKey(call, 'refreshes');
+}
+
+/** Presence of a non-computed key on the single object-literal argument. */
+function hasServerFnOptionKey(call: Node, keyName: string): boolean {
     const args = (call.arguments as Node[]) ?? [];
     if (args.length !== 1 || args[0]?.type !== 'ObjectExpression') return false;
     for (const prop of (args[0].properties as Node[]) ?? []) {
         if (prop.type !== 'Property' || prop.computed === true) continue;
         const key = prop.key as Node;
-        const keyName =
+        const name =
             key.type === 'Identifier' ? (key.name as string)
             : key.type === 'Literal' ? String(key.value)
             : '';
-        if (keyName === 'cache') return true;
+        if (name === keyName) return true;
     }
     return false;
 }
@@ -174,7 +197,8 @@ export function mintSymbols(
     explicitId: string | undefined,
     stableId: string,
     stream = false,
-    get = false
+    get = false,
+    refreshes = false
 ): ExtractedServerFn {
     const fnStableId = explicitId ?? stableId;
     return {
@@ -182,8 +206,20 @@ export function mintSymbols(
         symbol: `${name}_fn_${hash8(`${fnStableId}\0${name}\0${implSource}`)}`,
         stableSymbol: `${fnStableId}#${name}`,
         stream,
-        get
+        get,
+        refreshes
     };
+}
+
+/**
+ * The positional flags a fn stub call carries after the endpoint argument
+ * (4th: GET read §4.1; 5th: refreshes-declaring mutation §6.3). Unflagged
+ * output stays byte-identical to before either feature existed.
+ */
+export function stubFlags(fn: { stream: boolean; get: boolean; refreshes: boolean }): string {
+    if (fn.stream) return '';
+    if (fn.refreshes) return fn.get ? ', 1, 1' : ', 0, 1';
+    return fn.get ? ', 1' : '';
 }
 
 /**
@@ -230,7 +266,7 @@ export function extractServerFns(
      *  mark, for `export { x }` resolution. */
     const localFnSources = new Map<
         string,
-        { source: string; stream: boolean; explicitId?: string; get: boolean }
+        { source: string; stream: boolean; explicitId?: string; get: boolean; refreshes: boolean }
     >();
     const wrapperKind = (init: unknown): 'fn' | 'stream' | undefined => {
         if (!isNode(init) || init.type !== 'CallExpression' || !isNode(init.callee)) {
@@ -283,7 +319,8 @@ export function extractServerFns(
                 source: code.slice(init.start, init.end),
                 stream: kind === 'stream',
                 explicitId: idOption.id,
-                get: kind === 'fn' && readServerFnCacheOption(init)
+                get: kind === 'fn' && readServerFnCacheOption(init),
+                refreshes: kind === 'fn' && readServerFnRefreshesOption(init)
             });
         }
     }
@@ -302,7 +339,8 @@ export function extractServerFns(
                     record.explicitId,
                     options.stableId,
                     record.stream,
-                    record.get
+                    record.get,
+                    record.refreshes
                 )
             );
         } else {
@@ -390,12 +428,11 @@ export function extractServerFns(
     for (const fn of fns) {
         const wireSymbol = options.stubSymbols === 'stable' ? fn.stableSymbol : fn.symbol;
         const factory = fn.stream ? '__serverStreamStub' : '__serverFnStub';
-        // The GET mark rides as a 4th positional flag (§4.1) — absent means
-        // POST, keeping unmarked output byte-identical to before.
-        const getFlag = !fn.stream && fn.get ? ', 1' : '';
+        // Positional flags (§4.1 GET, §6.3 refreshes) — absent flags keep
+        // unmarked output byte-identical to before.
         lines.push(
             `export const ${fn.name} = ${factory}(${JSON.stringify(wireSymbol)}, ` +
-            `${JSON.stringify(fn.name)}, ${JSON.stringify(options.endpoint)}${getFlag});`
+            `${JSON.stringify(fn.name)}, ${JSON.stringify(options.endpoint)}${stubFlags(fn)});`
         );
     }
     for (const name of serverOnly) {
