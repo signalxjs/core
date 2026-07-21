@@ -129,6 +129,16 @@ export interface WrappedServerFn {
     ):
         | ReadonlyArray<string | readonly unknown[]>
         | Promise<ReadonlyArray<string | readonly unknown[]>>;
+    /**
+     * Present when the options form declared `refreshes` (rfc-server §6.3):
+     * the component registry keys whose boundaries this mutation may
+     * single-flight refresh — a static array, or VALIDATED input + settled
+     * result → keys. The endpoint filters the client's boundary descriptors
+     * to this allowlist before handing them to `renderBoundaries`.
+     */
+    __sigxRefreshes?:
+        | ReadonlyArray<string>
+        | ((input: unknown, result: unknown) => ReadonlyArray<string> | Promise<ReadonlyArray<string>>);
 }
 
 /**

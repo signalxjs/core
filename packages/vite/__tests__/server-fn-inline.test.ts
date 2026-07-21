@@ -403,6 +403,29 @@ export const Product = component((ctx) => {
     });
 });
 
+describe('extractInlineServerFns — refreshes-declaring mutations (rfc-server §6.3, #313)', () => {
+    it('stamps the refreshes flag (5th positional) on an inline declaring fn', () => {
+        const code = `
+import { component } from 'sigx';
+import { serverFn } from '@sigx/server';
+import { db } from './db';
+
+const track = serverFn({
+    refreshes: ['Tracker'],
+    handler: async (rq, input: { id: string }) => db.track(input.id)
+});
+
+export const Tracker = component((ctx) => {
+    return () => <button onClick={() => track({ id: 'p1' })} />;
+});
+`;
+        const result = extract(code, '/src/Tracker.tsx');
+        expect(result.errors).toHaveLength(0);
+        expect(result.fns[0].refreshes).toBe(true);
+        expect(result.clientModule).toContain(`, "${BASE}", 0, 1)`);
+    });
+});
+
 describe('extractInlineServerFns — serverStream (#310)', () => {
     it('swaps an inline serverStream for the stream stub and appends the mangled export', () => {
         const code = `

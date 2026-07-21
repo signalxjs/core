@@ -68,6 +68,71 @@ export interface ServerFnRequestOptions {
      * time-to-first-byte only. Default: no timeout.
      */
     timeoutMs?: number;
+    /**
+     * Single-flight boundary refresh (rfc-server §6.3): re-render the given
+     * boundary descriptors — already filtered to the mutation's `refreshes`
+     * allowlist — in a context id-seeded at `base`, and return envelope
+     * entries (`{for, id, html, state, records}`). Wired by the app entry;
+     * `createBoundaryRefresh` from `@sigx/resume/server` builds one (a
+     * typed option, not an import — this package never depends on a
+     * renderer). Called only for buffered POST mutations whose request
+     * carried descriptors. A throw here is caught: the refresh is dropped,
+     * never the mutation. The render time counts against `timeoutMs`.
+     */
+    renderBoundaries?(
+        requests: ReadonlyArray<BoundaryRefreshDescriptor>,
+        base: number,
+        rq: ServerFnContext
+    ): ReadonlyArray<unknown> | Promise<ReadonlyArray<unknown>>;
+}
+
+/**
+ * One boundary the client asks to have re-rendered (rfc-server §6.3) —
+ * shape-validated here, but its VALUES are untrusted client input; the
+ * renderer applies its own registry/lossiness checks.
+ */
+export interface BoundaryRefreshDescriptor {
+    /** The boundary's id on the live page. */
+    id: number;
+    /** The component registry key (`record.component`). */
+    component: string;
+    /** The record's props snapshot, verbatim in encoded (boundary-codec) form. */
+    props?: Record<string, unknown>;
+}
+
+/** Upper bound on descriptors per call — each admitted one is a render. */
+const MAX_REFRESH_DESCRIPTORS = 32;
+
+/**
+ * Shape-validate the `$boundaries` request sidecar. Null on anything
+ * malformed — a refresh is best-effort, so bad shapes degrade to "no
+ * refresh", never to a request error.
+ */
+function readBoundarySidecar(
+    raw: unknown
+): { base: number; refresh: BoundaryRefreshDescriptor[] } | null {
+    if (raw === null || typeof raw !== 'object') return null;
+    const { base, refresh } = raw as { base?: unknown; refresh?: unknown };
+    // Ids are counter values on both sides — positive SAFE integers only,
+    // so a hostile base/id can never smuggle precision loss into the
+    // renderer's seeded counter or the client's marker parse.
+    if (typeof base !== 'number' || !Number.isSafeInteger(base) || base <= 0) return null;
+    if (!Array.isArray(refresh)) return null;
+    const descriptors: BoundaryRefreshDescriptor[] = [];
+    for (const entry of refresh.slice(0, MAX_REFRESH_DESCRIPTORS)) {
+        if (entry === null || typeof entry !== 'object') continue;
+        const { id, component, props } = entry as Record<string, unknown>;
+        if (typeof id !== 'number' || !Number.isSafeInteger(id) || id <= 0) continue;
+        if (typeof component !== 'string' || component === '') continue;
+        descriptors.push({
+            id,
+            component,
+            ...(props !== null && typeof props === 'object' && !Array.isArray(props)
+                ? { props: props as Record<string, unknown> }
+                : {})
+        });
+    }
+    return descriptors.length > 0 ? { base, refresh: descriptors } : null;
 }
 
 /** Same three keys as the boundary serializer's DANGEROUS_KEYS. */
@@ -255,6 +320,7 @@ export async function handleServerFnRequest(
     };
 
     let parsed: unknown;
+    let boundarySidecar: unknown;
     if (isGet) {
         // §4.1: the arguments ride the query string — the same JSON text a
         // POST body carries as `args`, percent-encoded. Capped like a body
@@ -275,7 +341,11 @@ export async function handleServerFnRequest(
             return errorResponse(413, 'Request body too large');
         }
         try {
-            parsed = body ? (JSON.parse(body, reviver) as { args?: unknown }).args : undefined;
+            const parsedBody = body
+                ? (JSON.parse(body, reviver) as { args?: unknown; $boundaries?: unknown })
+                : undefined;
+            parsed = parsedBody?.args;
+            boundarySidecar = parsedBody?.$boundaries;
         } catch {
             return errorResponse(400, 'Malformed JSON body');
         }
@@ -375,6 +445,45 @@ export async function handleServerFnRequest(
             const invalidates = await fn.__sigxInvalidates(ctx._input, result);
             if (Array.isArray(invalidates) && invalidates.length > 0) {
                 envelope.$cache = { invalidates };
+            }
+        }
+        // Single-flight boundary refresh (rfc-server §6.3): the request's
+        // descriptors, filtered to the mutation's declared allowlist, are
+        // re-rendered by the app-wired option. Entries are already in
+        // boundary-codec form — attached verbatim, never wire-encoded. Its
+        // OWN try/catch: a refresh failure must never fail the mutation
+        // ($cache above already made the envelope converge without it).
+        if (!isGet && fn.__sigxRefreshes && options.renderBoundaries) {
+            try {
+                const sidecar = readBoundarySidecar(boundarySidecar);
+                if (sidecar) {
+                    const declared = fn.__sigxRefreshes;
+                    const keys =
+                        typeof declared === 'function'
+                            ? await declared(ctx._input, result)
+                            : declared;
+                    const admitted = Array.isArray(keys)
+                        ? sidecar.refresh.filter((d) => keys.includes(d.component))
+                        : [];
+                    if (admitted.length > 0) {
+                        const entries = await options.renderBoundaries(
+                            admitted,
+                            sidecar.base,
+                            ctx as ServerFnContext
+                        );
+                        if (Array.isArray(entries) && entries.length > 0) {
+                            envelope.$boundaries = entries;
+                        }
+                    }
+                }
+            } catch (error) {
+                if (__DEV__) {
+                    console.warn(
+                        `[sigx server] boundary refresh for "${info.name || symbol}" threw — ` +
+                        `dropped (the mutation result is unaffected):`,
+                        error
+                    );
+                }
             }
         }
         return new Response(JSON.stringify(envelope), { status, headers });

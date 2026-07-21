@@ -64,7 +64,8 @@ async function send(
     symbol: string,
     args: unknown[],
     get: boolean,
-    options?: ServerFnCallOptions
+    options?: ServerFnCallOptions,
+    boundaries?: { base: number; refresh: unknown[] }
 ): Promise<Response> {
     const config = transport;
     const target = config?.endpoint ?? endpoint;
@@ -117,7 +118,11 @@ async function send(
         init = {
             method: 'POST',
             headers,
-            body: JSON.stringify({ args: encodeWire(args) }),
+            // The §6.3 sidecar is already boundary-codec-encoded table data —
+            // attached verbatim, never through encodeWire.
+            body: JSON.stringify(
+                boundaries ? { args: encodeWire(args), $boundaries: boundaries } : { args: encodeWire(args) }
+            ),
             ...(signal ? { signal } : {})
         };
     }
@@ -171,22 +176,66 @@ function deliverCacheDirectives(directives: ServerFnCacheDirectives): void {
     }
 }
 
+/**
+ * The single-flight refresh seam (rfc-server §6.3) — a GLOBAL stamped by
+ * `@sigx/resume/client`, same posture as `__SIGX_SERVERFN_CACHE__`:
+ * `collect()` inventories the page's refreshable boundaries for the request
+ * sidecar; `apply(entries, seq)` patches the response's fresh HTML/state in.
+ * `seq` is dispatch order — the pack drops entries an earlier-dispatched but
+ * later-arriving call would stale-overwrite with.
+ */
+export interface BoundaryRefreshSeam {
+    collect(): { base: number; refresh: unknown[] } | null | undefined;
+    apply(entries: unknown[], seq: number): void;
+}
+
+let refreshSeq = 0;
+
+function refreshSeam(): BoundaryRefreshSeam | undefined {
+    return (globalThis as { __SIGX_SERVERFN_BOUNDARIES__?: BoundaryRefreshSeam })
+        .__SIGX_SERVERFN_BOUNDARIES__;
+}
+
 /** Create the typed client stub for one extracted server function. The 4th
  *  positional flag marks a cache-marked read (rfc-server §4.1): the stub
- *  issues GET so browser/edge caches can serve it; absent means POST. */
+ *  issues GET so browser/edge caches can serve it; absent means POST. The
+ *  5th marks a `refreshes`-declaring mutation (§6.3): the stub sends the
+ *  boundary inventory up and applies the envelope's fresh entries. */
 export function __serverFnStub(
     symbol: string,
     name: string,
     endpoint: string,
-    get?: 0 | 1
+    get?: 0 | 1,
+    refreshes?: 0 | 1
 ): ((...args: unknown[]) => Promise<unknown>) & {
     with(options?: ServerFnCallOptions): (...args: unknown[]) => Promise<unknown>;
 } {
     const call = async (args: unknown[], options?: ServerFnCallOptions): Promise<unknown> => {
-        const res = await send(endpoint, symbol, args, get === 1, options);
+        // §6.3 sidecar — only refresh-declaring mutations pay the inventory,
+        // and only when the pack has stamped the seam. Seam throws are
+        // swallowed like the cache hook's: never break the RPC.
+        let sidecar: { base: number; refresh: unknown[] } | null | undefined;
+        let seq = 0;
+        const seam = refreshes === 1 && get !== 1 ? refreshSeam() : undefined;
+        if (seam) {
+            try {
+                sidecar = seam.collect();
+                seq = ++refreshSeq;
+            } catch (error) {
+                if (__DEV__) console.error('[sigx server] $boundaries collect threw:', error);
+            }
+        }
+        const res = await send(
+            endpoint,
+            symbol,
+            args,
+            get === 1,
+            options,
+            sidecar && sidecar.refresh.length > 0 ? sidecar : undefined
+        );
         const text = await res.text();
         let payload:
-            | { data?: unknown; error?: WireError; $cache?: ServerFnCacheDirectives }
+            | { data?: unknown; error?: WireError; $cache?: ServerFnCacheDirectives; $boundaries?: unknown[] }
             | undefined;
         try {
             payload = text ? JSON.parse(text, reviver) : undefined;
@@ -199,9 +248,17 @@ export function __serverFnStub(
             throw wireFail(res.status, res.status === 404 ? { ...wire, message } : wire, message);
         }
         if (payload?.$cache) deliverCacheDirectives(payload.$cache);
-        // Revive `data` specifically, not the whole envelope: `$cache` is a
-        // reserved sidecar, and a `$`-prefixed sole key would otherwise look
-        // like an unrecognized tag.
+        if (seam && Array.isArray(payload?.$boundaries)) {
+            try {
+                seam.apply(payload!.$boundaries!, seq);
+            } catch (error) {
+                if (__DEV__) console.error('[sigx server] $boundaries apply threw:', error);
+            }
+        }
+        // Revive `data` specifically, not the whole envelope: `$cache` and
+        // `$boundaries` are reserved sidecars (the latter rides the boundary
+        // codec, decoded by its pack), and a `$`-prefixed sole key would
+        // otherwise look like an unrecognized tag.
         return 'data' in (payload ?? {}) ? reviveWire(payload!.data) : undefined;
     };
     // `.with(options)` — the per-call options channel (#353, the rfc-server

@@ -87,6 +87,14 @@ export interface SigxServerOptions {
      * enforcing the same auth seam (rfc-server §5).
      */
     guard?: string;
+    /**
+     * Dev boundary refresh (rfc-server §6.3): a Vite-root-relative module
+     * exporting `renderBoundaries`, forwarded to the dev endpoint — the
+     * same shape `createBoundaryRefresh` (`@sigx/resume/server`) builds for
+     * prod entries, so single-flight refresh works identically in dev.
+     * Loaded through the SSR module runner per request, like `guard`.
+     */
+    renderBoundaries?: string;
     /** Origin policy forwarded to the dev endpoint. Default `'same-origin'`. */
     origin?: 'same-origin' | 'verify-when-present' | string[] | false;
     /** Body cap forwarded to the dev endpoint. Default 1 MiB. */
@@ -514,11 +522,17 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
                     : undefined;
                 const guard = guardModule?.guard as
                     import('@sigx/server/node').ServerFnHandlerOptions['guard'];
+                const refreshModule = options.renderBoundaries
+                    ? await devServer.ssrLoadModule(options.renderBoundaries)
+                    : undefined;
+                const renderBoundaries = refreshModule?.renderBoundaries as
+                    import('@sigx/server/node').ServerFnHandlerOptions['renderBoundaries'];
                 const handler = nodeEntry.createServerFnHandler({
                     base,
                     origin: options.origin,
                     maxBodyBytes: options.maxBodyBytes,
                     guard,
+                    renderBoundaries,
                     resolve: async (symbol: string) => {
                         const record = findSymbol(symbol);
                         if (!record) return null;

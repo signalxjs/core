@@ -115,6 +115,23 @@ export interface ServerFnOptions<S, R> {
         | ReadonlyArray<string | readonly unknown[]>
         | Promise<ReadonlyArray<string | readonly unknown[]>>;
     /**
+     * Single-flight boundary refresh (rfc-server §6.3): the component
+     * registry keys (the resume transform's `__resumeId`) whose boundaries
+     * this MUTATION may refresh in its own response. The client sends its
+     * matching boundary descriptors up with the call; the endpoint filters
+     * them to this allowlist and re-renders through its `renderBoundaries`
+     * option, attaching fresh `{for, id, html, state, records}` entries as
+     * `$boundaries` — a never-hydrated boundary then updates without
+     * loading its chunk. Array form for a fixed set; function form receives
+     * the VALIDATED input and settled result (write it after `handler`,
+     * same inference note as `invalidates`). Wire-only, like `invalidates`
+     * — in-process calls have no envelope. Meaningless with `cache` (a
+     * read refreshes nothing).
+     */
+    refreshes?:
+        | ReadonlyArray<string>
+        | ((input: S, result: Awaited<R>) => ReadonlyArray<string> | Promise<ReadonlyArray<string>>);
+    /**
      * Marks the function a cacheable idempotent read (rfc-server §4.1):
      * the client stub issues GET with the arguments in the query string,
      * and the endpoint emits `Cache-Control` from this declaration
@@ -195,6 +212,9 @@ export function serverFn(
     // The §4.1 read marker: precompute the Cache-Control value once, at
     // definition time — the endpoint's per-request cost is one header set.
     const cache = typeof arg === 'function' ? undefined : arg.cache;
+    // The §6.3 seam for the ENDPOINT (wire-only, like `invalidates`): which
+    // boundary components this mutation may single-flight refresh.
+    const refreshes = typeof arg === 'function' ? undefined : arg.refreshes;
     if (__DEV__ && cache && invalidates) {
         console.warn(
             `[sigx server] serverFn ${name ? `"${name}" ` : ''}declares both \`cache\` and ` +
@@ -202,11 +222,19 @@ export function serverFn(
             `The function stays callable, but pick one.`
         );
     }
+    if (__DEV__ && cache && refreshes) {
+        console.warn(
+            `[sigx server] serverFn ${name ? `"${name}" ` : ''}declares both \`cache\` and ` +
+            `\`refreshes\` — a cacheable read refreshes nothing (rfc-server §6.3 is for ` +
+            `mutations). The function stays callable, but pick one.`
+        );
+    }
     return Object.assign(wrapper, {
         with: callWith,
         __sigxFn: invoke,
         __sigxName: name,
         ...(invalidates ? { __sigxInvalidates: invalidates } : {}),
+        ...(refreshes ? { __sigxRefreshes: refreshes } : {}),
         ...(cache ? { __sigxGet: true, __sigxCacheControl: cacheControlValue(cache) } : {})
     });
 }

@@ -202,6 +202,55 @@ export { read };
     });
 });
 
+describe('extractServerFns — refreshes-declaring mutations (rfc-server §6.3, #313)', () => {
+    it('stamps the refreshes flag (5th positional) on declaring fns only', () => {
+        const code = `
+import { serverFn } from '@sigx/server';
+export const track = serverFn({
+    refreshes: ['Tracker'],
+    handler: async (rq, input) => input
+});
+export const plain = serverFn(async (rq, id) => id);
+`;
+        const result = extractServerFns(code, '/src/api.server.ts', opts('src/api.server.ts'));
+        const byName = Object.fromEntries(result.fns.map((f) => [f.name, f]));
+        expect(byName.track.refreshes).toBe(true);
+        expect(byName.plain.refreshes).toBe(false);
+        expect(result.stubModule).toContain(
+            `export const track = __serverFnStub("${byName.track.symbol}", "track", "${BASE}", 0, 1);`
+        );
+        expect(result.stubModule).toContain(
+            `export const plain = __serverFnStub("${byName.plain.symbol}", "plain", "${BASE}");`
+        );
+    });
+
+    it('emits both flags when cache and refreshes coexist (dev-warned at runtime)', () => {
+        const code = `
+import { serverFn } from '@sigx/server';
+export const odd = serverFn({ cache: { maxAge: 5 }, refreshes: ['X'], handler: async (rq) => 1 });
+`;
+        const result = extractServerFns(code, '/src/api.server.ts', opts('src/api.server.ts'));
+        expect(result.stubModule).toContain(', 1, 1);');
+    });
+
+    it('toggling refreshes re-mints the symbol (version-skew safety)', () => {
+        const code = `
+import { serverFn } from '@sigx/server';
+export const track = serverFn({
+    refreshes: ['Tracker'],
+    handler: async (rq, input) => input
+});
+`;
+        const marked = extractServerFns(code, '/src/api.server.ts', opts('src/api.server.ts'));
+        const unmarked = extractServerFns(
+            code.replace("refreshes: ['Tracker'],\n", ''),
+            '/src/api.server.ts',
+            opts('src/api.server.ts')
+        );
+        expect(marked.fns[0].symbol).not.toBe(unmarked.fns[0].symbol);
+    });
+});
+
 describe('extractServerFns — serverStream (#310)', () => {
     const STREAMY = `
 import { serverFn, serverStream } from '@sigx/server';

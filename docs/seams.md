@@ -88,6 +88,23 @@ package being extended, and the **caller** is the one with no import path to it.
 Server-declared cache directives (rfc-server §6.2) reach the cache pack with no
 import in either direction. A throwing hook never breaks the RPC result.
 
+### `__SIGX_SERVERFN_BOUNDARIES__`
+
+| | |
+|---|---|
+| **Stamped by** | `@sigx/resume/client` at module init (lands with #313 part 3 — until then the seam is unstamped and the stub no-ops) |
+| **Called by** | `server/src/client/index.ts` — `collect()` before a `refreshes`-flagged POST, `apply(entries, seq)` when the response carries `$boundaries` |
+| **Contract** | `{ collect(): { base: number; refresh: unknown[] } \| null \| undefined; apply(entries: unknown[], seq: number): void }` — both synchronous-shaped, both throw-swallowed by the caller |
+
+Single-flight boundary refresh (rfc-server §6.3): the stub inventories the
+page's refreshable boundaries on the way out and hands fresh
+`{for, id, html, state, records}` entries back to the resume pack on the way
+in, with no import in either direction. `seq` is the call's dispatch order —
+the pack uses it to drop stale overwrites from out-of-order responses.
+Entries ride the BOUNDARY codec (table-encoded), not the RPC wire codec —
+the stub never decodes them. Missing seam ⇒ no sidecar is sent and `apply`
+is never called; a throwing hook never breaks the RPC result.
+
 ### `__SIGX_SERVERFN_CODEC__`
 
 | | |

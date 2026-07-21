@@ -4,6 +4,22 @@
 
 ### Added
 
+- **Single-flight boundary refresh — the wire** (rfc-server §6.3, #313).
+  `serverFn({ refreshes })` declares which boundary components a mutation
+  may refresh (array, or `(input, result) => keys` on the validated
+  input). The endpoint gains `ServerFnRequestOptions.renderBoundaries` — a
+  typed option the app wires (see `createBoundaryRefresh` in
+  `@sigx/resume/server`); the request's `$boundaries` sidecar is
+  shape-validated, capped, and filtered to the allowlist before the
+  renderer sees it, and the response envelope carries the re-rendered
+  entries as `$boundaries`. A renderer failure drops the refresh, never
+  the mutation. The client stub (5th positional flag, emitted by
+  `@sigx/vite/server` for declaring fns only) inventories the page through
+  the new `__SIGX_SERVERFN_BOUNDARIES__` seam on the way out and applies
+  entries (with a dispatch-order seq) on the way in — both throw-swallowed,
+  both no-ops until `@sigx/resume/client` stamps the seam. Stub entry
+  ceiling 2 KB → 2.1 KB (sits at 2.01 KB).
+
 - **Per-call `headers` and `fresh` on `.with(options)`** (rfc-server v2
   per-call options, #315 — completes the channel #353 opened with
   `signal`). `fn.with({ headers: {...} })(…)` sends one-off request
