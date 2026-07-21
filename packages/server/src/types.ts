@@ -85,6 +85,21 @@ export interface WrappedServerFn {
      */
     __sigxStream?: boolean;
     /**
+     * Present (true) when the options form declared `cache` (rfc-server
+     * §4.1) — the function is a side-effect-free idempotent read and the
+     * endpoint accepts GET for it. The build transform reads the same
+     * declaration statically so the stub issues GET.
+     */
+    __sigxGet?: boolean;
+    /**
+     * The precomputed `Cache-Control` value the endpoint emits on a 2xx GET
+     * (rfc-server §4.1) — built once at definition time from the `cache`
+     * declaration, so the per-request cost is one header set. Starts with
+     * `public` iff the read opted into shared caches (the args-only
+     * contract, §5.2a); the endpoint appends `Vary: Cookie` otherwise.
+     */
+    __sigxCacheControl?: string;
+    /**
      * Present when the options form declared `invalidates` (rfc-server
      * §6.2): VALIDATED input (stashed on the request context by the
      * pipeline) + settled result → cache keys the endpoint attaches to the
