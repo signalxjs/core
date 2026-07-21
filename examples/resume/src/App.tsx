@@ -3,6 +3,7 @@ import { Counter } from './resume/Counter';
 import { Tracker } from './resume/Tracker';
 import { Legacy } from './resume/Legacy';
 import { Quote } from './resume/Quote';
+import { Catalog } from './resume/Catalog';
 
 /**
  * Server-only page. The client ships ONLY the generated delegation loader
@@ -57,7 +58,18 @@ export const App = component<{ ssrRequest: string }>((ctx) => {
             </div>
 
             <div class="card">
-                <h3>4 — wake-on-interaction fallback</h3>
+                <h3>4 — cacheable GET read, rich types</h3>
+                <p class="hint">
+                    A cache-marked serverFn is called with GET — the response
+                    carries Cache-Control, so the browser and any edge cache
+                    absorb repeats — and Date/Set/BigInt arrive as live
+                    instances, verified right here in the browser.
+                </p>
+                <Catalog />
+            </div>
+
+            <div class="card">
+                <h3>5 — wake-on-interaction fallback</h3>
                 <p class="hint">
                     This component's handler captures a module-scope table, so
                     it is not extractable — the transform warned at build time

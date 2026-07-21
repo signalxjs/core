@@ -16,6 +16,7 @@ import {
     assertBotDocument,
     assertStaticAsset,
     assertServerFn,
+    assertCatalogGet,
     assertFallthrough,
     SSR_CONTEXT_MARKER
 } from './assertions.mjs';
@@ -108,6 +109,7 @@ try {
             args: [1],
             expectInData: 'Named = transferred.'
         });
+        await assertCatalogGet(fetchFn, { label });
         assert(/via Cloudflare-Workers/.test(data), `${label}: fn ran under workerd, not node (${data})`);
         await assertFallthrough(fetchFn, { label });
     });

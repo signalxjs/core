@@ -115,6 +115,39 @@ server-declared form is the better default for server-owned data.
 (Declare it after `handler` in the literal — TypeScript infers `result`
 in textual order.)
 
+### Cacheable reads — GET + `Cache-Control`
+
+The read-side twin of `invalidates` (rfc-server §4.1): declaring `cache`
+marks a function a **side-effect-free idempotent read**. The stub then
+calls it with `GET {endpoint}/{symbol}?args=…` and the endpoint emits
+`Cache-Control` from the declaration — the browser and any edge cache can
+absorb repeats without touching the origin:
+
+```ts
+export const getProduct = serverFn({
+    input: ProductQuery,
+    cache: { maxAge: 60, staleWhileRevalidate: 300 },
+    handler: async (rq, { id }) => db.products.get(id)
+});
+```
+
+- Default is `private, max-age=…` **plus `Vary: Cookie`** — safe for
+  personalized reads. `public: true` (+ `sMaxAge`) opts into shared/CDN
+  caching under a strict contract: the output depends **only on the
+  arguments**, never cookies, auth, or request headers (`__DEV__` warns
+  when a public read touches `rq.request`).
+- **Declaring `cache` is a promise.** A mutating function marked `cache`
+  re-opens CSRF — GET has no content-type gate and no preflight. Only mark
+  genuinely side-effect-free reads; `cache` and `invalidates` are mutually
+  exclusive.
+- Every non-2xx GET is `no-store`; a handler-set `cache-control` (via
+  `rq.responseHeaders`) wins for dynamic per-input TTLs. POST stays valid
+  for every function.
+- Layering with `@sigx/cache`: `staleTime` decides *when* to refetch,
+  `max-age` decides whether the refetch reaches the origin. For private
+  reads keep `maxAge ≤ staleTime`; for public reads put the real budget in
+  `sMaxAge` and keep the browser `max-age` short.
+
 ### Streaming (`serverStream`)
 
 An async generator wrapped in `serverStream` streams its yields to the
