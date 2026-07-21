@@ -414,9 +414,13 @@ Responses (all `application/json`):
   (`__DEV__` includes message + stack).
 - `400` malformed body / non-array args / validator rejection (validator
   issues in `data`); `403` origin; `404` unknown symbol (stub throws the
-  skew-aware error); `405` + `Allow: POST` (any method that is not POST —
-  or GET for a cache-marked read, §4.1); `413` over `maxBodyBytes`;
-  `414` over `maxUrlBytes` (GET only, §4.1); `415` wrong content-type.
+  skew-aware error); `405` for an unsupported method — before the symbol
+  resolves the endpoint cannot know the target's methods, so the
+  pre-resolution 405 (PUT, HEAD, …) advertises the endpoint's method
+  universe `Allow: POST, GET`, while GET on a fn that is not a
+  cache-marked read answers the resource-precise `Allow: POST` (§4.1);
+  `413` over `maxBodyBytes`; `414` over `maxUrlBytes` (GET only, §4.1);
+  `415` wrong content-type.
 
 Handler options (shared by `/server` and `/node`):
 
@@ -538,8 +542,10 @@ export interface ServerFnReadCache {
 GET {base=/_sigx/fn}/{symbol}?args=<encodeURIComponent(JSON.stringify(encode(args)))>
 ```
 
-The query value is byte-identical to the POST body's inner `args` array —
-the same boundary codec runs in the same places on both transports, so
+After percent-decoding, the query value is the same JSON text the POST
+body carries as its `args` array — one `JSON.stringify(encode(args))`
+feeds both transports (the body wraps it in `{"args": …}`, the URL wraps
+it in `encodeURIComponent`), so
 every tag (`$date`, `$map`, `$bigint`, `$esc`, …) survives with no second
 serialization format to drift. Arguments ride the *query string*, never
 the path — proxies and CDNs path-normalize `%2F` but do not touch query
@@ -557,8 +563,11 @@ of `maxBodyBytes`), and the stub warns in `__DEV__` above ~2 KiB that the
 arguments are too large to make a good cache key.
 
 **Endpoint behaviour.** GET is accepted **only** for a cache-marked,
-non-stream function — anything else answers `405` + `Allow: POST` +
-`Cache-Control: no-store`. The GET path skips the content-type gate and
+non-stream function; a GET to any other resolved function answers `405` +
+`Allow: POST` + `Cache-Control: no-store` (resource-precise — that
+target really does support only POST). Methods other than POST/GET are
+rejected before symbol resolution and advertise the endpoint's method
+universe, `Allow: POST, GET`. The GET path skips the content-type gate and
 the body read, then rejoins the POST pipeline unchanged: same
 prototype-pollution reviver, same codec revive, same error vocabulary,
 and the full `guard` → `input` validator → `timeoutMs` → `onError`
