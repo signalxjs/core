@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+**Fixed: an indented mount container no longer defeats hydration.**
+
+- `hydrate()` passes `container.firstChild` to the walk verbatim, and the
+  walk's skip loop advances past comments only. So when the host page
+  pretty-prints its mount container — `<div id="app">\n  <div …>` — a
+  component's SSR range began at a whitespace text node, which the
+  structural-mismatch check (#115) treated as a mismatch. The hydrator then
+  discarded the entire server-rendered subtree and re-rendered it on the
+  client: hydration defeated by indentation alone, and on a root component
+  that meant the whole page.
+- Leading **formatting whitespace** is now skipped instead. Text with visible
+  content still bails — that is the real #115 orphan case, where hydration
+  would otherwise abandon SSR text as content no VNode owns. The change
+  strictly narrows the bail set; nothing that hydrated before starts bailing.
+- "Formatting whitespace" means HTML's ASCII whitespace (space, tab, LF, FF,
+  CR) — deliberately *not* JavaScript's `\s`, which also matches NBSP and the
+  other Unicode space separators. Those are visible characters: a
+  server-rendered `&nbsp;` is real content and still triggers the bail.
+- The dev-only `Skipped non-matching sibling(s)` warning is now gated on
+  having skipped real content, so it no longer fires for every element on a
+  formatted page.
+
 **`createFetchHandler` — the WinterCG request handler.** (rfc-deploy §2,
 Phase 1 of #321; #323)
 

@@ -34,7 +34,8 @@ import type { SchedulerJob } from 'sigx/internals';
 import {
     InternalVNode,
     getCurrentAppContext,
-    getClientPlugins
+    getClientPlugins,
+    isFormattingWhitespace
 } from './hydrate-context';
 import { hydrateNode } from './hydrate-core';
 
@@ -403,6 +404,9 @@ export function hydrateComponent(vnode: VNode, dom: Node | null, parent: Node, t
  * Conservative by design: returns true (hydrate normally) for anything it
  * does not classify as an element-root mismatch — Text/Comment/Fragment and
  * component roots, and cases where SSR produced no element to compare against.
+ * Leading WHITESPACE-ONLY text is skipped rather than treated as a mismatch:
+ * it is markup formatting (an indented mount container), so bailing on it
+ * would discard a matching server-rendered tree over indentation alone.
  * This is a scoping decision, not a safety guarantee for those shapes: a
  * Text/Comment subtree whose SSR DOM was an element (or vice versa) can still
  * leave orphans, since hydrateNode's Text/Comment mismatch paths insert a
@@ -431,10 +435,19 @@ function subtreeMatchesSSRDom(subTree: VNode, startDom: Node | null, anchor: Nod
             return (node as Element).tagName.toLowerCase() === subTree.type.toLowerCase();
         }
         if (node.nodeType === Node.TEXT_NODE) {
-            // SSR produced leading text where the client wants an element.
-            // hydrateNode's element branch would scan past this text looking
-            // for a matching element and abandon it — treat as a mismatch so
-            // the range is cleaned up and remounted.
+            // Formatting whitespace is an artifact of the surrounding markup
+            // (an indented mount container, a pretty-printed template), not
+            // content SSR rendered for this component. Skip it: abandoning it
+            // leaves nothing visible, whereas bailing here would discard a
+            // perfectly good server-rendered subtree over indentation alone.
+            if (isFormattingWhitespace(node)) {
+                node = node.nextSibling;
+                continue;
+            }
+            // Text with visible content means SSR produced real leading text
+            // where the client wants an element. hydrateNode's element branch
+            // would scan past it and abandon it as an orphan — treat as a
+            // mismatch so the range is cleaned up and remounted (#115).
             return false;
         }
         node = node.nextSibling;

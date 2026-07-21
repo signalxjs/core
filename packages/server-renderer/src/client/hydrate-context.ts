@@ -40,6 +40,24 @@ export interface InternalVNode extends VNode {
     _slots?: any;
 }
 
+// ============= SSR Formatting Artifacts =============
+
+/**
+ * Is this text node pure markup formatting (indentation between tags) rather
+ * than content SSR rendered for a component?
+ *
+ * Deliberately NOT `/\S/`: JavaScript's `\s` class matches NBSP (` `) and
+ * the other Unicode space separators, which are VISIBLE characters. An SSR
+ * `&nbsp;` is real content — skipping it would let the hydrator abandon
+ * visible text as an orphan no VNode owns. Only HTML's ASCII whitespace
+ * (space, tab, LF, FF, CR) can appear as pretty-printing between tags, so that
+ * is exactly the set treated as skippable.
+ */
+export function isFormattingWhitespace(node: Node): boolean {
+    return node.nodeType === 3 /* TEXT_NODE */
+        && !/[^ \t\n\f\r]/.test((node as globalThis.Text).data);
+}
+
 // ============= Element Normalization =============
 
 /**
