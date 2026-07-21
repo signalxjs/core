@@ -216,8 +216,13 @@ function encode(
 
 /**
  * Walk a decoded-JSON tree, turning `{ [tag]: payload }` objects back into
- * live values. The inverse of {@link encodeWithHandlers}; safe to call on a
- * tree that was never encoded (it is then a deep copy).
+ * live values — the inverse of {@link encodeWithHandlers}.
+ *
+ * Apply this ONLY to trees that {@link encodeWithHandlers} produced. It is
+ * not a general-purpose deep copy: by design it interprets any single-key
+ * `$`-prefixed object as a tag, so foreign JSON that happens to contain
+ * `{ "$date": 1 }` would come back a `Date`. Encoded trees are safe because
+ * the encoder escapes exactly those shapes.
  *
  * An unrecognized `$`-tag is left untouched — data written by a newer
  * vocabulary degrades to its raw shape rather than throwing.
@@ -239,7 +244,16 @@ function revive(value: unknown, handlers: readonly SSRTypeHandler[]): unknown {
         const key = keys[0]!;
         const payload = (value as Record<string, unknown>)[key];
 
-        if (key === ESCAPE_TAG) {
+        // Only unwrap a payload this codec could actually have produced: the
+        // encoder always wraps an OBJECT. A `{ $esc: 1 }` that was never
+        // encoded falls through to the generic walk below and survives as
+        // itself, rather than becoming `{}` via `Object.keys(1)`.
+        if (
+            key === ESCAPE_TAG &&
+            payload !== null &&
+            typeof payload === 'object' &&
+            !Array.isArray(payload)
+        ) {
             // Unwrap one level, reviving the VALUES but never interpreting the
             // unwrapped object's own key as a tag — that is the whole point of
             // the escape. (`{ $esc: { $date: <encoded Date> } }` is a user
@@ -250,7 +264,10 @@ function revive(value: unknown, handlers: readonly SSRTypeHandler[]): unknown {
             return unwrapped;
         }
 
-        if (key.charCodeAt(0) === 36 /* $ */) {
+        // `$esc` reaching here means a payload the encoder never produced
+        // (handled above otherwise) — pass it through silently rather than
+        // reporting the codec's own escape marker as an unknown tag.
+        if (key.charCodeAt(0) === 36 /* $ */ && key !== ESCAPE_TAG) {
             for (const h of handlers) {
                 if (h.tag === key && h.revive) {
                     return h.revive(revive(payload, handlers));

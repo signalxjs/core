@@ -196,9 +196,18 @@ describe('forward and backward compatibility', () => {
         expect(warn).toHaveBeenCalledWith(expect.stringContaining('$fromTheFuture'));
     });
 
-    it('is a safe deep copy for a tree that was never encoded', () => {
+    it('passes through a tree with no tags in it', () => {
         const value = { a: [1, { b: 'c' }], d: null };
         expect(reviveWithHandlers(value)).toEqual(value);
+    });
+
+    it('does not corrupt a non-object $esc payload it never produced', () => {
+        // The encoder only ever wraps an OBJECT, so `{ $esc: 1 }` cannot have
+        // come from it; unwrapping blindly would yield {} via Object.keys(1).
+        expect(reviveWithHandlers({ $esc: 1 })).toEqual({ $esc: 1 });
+        expect(reviveWithHandlers({ $esc: null })).toEqual({ $esc: null });
+        expect(reviveWithHandlers({ $esc: [1, 2] })).toEqual({ $esc: [1, 2] });
+        expect(reviveWithHandlers({ $esc: 'x' })).toEqual({ $esc: 'x' });
     });
 
     it('emits a tagless legacy handler payload verbatim, unescaped', () => {
