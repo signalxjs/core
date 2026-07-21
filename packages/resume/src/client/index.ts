@@ -8,6 +8,7 @@
 
 import { resolveQrl } from './qrl-registry';
 import { getScope, getDetachedScope } from './scope';
+import { installBoundaryRefreshSeam } from './refresh';
 
 export { __registerResumeQrl, resolveQrl, resetResumeQrls } from './qrl-registry';
 export type { QrlLoader } from './qrl-registry';
@@ -15,6 +16,12 @@ export { getScope, resetResumeScopes } from './scope';
 export type { ResumeScope } from './scope';
 export { wake } from './upgrade';
 export { createRestoringSignal } from './restore-signal';
+export { installBoundaryRefreshSeam, uninstallBoundaryRefreshSeam } from './refresh';
+
+// Stamp the single-flight refresh seam (rfc-server §6.3) the moment the
+// client runtime evaluates — an RPC can only be issued by a handler this
+// module dispatches, so the fn stub always finds it on a resumable page.
+installBoundaryRefreshSeam();
 
 const BOUNDARY_ATTR = 'data-sigx-b';
 

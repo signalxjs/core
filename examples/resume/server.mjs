@@ -48,24 +48,33 @@ async function createServer() {
         // middleware.)
         const { createRequestHandler } = await import('@sigx/server-renderer/node');
         const { createServerFnHandler } = await import('@sigx/server/node');
+        const { createBoundaryRefresh } = await import('@sigx/resume/server');
 
         const { template, assets, resumeManifest } = await import(
             new URL('./dist/server/sigx-app.js', import.meta.url).href
         );
-        const { createApp } = await import(
+        const { createApp, refreshComponents } = await import(
             new URL('./dist/server/entry-server.js', import.meta.url).href
         );
         const { serverFns } = await import(
             new URL('./dist/server/sigx-server-fns.js', import.meta.url).href
         );
 
+        // ONE ssr instance for documents AND single-flight boundary
+        // refreshes (rfc-server §6.3) — the refresh re-renders through the
+        // same plugin set the page rendered with.
+        const ssr = createSSR().use(resumePlugin({ manifest: resumeManifest }));
+
         app.use(express.static(resolve(__dirname, 'dist/client'), { index: false }));
-        app.use(createServerFnHandler({ functions: serverFns }));
+        app.use(createServerFnHandler({
+            functions: serverFns,
+            renderBoundaries: createBoundaryRefresh({ ssr, components: refreshComponents })
+        }));
         app.use(createRequestHandler({
             template,
             app: (url) => createApp(url),
             isBot,
-            ssr: createSSR().use(resumePlugin({ manifest: resumeManifest })),
+            ssr,
             document: { assets }
         }));
     }
