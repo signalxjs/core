@@ -119,8 +119,14 @@ export function hydrate(element: any, container: Element, appContext?: AppContex
 /**
  * Hydrate a VNode against existing DOM
  * This only attaches event handlers and refs - no DOM creation
+ *
+ * `regionEnd` is the exclusive end of the sibling range these VNodes may own —
+ * the enclosing component's trailing marker. It travels down every position
+ * that shares a DOM parent with that marker (fragments, component subtrees)
+ * and resets to null when descending into an element, whose own child list
+ * bounds the search. Component marker selection needs it to stay exact (#373).
  */
-export function hydrateNode(vnode: VNode, dom: Node | null, parent: Node): Node | null {
+export function hydrateNode(vnode: VNode, dom: Node | null, parent: Node, regionEnd: Node | null = null): Node | null {
     if (!vnode) return dom;
 
     // Skip comment nodes (<!--t--> text separators and <!--$c:N--> component markers).
@@ -202,7 +208,9 @@ export function hydrateNode(vnode: VNode, dom: Node | null, parent: Node): Node 
     if (vnode.type === Fragment) {
         let current = dom;
         for (const child of vnode.children) {
-            current = hydrateNode(child, current, parent);
+            // A fragment's children live in the SAME parent, so they inherit
+            // this position's region bound.
+            current = hydrateNode(child, current, parent, regionEnd);
         }
         return current;
     }
@@ -213,18 +221,18 @@ export function hydrateNode(vnode: VNode, dom: Node | null, parent: Node): Node 
         // (hydrate:'load' records schedule immediately — same walk order,
         // plus the state-snapshot staging). Paid only when a table exists.
         if (_walkTable) {
-            const { trailingMarker } = findComponentBoundaries(dom);
+            const { trailingMarker } = findComponentBoundaries(dom, regionEnd);
             const id = trailingMarker ? parseMarkerId(trailingMarker) : null;
             const record = id !== null ? _walkTable[String(id)] : undefined;
             if (record) {
-                return scheduleWalkedBoundary(vnode, dom, parent, record);
+                return scheduleWalkedBoundary(vnode, dom, parent, record, regionEnd);
             }
         }
 
         // Let plugins intercept component hydration
         const plugins = getClientPlugins();
         for (const plugin of plugins) {
-            const result = plugin.client?.hydrateComponent?.(vnode, dom, parent);
+            const result = plugin.client?.hydrateComponent?.(vnode, dom, parent, regionEnd);
             if (result !== undefined) {
                 // Plugin handled this component — return the next DOM node
                 return result;
@@ -232,7 +240,7 @@ export function hydrateNode(vnode: VNode, dom: Node | null, parent: Node): Node 
         }
 
         // No plugin handled it — hydrate immediately
-        return hydrateComponent(vnode, dom, parent);
+        return hydrateComponent(vnode, dom, parent, null, regionEnd);
     }
 
     if (typeof vnode.type === 'string') {

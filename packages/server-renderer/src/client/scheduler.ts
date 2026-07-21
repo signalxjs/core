@@ -239,19 +239,37 @@ export function isSkipPlaceholder(el: Element | null, wantId: number | null): bo
 
 /**
  * Find this component's content start and trailing marker from a walk
- * position. Mirrors hydrateComponent's marker selection: when components are
- * nested, SSR emits multiple contiguous `<!--$c:N-->` markers with child IDs
- * appearing BEFORE the parent's — choose the lowest-ID marker in the
- * contiguous run so we anchor on this (outermost) component.
+ * position, searching the half-open sibling range `[dom, regionEnd)`.
+ *
+ * SSR allocates component ids from a pre-order counter (`nextId()`), entered
+ * BEFORE a component renders its children, and emits the id as a TRAILING
+ * `<!--$c:N-->` marker. That gives one invariant the pick rests on:
+ *
+ *   For a component with id N, every marker between its content start and its
+ *   own marker belongs to a DESCENDANT (id > N), and every later sibling in
+ *   the same parent also has id > N. The only markers with id < N belong to
+ *   ANCESTORS, and they always come after N's own marker.
+ *
+ * So the lowest-id marker in `[dom, regionEnd)` is always this component's,
+ * whatever mix of nested components and plain sibling content follows it.
+ *
+ * `regionEnd` — the enclosing component's trailing marker — is what keeps an
+ * ancestor's (lower) id out of the range; the walk threads it down through
+ * every position that shares a DOM parent with that marker, and resets it to
+ * null when descending into an element, whose own child list bounds the scan.
+ * Without it the scan needed a break heuristic, which mistook plain sibling
+ * content for the end of the component and latched a CHILD's marker (#373).
  */
-export function findComponentBoundaries(dom: Node | null): { contentStart: Node | null; trailingMarker: Comment | null } {
+export function findComponentBoundaries(
+    dom: Node | null,
+    regionEnd: Node | null = null
+): { contentStart: Node | null; trailingMarker: Comment | null } {
     const contentStart = dom;
     let trailingMarker: Comment | null = null;
 
     let current: Node | null = dom;
     let bestId = Infinity;
-    let foundAnyMarker = false;
-    while (current) {
+    while (current && current !== regionEnd) {
         if (current.nodeType === Node.COMMENT_NODE) {
             const text = (current as Comment).data;
             if (text.startsWith('$c:')) {
@@ -260,11 +278,7 @@ export function findComponentBoundaries(dom: Node | null): { contentStart: Node 
                     bestId = id;
                     trailingMarker = current as Comment;
                 }
-                foundAnyMarker = true;
             }
-        } else if (foundAnyMarker) {
-            // Passed this component's marker run into a sibling's content.
-            break;
         }
         current = current.nextSibling;
     }

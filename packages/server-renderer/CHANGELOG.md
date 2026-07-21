@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+**Fixed: a component followed by sibling content no longer latches its child's
+anchor.** (#373)
+
+- SSR emits a TRAILING `<!--$c:N-->` marker per component, so a parent's marker
+  comes after its children's. A component that is not handed its marker had to
+  find it, and the rule was a guess: lowest id in a *contiguous* comment run,
+  breaking at the first non-comment node after any marker. Ordinary sibling
+  content ended the run early — for `<div>A</div><!--$c:2--><span>B</span><!--$c:1-->`
+  the outer component latched `$c:2`, its **child's** marker.
+- Everything downstream is derived from that anchor, so a short one meant: the
+  structural-mismatch check (#115) judged the match on a prefix of the range;
+  a bail deleted only that prefix and mounted the fresh subtree *before* the
+  child's marker, leaving the rest of the SSR content as a duplicated orphan —
+  the very symptom the bail exists to prevent; the walk resumed mid-range; and
+  the boundary-table lookup used the wrong component id, silently ignoring that
+  boundary's hydration strategy.
+- The search is now bounded by the enclosing component's marker, and takes the
+  lowest id in that range. Component ids come from a pre-order counter entered
+  before a component renders its children, so within that bound every other
+  marker belongs to a descendant or a later sibling — all with higher ids. The
+  pick is exact rather than heuristic, and the wire format is unchanged.
+- `hydrateNode`, `hydrateComponent`, `findComponentBoundaries`,
+  `scheduleWalkedBoundary` and the `client.hydrateComponent` plugin hook each
+  take that bound as a new **optional trailing parameter** (`regionEnd`);
+  existing callers and packs compile and behave as before. A pack that locates
+  a component's own marker itself should thread it through — the defect applies
+  equally to a strategy pack's boundaries.
+
 **Fixed: an indented mount container no longer defeats hydration.**
 
 - `hydrate()` passes `container.firstChild` to the walk verbatim, and the
