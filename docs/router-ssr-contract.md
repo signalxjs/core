@@ -60,7 +60,7 @@ Which handler supplies what:
 
 | Handler | `req` | `platform` |
 |---|---|---|
-| `createDevRequestHandler` (`@sigx/vite/ssr`) | `IncomingMessage` | — |
+| `createDevRequestHandler` (`@sigx/vite/ssr`) | `IncomingMessage` | ✓ via its `platform` option |
 | `createRequestHandler` (`@sigx/server-renderer/node`) | `IncomingMessage` | — |
 | `createFetchHandler` (`@sigx/server-renderer/server`) | `Request` | ✓ |
 
@@ -70,9 +70,12 @@ Which handler supplies what:
   runtime-specific fields; reading a cookie header works on either. This is how
   a factory reads a session cookie without reaching for AsyncLocalStorage.
 - **`platform`** — opaque platform context (rfc-deploy §4.6), e.g.
-  Cloudflare's `{ env, ctx }`. **Only `createFetchHandler` passes it**; under
-  the two Node handlers the third argument is always `undefined`, so a factory
-  that needs platform bindings must be served by the fetch handler.
+  Cloudflare's `{ env, ctx }`. Supplied by `createFetchHandler` (from the
+  runtime) and by `createDevRequestHandler` (from its `platform` option — this
+  is what `@sigx/cloudflare`'s `devProxy` fills in via wrangler's
+  `getPlatformProxy`, so bindings work in dev). **`createRequestHandler` never
+  passes it**: plain Node has no platform context, so the third argument is
+  always `undefined` there.
 
 A factory that declares only `(url)` is unaffected — extra arguments are
 ignored. Dev used to drop `req` and pass `platform` second, so an app with
