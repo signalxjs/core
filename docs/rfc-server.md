@@ -415,7 +415,12 @@ Responses (all `application/json`):
   (`__DEV__` includes message + stack).
 - `400` malformed body / non-array args / validator rejection (validator
   issues in `data`); `403` origin; `404` unknown symbol (stub throws the
-  skew-aware error); `405` + `Allow: POST`; `413` over `maxBodyBytes`;
+  skew-aware error); `405` for an unsupported method — before the symbol
+  resolves the endpoint cannot know the target's methods, so the
+  pre-resolution 405 (PUT, HEAD, …) advertises the endpoint's method
+  universe `Allow: POST, GET`, while GET on a fn that is not a
+  cache-marked read answers the resource-precise `Allow: POST` (§4.1);
+  `413` over `maxBodyBytes`; `414` over `maxUrlBytes` (GET only, §4.1);
   `415` wrong content-type.
 
 Handler options (shared by `/server` and `/node`):
@@ -427,6 +432,8 @@ export interface ServerFnRequestOptions {
     guard?(rq: ServerFnContext, fn: { symbol: string; name: string }): void | Promise<void>;
     origin?: 'same-origin' | string[] | false;   // default 'same-origin'
     maxBodyBytes?: number;                        // default 1_048_576, enforced while reading
+    maxUrlBytes?: number;                         // default 8_192 — cap on a GET read's
+                                                  // `args` query value (§4.1); 414 over it
 }
 ```
 
@@ -487,6 +494,121 @@ bug in both copies before either shipped. Measurement settled it — importing
 and tree-shaking the codec costs 909 B, not the runtime-sized cliff the
 dependency-free rule is there to prevent.
 
+### §4.1 GET for idempotent reads (#354)
+
+Every call above is POST — correct for the CSRF posture (§5.2), but it
+means no read is ever CDN- or browser-cacheable: an edge cache can never
+absorb read traffic. A read-shaped function can opt into GET:
+
+```ts
+// src/catalog.server.ts
+export const getProduct = serverFn({
+    input: z.object({ id: z.string() }),
+    cache: { maxAge: 60, staleWhileRevalidate: 300 },   // ← the opt-in
+    handler: async (rq, { id }) => db.products.get(id)
+});
+```
+
+**The opt-in is `cache`, on the options form only.** Not a `query()`
+primitive (rejected below in "What this RFC does not do"), not a
+`method: 'GET'` option — semantics first: `cache` declares *this function
+is a side-effect-free idempotent read*, and GET is the consequence. It is
+the read-side twin of the shipped mutation-side `invalidates` (§6.2). The
+options form's single-input shape is what gives GET a clean one-value URL
+encoding, and restricting the option to that form makes the compiler
+enforce it — the variadic form cannot be marked. Declaring both `cache`
+and `invalidates` is a category error (`__DEV__` warning; a read that
+invalidates is not a read).
+
+```ts
+export interface ServerFnReadCache {
+    /** Seconds the response is fresh in HTTP caches (max-age). Required — no invented default TTL. */
+    maxAge: number;
+    /** stale-while-revalidate window, seconds. */
+    staleWhileRevalidate?: number;
+    /**
+     * Shared-cache opt-in: emits `public` (+ `s-maxage`). Default false → `private`.
+     * Contract: a public read's output must depend ONLY on its arguments —
+     * never cookies, auth, or any other request header (§5.2a).
+     */
+    public?: boolean;
+    /** Shared-cache TTL when public; defaults to maxAge. */
+    sMaxAge?: number;
+}
+```
+
+**The wire:**
+
+```
+GET {base=/_sigx/fn}/{symbol}?args=<encodeURIComponent(JSON.stringify(encode(args)))>
+```
+
+After percent-decoding, the query value is the same JSON text the POST
+body carries as its `args` array — one `JSON.stringify(encode(args))`
+feeds both transports (the body wraps it in `{"args": …}`, the URL wraps
+it in `encodeURIComponent`), so
+every tag (`$date`, `$map`, `$bigint`, `$esc`, …) survives with no second
+serialization format to drift. Arguments ride the *query string*, never
+the path — proxies and CDNs path-normalize `%2F` but do not touch query
+values, so the #355 stable-symbol hazard is not worsened, and whatever
+resolution #355 picks composes untouched. Encoding is deterministic
+(objects walk in insertion order), so a call site with equal inputs mints
+the identical URL — which is all an HTTP cache key needs. Two call sites
+spelling `{b, a}` vs `{a, b}` fragment the cache (a miss), never alias it
+(a wrong hit); canonical key-sorted encoding is rejected for v1 as bytes
+in the size-limited stub with zero correctness benefit. The stub always
+appends `?args=…` (one code path); the endpoint tolerates its absence as
+`[]` for curl ergonomics. Oversized URLs are a **414** over `maxUrlBytes`
+(default 8 KiB — under mainstream proxy request-line caps; the GET analog
+of `maxBodyBytes`), and the stub warns in `__DEV__` above ~2 KiB that the
+arguments are too large to make a good cache key.
+
+**Endpoint behaviour.** GET is accepted **only** for a cache-marked,
+non-stream function; a GET to any other resolved function answers `405` +
+`Allow: POST` + `Cache-Control: no-store` (resource-precise — that
+target really does support only POST). Methods other than POST/GET are
+rejected before symbol resolution and advertise the endpoint's method
+universe, `Allow: POST, GET`. The GET path skips the content-type gate and
+the body read, then rejoins the POST pipeline unchanged: same
+prototype-pollution reviver, same codec revive, same error vocabulary,
+and the full `guard` → `input` validator → `timeoutMs` → `onError`
+chain. `invalidates` delivery is skipped (mutually exclusive with
+`cache`). POST **remains valid for every function**, marked or not — GET
+is strictly additive (back-compat, `role: 'client'` builds, and the
+cache-busting escape hatch).
+
+**Header emission**, on 2xx only, unless the handler already set
+`cache-control` via `rq.responseHeaders` (the per-input dynamic-TTL
+escape hatch — the handler override always wins):
+
+| Declaration | Emitted |
+|---|---|
+| default (`private`) | `Cache-Control: private, max-age=<maxAge>[, stale-while-revalidate=<swr>]` **plus `Vary: Cookie`** |
+| `public: true` | `Cache-Control: public, max-age=<maxAge>, s-maxage=<sMaxAge ?? maxAge>[, stale-while-revalidate=<swr>]`, no Vary |
+
+`Vary: Cookie` on private responses makes even the *browser's* cache
+revalidate across a logout/login inside one profile. Public responses
+emit no Vary because the args-only contract (§5.2a) means nothing else
+may vary. **Every non-2xx GET response carries `Cache-Control:
+no-store`** — errors, guard rejections, 404s, 414s, 405s — so an
+attacker-induced error can never be pinned into a shared cache, and a
+redeploy's fresh symbols are never shadowed by cached 404s. The header
+value is precomputed once at definition time and stamped on the wrapper
+(the `__sigxInvalidates` pattern), so the per-request cost is one header
+set.
+
+**Out of scope for v1**, recorded as §7 follow-ups rather than designed
+here: ETag/conditional GET (hashing every body doesn't clear the bar
+while `max-age` + `stale-while-revalidate` absorbs the traffic, and CDNs
+mint ETags themselves), HEAD (405 for now), a per-call freshness flag
+(defers to the #315 per-call-options design), and server-side
+memoization of the in-process SSR call path (a different feature that
+must not creep in through this one). `serverStream` never qualifies:
+structurally it has no options form, and the endpoint guards it anyway.
+
+For how HTTP caching layers with `@sigx/cache`'s `staleTime`, see §6.2 —
+they are deliberately two separate channels.
+
 ## §5 Security — first-class design content
 
 The core truth: **every server function is a public HTTP endpoint.** Types,
@@ -513,7 +635,9 @@ attacker with `curl`. Defaults, in order of the failure they prevent:
    reviewable one-line opt-in, far narrower than `origin: false`. Caveat to
    document: never deploy an Origin-stripping proxy in front of a
    cookie-authenticated app using this policy; native clients authenticate
-   with token headers (CSRF-immune by construction).
+   with token headers (CSRF-immune by construction). Cache-marked GET
+   reads (§4.1) sit outside this item entirely — they are safe-method
+   requests with their own posture, §5.2a.
 3. **Injection via 'captured' state** — structurally impossible: the
    imports-only rule (§1.2) means nothing crosses the boundary except typed
    arguments, and the `input` validator runs server-side on exactly those.
@@ -528,6 +652,58 @@ attacker with `curl`. Defaults, in order of the failure they prevent:
    `rq.responseHeaders` / `rq.status()` apply before the body is written.
    (Qwik's cookie-after-stream-start failure cannot occur.) The streaming
    form (§6.1) documents that headers freeze at the first yield.
+
+### §5.2a GET reads — the safe-method contract (#354)
+
+Item 2's defenses protect *state changes*. A §4.1 GET read is a safe
+method: there is no state change to forge — **if and only if the function
+is genuinely side-effect-free**. Declaring `cache` is that promise, and
+its inverse must be stated starkly: **a mutating function marked `cache`
+re-opens CSRF completely.** `<img src="/_sigx/fn/<symbol>?args=…">` fires
+it cross-site, credentialed, with no preflight and no content-type gate —
+and additionally lets an attacker *prime caches* with the mutation's
+response. The framework cannot detect this; it is the one place the
+design trusts the author, and the docs say so in exactly these terms.
+
+What replaces the POST defenses, point by point:
+
+- **Origin.** Browsers send no `Origin` header on same-origin GET
+  fetches, so the POST-style `'same-origin'` check would 403 every
+  legitimate read. The endpoint therefore applies **verify-when-present
+  semantics to GET automatically**, under both `'same-origin'` and
+  `'verify-when-present'`: an absent `Origin` is admitted; a present,
+  mismatching one (including `Origin: null`) is still 403; allowlists and
+  `false` behave as configured. This is sound because the threats
+  Origin-checking addresses on POST don't transfer: cross-site *writing*
+  is excluded by the side-effect-free contract, and cross-site *reading*
+  is blocked by CORS — the endpoint never emits
+  `Access-Control-Allow-Origin`, so a cross-site page can trigger a read
+  but never observe its bytes.
+- **Residual: XS-Leaks.** A cross-site page can still probe timing and
+  cache state of a GET read. The mitigation is scoping, not machinery:
+  reads that must be unobservable cross-site stay on POST (don't mark
+  them). A `Sec-Fetch-Site` hardening knob is a deliberate non-goal for
+  v1 — it would also poison shared-cache correctness, since that header
+  varies by requesting context.
+- **Credential leakage — why `private` is the default.** The classic
+  failure is a personalized read cached `public`: a CDN serves user A's
+  body to user B. Defense in depth: (a) `private` unless `public: true`
+  is written in the source; (b) `Vary: Cookie` on every private cached
+  response, so even one browser profile revalidates across a session
+  switch; (c) every non-2xx — including 401/403 guard rejections — is
+  `no-store`; (d) `public` carries the **args-only contract**: the
+  handler's output must not consult `rq.request.headers`, cookies, or
+  auth-derived `rq.locals`. The guard still *runs* (it may reject), but
+  its identity must not shape a public body. `__DEV__` warns
+  heuristically when a public read touches `rq.request`.
+- **Cache poisoning.** The cache key is the full URL, and under the
+  args-only rule the arguments are the *only* input channel — so every
+  input is in the key, and unkeyed-header poisoning is impossible when
+  the rule is followed. That is why the rule is stated as a security
+  invariant, not a style tip. Deterministic encoding means equivalent
+  calls can fragment the cache but never alias to a wrong entry, and the
+  non-2xx `no-store` rule keeps attacker-induced errors out of shared
+  caches.
 
 ## §6 Beyond parity — what the architecture uniquely enables
 
@@ -563,6 +739,36 @@ hook (pack-to-pack, mirroring how cache rides the engine seam) that feeds
 `invalidate()` on arrival. Client-side `cache.invalidates` still works;
 server-declared is the better default because it cannot drift from the
 mutation. TanStack makes the client declare this; Qwik has nothing here.
+
+**Two channels, kept separate.** With §4.1, a read's server-declared
+caching has two carriers that must not be conflated: `$cache` is the
+*envelope → client-store* channel (invalidation today), while
+`Cache-Control` from the read's `cache` option is the *HTTP-layer*
+channel. The TTL never comes from `$cache` — a body field that in-process
+SSR calls and POST calls never see is the wrong home for a transport
+header. A future server-declared client-freshness hint
+(`$cache: { staleTime }`) was considered and deferred: the envelope hook
+is keyless today (it cannot know which `useData` entry a response feeds),
+and inventing that linkage is its own design; the sidecar stays open for
+it.
+
+**How the two caches layer.** `@sigx/cache`'s `staleTime` (per `useData`
+key, per tab) decides *when to refetch*; HTTP `max-age` (per URL,
+browser/CDN) decides *whether that refetch reaches the origin*. They
+compose naturally — a revalidation refetch landing inside `max-age` is
+served from the browser cache, making duplicate mounts, tab re-opens, and
+focus revalidations free. The one confusion to document: if
+`maxAge > staleTime`, sigx's revalidation *cannot observe* fresher data
+until `max-age` expires — the browser answers from cache. Recommended
+defaults: **private** reads keep `maxAge ≤` the read's `staleTime` (HTTP
+absorbs duplicates; `staleTime` still governs real freshness) and lean on
+`stale-while-revalidate` for the tail; **public** reads — the headline
+win, anonymous catalog/content served entirely from the edge — put the
+real freshness budget in `sMaxAge` and keep browser `max-age` short.
+Note that client-side `invalidate()`/`refresh()` on a GET read may be
+answered by the browser cache within `max-age`; the per-call bypass
+(`cache: 'no-cache'` on the fetch) defers to the #315 per-call-options
+design, where it naturally lives.
 
 ### 6.3 Single-flight boundary refresh
 
@@ -791,7 +997,10 @@ option (revisit only if that proves painful).
   server-declared cache directives with `@sigx/cache` (6.2 — **shipped**,
   #311); zero-JS forms (6.4); per-call options (`headers` — the
   `.with(options)` channel itself shipped in v1.1 with AbortSignal, #353);
-  GET + cache semantics for idempotent reads; rich type-handler
+  GET + cache semantics for idempotent reads (**design locked**, §4.1 +
+  §5.2a; #354 — follow-ups deliberately deferred from it:
+  ETag/conditional GET, HEAD, per-call freshness bypass → #315, canonical
+  key-sorted `args` encoding); rich type-handler
   wire serialization (**shipped**, #364 — the revive side of the serializer
   seam landed with it).
 - **v2+**: single-flight boundary refresh (6.3) once the envelope and the
