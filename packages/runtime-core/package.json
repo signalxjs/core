@@ -72,7 +72,8 @@
         "node": "^20.19.0 || >=22.12.0"
     },
     "dependencies": {
-        "@sigx/reactivity": "workspace:^"
+        "@sigx/reactivity": "workspace:^",
+        "@sigx/serialize": "workspace:^"
     },
     "devDependencies": {
         "@sigx/vite": "workspace:^",

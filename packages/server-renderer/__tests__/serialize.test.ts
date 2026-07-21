@@ -1,7 +1,7 @@
 /**
  * The shared serializer module — one escaping/key-safety/dev-warning
  * discipline for every state blob, plus the per-app type-handler seam
- * (SSR_SERIALIZER_TOKEN / provideSSRSerializerHandlers from sigx/internals).
+ * (TYPE_HANDLER_TOKEN / provideTypeHandlers from sigx/internals).
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
@@ -11,17 +11,17 @@ import {
     stringifyWithHandlers,
     serializeBoundaryProps,
     getTypeHandlers,
-    type SSRTypeHandler
+    type TypeHandler
 } from '../src/server/serialize';
 import { asyncAssignmentJs } from '../src/server/state';
 import { createSSRContext } from '../src/server/context';
-import { provideSSRSerializerHandlers, SSR_SERIALIZER_TOKEN } from 'sigx/internals';
+import { provideTypeHandlers, TYPE_HANDLER_TOKEN } from 'sigx/internals';
 
 afterEach(() => {
     vi.restoreAllMocks();
 });
 
-const dateHandler: SSRTypeHandler = {
+const dateHandler: TypeHandler = {
     name: 'date',
     test: (v) => v instanceof Date,
     serialize: (v) => ({ $date: (v as Date).getTime() })
@@ -64,7 +64,7 @@ describe('stringifyWithHandlers — type-handler chain', () => {
     });
 
     it('first matching handler wins; unmatched values pass through', () => {
-        const loud: SSRTypeHandler = { name: 'loud', test: (v) => v instanceof Date, serialize: () => 'LOUD' };
+        const loud: TypeHandler = { name: 'loud', test: (v) => v instanceof Date, serialize: () => 'LOUD' };
         expect(stringifyWithHandlers({ at: new Date(5), n: 1 }, [dateHandler, loud]))
             .toBe('{"at":{"$date":5},"n":1}');
     });
@@ -115,7 +115,7 @@ describe('serializeBoundaryProps', () => {
     });
 
     it('a type handler claiming a value bypasses the JSON check', () => {
-        const bigintHandler: SSRTypeHandler = {
+        const bigintHandler: TypeHandler = {
             name: 'bigint',
             test: (v) => typeof v === 'bigint',
             serialize: (v) => ({ $bigint: String(v) })
@@ -126,14 +126,14 @@ describe('serializeBoundaryProps', () => {
     });
 });
 
-describe('provideSSRSerializerHandlers — per-app seam', () => {
+describe('provideTypeHandlers — per-app seam', () => {
     it('accumulates handlers across installs, earlier first', () => {
         const provides = new Map<symbol, unknown>();
-        const a: SSRTypeHandler = { name: 'a', test: () => false, serialize: (v) => v };
-        const b: SSRTypeHandler = { name: 'b', test: () => false, serialize: (v) => v };
-        provideSSRSerializerHandlers({ provides }, [a]);
-        provideSSRSerializerHandlers({ provides }, [b]);
-        expect((provides.get(SSR_SERIALIZER_TOKEN) as SSRTypeHandler[]).map(h => h.name)).toEqual(['a', 'b']);
+        const a: TypeHandler = { name: 'a', test: () => false, serialize: (v) => v };
+        const b: TypeHandler = { name: 'b', test: () => false, serialize: (v) => v };
+        provideTypeHandlers({ provides }, [a]);
+        provideTypeHandlers({ provides }, [b]);
+        expect((provides.get(TYPE_HANDLER_TOKEN) as TypeHandler[]).map(h => h.name)).toEqual(['a', 'b']);
     });
 
     it('getTypeHandlers resolves through ctx._appContext, empty without an app', () => {
@@ -141,7 +141,7 @@ describe('provideSSRSerializerHandlers — per-app seam', () => {
         expect(getTypeHandlers(ctx)).toEqual([]);
 
         const provides = new Map<symbol, unknown>();
-        provideSSRSerializerHandlers({ provides }, [dateHandler]);
+        provideTypeHandlers({ provides }, [dateHandler]);
         ctx._appContext = { provides } as any;
         expect(getTypeHandlers(ctx).map(h => h.name)).toEqual(['date']);
     });

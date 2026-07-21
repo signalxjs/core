@@ -25,6 +25,7 @@ Thirteen packages live under `packages/`. See the table in the root `README.md` 
 ```
 packages/
   reactivity/      → @sigx/reactivity     (signals, computed, effects)
+  serialize/       → @sigx/serialize      (boundary codec: Date/Map/Set over the wire)
   runtime-core/    → @sigx/runtime-core   (component model, renderer base)
   runtime-dom/     → @sigx/runtime-dom    (DOM renderer)
   sigx/            → sigx                 (umbrella package)

@@ -80,14 +80,17 @@ export { ASYNC_ENGINE_TOKEN, provideAsyncEngine, defaultAsyncEngine } from './as
 export type { AsyncEngine, AsyncReadHandle } from './async/engine.js';
 
 // SSR serializer type-handler seam (per-app provide, consumed by @sigx/server-renderer)
+export { TYPE_HANDLER_TOKEN, provideTypeHandlers } from './ssr-serialize.js';
+// Re-exported for convenience: consumers that already depend on runtime-core
+// (server-renderer, resume, cache) get the codec without a second import.
+// `@sigx/server` deliberately imports `@sigx/serialize` directly instead —
+// its client stub must not pull runtime-core.
 export {
-    SSR_SERIALIZER_TOKEN,
-    provideSSRSerializerHandlers,
     BUILTIN_TYPE_HANDLERS,
     encodeWithHandlers,
     reviveWithHandlers,
-} from './ssr-serialize.js';
-export type { SSRTypeHandler } from './ssr-serialize.js';
+} from '@sigx/serialize';
+export type { TypeHandler } from '@sigx/serialize';
 
 // errorScope internals (for the SSR hydrator: render wrapping + server-error seeding)
 export { applyErrorScope, seedErrorScopeError, ERROR_SCOPE_TOKEN } from './error-scope.js';

@@ -3,11 +3,11 @@ import {
     encodeWithHandlers,
     reviveWithHandlers,
     BUILTIN_TYPE_HANDLERS,
-    type SSRTypeHandler,
-} from '../src/ssr-serialize';
+    type TypeHandler,
+} from '../src/index';
 
 /** Encode → JSON → parse → revive: the actual wire path, not just the halves. */
-function roundTrip(value: unknown, handlers: readonly SSRTypeHandler[] = []): unknown {
+function roundTrip(value: unknown, handlers: readonly TypeHandler[] = []): unknown {
     const json = JSON.stringify(encodeWithHandlers(value, handlers));
     return reviveWithHandlers(JSON.parse(json), handlers);
 }
@@ -144,7 +144,7 @@ describe('registry handlers', () => {
     class Money {
         constructor(readonly cents: number) {}
     }
-    const money: SSRTypeHandler = {
+    const money: TypeHandler = {
         name: 'money',
         tag: '$money',
         test: (v) => v instanceof Money,
@@ -159,7 +159,7 @@ describe('registry handlers', () => {
     });
 
     it('takes precedence over a built-in for the same type', () => {
-        const epochOnly: SSRTypeHandler = {
+        const epochOnly: TypeHandler = {
             name: 'epoch',
             tag: '$epoch',
             test: (v) => v instanceof Date,
@@ -176,7 +176,7 @@ describe('registry handlers', () => {
     });
 
     it('walks nested values inside a handler payload', () => {
-        const box: SSRTypeHandler = {
+        const box: TypeHandler = {
             name: 'box',
             tag: '$box',
             test: (v) => v instanceof Set && (v as Set<unknown>).has('BOXED'),
@@ -213,7 +213,7 @@ describe('forward and backward compatibility', () => {
     it('emits a tagless legacy handler payload verbatim, unescaped', () => {
         // Serialize-only handlers written before tags existed own their whole
         // encoding — wrapping their output in $esc would corrupt it.
-        const legacy: SSRTypeHandler = {
+        const legacy: TypeHandler = {
             name: 'legacy',
             test: (v) => v instanceof Date,
             serialize: (v) => ({ $legacyDate: (v as Date).getTime() }),
@@ -249,7 +249,7 @@ describe('unsupported values', () => {
         // The whole reason handlers see pre-toJSON values: Date.toJSON would
         // otherwise have flattened it to a string before any handler ran.
         const seen: unknown[] = [];
-        const spy: SSRTypeHandler = {
+        const spy: TypeHandler = {
             name: 'spy',
             tag: '$spy',
             test: (v) => {

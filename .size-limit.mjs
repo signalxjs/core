@@ -26,6 +26,15 @@ export default [
     limit: '5 KB',
   },
   {
+    // The boundary codec. NO ignore list, and none is possible — the package
+    // has zero dependencies by design: `@sigx/server/client` imports it, and
+    // that entry is itself the "stubs import nothing" guard. Anything added
+    // here lands in a size-limited entry resume handler chunks replicate.
+    name: '@sigx/serialize',
+    path: 'packages/serialize/dist/index.prod.js',
+    limit: '1 KB',
+  },
+  {
     // public entry + /internals (createRenderer & co.) — see the fixture.
     name: '@sigx/runtime-core (incl. renderer internals)',
     path: 'scripts/size/runtime-core-with-internals.mjs',

@@ -3,17 +3,17 @@
  * type-handler discipline for every state blob the server emits
  * (`__SIGX_ASYNC__`, `__SIGX_BOUNDARIES__`).
  *
- * Type handlers are provided per app via `provideSSRSerializerHandlers` from
+ * Type handlers are provided per app via `provideTypeHandlers` from
  * `sigx/internals` (a pack's `install(app)` registers them); the render entry
  * points expose the app context on the request's SSRContext, and every
  * serialization site resolves the chain through `getTypeHandlers`.
  */
 
-import { SSR_SERIALIZER_TOKEN, getProvided, type SSRTypeHandler } from 'sigx/internals';
+import { TYPE_HANDLER_TOKEN, getProvided, type TypeHandler } from 'sigx/internals';
 import type { SSRContext } from './context';
 import type { SSRBoundaryRecord } from '../boundary';
 
-export type { SSRTypeHandler };
+export type { TypeHandler };
 
 /**
  * Escape a JSON string for safe embedding inside <script> tags.
@@ -117,7 +117,7 @@ export function isSerializable(key: string, value: unknown, what = 'useAsync'): 
  */
 export function stringifyWithHandlers(
     value: unknown,
-    handlers: readonly SSRTypeHandler[]
+    handlers: readonly TypeHandler[]
 ): string {
     if (handlers.length === 0) return JSON.stringify(value);
     return JSON.stringify(value, function (this: any, key: string, transformed: unknown) {
@@ -143,7 +143,7 @@ export function stringifyWithHandlers(
 export function assignmentJs(
     globalName: string,
     values: Record<string | number, unknown>,
-    handlers: readonly SSRTypeHandler[] = []
+    handlers: readonly TypeHandler[] = []
 ): string {
     const json = escapeJsonForScript(stringifyWithHandlers(values, handlers));
     return `window.${globalName}=Object.assign(Object.create(null),window.${globalName},${json});`;
@@ -161,7 +161,7 @@ export function assignmentJs(
  */
 export function serializeBoundaryProps(
     props: Record<string, unknown> | null | undefined,
-    handlers: readonly SSRTypeHandler[] = []
+    handlers: readonly TypeHandler[] = []
 ): Record<string, unknown> | undefined {
     if (!props) return undefined;
 
@@ -241,13 +241,13 @@ export function boundaryPatchJs(ctx: SSRContext, id: number): string {
     return assignmentJs('__SIGX_BOUNDARIES__', patch, getTypeHandlers(ctx));
 }
 
-const NO_HANDLERS: readonly SSRTypeHandler[] = [];
+const NO_HANDLERS: readonly TypeHandler[] = [];
 
 /**
  * Resolve the per-app type-handler chain for this request. Empty when the
  * render input carried no app or no pack registered handlers.
  */
-export function getTypeHandlers(ctx: SSRContext): readonly SSRTypeHandler[] {
-    const provided = getProvided(ctx._appContext?.provides, SSR_SERIALIZER_TOKEN);
+export function getTypeHandlers(ctx: SSRContext): readonly TypeHandler[] {
+    const provided = getProvided(ctx._appContext?.provides, TYPE_HANDLER_TOKEN);
     return provided ?? NO_HANDLERS;
 }

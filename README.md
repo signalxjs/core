@@ -54,6 +54,7 @@ Full guides, API reference and live examples → **<https://sigx.dev/core/>**
 | Package | npm | Docs | Description |
 |---|---|---|---|
 | `@sigx/reactivity`     | [npm](https://www.npmjs.com/package/@sigx/reactivity)     | [docs](https://sigx.dev/core/packages/reactivity/overview/)   | Signals, computed, and effects — the reactive primitives |
+| `@sigx/serialize`      | [npm](https://www.npmjs.com/package/@sigx/serialize)      | [docs](https://sigx.dev/)                                     | The boundary codec — how Date, Map, Set, BigInt and custom types survive every server↔client boundary |
 | `@sigx/runtime-core`   | [npm](https://www.npmjs.com/package/@sigx/runtime-core)   | [docs](https://sigx.dev/core/packages/runtime-core/overview/) | Component model and renderer base shared between targets |
 | `@sigx/runtime-dom`    | [npm](https://www.npmjs.com/package/@sigx/runtime-dom)    | [docs](https://sigx.dev/core/packages/runtime-dom/overview/)  | DOM renderer |
 | `sigx`                 | [npm](https://www.npmjs.com/package/sigx)                 | [docs](https://sigx.dev/core/)                                | The public umbrella package — what you import in apps |
