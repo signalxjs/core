@@ -89,10 +89,10 @@ export interface SigxServerOptions {
     guard?: string;
     /**
      * Dev boundary refresh (rfc-server §6.3): a Vite-root-relative module
-     * whose `renderBoundaries` export the dev endpoint forwards — the same
-     * shape `createBoundaryRefresh` (`@sigx/resume/server`) builds for prod
-     * entries, so single-flight refresh works identically in dev. Loaded
-     * through the SSR module runner per request, like `guard`.
+     * exporting `renderBoundaries`, forwarded to the dev endpoint — the
+     * same shape `createBoundaryRefresh` (`@sigx/resume/server`) builds for
+     * prod entries, so single-flight refresh works identically in dev.
+     * Loaded through the SSR module runner per request, like `guard`.
      */
     renderBoundaries?: string;
     /** Origin policy forwarded to the dev endpoint. Default `'same-origin'`. */

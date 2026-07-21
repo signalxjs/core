@@ -113,13 +113,16 @@ function readBoundarySidecar(
 ): { base: number; refresh: BoundaryRefreshDescriptor[] } | null {
     if (raw === null || typeof raw !== 'object') return null;
     const { base, refresh } = raw as { base?: unknown; refresh?: unknown };
-    if (typeof base !== 'number' || !Number.isFinite(base) || base <= 0) return null;
+    // Ids are counter values on both sides — positive SAFE integers only,
+    // so a hostile base/id can never smuggle precision loss into the
+    // renderer's seeded counter or the client's marker parse.
+    if (typeof base !== 'number' || !Number.isSafeInteger(base) || base <= 0) return null;
     if (!Array.isArray(refresh)) return null;
     const descriptors: BoundaryRefreshDescriptor[] = [];
     for (const entry of refresh.slice(0, MAX_REFRESH_DESCRIPTORS)) {
         if (entry === null || typeof entry !== 'object') continue;
         const { id, component, props } = entry as Record<string, unknown>;
-        if (typeof id !== 'number' || !Number.isFinite(id)) continue;
+        if (typeof id !== 'number' || !Number.isSafeInteger(id) || id <= 0) continue;
         if (typeof component !== 'string' || component === '') continue;
         descriptors.push({
             id,
@@ -129,7 +132,7 @@ function readBoundarySidecar(
                 : {})
         });
     }
-    return descriptors.length > 0 ? { base: Math.floor(base), refresh: descriptors } : null;
+    return descriptors.length > 0 ? { base, refresh: descriptors } : null;
 }
 
 /** Same three keys as the boundary serializer's DANGEROUS_KEYS. */

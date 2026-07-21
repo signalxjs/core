@@ -92,9 +92,9 @@ import in either direction. A throwing hook never breaks the RPC result.
 
 | | |
 |---|---|
-| **Stamped by** | `resume/src/client/refresh.ts` at module init (`@sigx/resume/client`) |
+| **Stamped by** | `@sigx/resume/client` at module init (lands with #313 part 3 — until then the seam is unstamped and the stub no-ops) |
 | **Called by** | `server/src/client/index.ts` — `collect()` before a `refreshes`-flagged POST, `apply(entries, seq)` when the response carries `$boundaries` |
-| **Contract** | `{ collect(): { base: number; refresh: unknown[] } \| null; apply(entries: unknown[], seq: number): void }` — both synchronous-shaped, both throw-swallowed by the caller |
+| **Contract** | `{ collect(): { base: number; refresh: unknown[] } \| null \| undefined; apply(entries: unknown[], seq: number): void }` — both synchronous-shaped, both throw-swallowed by the caller |
 
 Single-flight boundary refresh (rfc-server §6.3): the stub inventories the
 page's refreshable boundaries on the way out and hands fresh

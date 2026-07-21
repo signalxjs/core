@@ -120,8 +120,22 @@ describe('endpoint — $boundaries envelope (rfc-server §6.3)', () => {
         for (const bad of [
             { base: -1, refresh: [{ id: 3, component: 'Tracker' }] },
             { base: 'high', refresh: [{ id: 3, component: 'Tracker' }] },
+            // Ids are counter values: non-integers and beyond-safe-integer
+            // magnitudes are rejected outright (precision-loss guard).
+            { base: BASE + 0.5, refresh: [{ id: 3, component: 'Tracker' }] },
+            { base: 2 ** 53, refresh: [{ id: 3, component: 'Tracker' }] },
             { base: BASE, refresh: 'nope' },
-            { base: BASE, refresh: [{ id: 'x', component: 'Tracker' }, { id: 3, component: '' }, null] },
+            {
+                base: BASE,
+                refresh: [
+                    { id: 'x', component: 'Tracker' },
+                    { id: 3.5, component: 'Tracker' },
+                    { id: -3, component: 'Tracker' },
+                    { id: 2 ** 53, component: 'Tracker' },
+                    { id: 3, component: '' },
+                    null
+                ]
+            },
             'nonsense',
             42
         ]) {
