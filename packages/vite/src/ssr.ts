@@ -48,10 +48,11 @@ export interface DevRequestHandlerOptions extends ForwardedHandlerOptions {
 
     /**
      * Opaque platform context (rfc-deploy §4.6) — e.g. Cloudflare's
-     * `{ env, ctx }` from a dev binding proxy. Forwarded verbatim: to the
-     * entry factory as its second argument (existing `createApp(url)`
-     * factories ignore it) and to a function-form `document` as its third —
-     * matching the fetch handler's callback shapes.
+     * `{ env, ctx }` from a dev binding proxy. Forwarded verbatim as the
+     * THIRD argument to both the entry factory and a function-form
+     * `document`, matching `createFetchHandler`'s `app(url, request,
+     * platform)`. The second argument is the request (#304); existing
+     * `createApp(url)` factories ignore both.
      */
     platform?: unknown;
 
@@ -394,7 +395,15 @@ export async function createDevRequestHandler(
                     })();
                     return html.slice(0, close) + styles + html.slice(close);
                 },
-                app: async (url) => {
+                // `devReq` is the second argument on purpose: it matches what
+                // BOTH production handlers pass — `createRequestHandler`'s
+                // `app(url, req)` and `createFetchHandler`'s
+                // `app(url, request, platform)`. Dev used to pass `platform`
+                // second and drop the request entirely, so a factory reading a
+                // session cookie rendered logged-out in dev and correct in
+                // prod (#304). The sibling `document` callback below already
+                // forwarded it; only `app` had diverged.
+                app: async (url, devReq) => {
                     const mod = await loadEntry();
                     const factory = mod[entryExport];
                     if (typeof factory !== 'function') {
@@ -404,7 +413,7 @@ export async function createDevRequestHandler(
                             `(see the router SSR contract).`
                         );
                     }
-                    return factory(url, options.platform);
+                    return factory(url, devReq, options.platform);
                 },
                 document: (typeof options.document === 'function'
                     ? (url: string, devReq: unknown) =>

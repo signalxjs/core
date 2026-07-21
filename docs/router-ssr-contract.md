@@ -42,6 +42,43 @@ per-request app factory both request handlers consume
 (`createDevRequestHandler` from `@sigx/vite/ssr` in dev,
 `createRequestHandler` from `@sigx/server-renderer/node` in production).
 
+Two **optional** further arguments carry per-request context, identically in
+dev and production:
+
+```ts
+export function createApp(
+    url: string,
+    req?: IncomingMessage | Request,
+    platform?: unknown
+) {
+    const session = req && sessionFrom(req);   // cookies, headers, auth
+    // …
+}
+```
+
+Which handler supplies what:
+
+| Handler | `req` | `platform` |
+|---|---|---|
+| `createDevRequestHandler` (`@sigx/vite/ssr`) | `IncomingMessage` | — |
+| `createRequestHandler` (`@sigx/server-renderer/node`) | `IncomingMessage` | — |
+| `createFetchHandler` (`@sigx/server-renderer/server`) | `Request` | ✓ |
+
+- **`req`** — the incoming request. Node's `IncomingMessage` under both Node
+  handlers, a WHATWG `Request` under `createFetchHandler` — hence the union in
+  the signature above. Narrow it before use if your factory touches
+  runtime-specific fields; reading a cookie header works on either. This is how
+  a factory reads a session cookie without reaching for AsyncLocalStorage.
+- **`platform`** — opaque platform context (rfc-deploy §4.6), e.g.
+  Cloudflare's `{ env, ctx }`. **Only `createFetchHandler` passes it**; under
+  the two Node handlers the third argument is always `undefined`, so a factory
+  that needs platform bindings must be served by the fetch handler.
+
+A factory that declares only `(url)` is unaffected — extra arguments are
+ignored. Dev used to drop `req` and pass `platform` second, so an app with
+per-request auth rendered logged-out in dev while working in production
+(#304); both handlers now agree.
+
 ## 2. Route resolution exposes chunk refs
 
 Routes that render `lazy()` components declare their chunks, so the
