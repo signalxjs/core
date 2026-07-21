@@ -1,6 +1,15 @@
 import { defineApp } from 'sigx';
 import { App } from './App';
+import { Poll } from './resume/Poll';
 import { requestSummary } from './api.server';
+
+/**
+ * The boundary-refresh registry (rfc-server §6.3): registry key → server
+ * component, explicitly passed to `createBoundaryRefresh` — same posture as
+ * the server-fn registry, never ambient. Keys are the components'
+ * transform-stamped `__resumeId` (the export name).
+ */
+export const refreshComponents = { Poll };
 
 /**
  * Per-request app factory (docs/router-ssr-contract.md §1).

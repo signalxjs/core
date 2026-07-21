@@ -124,7 +124,38 @@ export function getDetachedScope(): InternalScope {
     return scope;
 }
 
+/** The cached scope for an id, or undefined — NEVER fabricates one (unlike
+ *  `getScope`); the refresh path peeks so a status check cannot create the
+ *  very scope it is gating on. */
+export function peekScope(id: number): InternalScope | undefined {
+    return scopes.get(id);
+}
+
+/** Retire one cached scope — a refresh swapped its boundary out under a
+ *  fresh id, and the old scope must not satisfy later lookups. */
+export function dropScope(id: number): void {
+    scopes.delete(id);
+}
+
+const resetHooks = new Set<() => void>();
+
+/** Run a hook on every `resetResumeScopes()` — pack-internal, so modules
+ *  with per-page state (the refresh seq guard) reset in step without a
+ *  circular import. A Set: duplicate registration under HMR / duplicated
+ *  module graphs must not grow the list. */
+export function onResumeReset(hook: () => void): void {
+    resetHooks.add(hook);
+}
+
 /** Drop all cached scopes — SPA navigation (new boundary table) and tests. */
 export function resetResumeScopes(): void {
     scopes.clear();
+    for (const hook of resetHooks) {
+        try {
+            hook();
+        } catch (error) {
+            // A hook bug must never break SPA navigation's scope reset.
+            if (__DEV__) console.error('[sigx resume] reset hook threw:', error);
+        }
+    }
 }

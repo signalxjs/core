@@ -1179,13 +1179,14 @@ option (revisit only if that proves painful).
   shipped with #315); rich type-handler
   wire serialization (**shipped**, #364 — the revive side of the serializer
   seam landed with it).
-- **v2+**: single-flight boundary refresh (6.3) once the envelope and the
-  per-request re-render path are proven — in progress as three PRs
-  (#313): **mechanism shipped** (`baseComponentId`, `refreshable`
-  stamping, `createBoundaryRefresh`, table write accessors); wire next
-  (`refreshes` option, `renderBoundaries` endpoint option, stub sidecar +
-  `__SIGX_SERVERFN_BOUNDARIES__` seam); client apply last (status-gated
-  swap/live-write, examples/resume proof).
+- **v2+**: single-flight boundary refresh (6.3) — **shipped** (#313, three
+  PRs): mechanism (`baseComponentId`, `refreshable` stamping,
+  `createBoundaryRefresh`, table write accessors); wire (`refreshes`
+  option, `renderBoundaries` endpoint option, stub sidecar +
+  `__SIGX_SERVERFN_BOUNDARIES__` seam, transform flag + dev parity);
+  client apply (status-gated swap/live-write in `@sigx/resume/client`,
+  proven end-to-end by examples/resume's smoke: mutation + fresh UI in
+  one request, zero component chunks).
 - **Native clients (rev 2, one milestone, independent of v2)**:
   `configureServerFn` + stub call-time resolution; `'verify-when-present'`;
   plugin `endpoint`/`role`/`scan`; stable-id seeds + stable symbols + dual

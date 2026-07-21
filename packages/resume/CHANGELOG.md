@@ -4,6 +4,23 @@
 
 ### Added
 
+- Single-flight boundary refresh — the client half (rfc-server §6.3, #313,
+  completing the feature). `@sigx/resume/client` stamps the
+  `__SIGX_SERVERFN_BOUNDARIES__` seam at module init: `collect()`
+  inventories the page's refreshable boundaries for a `refreshes`-declaring
+  mutation's request, and `apply()` patches the response — resumed
+  boundaries get a marker-anchored DOM swap under a fresh id (records
+  installed, old ids' records/scopes retired) **without their component
+  chunk ever loading**; upgraded boundaries get whole-value live-signal
+  writes guarded by a dispatch-order seq. Drops are silent convergence: an
+  in-flight upgrade wins, buffered writes win, a focused text entry inside
+  the swap range wins, and stale overlapping responses drop via retirement
+  — declined/dropped boundaries catch up through `$cache` invalidation.
+  Pack-internal `peekScope`/`dropScope`/`onResumeReset` support it;
+  examples/resume gained the `Poll` demo and smoke assertions (fresh UI in
+  one request, zero component chunks, the swapped boundary stays
+  resumable).
+
 - `createBoundaryRefresh({ ssr, components, app? })` on `@sigx/resume/server` —
   the server half of single-flight boundary refresh (rfc-server §6.3, #313):
   re-renders client boundary descriptors through the instance's plugin set in

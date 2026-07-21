@@ -63,6 +63,18 @@ mutation already succeeded, and declined boundaries converge through
 (children/slots/render props) are stamped `refreshable: false` at initial
 SSR and decline the same way.
 
+The client half is automatic: `@sigx/resume/client` stamps the
+`__SIGX_SERVERFN_BOUNDARIES__` seam when it loads, so any
+`refreshes`-declaring mutation sends the page's boundary inventory and
+applies the fresh entries — a never-hydrated boundary is DOM-swapped
+(delegation re-wires itself off the fresh attributes; its chunk never
+loads), an upgraded one gets live-signal writes. An in-flight upgrade,
+buffered writes, or a focused text field inside the boundary all win over
+a refresh — drops converge through cache invalidation. In dev, pass
+`sigxServer({ renderBoundaries: '/src/dev-refresh.ts' })` a module
+exporting the same `createBoundaryRefresh` result (see
+`examples/resume/src/dev-refresh.ts`).
+
 ## Writing resumable components
 
 Ordinary sigx components in resume modules (`*.resume.tsx` or under a

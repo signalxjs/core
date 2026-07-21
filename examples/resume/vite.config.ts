@@ -20,7 +20,9 @@ export default defineConfig(({ command }) => ({
     plugins: [
         sigx({ ssr: { entry: 'src/entry-server.tsx' } }),
         sigxResume(),
-        sigxServer()
+        // Single-flight boundary refresh in dev (rfc-server §6.3): the
+        // module's `renderBoundaries` export reaches the dev fn endpoint.
+        sigxServer({ renderBoundaries: '/src/dev-refresh.ts' })
     ],
     oxc: {
         jsx: {

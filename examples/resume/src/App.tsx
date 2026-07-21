@@ -4,6 +4,7 @@ import { Tracker } from './resume/Tracker';
 import { Legacy } from './resume/Legacy';
 import { Quote } from './resume/Quote';
 import { Catalog } from './resume/Catalog';
+import { Poll } from './resume/Poll';
 
 /**
  * Server-only page. The client ships ONLY the generated delegation loader
@@ -69,7 +70,18 @@ export const App = component<{ ssrRequest: string }>((ctx) => {
             </div>
 
             <div class="card">
-                <h3>5 — wake-on-interaction fallback</h3>
+                <h3>5 — single-flight boundary refresh</h3>
+                <p class="hint">
+                    The vote mutation declares <code>refreshes</code> — its
+                    response carries this boundary's freshly re-rendered HTML
+                    and the client swaps it in. Fresh UI in ONE request, and
+                    the component chunk never loads.
+                </p>
+                <Poll />
+            </div>
+
+            <div class="card">
+                <h3>6 — wake-on-interaction fallback</h3>
                 <p class="hint">
                     This component's handler captures a module-scope table, so
                     it is not extractable — the transform warned at build time

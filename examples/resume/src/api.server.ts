@@ -43,6 +43,26 @@ export const getCatalog = serverFn({
     })
 });
 
+/**
+ * Single-flight boundary refresh (rfc-server §6.3). The vote count lives
+ * here — server truth, per-process for the demo. `vote` declares which
+ * boundary components it may refresh; the endpoint re-renders them through
+ * `createBoundaryRefresh` (see server.mjs / src/dev-refresh.ts) and the
+ * response carries fresh HTML the client patches in without ever loading
+ * the Poll component chunk.
+ */
+let votes = 3;
+
+export const getVotes = serverFn(async () => votes);
+
+export const vote = serverFn({
+    refreshes: ['Poll'],
+    handler: async () => {
+        votes += 1;
+        return votes;
+    }
+});
+
 export const getQuote = serverFn(async (rq, index: number) => {
     if (!Number.isInteger(index)) {
         throw new ServerFnError(400, 'index must be an integer');

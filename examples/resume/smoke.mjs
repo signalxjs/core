@@ -11,7 +11,10 @@
 //      REPLAYS (7 → 8 in one click); the write upgrades → the component
 //      chunk executes; post-upgrade clicks run the live listener.
 //   3. Tracker (read-only handler): its component chunk NEVER executes.
-//   4. Legacy (wake-on-interaction): first click hydrates without replay,
+//   4. Poll (single-flight boundary refresh, rfc-server §6.3): the vote
+//      mutation's response carries fresh boundary HTML — the DOM updates
+//      with NO component chunk, and the swapped boundary stays resumable.
+//   5. Legacy (wake-on-interaction): first click hydrates without replay,
 //      second click is live.
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -96,7 +99,28 @@ try {
     assert(!afterTracker.some((p) => /\/Tracker-/.test(p)),
         'read-only handler never executes its component chunk');
 
-    // 4) Legacy: wake-on-interaction, no replay.
+    // 4) Poll: single-flight boundary refresh — one POST returns the
+    // mutation result AND this boundary's fresh HTML; zero component chunks.
+    const poll = page.locator('button', { hasText: 'Vote — total' });
+    assert((await poll.textContent()).includes('total 3'), 'SSR vote total rendered (total 3)');
+    await poll.click();
+    await page.waitForFunction(() =>
+        [...document.querySelectorAll('button')].some((b) => b.textContent?.includes('total 4')));
+    assert(true, 'the mutation response refreshed the boundary in ONE request (3 → 4)');
+    const afterVote = await executed();
+    assert(afterVote.some((p) => /Poll\.tsx\.handlers-/.test(p)),
+        'poll handler chunk executed');
+    assert(!afterVote.some((p) => /\/Poll-/.test(p)),
+        'refresh patched fresh server HTML without the Poll component chunk');
+    // The swapped DOM re-wires delegation by attributes alone — vote again.
+    await page.locator('button', { hasText: 'Vote — total' }).click();
+    await page.waitForFunction(() =>
+        [...document.querySelectorAll('button')].some((b) => b.textContent?.includes('total 5')));
+    assert(true, 'the swapped boundary stays resumable — a second vote refreshes again (4 → 5)');
+    assert(!(await executed()).some((p) => /\/Poll-/.test(p)),
+        'still no Poll component chunk after the second refresh');
+
+    // 5) Legacy: wake-on-interaction, no replay.
     const legacy = page.locator('button', { hasText: 'Legacy stepper' });
     await legacy.click(); // wakes (hydrates); this click is NOT replayed
     await page.waitForTimeout(300);
