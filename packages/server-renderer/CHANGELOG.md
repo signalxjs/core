@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+**Added: the single-flight boundary-refresh mechanism (rfc-server §6.3, #313).**
+
+- `SSRContextOptions.baseComponentId` — seed the component-id counter so a
+  boundary re-render's `<!--$c:N-->` markers and `data-sigx-b` ids never
+  collide with ids already live on the page it patches into.
+- `SSRBoundaryRecord.refreshable?: false` — stamped at initial SSR when a
+  re-render from the serialized snapshot could not reproduce the boundary's
+  HTML; the refresh path declines these.
+- `installBoundaryRecords(patch)` / `removeBoundaryRecord(id)` on the client
+  scheduler — the write half of the table accessor pair: a refresh envelope's
+  `records` patch enters `__SIGX_BOUNDARIES__` exactly as a streamed
+  assignment would (same null-prototype discipline), and a swapped-out
+  boundary's id is retired.
+
 **Added: document renders open the server-function request scope.**
 
 - `createRequestHandler` and `createFetchHandler` now run the whole render —

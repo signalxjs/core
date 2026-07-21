@@ -48,6 +48,8 @@ export type { HydrateDefaults } from './hydrate-defaults';
 export {
     getBoundaryTable,
     getBoundaryRecord,
+    installBoundaryRecords,
+    removeBoundaryRecord,
     findBoundaryMarker,
     hydrateTableBoundary,
     scheduleTableBoundaries,

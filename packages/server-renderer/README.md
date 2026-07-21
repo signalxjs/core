@@ -121,7 +121,11 @@ zero runtime JS at load:
 - **`@sigx/server-renderer/client/scheduler`** — the eager half: reads the
   boundary table, wires `load`/`idle`/`visible`/`media`/`interaction`
   triggers, listens for streamed boundaries. It imports nothing from the
-  sigx family (~2 kB, size-limit-guarded).
+  sigx family (~2 kB, size-limit-guarded). The table surface is an
+  accessor pair: reads (`getBoundaryTable`/`getBoundaryRecord`) and writes
+  (`installBoundaryRecords`/`removeBoundaryRecord` — how a single-flight
+  refresh patch enters the table and a swapped-out boundary retires,
+  rfc-server §6.3).
 - **The hydration core** — the executor (`hydrateComponent`, the renderer,
   mount/hydrate primitives) lives in a separate chunk that
   `loadHydrationCore()` dynamically imports on the first strategy that
