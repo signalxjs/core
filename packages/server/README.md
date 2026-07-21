@@ -188,7 +188,10 @@ with neither the throw stays — a function reading `rq.request` when nothing
 supplied one is a bug worth seeing, not a silent `undefined`.
 
 `context` accepts a `Request` or a partial `ServerFnContext` (to set `locals`,
-say). `rq.responseHeaders`/`rq.status()` stay inert either way: there is no
+say). A supplied `Request` also supplies `rq.abortSignal`, so wire its signal
+to the client disconnect (`res.once('close', …)` under Node) and SSR-time work
+stops when the client goes away. `rq.responseHeaders`/`rq.status()` stay inert
+either way: there is no
 HTTP response to affect, and pretending otherwise would silently drop headers.
 On the client `.with({ context })` is ignored, with a dev warning — a stub's
 context is the request it makes.

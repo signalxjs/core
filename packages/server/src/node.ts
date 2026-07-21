@@ -194,10 +194,22 @@ function toWebRequest(req: IncomingMessage, res: ServerResponse): Request {
  * import { runWithServerFnContext } from '@sigx/server/node';
  *
  * app.use(async (req, res, next) => {
- *     const request = toWebRequest(req);
+ *     // Abort when the client goes away: the scope adopts this Request's
+ *     // signal, so SSR-time work sees it on rq.abortSignal.
+ *     const aborter = new AbortController();
+ *     res.once('close', () => {
+ *         if (!res.writableEnded) aborter.abort();
+ *     });
+ *     const request = new Request(
+ *         `http://${req.headers.host ?? 'localhost'}${req.url ?? '/'}`,
+ *         { headers: req.headers, signal: aborter.signal }
+ *     );
  *     await runWithServerFnContext(request, () => renderHandler(req, res, next));
  * });
  * ```
+ *
+ * (Built inline on purpose — the handler's own `IncomingMessage` bridge is
+ * internal, and a document render needs headers and a URL, not the body.)
  *
  * `AsyncLocalStorage` carries it across every `await` in the render without
  * threading a parameter through user code. The store is installed on first
