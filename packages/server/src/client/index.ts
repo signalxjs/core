@@ -56,13 +56,15 @@ export function configureServerFn(config: ServerFnTransport | null): void {
     transport = config;
 }
 
-/** POST the RPC envelope, resolving the transport at call time
- *  (configureServerFn endpoint > baked endpoint; rfc-server N.1). */
+/** Send the RPC envelope — POST body, or for a cache-marked read (§4.1) a
+ *  GET whose `?args=` carries the same JSON text — resolving the transport
+ *  at call time (configureServerFn endpoint > baked endpoint; rfc-server N.1). */
 async function send(
     endpoint: string,
     symbol: string,
     args: unknown[],
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    get?: boolean
 ): Promise<Response> {
     const config = transport;
     const target = config?.endpoint ?? endpoint;
@@ -72,18 +74,34 @@ async function send(
     // content-type is NOT overridable (the endpoint 415s anything else;
     // rfc-server N.1) — stripped case-insensitively, since Headers
     // normalization would otherwise COMBINE `Content-Type: x` with ours.
+    // A GET carries no body and therefore no content-type at all.
     const headers: Record<string, string> = {};
     for (const key in extra) {
         if (key.toLowerCase() !== 'content-type') headers[key] = extra[key];
     }
-    headers['content-type'] = 'application/json';
-    const url = `${prefix}/${encodeURIComponent(symbol)}`;
-    const init: RequestInit = {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ args: encodeWire(args) }),
-        ...(signal ? { signal } : {})
-    };
+    const base = `${prefix}/${encodeURIComponent(symbol)}`;
+    let url = base;
+    let init: RequestInit;
+    if (get) {
+        const query = encodeURIComponent(JSON.stringify(encodeWire(args)));
+        if (__DEV__ && query.length > 2048) {
+            console.warn(
+                `[sigx server] GET read "${symbol}" encodes ~${query.length} bytes of ` +
+                `arguments into its URL — too large to make a good cache key. Use a ` +
+                `smaller input, or keep this read on POST (drop \`cache\`).`
+            );
+        }
+        url = `${base}?args=${query}`;
+        init = { method: 'GET', headers, ...(signal ? { signal } : {}) };
+    } else {
+        headers['content-type'] = 'application/json';
+        init = {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ args: encodeWire(args) }),
+            ...(signal ? { signal } : {})
+        };
+    }
     // Branch instead of aliasing the global fetch — an unbound alias is
     // an illegal invocation in some runtimes, and the zero-config path
     // must stay byte-identical to a plain `fetch(...)` call.
@@ -134,16 +152,19 @@ function deliverCacheDirectives(directives: ServerFnCacheDirectives): void {
     }
 }
 
-/** Create the typed client stub for one extracted server function. */
+/** Create the typed client stub for one extracted server function. The 4th
+ *  positional flag marks a cache-marked read (rfc-server §4.1): the stub
+ *  issues GET so browser/edge caches can serve it; absent means POST. */
 export function __serverFnStub(
     symbol: string,
     name: string,
-    endpoint: string
+    endpoint: string,
+    get?: 0 | 1
 ): ((...args: unknown[]) => Promise<unknown>) & {
     with(options?: ServerFnCallOptions): (...args: unknown[]) => Promise<unknown>;
 } {
     const call = async (args: unknown[], signal?: AbortSignal): Promise<unknown> => {
-        const res = await send(endpoint, symbol, args, signal);
+        const res = await send(endpoint, symbol, args, signal, get === 1);
         const text = await res.text();
         let payload:
             | { data?: unknown; error?: WireError; $cache?: ServerFnCacheDirectives }

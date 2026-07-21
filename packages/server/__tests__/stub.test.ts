@@ -84,6 +84,66 @@ describe('__serverFnStub', () => {
         expect((error as Error).message).toContain('HTTP 502');
     });
 
+    it('a GET-marked stub (4th flag) issues GET with args in the query string', async () => {
+        const mock = stubFetch(200, { data: { id: 'p1' } });
+        const read = __serverFnStub('read_fn_00000010', 'read', '/_sigx/fn', 1);
+        await expect(read({ id: 'p1' })).resolves.toEqual({ id: 'p1' });
+
+        const expectedQuery = encodeURIComponent(JSON.stringify([{ id: 'p1' }]));
+        expect(mock).toHaveBeenCalledWith(`/_sigx/fn/read_fn_00000010?args=${expectedQuery}`, {
+            method: 'GET',
+            headers: {}
+        });
+    });
+
+    it('a GET stub percent-encodes codec tags into the query value', async () => {
+        const mock = stubFetch(200, {});
+        const read = __serverFnStub('read_fn_00000011', 'read', '/_sigx/fn', 1);
+        await read(new Date('2026-07-21T12:00:00.000Z'), 42n);
+
+        const url = mock.mock.calls[0][0] as string;
+        const [, query] = url.split('?args=');
+        expect(JSON.parse(decodeURIComponent(query))).toEqual([
+            { $date: 1784635200000 },
+            { $bigint: '42' }
+        ]);
+        // Everything outside unreserved chars is percent-encoded — no raw
+        // braces/quotes reach the request line.
+        expect(query).not.toMatch(/[{}"\s]/);
+    });
+
+    it('a GET stub sends no content-type but keeps transport extra headers', async () => {
+        const mock = stubFetch(200, {});
+        configureServerFn({ headers: { authorization: 'Bearer t', 'Content-Type': 'nope' } });
+        const read = __serverFnStub('read_fn_00000012', 'read', '/_sigx/fn', 1);
+        await read();
+
+        const init = mock.mock.calls[0][1] as RequestInit;
+        expect(init.method).toBe('GET');
+        expect(init.headers).toEqual({ authorization: 'Bearer t' });
+        expect('body' in init).toBe(false);
+    });
+
+    it('GET stubs share the envelope path: errors, skew hint, and .with({signal})', async () => {
+        stubFetch(404, '');
+        const read = __serverFnStub('read_fn_00000013', 'read', '/_sigx/fn', 1);
+        const error = await read().catch((e: unknown) => e);
+        expect(isServerFnError(error)).toBe(true);
+        expect((error as Error).message).toContain('stale build');
+
+        const mock = stubFetch(200, { data: 1 });
+        const controller = new AbortController();
+        await read.with({ signal: controller.signal })();
+        expect((mock.mock.calls[0][1] as RequestInit).signal).toBe(controller.signal);
+    });
+
+    it('an unmarked stub still POSTs — the flag defaults off', async () => {
+        const mock = stubFetch(200, { data: 1 });
+        const fn = __serverFnStub('post_fn_00000014', 'post', '/_sigx/fn');
+        await fn(1);
+        expect((mock.mock.calls[0][1] as RequestInit).method).toBe('POST');
+    });
+
     it('drops dangerous keys from the response payload', async () => {
         stubFetch(200, '{"data":{"__proto__":{"polluted":true},"ok":1}}');
         const fn = __serverFnStub('e_fn_00000006', 'echo', '/_sigx/fn');

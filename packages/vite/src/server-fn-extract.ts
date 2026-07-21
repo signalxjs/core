@@ -62,6 +62,16 @@ export interface ExtractedServerFn {
     stableSymbol: string;
     /** True for `serverStream` (NDJSON transport, AsyncIterable stub). */
     stream: boolean;
+    /**
+     * True when the options form declares `cache` (rfc-server §4.1) — the
+     * stub issues GET with the arguments in the query string. Presence-only
+     * detection: the VALUES are runtime data the endpoint reads off the
+     * wrapper; the stub needs just this one bit. No hash-seed change is
+     * needed — the symbol already covers the call source, so toggling
+     * `cache` re-mints it and a stale client can never GET a symbol whose
+     * server half does not accept GET.
+     */
+    get: boolean;
 }
 
 /** Shared options for both extractors (file form and inline). */
@@ -127,6 +137,29 @@ export function readServerFnIdOption(call: Node): { id?: string; nonLiteral: boo
 }
 
 /**
+ * Statically detect the options-form `cache` declaration (rfc-server §4.1)
+ * on a `serverFn({...})` call — PRESENCE only, unlike `id`: the values
+ * (`maxAge`, …) are runtime data the endpoint reads off the wrapper, so a
+ * computed `cache: makePolicy()` still extracts. A call whose single
+ * argument is not an object literal simply stays POST-only — safe
+ * degradation. Shared with the inline extractor.
+ */
+export function readServerFnCacheOption(call: Node): boolean {
+    const args = (call.arguments as Node[]) ?? [];
+    if (args.length !== 1 || args[0]?.type !== 'ObjectExpression') return false;
+    for (const prop of (args[0].properties as Node[]) ?? []) {
+        if (prop.type !== 'Property' || prop.computed === true) continue;
+        const key = prop.key as Node;
+        const keyName =
+            key.type === 'Identifier' ? (key.name as string)
+            : key.type === 'Literal' ? String(key.value)
+            : '';
+        if (keyName === 'cache') return true;
+    }
+    return false;
+}
+
+/**
  * Mint both transport symbols for one function (rfc-server rev 2, §3/N.3):
  * hashed — `<name>_fn_<hash8(id\0name\0implSource)>` (`\0` is only ever a
  * hash-seed FIELD separator; never part of the id) — and stable —
@@ -140,14 +173,16 @@ export function mintSymbols(
     implSource: string,
     explicitId: string | undefined,
     stableId: string,
-    stream = false
+    stream = false,
+    get = false
 ): ExtractedServerFn {
     const fnStableId = explicitId ?? stableId;
     return {
         name,
         symbol: `${name}_fn_${hash8(`${fnStableId}\0${name}\0${implSource}`)}`,
         stableSymbol: `${fnStableId}#${name}`,
-        stream
+        stream,
+        get
     };
 }
 
@@ -191,11 +226,11 @@ export function extractServerFns(
 
     const warnings: string[] = [];
 
-    /** local name → wrapped call source + kind + explicit stable id, for
-     *  `export { x }` resolution. */
+    /** local name → wrapped call source + kind + explicit stable id + GET
+     *  mark, for `export { x }` resolution. */
     const localFnSources = new Map<
         string,
-        { source: string; stream: boolean; explicitId?: string }
+        { source: string; stream: boolean; explicitId?: string; get: boolean }
     >();
     const wrapperKind = (init: unknown): 'fn' | 'stream' | undefined => {
         if (!isNode(init) || init.type !== 'CallExpression' || !isNode(init.callee)) {
@@ -247,7 +282,8 @@ export function extractServerFns(
             localFnSources.set((declarator.id as Node).name as string, {
                 source: code.slice(init.start, init.end),
                 stream: kind === 'stream',
-                explicitId: idOption.id
+                explicitId: idOption.id,
+                get: kind === 'fn' && readServerFnCacheOption(init)
             });
         }
     }
@@ -265,7 +301,8 @@ export function extractServerFns(
                     record.source,
                     record.explicitId,
                     options.stableId,
-                    record.stream
+                    record.stream,
+                    record.get
                 )
             );
         } else {
@@ -353,9 +390,12 @@ export function extractServerFns(
     for (const fn of fns) {
         const wireSymbol = options.stubSymbols === 'stable' ? fn.stableSymbol : fn.symbol;
         const factory = fn.stream ? '__serverStreamStub' : '__serverFnStub';
+        // The GET mark rides as a 4th positional flag (§4.1) — absent means
+        // POST, keeping unmarked output byte-identical to before.
+        const getFlag = !fn.stream && fn.get ? ', 1' : '';
         lines.push(
             `export const ${fn.name} = ${factory}(${JSON.stringify(wireSymbol)}, ` +
-            `${JSON.stringify(fn.name)}, ${JSON.stringify(options.endpoint)});`
+            `${JSON.stringify(fn.name)}, ${JSON.stringify(options.endpoint)}${getFlag});`
         );
     }
     for (const name of serverOnly) {

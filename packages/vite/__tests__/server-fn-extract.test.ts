@@ -144,6 +144,64 @@ export { ping as default };
     });
 });
 
+describe('extractServerFns — cache-marked reads (rfc-server §4.1, #354)', () => {
+    const READ = `
+import { serverFn } from '@sigx/server';
+export const getProduct = serverFn({
+    cache: { maxAge: 60 },
+    handler: async (rq, input) => input
+});
+export const addToCart = serverFn(async (rq, id) => id);
+`;
+
+    it('stamps the GET flag on cache-marked fns only', () => {
+        const result = extractServerFns(READ, '/src/api.server.ts', opts('src/api.server.ts'));
+        const byName = Object.fromEntries(result.fns.map((f) => [f.name, f]));
+        expect(byName.getProduct.get).toBe(true);
+        expect(byName.addToCart.get).toBe(false);
+        expect(result.stubModule).toContain(
+            `export const getProduct = __serverFnStub("${byName.getProduct.symbol}", "getProduct", "${BASE}", 1);`
+        );
+        expect(result.stubModule).toContain(
+            `export const addToCart = __serverFnStub("${byName.addToCart.symbol}", "addToCart", "${BASE}");`
+        );
+    });
+
+    it('detects a computed cache VALUE (presence-only, unlike id)', () => {
+        const code = `
+import { serverFn } from '@sigx/server';
+import { policy } from './policy';
+export const read = serverFn({ cache: policy(), handler: async (rq) => 1 });
+`;
+        const result = extractServerFns(code, '/src/api.server.ts', opts('src/api.server.ts'));
+        expect(result.fns[0].get).toBe(true);
+        expect(result.warnings).toHaveLength(0);
+    });
+
+    it('toggling cache re-mints the symbol (version-skew safety)', () => {
+        const marked = extractServerFns(READ, '/src/api.server.ts', opts('src/api.server.ts'));
+        const unmarked = extractServerFns(
+            READ.replace('cache: { maxAge: 60 },\n', ''),
+            '/src/api.server.ts',
+            opts('src/api.server.ts')
+        );
+        const a = marked.fns.find((f) => f.name === 'getProduct')!;
+        const b = unmarked.fns.find((f) => f.name === 'getProduct')!;
+        expect(a.symbol).not.toBe(b.symbol);
+    });
+
+    it('survives export { x } indirection', () => {
+        const code = `
+import { serverFn } from '@sigx/server';
+const read = serverFn({ cache: { maxAge: 30 }, handler: async (rq) => 1 });
+export { read };
+`;
+        const result = extractServerFns(code, '/src/api.server.ts', opts('src/api.server.ts'));
+        expect(result.fns[0].get).toBe(true);
+        expect(result.stubModule).toContain(', 1);');
+    });
+});
+
 describe('extractServerFns — serverStream (#310)', () => {
     const STREAMY = `
 import { serverFn, serverStream } from '@sigx/server';

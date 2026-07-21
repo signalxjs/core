@@ -373,6 +373,36 @@ export const ping = srv.serverFn(async (rq) => 'pong');
     });
 });
 
+describe('extractInlineServerFns — cache-marked reads (rfc-server §4.1, #354)', () => {
+    it('stamps the GET flag on an inline cache-marked read', () => {
+        const code = `
+import { component } from 'sigx';
+import { serverFn } from '@sigx/server';
+import { db } from './db';
+
+const getProduct = serverFn({
+    cache: { maxAge: 60 },
+    handler: async (rq, input: { id: string }) => db.products.get(input.id)
+});
+
+export const Product = component((ctx) => {
+    return () => <button onClick={() => getProduct({ id: 'p1' })} />;
+});
+`;
+        const result = extract(code, '/src/Product.tsx');
+        expect(result.errors).toHaveLength(0);
+        expect(result.fns[0].get).toBe(true);
+        expect(result.clientModule).toContain(`, "${BASE}", 1)`);
+    });
+
+    it('an unmarked inline fn stays POST (no 4th flag)', () => {
+        const result = extract(SEARCH);
+        expect(result.fns[0].get).toBe(false);
+        expect(result.clientModule).toContain(`, "${BASE}")`);
+        expect(result.clientModule).not.toContain(`, "${BASE}", 1)`);
+    });
+});
+
 describe('extractInlineServerFns — serverStream (#310)', () => {
     it('swaps an inline serverStream for the stream stub and appends the mangled export', () => {
         const code = `

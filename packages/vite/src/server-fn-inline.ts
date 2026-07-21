@@ -36,6 +36,7 @@
 import { parseAst } from 'vite';
 import {
     mintSymbols,
+    readServerFnCacheOption,
     readServerFnIdOption,
     type ServerFnExtractOptions
 } from './server-fn-extract.js';
@@ -60,6 +61,8 @@ export interface InlineServerFn {
     stableSymbol: string;
     /** True for `serverStream` (NDJSON transport, AsyncIterable stub). */
     stream: boolean;
+    /** True for a cache-marked read (rfc-server §4.1) — the stub issues GET. */
+    get: boolean;
     /** The appended SSR export the endpoint resolves. */
     mangled: string;
 }
@@ -498,7 +501,8 @@ export function extractInlineServerFns(
                     `statically) — falling back to the file-derived stable id.`
                 );
             }
-            const minted = mintSymbols(name, callSource, idOption.id, options.stableId, stream);
+            const isGet = !stream && readServerFnCacheOption(call);
+            const minted = mintSymbols(name, callSource, idOption.id, options.stableId, stream, isGet);
             const mangled = MANGLE_PREFIX + name;
             if (moduleLocals.has(mangled) || imports.has(mangled) || exportedNames.has(mangled)) {
                 errors.push({
@@ -510,10 +514,11 @@ export function extractInlineServerFns(
             fns.push({ ...minted, mangled });
             const wireSymbol = options.stubSymbols === 'stable' ? minted.stableSymbol : minted.symbol;
             const factory = stream ? '__serverStreamStub' : '__serverFnStub';
+            // The GET mark rides as a 4th positional flag (rfc-server §4.1).
             clientSplices.push({
                 start: call.start,
                 end: call.end,
-                text: `${factory}(${JSON.stringify(wireSymbol)}, ${JSON.stringify(name)}, ${JSON.stringify(options.endpoint)})`
+                text: `${factory}(${JSON.stringify(wireSymbol)}, ${JSON.stringify(name)}, ${JSON.stringify(options.endpoint)}${isGet ? ', 1' : ''})`
             });
         }
     }
