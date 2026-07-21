@@ -15,8 +15,16 @@ export function assert(cond, message) {
 
 const BROWSER_UA = 'Mozilla/5.0 (deploy-smoke)';
 
+// What the resume example's SSR-time server-function call renders (rfc-server
+// §7 v1.1, #309). Asserting it on every tier is the cross-runtime proof that
+// the ambient request scope works there — the string can only appear if
+// `rq.request` and `rq.url` resolved during an IN-PROCESS call, which is
+// exactly what used to throw. Passed explicitly: the storefront app has no
+// server functions, so it must not be held to it.
+export const SSR_CONTEXT_MARKER = 'SSR request: GET /';
+
 /** Streamed document: resume attributes, boundary table, completion script. */
-export async function assertDocument(fetchFn, { label, appMarker }) {
+export async function assertDocument(fetchFn, { label, appMarker, ssrMarker }) {
     const res = await fetchFn('/', { headers: { 'user-agent': BROWSER_UA } });
     assert(res.status === 200, `${label}: document 200`);
     assert((res.headers.get('content-type') ?? '').includes('text/html'), `${label}: text/html`);
@@ -28,6 +36,12 @@ export async function assertDocument(fetchFn, { label, appMarker }) {
         `${label}: completion script emitted`
     );
     assert(html.includes(appMarker), `${label}: app content rendered (${appMarker})`);
+    if (ssrMarker) {
+        assert(
+            html.includes(ssrMarker),
+            `${label}: SSR-time server-function call saw the request (${ssrMarker})`
+        );
+    }
     return html;
 }
 

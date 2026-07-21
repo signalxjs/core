@@ -130,6 +130,25 @@ The ambient request for in-process (SSR-time) server-function calls
 can hold two copies of the same module — the same hazard that makes
 `ServerFnError` a brand check rather than `instanceof`.
 
+### `__SIGX_SERVERFN_SCOPE__`
+
+| | |
+|---|---|
+| **Stamped by** | `server/src/scope.ts`, at IMPORT (every server entry pulls it) |
+| **Called by** | `server-renderer/src/server/serverfn-scope.ts` — both document handlers |
+| **Contract** | `{ run<T>(source: Request \| IncomingMessage \| Partial<ServerFnContext>, fn: () => T \| Promise<T>): Promise<T> }` |
+
+The other half of the pair above: `__SIGX_SERVERFN_CONTEXT__` says what the
+ambient request IS, this one OPENS the scope that sets it. The handlers wrap
+each render in `run()`, so a `serverFn` called during SSR reads the real
+request with no wiring in the app.
+
+Stamped at import rather than on first scope, because the renderer has to know
+it can open one BEFORE any scope exists. **Absence is a supported state** —
+with no scope registered the handlers call straight through, so
+AsyncLocalStorage stays never-required (rfc-ssr-platform §2.3) and an app
+without `@sigx/server` pays nothing.
+
 Re-stamped on every scope entry, not just the first: anything may clobber or
 delete a global, and a store nothing can read is a worse failure than a
 redundant assignment. A throwing resolver is swallowed — the detached

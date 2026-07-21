@@ -462,6 +462,32 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
             // A role:'client' build has no server — nothing to mount; its
             // functions live on the remote backend the stubs target.
             if (role === 'client') return;
+            // Register the ambient-request seam EAGERLY (rfc-server §7 v1.1,
+            // #309). In production the app's entry imports `@sigx/server/…`
+            // when the server boots, so a document render is always scoped; in
+            // dev the fn middleware below loads it lazily on the first RPC —
+            // and a document request usually comes first, which would leave
+            // SSR-time `rq.request` throwing in dev while working in prod.
+            // That exact dev/prod divergence was #304.
+            void server.ssrLoadModule('@sigx/server/node').catch((err: unknown) => {
+                // "Not installed" is the EXPECTED miss (no @sigx/server in
+                // this app's graph, or a version predating the entry): those
+                // apps just keep the v1 detached-context behaviour. Any other
+                // failure — a broken install, a throw inside the entry —
+                // would otherwise leave SSR-time `rq.request` throwing with
+                // no clue why, so it gets logged.
+                const message = err instanceof Error ? err.message : String(err);
+                const notInstalled =
+                    (err as { code?: string } | null)?.code === 'ERR_MODULE_NOT_FOUND' ||
+                    /Failed to (resolve|load) (import|url)|Cannot find (module|package)/.test(
+                        message
+                    );
+                if (notInstalled) return;
+                server.config.logger.warn(
+                    `[sigx:server] could not load @sigx/server/node — server functions ` +
+                    `called during SSR will not see the request: ${message}`
+                );
+            });
             const prefix = base.endsWith('/') ? base : base + '/';
             server.middlewares.use(async (req, res, next) => {
                 if (!req.url?.startsWith(prefix)) return next();

@@ -25,6 +25,7 @@ import type { JSXElement, App } from 'sigx';
 import { createSSR } from './ssr';
 import { defaultSSR } from './server/render-api';
 import { defaultIsBot } from './server/bot';
+import { withServerFnScope } from './server/serverfn-scope';
 import type { SSRContext, SSRContextOptions } from './server/context';
 import type { DocumentOptions } from './server/document';
 import type { SSRResponse } from './response';
@@ -191,67 +192,71 @@ export function createRequestHandler(options: RequestHandlerOptions): NodeReques
     const ssr = options.ssr ?? defaultSSR;
     const isBot = options.isBot ?? defaultIsBot;
 
-    return async function handleRequest(req, res, next) {
-        const url = req.url ?? '/';
-        try {
-            const [template, input] = await Promise.all([
-                typeof options.template === 'function'
-                    ? options.template(url, req)
-                    : options.template,
-                options.app(url, req)
-            ]);
-            const docOptions =
-                typeof options.document === 'function'
-                    ? options.document(url, req)
-                    : options.document;
-            const mode = isBot(String(req.headers['user-agent'] ?? ''), req)
-                ? ('blocking' as const)
-                : ('stream' as const);
+    // The scope encloses the ENTIRE handler, streaming included: `useData`
+    // fetchers resolve while chunks are pumped, and a scope that ended at the
+    // shell would leave those continuations request-less (#309).
+    return (req, res, next) =>
+        withServerFnScope(req, async function handleRequest(): Promise<void> {
+            const url = req.url ?? '/';
+            try {
+                const [template, input] = await Promise.all([
+                    typeof options.template === 'function'
+                        ? options.template(url, req)
+                        : options.template,
+                    options.app(url, req)
+                ]);
+                const docOptions =
+                    typeof options.document === 'function'
+                        ? options.document(url, req)
+                        : options.document;
+                const mode = isBot(String(req.headers['user-agent'] ?? ''), req)
+                    ? ('blocking' as const)
+                    : ('stream' as const);
 
-            const { chunks, shell } = ssr.renderDocumentChunks(input, {
-                ...docOptions,
-                template,
-                mode
-            });
-
-            // The shell is the status/redirect decision point (§2.1).
-            const head = await shell;
-
-            if (head.redirect) {
-                res.writeHead(head.redirect.status, { location: head.redirect.location });
-                res.end();
-                await chunks.return?.(undefined); // release the (empty) generator
-                return;
-            }
-
-            res.writeHead(head.status, {
-                'content-type': 'text/html; charset=utf-8',
-                ...head.headers
-            });
-
-            const body = toNodeStream(chunks, { objectMode: false });
-            body.pipe(res);
-            await new Promise<void>((resolve) => {
-                body.on('end', resolve);
-                body.on('error', (err) => {
-                    // Mid-stream failure after the head was sent: the document
-                    // generator already routed it to onError; end the response
-                    // visibly truncated.
-                    if (__DEV__) {
-                        console.error('[createRequestHandler] stream error:', err);
-                    }
-                    res.end();
-                    resolve();
+                const { chunks, shell } = ssr.renderDocumentChunks(input, {
+                    ...docOptions,
+                    template,
+                    mode
                 });
-            });
-        } catch (err) {
-            // Shell (or app-factory) failure — no byte has been written yet.
-            if (next) {
-                next(err);
-                return;
+
+                // The shell is the status/redirect decision point (§2.1).
+                const head = await shell;
+
+                if (head.redirect) {
+                    res.writeHead(head.redirect.status, { location: head.redirect.location });
+                    res.end();
+                    await chunks.return?.(undefined); // release the (empty) generator
+                    return;
+                }
+
+                res.writeHead(head.status, {
+                    'content-type': 'text/html; charset=utf-8',
+                    ...head.headers
+                });
+
+                const body = toNodeStream(chunks, { objectMode: false });
+                body.pipe(res);
+                await new Promise<void>((resolve) => {
+                    body.on('end', resolve);
+                    body.on('error', (err) => {
+                        // Mid-stream failure after the head was sent: the document
+                        // generator already routed it to onError; end the response
+                        // visibly truncated.
+                        if (__DEV__) {
+                            console.error('[createRequestHandler] stream error:', err);
+                        }
+                        res.end();
+                        resolve();
+                    });
+                });
+            } catch (err) {
+                // Shell (or app-factory) failure — no byte has been written yet.
+                if (next) {
+                    next(err);
+                    return;
+                }
+                res.writeHead(500, { 'content-type': 'text/html; charset=utf-8' });
+                res.end('<!doctype html><title>500</title><h1>Internal Server Error</h1>');
             }
-            res.writeHead(500, { 'content-type': 'text/html; charset=utf-8' });
-            res.end('<!doctype html><title>500</title><h1>Internal Server Error</h1>');
-        }
-    };
+        });
 }

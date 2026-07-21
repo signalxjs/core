@@ -14,12 +14,28 @@ const QUOTES = [
     'Every server function is a public endpoint — validate accordingly.'
 ];
 
+/**
+ * Called IN-PROCESS during SSR (see `entry-server.tsx`) — no HTTP hop, no
+ * fetch stub. `rq.request`/`rq.url` are the DOCUMENT request: the handler
+ * opened an ambient scope around the render (rfc-server §7 v1.1), which needs
+ * no wiring beyond the `@sigx/server/server` import this app's entry already
+ * has. Both of these used to throw here while the identical code worked over
+ * RPC.
+ */
+export const requestSummary = serverFn(async (rq) => {
+    return `SSR request: ${rq.request.method} ${rq.url.pathname}`;
+});
+
 export const getQuote = serverFn(async (rq, index: number) => {
     if (!Number.isInteger(index)) {
         throw new ServerFnError(400, 'index must be an integer');
     }
-    // Proof this ran server-side: neither value exists in a browser. The
-    // optional access keeps the fn runtime-agnostic — under workerd (no
-    // nodejs_compat) there is no process global.
-    return `${QUOTES[Math.abs(index) % QUOTES.length]} (via ${globalThis.process?.version ?? 'workerd'})`;
+    // Proof this ran server-side, and WHERE: `navigator.userAgent` NAMES the
+    // runtime on every tier — `Deno/…`, `Bun/…`, `Cloudflare-Workers`,
+    // `Node.js/…` (Node ≥ 21; the fallback covers Node 20). It replaced a
+    // `process.version` sniff, which stopped telling workerd apart from Node
+    // the moment the worker enabled nodejs_compat.
+    const runtime =
+        globalThis.navigator?.userAgent ?? `Node.js/${globalThis.process?.versions?.node ?? '?'}`;
+    return `${QUOTES[Math.abs(index) % QUOTES.length]} (via ${runtime})`;
 });

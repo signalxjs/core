@@ -76,8 +76,21 @@ One default is load-bearing:
 client outDir contains `index.html` — the raw outlet template — and with the
 default handling the router would serve it for `GET /` *before the worker
 runs*. (`run_worker_first` routing is the wrangler ≥ 4.20 alternative.)
-`nodejs_compat` is not required by sigx; it is a concern for your own
-dependencies only.
+`nodejs_compat` is not required to render: sigx's edge graph takes no `node:`
+import. It IS required for **one feature** — the ambient request scope that lets a
+server function called during SSR read `rq.request` (rfc-server §7 v1.1).
+That scope is AsyncLocalStorage, i.e. `node:async_hooks`, so a worker whose
+renders need it wants:
+
+```jsonc
+"compatibility_flags": ["nodejs_compat"]
+```
+
+Without the flag nothing breaks: the render simply runs unscoped, server
+functions still work over RPC, and only SSR-time `rq.request` falls back to
+the request-less detached context (`fn.with({ context })` supplies one with no
+ALS at all). Beyond that,
+`nodejs_compat` is a concern for your own dependencies only.
 
 ## Dev — one loop, optional bindings
 

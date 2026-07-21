@@ -10,7 +10,7 @@ import { Quote } from './resume/Quote';
  * interaction below demonstrates a different rung of the resumability
  * ladder.
  */
-export const App = component(() => {
+export const App = component<{ ssrRequest: string }>((ctx) => {
     const rendered = new Date().toISOString();
     return () => (
         <main>
@@ -19,6 +19,11 @@ export const App = component(() => {
                 Server-rendered at {rendered}. Open the network panel: no
                 component JS loads until you interact, and component chunks
                 load only when state actually changes.
+            </p>
+            <p class="hint">
+                {/* Produced by a server function called during SSR, reading
+                    the live document request (rfc-server §7 v1.1). */}
+                {ctx.props.ssrRequest}
             </p>
 
             <div class="card">

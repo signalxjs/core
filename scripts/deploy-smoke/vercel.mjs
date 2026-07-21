@@ -18,7 +18,8 @@ import {
     assertBotDocument,
     assertStaticAsset,
     assertServerFn,
-    assertFallthrough
+    assertFallthrough,
+    SSR_CONTEXT_MARKER
 } from './assertions.mjs';
 
 const repoRoot = resolve(fileURLToPath(import.meta.url), '../../..');
@@ -93,7 +94,11 @@ try {
         return fn.fetch(new Request(ORIGIN + urlPath, init));
     };
 
-    await assertDocument(fetchFn, { label, appMarker: 'SignalX resumability' });
+    await assertDocument(fetchFn, {
+        label,
+        appMarker: 'SignalX resumability',
+        ssrMarker: SSR_CONTEXT_MARKER
+    });
     await assertBotDocument(fetchFn, { label, appMarker: 'SignalX resumability' });
     await assertStaticAsset(fetchFn, { label, clientDir: join(dir, 'dist-vercel/client') });
     const data = await assertServerFn(fetchFn, {
@@ -103,7 +108,7 @@ try {
         args: [1],
         expectInData: 'Named = transferred.'
     });
-    assert(/via v\d/.test(data), `${label}: fn reported a runtime version (${data})`);
+    assert(/via Node\.js/.test(data), `${label}: fn ran under the Node runtime (${data})`);
     await assertFallthrough(fetchFn, { label });
 
     console.log('\n✅ deploy-smoke: the generated .vercel/output is spec-shaped and serves documents, assets, and server functions');

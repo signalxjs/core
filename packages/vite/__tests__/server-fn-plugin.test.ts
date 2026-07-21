@@ -357,6 +357,73 @@ describe('sigxServer — rev 2: role, endpoint, stable symbols, scan (#320)', ()
         }
     });
 
+    it('loads the ambient-request seam eagerly, so dev matches prod (#309)', async () => {
+        const { plugin, root } = makeProject(APP);
+        try {
+            const loaded: string[] = [];
+            plugin.configureServer({
+                middlewares: { use: () => {} },
+                watcher: { add: () => {} },
+                ssrLoadModule: (id: string) => {
+                    loaded.push(id);
+                    return Promise.resolve({});
+                }
+            });
+            await Promise.resolve();
+            // In prod the seam registers when the server imports
+            // @sigx/server/node; in dev nothing would load it before the
+            // first RPC, leaving SSR-time rq.request throwing until then.
+            expect(loaded).toEqual(['@sigx/server/node']);
+        } finally {
+            rmSync(root, { recursive: true, force: true });
+        }
+    });
+
+    it('boots an app without @sigx/server, silently — that miss is expected', async () => {
+        const { plugin, root } = makeProject(APP);
+        try {
+            const warnings: string[] = [];
+            expect(() =>
+                plugin.configureServer({
+                    middlewares: { use: () => {} },
+                    watcher: { add: () => {} },
+                    config: { logger: { warn: (m: string) => warnings.push(m) } },
+                    ssrLoadModule: () =>
+                        Promise.reject(
+                            new Error('Failed to resolve import "@sigx/server/node"')
+                        )
+                })
+            ).not.toThrow();
+            // The rejection is handled — an unhandled one would fail the run.
+            await Promise.resolve();
+            await Promise.resolve();
+            expect(warnings).toEqual([]);
+        } finally {
+            rmSync(root, { recursive: true, force: true });
+        }
+    });
+
+    it('warns when the seam fails to load for any OTHER reason', async () => {
+        const { plugin, root } = makeProject(APP);
+        try {
+            const warnings: string[] = [];
+            plugin.configureServer({
+                middlewares: { use: () => {} },
+                watcher: { add: () => {} },
+                config: { logger: { warn: (m: string) => warnings.push(m) } },
+                ssrLoadModule: () => Promise.reject(new SyntaxError('Unexpected token'))
+            });
+            await Promise.resolve();
+            await Promise.resolve();
+            // Silently degrading here would leave SSR-time rq.request
+            // throwing with nothing to point at.
+            expect(warnings).toHaveLength(1);
+            expect(warnings[0]).toContain('Unexpected token');
+        } finally {
+            rmSync(root, { recursive: true, force: true });
+        }
+    });
+
     it("role: 'auto' still emits the registry for the ssr environment", () => {
         const { plugin, root } = makeProject(APP);
         try {

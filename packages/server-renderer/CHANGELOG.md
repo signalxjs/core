@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+**Added: document renders open the server-function request scope.**
+
+- `createRequestHandler` and `createFetchHandler` now run the whole render —
+  streaming included, since `useData` fetchers settle while chunks are pumped —
+  inside the request's ambient scope when one can be opened, so a server
+  function called in-process during SSR reads the real request (rfc-server §7
+  v1.1, #309).
+- Read through the `__SIGX_SERVERFN_SCOPE__` seam (docs/seams.md), never an
+  import: `@sigx/server` stays an optional pack, an app without server
+  functions pays nothing, and with no scope registered the handlers behave
+  exactly as before — per-request `SSRContext` remains the isolation mechanism
+  and **AsyncLocalStorage is still never required** (rfc-ssr-platform §2.3).
+
 **Fixed: a component followed by sibling content no longer latches its child's
 anchor.** (#373)
 

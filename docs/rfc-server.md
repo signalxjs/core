@@ -772,10 +772,14 @@ option (revisit only if that proves painful).
   `$cache`/`$boundaries` reserved. Detached SSR context (in-process call =
   direct invocation). Implementation may sequence file-form first, inline
   right behind, within the same milestone.
-- **v1.1**: AsyncLocalStorage ambient request context (`/node`) so SSR-time
-  calls see the real request — **shipped** (#309, `runWithServerFnContext`),
-  together with the explicit `fn.with({ context })` channel (#352) that
-  needs no ALS and so works on every runtime. Still open: per-fn guard
+- **v1.1**: AsyncLocalStorage ambient request context so SSR-time calls see
+  the real request — **shipped** (#309, `runWithServerFnContext`), together
+  with the explicit `fn.with({ context })` channel (#352) that needs no ALS
+  and so works on every runtime. The document handlers open the scope
+  themselves through `__SIGX_SERVERFN_SCOPE__`, so apps wire nothing and dev
+  matches production; the runner lives beneath `./server` (not `./node`) so
+  WinterCG entries register it by import alone, and degrades to running
+  unscoped where `node:async_hooks` is absent. Still open: per-fn guard
   overrides. **Shipped early from
   the #349–#357 review sweep**: `onError` observability hook and
   `timeoutMs` on the endpoint options (post-RFC additive surface — the RFC

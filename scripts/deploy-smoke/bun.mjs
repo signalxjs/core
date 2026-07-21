@@ -13,7 +13,8 @@ import {
     assertBotDocument,
     assertStaticAsset,
     assertServerFn,
-    assertFallthrough
+    assertFallthrough,
+    SSR_CONTEXT_MARKER
 } from './assertions.mjs';
 
 const repoRoot = resolve(fileURLToPath(import.meta.url), '../../..');
@@ -70,7 +71,11 @@ try {
     await waitForServer(ORIGIN + '/');
     const fetchFn = (path, init) => fetch(ORIGIN + path, init);
     const label = 'bun/resume';
-    await assertDocument(fetchFn, { label, appMarker: 'SignalX resumability' });
+    await assertDocument(fetchFn, {
+        label,
+        appMarker: 'SignalX resumability',
+        ssrMarker: SSR_CONTEXT_MARKER
+    });
     await assertBotDocument(fetchFn, { label, appMarker: 'SignalX resumability' });
     await assertStaticAsset(fetchFn, { label, clientDir: join(dir, 'dist/client') });
     const data = await assertServerFn(fetchFn, {
@@ -80,8 +85,9 @@ try {
         args: [1],
         expectInData: 'Named = transferred.'
     });
-    // Bun's node-compat process.version — proof the fn executed server-side.
-    assert(/via v\d/.test(data), `${label}: fn reported a runtime version (${data})`);
+    // navigator.userAgent names the runtime — proof the fn ran HERE, not
+    // in a Node process (`Bun/x.y.z`).
+    assert(/via Bun\//.test(data), `${label}: fn ran under bun (${data})`);
     await assertFallthrough(fetchFn, { label });
     console.log('\n✅ deploy-smoke: the external build serves documents, assets, and server functions under bun');
 } catch (err) {

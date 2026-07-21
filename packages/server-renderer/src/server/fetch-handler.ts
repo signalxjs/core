@@ -19,6 +19,7 @@ import type { DocumentOptions } from './document';
 import { defaultSSR } from './render-api';
 import { defaultIsBot } from './bot';
 import { chunksToBytes } from './bytes';
+import { withServerFnScope } from './serverfn-scope';
 
 export interface FetchHandlerOptions<TPlatform = unknown> {
     /**
@@ -110,66 +111,71 @@ export function createFetchHandler<TPlatform = unknown>(
     const ssr = options.ssr ?? defaultSSR;
     const isBot = options.isBot ?? defaultIsBot;
 
-    return async function handleFetch(request, ...rest) {
-        const parsed = new URL(request.url);
-        // Path + query, matching the Node/dev handlers' `req.url` — one
-        // `createApp(url)` entry contract across all three.
-        const url = parsed.pathname + parsed.search;
-        // Internal-only cast: the FetchHandler tuple makes `platform`
-        // required whenever TPlatform doesn't admit undefined.
-        const p = rest[0] as TPlatform;
-        try {
-            const [template, input] = await Promise.all([
-                typeof options.template === 'function'
-                    ? options.template(url, request, p)
-                    : options.template,
-                options.app(url, request, p)
-            ]);
-            const docOptions =
-                typeof options.document === 'function'
-                    ? options.document(url, request, p)
-                    : options.document;
-            const mode = isBot(request.headers.get('user-agent') ?? '', request)
-                ? ('blocking' as const)
-                : ('stream' as const);
+    // Scoped so in-process server-function calls made during the render see
+    // this request (#309) — a plain call when no ALS runner is registered.
+    // The scope encloses the streaming body too: `useData` fetchers resolve
+    // while chunks are pumped.
+    return (request, ...rest) =>
+        withServerFnScope(request, async function handleFetch(): Promise<Response> {
+            const parsed = new URL(request.url);
+            // Path + query, matching the Node/dev handlers' `req.url` — one
+            // `createApp(url)` entry contract across all three.
+            const url = parsed.pathname + parsed.search;
+            // Internal-only cast: the FetchHandler tuple makes `platform`
+            // required whenever TPlatform doesn't admit undefined.
+            const p = rest[0] as TPlatform;
+            try {
+                const [template, input] = await Promise.all([
+                    typeof options.template === 'function'
+                        ? options.template(url, request, p)
+                        : options.template,
+                    options.app(url, request, p)
+                ]);
+                const docOptions =
+                    typeof options.document === 'function'
+                        ? options.document(url, request, p)
+                        : options.document;
+                const mode = isBot(request.headers.get('user-agent') ?? '', request)
+                    ? ('blocking' as const)
+                    : ('stream' as const);
 
-            const { chunks, shell } = ssr.renderDocumentChunks(input, {
-                ...docOptions,
-                template,
-                mode
-            });
-
-            // The shell resolution (`useResponse`'s { status, headers,
-            // redirect }) decides the response head before the first byte.
-            const head = await shell;
-
-            if (head.redirect) {
-                // Release the (empty) generator without awaiting — the
-                // redirect is decided; its Response must not hinge on (or be
-                // converted to a 500 by) the release settling.
-                void chunks.return?.(undefined);
-                return new Response(null, {
-                    status: head.redirect.status,
-                    headers: { location: head.redirect.location }
+                const { chunks, shell } = ssr.renderDocumentChunks(input, {
+                    ...docOptions,
+                    template,
+                    mode
                 });
-            }
 
-            return new Response(chunksToBytes(chunks), {
-                status: head.status,
-                headers: {
-                    'content-type': 'text/html; charset=utf-8',
-                    ...head.headers
+                // The shell resolution (`useResponse`'s { status, headers,
+                // redirect }) decides the response head before the first byte.
+                const head = await shell;
+
+                if (head.redirect) {
+                    // Release the (empty) generator without awaiting — the
+                    // redirect is decided; its Response must not hinge on (or be
+                    // converted to a 500 by) the release settling.
+                    void chunks.return?.(undefined);
+                    return new Response(null, {
+                        status: head.redirect.status,
+                        headers: { location: head.redirect.location }
+                    });
                 }
-            });
-        } catch (err) {
-            // Shell (or app-factory) failure — no byte written yet.
-            if (__DEV__) {
-                console.error('[createFetchHandler] shell error:', err);
+
+                return new Response(chunksToBytes(chunks), {
+                    status: head.status,
+                    headers: {
+                        'content-type': 'text/html; charset=utf-8',
+                        ...head.headers
+                    }
+                });
+            } catch (err) {
+                // Shell (or app-factory) failure — no byte written yet.
+                if (__DEV__) {
+                    console.error('[createFetchHandler] shell error:', err);
+                }
+                return new Response(
+                    '<!doctype html><title>500</title><h1>Internal Server Error</h1>',
+                    { status: 500, headers: { 'content-type': 'text/html; charset=utf-8' } }
+                );
             }
-            return new Response(
-                '<!doctype html><title>500</title><h1>Internal Server Error</h1>',
-                { status: 500, headers: { 'content-type': 'text/html; charset=utf-8' } }
-            );
-        }
-    };
+        });
 }

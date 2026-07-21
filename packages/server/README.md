@@ -180,10 +180,17 @@ import { runWithServerFnContext } from '@sigx/server/node';
 await runWithServerFnContext(request, () => renderHandler(req, res, next));
 ```
 
+Form 2 is usually already done for you: `createRequestHandler` and
+`createFetchHandler` open a scope around every render, so an app that mounts
+either handler — and imports `@sigx/server/server` or `@sigx/server/node` for
+its endpoint, as every app with server functions does — has ambient context
+with no wiring at all. Call `runWithServerFnContext` yourself for renders sigx
+does not own, or to supply a request with your own abort wiring.
+
 `runWithServerFnContext` uses `AsyncLocalStorage`, so the request survives
 every `await` in the render without threading a parameter through user code.
-It needs Node, Deno, or workerd with `nodejs_compat`; runtimes without it use
-form 1, which behaves identically. `.with({ context })` wins over ambient, and
+It needs Node, Deno, or workerd with `nodejs_compat`; where it is missing the
+render runs unscoped rather than failing, and form 1 behaves identically. `.with({ context })` wins over ambient, and
 with neither the throw stays — a function reading `rq.request` when nothing
 supplied one is a bug worth seeing, not a silent `undefined`.
 

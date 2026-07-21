@@ -2,6 +2,10 @@
     "name": "sigx-resume-example",
     "main": "dist-cf/server/entry.cloudflare.js",
     "compatibility_date": "2026-07-01",
+    // AsyncLocalStorage (node:async_hooks) is what carries the request into
+    // in-process server-function calls during SSR — rfc-server §7 v1.1.
+    // Without this flag `@sigx/server/async-context` cannot load on workerd.
+    "compatibility_flags": ["nodejs_compat"],
     "assets": {
         "directory": "dist-cf/client",
         "html_handling": "none"
