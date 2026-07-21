@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+**The walk fallback forwards the hydration region bound.** (#373)
+
+- Core now passes `regionEnd` — the enclosing component's trailing marker — to
+  the `client.hydrateComponent` plugin hook, and the islands hook threads it
+  through `scheduleComponentHydration` to `scheduleWalkedBoundary`. Without it,
+  an island whose content is followed by sibling content in the same parent
+  anchored on a CHILD's marker, so a structural-mismatch bail could leave part
+  of the island's server-rendered content behind as a duplicate.
+- `scheduleComponentHydration` takes the bound as a new optional trailing
+  parameter; existing callers are unaffected.
+
 **Islands pages now defer the sigx runtime until a strategy fires.** (#293)
 
 - `hydrateIslands()` (from `@sigx/ssr-islands/client`) is now the whole

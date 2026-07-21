@@ -33,7 +33,8 @@ export function scheduleComponentHydration(
     vnode: VNode,
     dom: Node | null,
     parent: Node,
-    strategy: { strategy: HydrationStrategy; media?: string }
+    strategy: { strategy: HydrationStrategy; media?: string },
+    regionEnd: Node | null = null
 ): Node | null {
     // Strip client:* before delegating — the directive vocabulary is
     // islands-owned; core never filters props. Mutate props on THIS vnode
@@ -52,7 +53,9 @@ export function scheduleComponentHydration(
     const record: SSRBoundaryRecord = strategy.strategy === 'only'
         ? { flush: 'skip', hydrate: 'load' }
         : { hydrate: strategy.strategy, media: strategy.media };
-    return scheduleWalkedBoundary(vnode, dom, parent, record);
+    // regionEnd travels through untouched: the core scheduler needs it to
+    // pick this island's own trailing marker rather than a child's (#373).
+    return scheduleWalkedBoundary(vnode, dom, parent, record, regionEnd);
 }
 
 /**
@@ -83,7 +86,8 @@ export const islandsClientHooks: SSRPlugin = {
         hydrateComponent(
             vnode: VNode,
             dom: Node | null,
-            parent: Node
+            parent: Node,
+            regionEnd?: Node | null
         ): Node | null | undefined {
             // Walk fallback for islands the boundary table did not record
             // (a stripped blob, or markup rendered without the table):
@@ -94,7 +98,7 @@ export const islandsClientHooks: SSRPlugin = {
 
             if (!strategy) return undefined; // Not an island — let core handle it
 
-            return scheduleComponentHydration(vnode, dom, parent, strategy);
+            return scheduleComponentHydration(vnode, dom, parent, strategy, regionEnd ?? null);
         }
 
         // No afterHydrate hook anymore: the core hydrator runs the

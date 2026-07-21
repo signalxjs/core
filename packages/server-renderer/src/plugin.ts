@@ -191,12 +191,21 @@ export interface SSRPlugin {
          * (the returned value is the next DOM sibling to process).
          * Return `undefined` (void) to let the next plugin or default hydration handle it.
          *
+         * `regionEnd` is the exclusive end of the sibling range this component
+         * may own — the enclosing component's trailing `<!--$c:ID-->` marker,
+         * or null at the top of a DOM parent. A pack that locates the
+         * component's own marker itself must bound the search by it, or a
+         * component followed by sibling content latches a CHILD's marker
+         * (#373). Passing it straight through to `scheduleWalkedBoundary` /
+         * `hydrateComponent` is all most packs need.
+         *
          * @example Islands plugin intercepts `client:*` components and schedules deferred hydration
          */
         hydrateComponent?(
             vnode: VNode,
             dom: Node | null,
-            parent: Node
+            parent: Node,
+            regionEnd?: Node | null
         ): Node | null | undefined;
 
         /**

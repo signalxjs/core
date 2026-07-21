@@ -110,14 +110,19 @@ export function mountSkipBoundary(marker: Comment, component: ComponentFactory, 
  * Lives on the executor side of the scheduler/core split: it closes over
  * the live vnode and `hydrateComponent`, and is only reachable from the
  * root walk — which is already heavy by definition.
+ *
+ * `regionEnd` is the walk's region bound (the enclosing component's trailing
+ * marker); it keeps this boundary's marker pick exact when its content is
+ * followed by sibling content in the same parent (#373).
  */
 export function scheduleWalkedBoundary(
     vnode: VNode,
     dom: Node | null,
     parent: Node,
-    record: SSRBoundaryRecord
+    record: SSRBoundaryRecord,
+    regionEnd: Node | null = null
 ): Node | null {
-    const { contentStart, trailingMarker } = findComponentBoundaries(dom);
+    const { contentStart, trailingMarker } = findComponentBoundaries(dom, regionEnd);
 
     const componentFactory = vnode.type as unknown as ComponentFactory;
     const componentName = componentFactory.__islandId || componentFactory.__name || 'Anonymous';

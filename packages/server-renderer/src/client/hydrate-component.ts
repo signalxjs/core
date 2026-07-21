@@ -38,6 +38,7 @@ import {
     isFormattingWhitespace
 } from './hydrate-context';
 import { hydrateNode } from './hydrate-core';
+import { findComponentBoundaries } from './scheduler';
 
 /**
  * Minimal type for component factories used in hydration.
@@ -60,49 +61,26 @@ export interface ComponentFactory {
  * @param dom - The DOM node to start from (content starts here)
  * @param parent - The parent node
  * @param trailingMarker - Optional trailing marker comment (the component anchor)
+ * @param regionEnd - Exclusive end of the sibling range this component may own
+ *                    (the enclosing component's trailing marker), bounding the
+ *                    marker search when no `trailingMarker` is supplied (#373)
  */
-export function hydrateComponent(vnode: VNode, dom: Node | null, parent: Node, trailingMarker?: Comment | null): Node | null {
+export function hydrateComponent(
+    vnode: VNode,
+    dom: Node | null,
+    parent: Node,
+    trailingMarker?: Comment | null,
+    regionEnd: Node | null = null
+): Node | null {
     const componentFactory = vnode.type as unknown as ComponentFactory;
     const setup = componentFactory.__setup;
     const componentName = componentFactory.__name || 'Anonymous';
 
-    // With trailing markers, find the marker if not provided
-    let anchor: Comment | null = trailingMarker || null;
-
-    if (!anchor) {
-        // Find this component's trailing marker by traversing forward.
-        // SSR emits <!--$c:N--> after each component's content, with parent IDs
-        // lower than child IDs. When nested components exist, child markers appear
-        // before the parent marker. We find the correct (outermost) marker by
-        // looking for the lowest-ID $c: comment in a contiguous sequence.
-        let current: Node | null = dom;
-        let bestAnchor: Comment | null = null;
-        let bestId: number = Infinity;
-        let foundAnyMarker = false;
-
-        while (current) {
-            if (current.nodeType === Node.COMMENT_NODE) {
-                const text = (current as Comment).data;
-                if (text.startsWith('$c:')) {
-                    const id = parseInt(text.slice(3), 10);
-                    if (id < bestId) {
-                        bestId = id;
-                        bestAnchor = current as Comment;
-                    }
-                    foundAnyMarker = true;
-                }
-            } else if (foundAnyMarker) {
-                // Hit a non-comment node after finding markers — we've passed
-                // our component's boundary and entered a sibling's content
-                break;
-            }
-            current = current.nextSibling;
-        }
-
-        if (bestAnchor) {
-            anchor = bestAnchor;
-        }
-    }
+    // With trailing markers, find the marker if not provided: the lowest-id
+    // `<!--$c:N-->` in [dom, regionEnd). See findComponentBoundaries for why
+    // that is exact rather than a heuristic, and why the bound matters (#373).
+    const anchor: Comment | null =
+        trailingMarker || findComponentBoundaries(dom, regionEnd).trailingMarker;
 
     const internalVNode = vnode as InternalVNode;
     const initialProps = vnode.props || {};
@@ -324,7 +302,11 @@ export function hydrateComponent(vnode: VNode, dom: Node | null, parent: Node, t
                     } else if (hasSSRContent) {
                         // Hydrate against existing SSR DOM (inside the
                         // placeholder wrapper when one exists)
-                        endDom = hydrateNode(subTree, hydrateDom, hydrateParent);
+                        // rangeEnd is this component's own anchor (null inside
+                        // a wrapper, whose children the subtree owns outright):
+                        // exactly the region its descendants may claim markers
+                        // from (#373).
+                        endDom = hydrateNode(subTree, hydrateDom, hydrateParent, rangeEnd);
                     } else if (hydrateParent !== parent) {
                         // Empty placeholder wrapper — mount inside it
                         mount(subTree, hydrateParent as Element, null);
