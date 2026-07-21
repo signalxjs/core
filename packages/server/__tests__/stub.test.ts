@@ -284,3 +284,15 @@ describe('__serverFnStub — rich wire serialization (rfc-server §4)', () => {
         expect(await stub()()).toEqual({ v: { $fromTheFuture: 1 } });
     });
 });
+
+describe('__serverFnStub — codec robustness on payloads it did not produce', () => {
+    const stub = (): ReturnType<typeof __serverFnStub> =>
+        __serverFnStub('rich_fn_00000001', 'rich', '/_sigx/fn');
+
+    it('does not corrupt a non-object $esc payload', async () => {
+        // The encoder only ever wraps an OBJECT, so this cannot have come
+        // from it; unwrapping blindly would yield {} via Object.keys(1).
+        stubFetch(200, { data: { $esc: 1 } });
+        expect(await stub()()).toEqual({ $esc: 1 });
+    });
+});

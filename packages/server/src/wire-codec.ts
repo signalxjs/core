@@ -166,7 +166,16 @@ function rev(value: unknown, handlers: WireTypeHandler[]): unknown {
     if (keys.length === 1) {
         const key = keys[0]!;
         const payload = (value as Record<string, unknown>)[key];
-        if (key === ESCAPE_TAG) {
+        // Only unwrap a payload this codec could have produced — the encoder
+        // always wraps an OBJECT. A `{ $esc: 1 }` that was never encoded
+        // falls through and survives as itself, instead of becoming `{}` via
+        // `Object.keys(1)`.
+        if (
+            key === ESCAPE_TAG &&
+            payload !== null &&
+            typeof payload === 'object' &&
+            !Array.isArray(payload)
+        ) {
             // Unwrap one level, reviving the VALUES but never reading the
             // unwrapped object's own key as a tag — that is the whole point.
             const inner = payload as Record<string, unknown>;
@@ -174,7 +183,7 @@ function rev(value: unknown, handlers: WireTypeHandler[]): unknown {
             for (const k of Object.keys(inner)) out[k] = rev(inner[k], handlers);
             return out;
         }
-        if (key.charCodeAt(0) === 36 /* $ */) {
+        if (key.charCodeAt(0) === 36 /* $ */ && key !== ESCAPE_TAG) {
             for (const h of handlers) {
                 if (h.tag === key) return h.revive(rev(payload, handlers));
             }
