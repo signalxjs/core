@@ -93,8 +93,11 @@ export async function assertServerFn(fetchFn, { label, origin, symbol, args, exp
  * GET {base}/{symbol}?args=… → {data} + Cache-Control (rfc-server §4.1).
  * Asserts the example's cache-marked `getCatalog` read end to end: the GET
  * transport (no body, no content-type, no Origin — a browser's same-origin
- * GET sends none), the declared Cache-Control + Vary, and the #364 tagged
- * rich types in the envelope (a live Date/Set/BigInt after revive).
+ * GET sends none), the declared Cache-Control + Vary, and the #364 rich
+ * types as their WIRE tags in the raw envelope (`$date`/`$set`/`$bigint` —
+ * this probe reads JSON directly, no codec). The revived-instance check
+ * (`instanceof Date/Set`, `typeof bigint`) lives in the example's Catalog
+ * component, which runs the real stub in the browser.
  */
 export async function assertCatalogGet(fetchFn, { label }) {
     const symbol = '@sigx/resume-example/src/api.server.ts#getCatalog';
