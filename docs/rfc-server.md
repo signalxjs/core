@@ -601,7 +601,8 @@ set.
 here: ETag/conditional GET (hashing every body doesn't clear the bar
 while `max-age` + `stale-while-revalidate` absorbs the traffic, and CDNs
 mint ETags themselves), HEAD (405 for now), a per-call freshness flag
-(defers to the #315 per-call-options design), and server-side
+(deferred to #315 and since **shipped** there as `.with({ fresh: true })`
+— `cache: 'no-cache'` on the stub's fetch), and server-side
 memoization of the in-process SSR call path (a different feature that
 must not creep in through this one). `serverStream` never qualifies:
 structurally it has no options form, and the endpoint guards it anyway.
@@ -766,9 +767,9 @@ absorbs duplicates; `staleTime` still governs real freshness) and lean on
 win, anonymous catalog/content served entirely from the edge — put the
 real freshness budget in `sMaxAge` and keep browser `max-age` short.
 Note that client-side `invalidate()`/`refresh()` on a GET read may be
-answered by the browser cache within `max-age`; the per-call bypass
-(`cache: 'no-cache'` on the fetch) defers to the #315 per-call-options
-design, where it naturally lives.
+answered by the browser cache within `max-age`; the per-call bypass is
+`fn.with({ fresh: true })(…)` (#315) — `cache: 'no-cache'` on the stub's
+fetch, so the browser revalidates with the origin for that one call.
 
 ### 6.3 Single-flight boundary refresh
 
@@ -995,12 +996,14 @@ option (revisit only if that proves painful).
   `.with(options)` per-call channel (pulled forward from v2; #353).
 - **v2**: `serverStream` → `useStream` (6.1 — **shipped**, #310);
   server-declared cache directives with `@sigx/cache` (6.2 — **shipped**,
-  #311); zero-JS forms (6.4); per-call options (`headers` — the
-  `.with(options)` channel itself shipped in v1.1 with AbortSignal, #353);
-  GET + cache semantics for idempotent reads (**design locked**, §4.1 +
-  §5.2a; #354 — follow-ups deliberately deferred from it:
-  ETag/conditional GET, HEAD, per-call freshness bypass → #315, canonical
-  key-sorted `args` encoding); rich type-handler
+  #311); zero-JS forms (6.4); per-call options (**shipped**, #315 —
+  `headers` merged over the transport's under the content-type rule, and
+  the `fresh` GET-freshness bypass; the `.with(options)` channel itself
+  shipped in v1.1 with AbortSignal, #353); GET + cache semantics for
+  idempotent reads (**shipped**, #354 — locked design §4.1 + §5.2a;
+  follow-ups deliberately deferred from it: ETag/conditional GET, HEAD,
+  canonical key-sorted `args` encoding; its per-call freshness bypass
+  shipped with #315); rich type-handler
   wire serialization (**shipped**, #364 — the revive side of the serializer
   seam landed with it).
 - **v2+**: single-flight boundary refresh (6.3) once the envelope and the

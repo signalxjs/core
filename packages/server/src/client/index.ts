@@ -63,8 +63,8 @@ async function send(
     endpoint: string,
     symbol: string,
     args: unknown[],
-    signal?: AbortSignal,
-    get?: boolean
+    get: boolean,
+    options?: ServerFnCallOptions
 ): Promise<Response> {
     const config = transport;
     const target = config?.endpoint ?? endpoint;
@@ -75,10 +75,15 @@ async function send(
     // rfc-server N.1) — stripped case-insensitively, since Headers
     // normalization would otherwise COMBINE `Content-Type: x` with ours.
     // A GET carries no body and therefore no content-type at all.
+    // Per-call headers (#315) merge OVER transport headers — the one-off
+    // wins — under the same content-type rule.
     const headers: Record<string, string> = {};
-    for (const key in extra) {
-        if (key.toLowerCase() !== 'content-type') headers[key] = extra[key];
+    for (const source of [extra, options?.headers]) {
+        for (const key in source) {
+            if (key.toLowerCase() !== 'content-type') headers[key] = source[key];
+        }
     }
+    const signal = options?.signal;
     const base = `${prefix}/${encodeURIComponent(symbol)}`;
     let url = base;
     let init: RequestInit;
@@ -92,8 +97,22 @@ async function send(
             );
         }
         url = `${base}?args=${query}`;
-        init = { method: 'GET', headers, ...(signal ? { signal } : {}) };
+        init = {
+            method: 'GET',
+            headers,
+            // §4.1's per-call freshness escape (#315): revalidate with the
+            // origin instead of answering from max-age.
+            ...(options?.fresh ? { cache: 'no-cache' as RequestCache } : {}),
+            ...(signal ? { signal } : {})
+        };
     } else {
+        if (__DEV__ && options?.fresh) {
+            console.warn(
+                `[sigx server] .with({ fresh }) is a no-op on "${symbol}" — only a ` +
+                `cache-marked GET read is ever answered from an HTTP cache; POSTs ` +
+                `always reach the origin.`
+            );
+        }
         headers['content-type'] = 'application/json';
         init = {
             method: 'POST',
@@ -163,8 +182,8 @@ export function __serverFnStub(
 ): ((...args: unknown[]) => Promise<unknown>) & {
     with(options?: ServerFnCallOptions): (...args: unknown[]) => Promise<unknown>;
 } {
-    const call = async (args: unknown[], signal?: AbortSignal): Promise<unknown> => {
-        const res = await send(endpoint, symbol, args, signal, get === 1);
+    const call = async (args: unknown[], options?: ServerFnCallOptions): Promise<unknown> => {
+        const res = await send(endpoint, symbol, args, get === 1, options);
         const text = await res.text();
         let payload:
             | { data?: unknown; error?: WireError; $cache?: ServerFnCacheDirectives }
@@ -201,7 +220,7 @@ export function __serverFnStub(
                         `(SSR-time) calls; passing it here does not send anything.`
                     );
                 }
-                return call(args, options?.signal);
+                return call(args, options);
             }
     });
 }
@@ -223,7 +242,7 @@ export function __serverStreamStub(
         const controller = new AbortController();
         async function* stream(): AsyncGenerator<unknown> {
             try {
-                const res = await send(endpoint, symbol, args, controller.signal);
+                const res = await send(endpoint, symbol, args, false, { signal: controller.signal });
                 if (!res.ok || !res.body) {
                     let wire: WireError | undefined;
                     try {

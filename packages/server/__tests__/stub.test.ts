@@ -151,6 +151,72 @@ describe('__serverFnStub', () => {
     });
 });
 
+describe('per-call options — .with({ headers }) / .with({ fresh }) (#315)', () => {
+    it('sends one-off headers alongside the forced content-type', async () => {
+        const mock = stubFetch(200, { data: 1 });
+        const fn = __serverFnStub('t_fn_00000020', 'traced', '/_sigx/fn');
+        await fn.with({ headers: { 'x-trace-id': 'abc123' } })(1);
+        expect((mock.mock.calls[0][1] as RequestInit).headers).toEqual({
+            'x-trace-id': 'abc123',
+            'content-type': 'application/json'
+        });
+    });
+
+    it('per-call headers win over transport headers; content-type stays unoverridable in BOTH', async () => {
+        const mock = stubFetch(200, { data: 1 });
+        configureServerFn({
+            headers: { authorization: 'Bearer stale', 'x-app': 'demo', 'Content-Type': 'nope' }
+        });
+        const fn = __serverFnStub('t_fn_00000021', 'traced', '/_sigx/fn');
+        await fn.with({
+            headers: { authorization: 'Bearer rotated', 'CONTENT-TYPE': 'also-nope' }
+        })(1);
+        expect((mock.mock.calls[0][1] as RequestInit).headers).toEqual({
+            authorization: 'Bearer rotated',
+            'x-app': 'demo',
+            'content-type': 'application/json'
+        });
+    });
+
+    it('fresh: true puts cache: no-cache on a GET read fetch', async () => {
+        const mock = stubFetch(200, { data: 1 });
+        const read = __serverFnStub('r_fn_00000022', 'read', '/_sigx/fn', 1);
+        await read.with({ fresh: true })({ id: 'p1' });
+        const init = mock.mock.calls[0][1] as RequestInit;
+        expect(init.method).toBe('GET');
+        expect(init.cache).toBe('no-cache');
+    });
+
+    it('a GET read WITHOUT fresh sets no cache mode (the declared max-age governs)', async () => {
+        const mock = stubFetch(200, { data: 1 });
+        const read = __serverFnStub('r_fn_00000023', 'read', '/_sigx/fn', 1);
+        await read({ id: 'p1' });
+        expect('cache' in (mock.mock.calls[0][1] as RequestInit)).toBe(false);
+    });
+
+    it('fresh on a POST stub is a warned no-op', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const mock = stubFetch(200, { data: 1 });
+        const fn = __serverFnStub('p_fn_00000024', 'post', '/_sigx/fn');
+        await fn.with({ fresh: true })(1);
+        const init = mock.mock.calls[0][1] as RequestInit;
+        expect(init.method).toBe('POST');
+        expect('cache' in init).toBe(false);
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining('no-op'));
+    });
+
+    it('headers and fresh compose with a GET read', async () => {
+        const mock = stubFetch(200, { data: 1 });
+        const read = __serverFnStub('r_fn_00000025', 'read', '/_sigx/fn', 1);
+        await read.with({ fresh: true, headers: { 'x-trace-id': 't1' } })({ id: 'p1' });
+        const init = mock.mock.calls[0][1] as RequestInit;
+        expect(init.method).toBe('GET');
+        expect(init.cache).toBe('no-cache');
+        // GET carries the one-off header but never a content-type.
+        expect(init.headers).toEqual({ 'x-trace-id': 't1' });
+    });
+});
+
 describe('configureServerFn (rfc-server rev 2, N.1)', () => {
     it('resolves the transport endpoint at CALL time, over the baked endpoint', async () => {
         const mock = stubFetch(200, { data: 1 });
