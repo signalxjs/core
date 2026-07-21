@@ -145,10 +145,43 @@ renderer failure) is simply omitted and the UI converges through
 `invalidates`/`$cache` — declare both on a mutation for exactly that
 fallback. Wire-only, like `invalidates`; meaningless with `cache`.
 
+### Zero-JS form actions — `form: true`
+
+The mutation-side twin of `cache` (rfc-server §6.4): declaring `form: true`
+marks a function as a **form target**. The endpoint then accepts native form
+POSTs (`application/x-www-form-urlencoded` / `multipart/form-data`) for it,
+and — when a resume `<form>`'s submit handler calls it — the build stamps a
+real `action="/_sigx/fn/<symbol>" method="post"` onto the form:
+
+```ts
+export const submitFeedback = serverFn({
+    form: true,
+    input: FeedbackSchema,          // load-bearing: form fields are strings
+    handler: async (rq, input) => save(input)
+});
+```
+
+- **JS loaded**: the resume delegation cancels the native submit and the
+  handler runs as plain RPC — nothing changes.
+- **JS off, failed, or not yet loaded**: the browser POSTs the form
+  natively; FormData is normalized to the fn's single input (flat object,
+  repeated names → array, `File` passed through, values stay strings —
+  use Standard Schema coercion like `z.coerce.number()`), the same
+  validator and handler run, and the response is a `303` back to the
+  submitting page (handler-set `Location` wins; the Referer is
+  same-origin-validated). Validation failures render a minimal HTML page —
+  use native attributes (`required`, `type=`, `pattern=`) as the no-JS
+  first line.
+- **Security**: the JSON-content-type CSRF layer is deliberately given up
+  for declared form targets only; the `Origin` check stays at full
+  strength (an Origin-less form POST is 403 under the default policy).
+  Only mark genuinely intended form targets, and always declare `input`.
+- JSON callers of the same fn are untouched — same envelope, same errors.
+
 ### Cacheable reads — GET + `Cache-Control`
 
 The read-side twin of `invalidates` (rfc-server §4.1): declaring `cache`
-marks a function a **side-effect-free idempotent read**. The stub then
+marks a function as a **side-effect-free idempotent read**. The stub then
 calls it with `GET {endpoint}/{symbol}?args=…` and the endpoint emits
 `Cache-Control` from the declaration — the browser and any edge cache can
 absorb repeats without touching the origin:

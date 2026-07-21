@@ -19,6 +19,7 @@ import {
     assertStaticAsset,
     assertServerFn,
     assertCatalogGet,
+    assertFormPost,
     assertFallthrough,
     SSR_CONTEXT_MARKER
 } from './assertions.mjs';
@@ -95,7 +96,7 @@ try {
         return fn.fetch(new Request(ORIGIN + urlPath, init));
     };
 
-    await assertDocument(fetchFn, {
+    const resumeHtml = await assertDocument(fetchFn, {
         label,
         appMarker: 'SignalX resumability',
         ssrMarker: SSR_CONTEXT_MARKER
@@ -110,6 +111,7 @@ try {
         expectInData: 'Named = transferred.'
     });
     await assertCatalogGet(fetchFn, { label });
+    await assertFormPost(fetchFn, { label, origin: ORIGIN, html: resumeHtml });
     assert(/via Node\.js/.test(data), `${label}: fn ran under the Node runtime (${data})`);
     await assertFallthrough(fetchFn, { label });
 

@@ -17,6 +17,7 @@ import {
     assertStaticAsset,
     assertServerFn,
     assertCatalogGet,
+    assertFormPost,
     assertFallthrough,
     SSR_CONTEXT_MARKER
 } from './assertions.mjs';
@@ -93,7 +94,7 @@ try {
     build('@sigx/resume-example');
     await withWorker(dir, async (fetchFn, clientDir) => {
         const label = 'workerd/resume';
-        await assertDocument(fetchFn, {
+        const resumeHtml = await assertDocument(fetchFn, {
             label,
             appMarker: 'SignalX resumability',
             ssrMarker: SSR_CONTEXT_MARKER
@@ -110,6 +111,7 @@ try {
             expectInData: 'Named = transferred.'
         });
         await assertCatalogGet(fetchFn, { label });
+        await assertFormPost(fetchFn, { label, origin: 'http://localhost', html: resumeHtml });
         assert(/via Cloudflare-Workers/.test(data), `${label}: fn ran under workerd, not node (${data})`);
         await assertFallthrough(fetchFn, { label });
     });

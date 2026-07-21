@@ -5,6 +5,7 @@ import { Legacy } from './resume/Legacy';
 import { Quote } from './resume/Quote';
 import { Catalog } from './resume/Catalog';
 import { Poll } from './resume/Poll';
+import { Feedback } from './resume/Feedback';
 
 /**
  * Server-only page. The client ships ONLY the generated delegation loader
@@ -81,7 +82,18 @@ export const App = component<{ ssrRequest: string }>((ctx) => {
             </div>
 
             <div class="card">
-                <h3>6 — wake-on-interaction fallback</h3>
+                <h3>6 — zero-JS form action</h3>
+                <p class="hint">
+                    The build stamped a real action/method onto this form, so
+                    submitting works with JS disabled (native POST, 303 back
+                    here). With JS, the same server function runs over RPC.
+                    View source: the form has both a QRL and an action.
+                </p>
+                <Feedback />
+            </div>
+
+            <div class="card">
+                <h3>7 — wake-on-interaction fallback</h3>
                 <p class="hint">
                     This component's handler captures a module-scope table, so
                     it is not extractable — the transform warned at build time
