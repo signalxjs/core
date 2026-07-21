@@ -50,4 +50,16 @@ export function provideTypeHandlers(
         TYPE_HANDLER_TOKEN,
         existing ? [...existing, ...handlers] : [...handlers]
     );
+
+    // Mirror onto the page-global seam (`docs/seams.md`) so the CLIENT read
+    // paths can decode these types too. They have no app context to resolve:
+    // `peekRestored` runs inside a reactive effect, and the boundary readers
+    // live in packs with no instance in scope. The blob is itself a page
+    // global, so a page-global decoder matches its scope exactly.
+    //
+    // Browser only — on the server the DI token is authoritative, and a
+    // process-wide list would let two apps' handlers collide across requests.
+    if (typeof window === 'undefined') return;
+    const g = globalThis as { __SIGX_TYPE_HANDLERS__?: TypeHandler[] };
+    g.__SIGX_TYPE_HANDLERS__ = [...(g.__SIGX_TYPE_HANDLERS__ ?? []), ...handlers];
 }

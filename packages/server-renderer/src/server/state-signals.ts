@@ -21,7 +21,7 @@
 
 import { signal } from 'sigx';
 import type { PrimitiveSignal, Signal, Primitive } from 'sigx';
-import { isSerializable } from './serialize';
+import { admitPayloadEntry, type TypeHandler } from './serialize';
 
 /**
  * Signal factory used by components on the server to declare reactive state
@@ -114,12 +114,15 @@ export function createTrackingSignal(signalMap: Map<string, any>): StateSignalFn
  * checks route through the shared serializer discipline in `./serialize` —
  * one dev-warning path for every blob.
  */
-export function serializeSignalState(signalMap: Map<string, any>): Record<string, any> | undefined {
+export function serializeSignalState(
+    signalMap: Map<string, any>,
+    handlers: readonly TypeHandler[] = []
+): Record<string, any> | undefined {
     if (signalMap.size === 0) return undefined;
 
     const state: Record<string, any> = {};
     for (const [key, value] of signalMap) {
-        if (isSerializable(key, value, 'state signal')) {
+        if (admitPayloadEntry(key, value, 'state signal', handlers)) {
             state[key] = value;
         }
     }
