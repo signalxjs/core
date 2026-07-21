@@ -772,7 +772,10 @@ option (revisit only if that proves painful).
   direct invocation). Implementation may sequence file-form first, inline
   right behind, within the same milestone.
 - **v1.1**: AsyncLocalStorage ambient request context (`/node`) so SSR-time
-  calls see the real request; per-fn guard overrides. **Shipped early from
+  calls see the real request — **shipped** (#309, `runWithServerFnContext`),
+  together with the explicit `fn.with({ context })` channel (#352) that
+  needs no ALS and so works on every runtime. Still open: per-fn guard
+  overrides. **Shipped early from
   the #349–#357 review sweep**: `onError` observability hook and
   `timeoutMs` on the endpoint options (post-RFC additive surface — the RFC
   originally promised neither; #349/#350), the `__DEV__` non-JSON-safe

@@ -116,6 +116,26 @@ decoder matches its scope. Packs call `provideTypeHandlers` once and get both.
 Not stamped on the server: a process-wide list would let two apps' handlers
 collide across requests.
 
+### `__SIGX_SERVERFN_CONTEXT__`
+
+| | |
+|---|---|
+| **Stamped by** | `runWithServerFnContext` (`@sigx/server/node`), on every scope entry |
+| **Read by** | `server/src/context.ts` — `resolveInProcessContext` |
+| **Contract** | `() => Request \| Partial<ServerFnContext> \| undefined` |
+
+The ambient request for in-process (SSR-time) server-function calls
+(rfc-server §7, #309). A global rather than a module variable because `.` and
+`./node` are separate dist entries, and in dev the Vite module runner and Node
+can hold two copies of the same module — the same hazard that makes
+`ServerFnError` a brand check rather than `instanceof`.
+
+Re-stamped on every scope entry, not just the first: anything may clobber or
+delete a global, and a store nothing can read is a worse failure than a
+redundant assignment. A throwing resolver is swallowed — the detached
+context's descriptive error is more actionable than a leaked internal one.
+`fn.with({ context })` wins over whatever is ambient.
+
 ### `__SIGX_LIVE_CLIENT__`
 
 | | |

@@ -16,6 +16,7 @@
 import { Readable } from 'node:stream';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { handleServerFnRequest, type ServerFnRequestOptions } from './server/index';
+import type { ServerFnContextInit } from './context';
 
 export type NodeRequestHandler = (
     req: IncomingMessage,
@@ -174,5 +175,85 @@ function toWebRequest(req: IncomingMessage, res: ServerResponse): Request {
         signal: controller.signal,
         // Required by undici for stream bodies; not yet in lib.dom's RequestInit.
         ...(body ? ({ duplex: 'half' } as unknown as RequestInit) : {})
+    });
+}
+
+// ---------------------------------------------------------------------------
+// Ambient request context for in-process (SSR-time) calls — rfc-server §7 v1.1
+// ---------------------------------------------------------------------------
+
+/**
+ * Run `fn` with `context` visible to every server function called inside it,
+ * however deep (#309).
+ *
+ * A server function shaped `sessionFrom(rq.request)` works over RPC but
+ * throws when the same function is called during SSR, because an in-process
+ * call has no request to expose. Wrap the render and it does:
+ *
+ * ```js
+ * import { runWithServerFnContext } from '@sigx/server/node';
+ *
+ * app.use(async (req, res, next) => {
+ *     const request = toWebRequest(req);
+ *     await runWithServerFnContext(request, () => renderHandler(req, res, next));
+ * });
+ * ```
+ *
+ * `AsyncLocalStorage` carries it across every `await` in the render without
+ * threading a parameter through user code. The store is installed on first
+ * use and read through the `__SIGX_SERVERFN_CONTEXT__` seam
+ * (`docs/seams.md`) rather than a module variable — the `.` and `./node`
+ * entries are separate dist entries, and in dev the Vite module runner and
+ * Node can hold two copies of the same module.
+ *
+ * **Explicit still wins**: `fn.with({ context })` overrides whatever is
+ * ambient, and with neither, `rq.request` keeps throwing its descriptive
+ * error rather than returning undefined.
+ *
+ * **Runtime support.** This entry imports `node:async_hooks`, so it needs
+ * Node, Deno, or workerd with `nodejs_compat`. Runtimes without it use
+ * `fn.with({ context })`, which needs no ALS and behaves identically — that
+ * is the WinterCG-portable form.
+ */
+export async function runWithServerFnContext<T>(
+    context: ServerFnContextInit,
+    fn: () => T | Promise<T>
+): Promise<T> {
+    const store = await ensureContextStore();
+    return store.run(context, fn) as Promise<T>;
+}
+
+/** The slice of AsyncLocalStorage this uses — typed here so the entry needs
+ *  no `node:async_hooks` types at build time. */
+interface ContextStore {
+    run(ctx: ServerFnContextInit, fn: () => unknown): unknown;
+    getStore(): ServerFnContextInit | undefined;
+}
+let _storePromise: Promise<ContextStore> | undefined;
+
+/**
+ * Create the ALS once per process and (re-)stamp the resolver seam on every
+ * scope entry.
+ *
+ * The AsyncLocalStorage is memoized — one store, so nested scopes nest — but
+ * the seam is re-asserted each time rather than only on first use: it is a
+ * global, and anything may clobber or delete it (a test teardown, another
+ * copy of this module, a host that resets globals between requests). The
+ * write is a property assignment; re-doing it is cheaper than the class of
+ * bug where the store exists but nothing can read it.
+ *
+ * The import is dynamic so merely loading this entry does not pull
+ * `node:async_hooks` on a runtime that lacks it — only calling
+ * `runWithServerFnContext` does.
+ */
+function ensureContextStore(): Promise<ContextStore> {
+    _storePromise ??= import('node:async_hooks').then(
+        ({ AsyncLocalStorage }) => new AsyncLocalStorage<ServerFnContextInit>()
+    );
+    return _storePromise.then((als) => {
+        (globalThis as {
+            __SIGX_SERVERFN_CONTEXT__?: () => ServerFnContextInit | undefined;
+        }).__SIGX_SERVERFN_CONTEXT__ = () => als.getStore();
+        return als as unknown as ContextStore;
     });
 }

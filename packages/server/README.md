@@ -157,9 +157,41 @@ serverFn(async (rq, ...args) => {
 });
 ```
 
-In-process calls (during SSR) run the same pipeline against a detached
-context — no network hop; `rq.request` throws a descriptive error there
-(ambient request context is the designed v1.1 follow-up).
+### In-process (SSR-time) calls
+
+Calling a server function during SSR runs the same pipeline with no network
+hop. By default the context is **detached**: `rq.request`/`rq.url` throw a
+descriptive error, because there is no HTTP request to expose. That matters
+for the most common shape there is —
+
+```ts
+const user = await sessionFrom(rq.request);   // fine over RPC, throws during SSR
+```
+
+Two ways to supply the request, most explicit first:
+
+```ts
+// 1. Per call — works on every runtime, no ALS needed.
+await getCart.with({ context: request })(cartId);
+
+// 2. Ambient — every server function called anywhere inside sees it.
+import { runWithServerFnContext } from '@sigx/server/node';
+
+await runWithServerFnContext(request, () => renderHandler(req, res, next));
+```
+
+`runWithServerFnContext` uses `AsyncLocalStorage`, so the request survives
+every `await` in the render without threading a parameter through user code.
+It needs Node, Deno, or workerd with `nodejs_compat`; runtimes without it use
+form 1, which behaves identically. `.with({ context })` wins over ambient, and
+with neither the throw stays — a function reading `rq.request` when nothing
+supplied one is a bug worth seeing, not a silent `undefined`.
+
+`context` accepts a `Request` or a partial `ServerFnContext` (to set `locals`,
+say). `rq.responseHeaders`/`rq.status()` stay inert either way: there is no
+HTTP response to affect, and pretending otherwise would silently drop headers.
+On the client `.with({ context })` is ignored, with a dev warning — a stub's
+context is the request it makes.
 
 ## The endpoint
 

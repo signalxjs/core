@@ -4,6 +4,10 @@
 
 ### Added
 
+- **Request context for in-process (SSR-time) calls** (rfc-server §7 v1.1, #309 + #352). The most common server-function shape — `sessionFrom(rq.request)` — worked over RPC and **threw** the moment the same function was called during SSR, because an in-process call has no request to expose. Two ways to supply one now, most explicit first: `fn.with({ context: request })` per call (#352), and `runWithServerFnContext(request, fn)` from `@sigx/server/node` (#309), which uses `AsyncLocalStorage` so every server function called anywhere inside the scope sees it — including `serverStream`, which has no `.with()` channel. `context` takes a `Request` or a partial `ServerFnContext`. Explicit wins over ambient; with neither, the descriptive throw stays, because a function reading `rq.request` when nothing supplied one is a bug worth seeing rather than a silent `undefined`. `rq.responseHeaders`/`rq.status()` remain inert either way — there is no HTTP response to affect. On the client `.with({ context })` is ignored with a `__DEV__` warning (a stub's context is the request it makes), which costs the size-limited stub entry nothing.
+
+  **WinterCG story**: `runWithServerFnContext` imports `node:async_hooks` **dynamically**, so merely loading `@sigx/server/node` does not pull it on a runtime that lacks it — only calling the function does. It needs Node, Deno, or workerd with `nodejs_compat`; everywhere else `.with({ context })` behaves identically and needs no ALS. The ambient request reaches the core through the `__SIGX_SERVERFN_CONTEXT__` seam (`docs/seams.md`) rather than a module variable, because `.` and `./node` are separate dist entries and dev can hold two copies of a module — the same hazard that makes `ServerFnError` a brand check. The seam is re-stamped on every scope entry, not just the first: a store nothing can read is a worse failure than a redundant assignment.
+
 - **Rich wire serialization, both directions** (rfc-server §4, #364). A
   returned `Date` used to arrive as a string — while TypeScript still
   reported `Date`, so `.getTime()` threw in production. `Map`/`Set` arrived

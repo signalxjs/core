@@ -27,7 +27,7 @@
  * server.)
  */
 
-import { createDetachedContext, type ServerFnContext } from './context';
+import { resolveInProcessContext, type ServerFnContext } from './context';
 import { ServerFnError } from './errors';
 import type {
     ServerFnCallOptions,
@@ -145,7 +145,7 @@ export function serverFn(
         (options?: ServerFnCallOptions) =>
         (...args: unknown[]) => {
             assertNotLiveClient(name);
-            return invoke(createDetachedContext(options?.signal), { symbol: '', name }, args);
+            return invoke(resolveInProcessContext(options?.signal, options?.context), { symbol: '', name }, args);
         };
     const wrapper = callWith();
     // The §6.2 seam for the ENDPOINT (wire-only — the wrapper above never
@@ -196,7 +196,10 @@ export function serverStream<A extends unknown[], T>(
     const invoke: ServerFnInvoke = async (rq, _info, args) => impl(rq, ...(args as A));
     const wrapper = (...args: A): AsyncIterable<T> => {
         assertNotLiveClient(name);
-        return impl(createDetachedContext(), ...args);
+        // Ambient context applies here too: serverStream has no .with()
+        // channel (#362 excluded it -- consumer break/return aborts), but an
+        // SSR-time stream still needs the real request.
+        return impl(resolveInProcessContext(), ...args);
     };
     return Object.assign(wrapper, { __sigxFn: invoke, __sigxName: name, __sigxStream: true as const });
 }
