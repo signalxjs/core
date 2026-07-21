@@ -225,7 +225,14 @@ export async function handleServerFnRequest(
             isGet ? NO_STORE : undefined
         );
     }
-    if (isGet && (fn.__sigxGet !== true || fn.__sigxStream === true)) {
+    if (
+        isGet &&
+        (fn.__sigxGet !== true ||
+            fn.__sigxStream === true ||
+            // A wrapper that kept the mark but dropped the precomputed header
+            // must degrade to POST-only, not throw into a masked 500 later.
+            typeof fn.__sigxCacheControl !== 'string')
+    ) {
         // Resource-precise: THIS function supports only POST (§4.1).
         return errorResponse(405, 'Method not allowed', undefined, undefined, {
             Allow: 'POST',

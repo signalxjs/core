@@ -112,6 +112,13 @@ describe('method gating (§4.1)', () => {
         expect(res.headers.get('cache-control')).toBe('no-store');
     });
 
+    it('a __sigxGet mark WITHOUT __sigxCacheControl degrades to POST-only (405), not a 500', async () => {
+        const wrapped = { ...(read as object), __sigxCacheControl: undefined };
+        const res = await get('w', [{ id: 'p1' }], {}, { resolve: () => wrapped });
+        expect(res.status).toBe(405);
+        expect(res.headers.get('allow')).toBe('POST');
+    });
+
     it('GET to a serverStream is 405 even though streams carry no cache mark', async () => {
         const res = await get('stream_fn_00000009', []);
         expect(res.status).toBe(405);
