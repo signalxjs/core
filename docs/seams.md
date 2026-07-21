@@ -14,10 +14,16 @@ Two mechanisms carry that coordination:
   server→client boundary, or inside a reactive effect where no instance is
   current. Untyped by nature, so they are listed here.
 
-**This file is the registry.** A global with no entry here is a bug. The map
-used to exist only by grepping, and that cost real time: `@sigx/ssr-islands`
-reads `__SIGX_BOUNDARIES__` directly rather than through
-`getBoundaryTable()`, and a change to the "one" accessor silently missed it.
+**This file is the registry.** A global with no entry here is a bug, and so is
+a second way to read one — every seam below has exactly one accessor, on
+purpose.
+
+That rule is written in hindsight. The map used to exist only by grepping, and
+it cost real time: `@sigx/ssr-islands` read `__SIGX_BOUNDARIES__` directly
+instead of through `getBoundaryTable()`, and `@sigx/cache` kept its own copy of
+the `__SIGX_ASYNC__` accessors. Both were invisible to anyone changing "the"
+reader — a decode added to the single accessor would have silently skipped
+every island. Both were united in #374.
 
 ## Data seams — payloads the server writes and the client reads
 
@@ -26,8 +32,11 @@ reads `__SIGX_BOUNDARIES__` directly rather than through
 | | |
 |---|---|
 | **Written by** | `server-renderer/src/server/state.ts` → `assignmentJs` (`server/serialize.ts:148`), from `server/state-plugin.ts` — shell script and mid-stream |
-| **Read by** | `runtime-core/src/async/restore.ts` (`peekRestored`), `cache/src/store.ts` (`peekBlob`) |
+| **Read by** | `runtime-core/src/async/restore.ts` — `peekRestored`, **the only accessor**. `@sigx/cache` imports it (plus `writeBack`/`invalidateRestored`) from `@sigx/runtime-core/internals` rather than touching the global. |
 | **Shape** | Null-prototype object, `key → value`. Values are encoded by `@sigx/serialize`. |
+
+`peekRestored` is therefore also **the** decode point: the codec is applied in
+exactly one place for this seam.
 
 The page's data cache for its lifetime: every mount of the same key restores
 from it, including after client-side navigation.
@@ -45,12 +54,23 @@ from it, including after client-side navigation.
 | | |
 |---|---|
 | **Written by** | `server-renderer/src/server/serialize.ts` → `emitBoundaryTable` (:209) and `boundaryPatchJs` (:241) |
-| **Read by** | `server-renderer/src/client/scheduler.ts:90` (`getBoundaryTable`/`getBoundaryRecord`), `ssr-islands/src/client/island-context.ts:50` (**direct read — bypasses the accessor**), `resume/src/client/scope.ts:76,102` (via `getBoundaryRecord`) |
+| **Read by** | `server-renderer/src/client/scheduler.ts:90` — `getBoundaryTable`/`getBoundaryRecord`, **the only accessor**. `@sigx/ssr-islands` (`client/island-context.ts`) and `@sigx/resume` (`client/scope.ts`) both go through it. |
 | **Shape** | `id → SSRBoundaryRecord { props, state, … }` |
 
 Per-boundary props and signal snapshots for selective hydration and resume.
-Islands caches its view in `_cachedIslandData` and invalidates on patch; the
-core accessor does not memoize.
+Islands derives a filtered `IslandInfo` view and memoizes it in
+`_cachedIslandData` (invalidated by `invalidateIslandCache`); the core accessor
+does not memoize.
+
+> **Decode does NOT happen at the accessor.** `getBoundaryTable` and
+> `seedBoundaryState` both sit in the **eager** scheduler bundle, whose
+> size-limit entry carries no ignore list precisely to guarantee no runtime
+> reaches the eager path — the codec would cost ~750 B of a 3 KB budget. The
+> eager path reads only *metadata* (`hydrate`, `media`, `flush`, `chunk`); the
+> user values live in `record.props`/`record.state`, so those are decoded with
+> `reviveFromServer` in the **lazy** chunks that actually mount components
+> (`server-renderer/src/client/hydration-core.ts`, `resume/src/client/`).
+> Adding a decode to the accessor would trade a size guard for convenience.
 
 ## Control seams — one package handing another a capability
 
