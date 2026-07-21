@@ -53,11 +53,11 @@
 //     oracle observes components, not nodes. Leaf-level orphaning is the
 //     unit suites' job (`hydrate-mismatch-cleanup`), not this gate's.
 import { execSync, spawn } from 'node:child_process';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 
-const repoRoot = resolve(fileURLToPath(import.meta.url), '../..');
+const repoRoot = fileURLToPath(new URL('..', import.meta.url));
 
 // A real-Chrome UA: the examples' `isBot` regex matches /headless/, and a bot
 // gets the blocking document — a different code path with nothing to hydrate.
@@ -193,12 +193,13 @@ async function waitForServer(url, timeoutMs = 20000) {
     const deadline = Date.now() + timeoutMs;
     for (;;) {
         try {
-            await fetch(url, { headers: { 'user-agent': UA } });
-            return;
-        } catch {
-            if (Date.now() > deadline) throw new Error(`server did not start within ${timeoutMs}ms`);
-            await new Promise((r) => setTimeout(r, 250));
-        }
+            // A response is not enough — an error page would send the browser
+            // to a document with nothing to hydrate, failing obscurely later.
+            const res = await fetch(url, { headers: { 'user-agent': UA } });
+            if (res.ok) return;
+        } catch { /* not listening yet */ }
+        if (Date.now() > deadline) throw new Error(`server did not serve ${url} within ${timeoutMs}ms`);
+        await new Promise((r) => setTimeout(r, 250));
     }
 }
 
