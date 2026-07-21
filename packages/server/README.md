@@ -276,7 +276,9 @@ globalThis.__SIGX_SERVERFN_CODEC__ = [{
 ```
 
 Registered handlers are consulted **before** the built-ins, so a pack can own
-a type they also cover. Encoded values take the form `{ $date: 1700000000 }`;
+a type they also cover. Encoded values take the form
+`{ $date: 1700000000000 }` (epoch **milliseconds**, straight from
+`Date#getTime()`);
 a user object that happens to look like one (`{ $date: 'a string' }`) is
 escaped and comes back intact, and an unrecognized tag is passed through
 rather than throwing — so a client and server on different versions degrade
