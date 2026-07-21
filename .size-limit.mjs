@@ -148,8 +148,11 @@ export default [
     // because the module boundary blocks some inlining, and that is the
     // deliberate trade — one implementation instead of two that drift (the
     // duplicated pair had already grown the same $esc bug twice).
+    // 1.9 KB → 2 KB with #354: the GET branch for cache-marked reads
+    // (query-string args + the dev URL-length warning) landed the entry at
+    // 1.89 KB — 10 B of headroom is a CI hair-trigger, not a budget.
     name: '@sigx/server/client (fetch stubs)',
     path: 'packages/server/dist/client/index.prod.js',
-    limit: '1.9 KB',
+    limit: '2 KB',
   },
 ];

@@ -25,8 +25,18 @@
   pipeline is identical on both methods; `invalidates` never runs on GET
   (`cache` and `invalidates` are mutually exclusive — `__DEV__` warns).
   `__DEV__` also warns when a `public` read touches `rq.request` (identity
-  must not shape a shared-cacheable body). The client stub's GET emission
-  ships with the build-transform half.
+  must not shape a shared-cacheable body).
+- **GET stubs** — the client half of the same feature. `__serverFnStub`
+  gains a 4th positional flag; when the `@sigx/vite/server` transform sees
+  a `cache` declaration (presence-only, so a computed
+  `cache: makePolicy()` still extracts) it stamps the flag and the stub
+  issues `GET {endpoint}/{symbol}?args=<encoded>` — no body, no
+  content-type, transport extra headers preserved, the envelope/`$cache`/
+  error path shared with POST. `__DEV__` warns when the encoded arguments
+  exceed ~2 KiB (too large to make a good cache key). No hash-seed change:
+  the symbol already covers the call source, so toggling `cache` re-mints
+  it and a stale client can never GET a symbol whose server half does not
+  accept GET.
 - **Renders are scoped automatically** (#309). `runWithServerFnContext` now
   publishes its runner as the `__SIGX_SERVERFN_SCOPE__` seam, which
   `createRequestHandler` / `createFetchHandler` use to wrap every document
