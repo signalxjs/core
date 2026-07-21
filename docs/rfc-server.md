@@ -274,11 +274,12 @@ Notes:
 
 - **Ctx-first parameter** is the sigx idiom (`component((ctx) => …)`,
   extracted handlers `($scope, e) => …`). No `this` (Qwik), no ambient
-  `getRequestEvent()` global (Solid) in v1 — explicit beats ambient, and it
-  makes the in-process SSR call semantics obvious (§7 v1: a detached
-  context whose `request` throws a descriptive dev error; AsyncLocalStorage
-  ambient context is the v1.1 follow-up for SSR-time calls that need the
-  real request).
+  `getRequestEvent()` global (Solid) at the CALL site — the context is always
+  a parameter, which is what makes the in-process SSR call semantics obvious.
+  Where its value comes from is resolved per call (**v1.1**): explicit
+  `fn.with({ context })` → the ambient `runWithServerFnContext` scope → the
+  detached context, whose `request`/`url` throw a descriptive error naming
+  both remedies.
 - **`use` guards are part of the function's definition**, so they run for
   every transport — the structural fix for Qwik's "layout middleware does
   not run for `server$`" auth trap. App-wide auth belongs in the handler's

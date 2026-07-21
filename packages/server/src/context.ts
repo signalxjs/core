@@ -100,7 +100,12 @@ function contextFrom(init: ServerFnContextInit, signal?: AbortSignal): ServerFnC
         get url(): URL {
             return url ?? detached.url;
         },
-        abortSignal: signal ?? partial.abortSignal ?? detached.abortSignal,
+        // A supplied Request carries the REAL cancellation channel (the Node
+        // adapter aborts it on client disconnect), so it beats the detached
+        // never-aborting default — otherwise SSR-time work would keep running
+        // for a client that has already gone away. A per-call `signal` or an
+        // explicitly supplied `abortSignal` still wins over it.
+        abortSignal: signal ?? partial.abortSignal ?? request?.signal ?? detached.abortSignal,
         responseHeaders: partial.responseHeaders ?? new Headers(),
         status: partial.status ?? detached.status,
         locals: partial.locals ?? {}
@@ -149,8 +154,10 @@ export function createDetachedContext(signal?: AbortSignal): ServerFnContext {
     const noRequest = (what: string): never => {
         throw new Error(
             `[sigx server] ${what} is not available on an in-process server-function call — ` +
-            `there is no HTTP request. (Reading the live request during SSR is the designed ` +
-            `v1.1 follow-up; see docs/rfc-server.md §7.)`
+            `nothing supplied a request. Either hand one to this call, ` +
+            `fn.with({ context: request })(…), or render inside ` +
+            `runWithServerFnContext(request, …) from '@sigx/server/node' so every call in ` +
+            `scope sees it. See docs/rfc-server.md §7.`
         );
     };
     return {

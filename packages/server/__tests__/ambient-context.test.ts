@@ -33,6 +33,13 @@ describe('detached context — the default', () => {
     it('throws on rq.url too', async () => {
         await expect(whereAmI()).rejects.toThrow(/rq\.url/);
     });
+
+    it('names both remedies — the error is where an author learns them', async () => {
+        const error: unknown = await whoAmI().catch((e: unknown) => e);
+        const message = error instanceof Error ? error.message : String(error);
+        expect(message).toContain('fn.with({ context: request })');
+        expect(message).toContain('runWithServerFnContext');
+    });
 });
 
 describe('explicit context — fn.with({ context }) (#352)', () => {
@@ -116,6 +123,43 @@ describe('ambient context — runWithServerFnContext (#309)', () => {
             return chunks;
         });
         expect(out).toEqual(['/feed']);
+    });
+});
+
+describe('cancellation follows the supplied request', () => {
+    it('adopts request.signal, so a disconnect reaches SSR-time work', async () => {
+        const controller = new AbortController();
+        const readsSignal = serverFn(async (rq) => rq.abortSignal);
+        const signal = await readsSignal.with({
+            context: REQ('https://example.com/cart', { signal: controller.signal })
+        })();
+        expect(signal.aborted).toBe(false);
+        controller.abort();
+        // The never-aborting detached default would have stayed false —
+        // work would keep running for a client that has gone away.
+        expect(signal.aborted).toBe(true);
+    });
+
+    it('does the same for the ambient scope', async () => {
+        const controller = new AbortController();
+        const readsSignal = serverFn(async (rq) => rq.abortSignal);
+        const signal = await runWithServerFnContext(
+            REQ('https://example.com/cart', { signal: controller.signal }),
+            () => readsSignal()
+        );
+        controller.abort();
+        expect(signal.aborted).toBe(true);
+    });
+
+    it('still lets an explicit per-call signal win', async () => {
+        const perCall = new AbortController();
+        const request = new AbortController();
+        const readsSignal = serverFn(async (rq) => rq.abortSignal);
+        const signal = await readsSignal.with({
+            signal: perCall.signal,
+            context: REQ('https://example.com/cart', { signal: request.signal })
+        })();
+        expect(signal).toBe(perCall.signal);
     });
 });
 
