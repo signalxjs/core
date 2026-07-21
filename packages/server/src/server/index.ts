@@ -12,6 +12,7 @@
  */
 
 import { createRequestContext, type ServerFnContext } from '../context';
+import { runInScope } from '../scope';
 import { isServerFnError } from '../errors';
 import type { ServerFnGuard, ServerFnInfo, WrappedServerFn } from '../types';
 import { encodeWire, reviveWire } from '../wire-codec';
@@ -230,7 +231,12 @@ export async function handleServerFnRequest(
     let timer: ReturnType<typeof setTimeout> | undefined;
     let timeoutError: Error | undefined;
 
-    const work = (async (): Promise<Response> => {
+    // The invocation runs inside a request scope (#309), so a server function
+    // calling ANOTHER server function in-process inherits THIS request instead
+    // of dropping to the detached context — the live one is right here. Also
+    // what registers `__SIGX_SERVERFN_CONTEXT__` on an RPC-only deployment.
+    // Unscoped where the runtime has no AsyncLocalStorage; nothing else moves.
+    const work = runInScope(ctx as ServerFnContext, async (): Promise<Response> => {
         await options.guard?.(ctx as ServerFnContext, info);
         const result = await invoke(ctx, info, args);
         if (fn.__sigxStream === true) {
@@ -259,7 +265,7 @@ export async function handleServerFnRequest(
             }
         }
         return new Response(JSON.stringify(envelope), { status: ctx._status ?? 200, headers });
-    })();
+    });
 
     try {
         if (timeoutMs === undefined) return await work;

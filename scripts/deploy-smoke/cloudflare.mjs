@@ -16,7 +16,8 @@ import {
     assertBotDocument,
     assertStaticAsset,
     assertServerFn,
-    assertFallthrough
+    assertFallthrough,
+    SSR_CONTEXT_MARKER
 } from './assertions.mjs';
 
 const repoRoot = resolve(fileURLToPath(import.meta.url), '../../..');
@@ -62,6 +63,11 @@ async function withWorker(exampleDir, run) {
         modules: [{ type: 'ESModule', path: join(exampleDir, cfg.main) }],
         modulesRoot: join(exampleDir, 'dist-cf/server'),
         compatibilityDate: cfg.compatibility_date,
+        // The app's flags, not a hard-coded set — the smoke must run workerd
+        // configured the way the deployment is. `nodejs_compat` is what makes
+        // node:async_hooks (the ambient request scope, rfc-server §7 v1.1)
+        // resolvable; without this line the worker fails to start.
+        compatibilityFlags: cfg.compatibility_flags ?? [],
         assets: {
             directory: join(exampleDir, cfg.assets.directory),
             routerConfig: { has_user_worker: true },
@@ -86,7 +92,11 @@ try {
     build('@sigx/resume-example');
     await withWorker(dir, async (fetchFn, clientDir) => {
         const label = 'workerd/resume';
-        await assertDocument(fetchFn, { label, appMarker: 'SignalX resumability' });
+        await assertDocument(fetchFn, {
+            label,
+            appMarker: 'SignalX resumability',
+            ssrMarker: SSR_CONTEXT_MARKER
+        });
         await assertBotDocument(fetchFn, { label, appMarker: 'SignalX resumability' });
         await assertStaticAsset(fetchFn, { label, clientDir });
         const data = await assertServerFn(fetchFn, {
@@ -98,7 +108,7 @@ try {
             args: [1],
             expectInData: 'Named = transferred.'
         });
-        assert(!/via v\d/.test(data), `${label}: fn ran under workerd, not node (${data})`);
+        assert(/via Cloudflare-Workers/.test(data), `${label}: fn ran under workerd, not node (${data})`);
         await assertFallthrough(fetchFn, { label });
     });
 }

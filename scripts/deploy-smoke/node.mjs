@@ -13,7 +13,8 @@ import {
     assertBotDocument,
     assertStaticAsset,
     assertServerFn,
-    assertFallthrough
+    assertFallthrough,
+    SSR_CONTEXT_MARKER
 } from './assertions.mjs';
 
 const repoRoot = resolve(fileURLToPath(import.meta.url), '../../..');
@@ -54,7 +55,11 @@ try {
     await waitForServer(ORIGIN + '/');
     const fetchFn = (path, init) => fetch(ORIGIN + path, init);
     const label = 'node/resume';
-    await assertDocument(fetchFn, { label, appMarker: 'SignalX resumability' });
+    await assertDocument(fetchFn, {
+        label,
+        appMarker: 'SignalX resumability',
+        ssrMarker: SSR_CONTEXT_MARKER
+    });
     await assertBotDocument(fetchFn, { label, appMarker: 'SignalX resumability' });
     await assertStaticAsset(fetchFn, { label, clientDir: join(dir, 'dist/client') });
     const data = await assertServerFn(fetchFn, {
@@ -64,7 +69,7 @@ try {
         args: [1],
         expectInData: 'Named = transferred.'
     });
-    assert(/via v\d/.test(data), `${label}: fn ran under node (${data})`);
+    assert(/via Node\.js/.test(data), `${label}: fn ran under node (${data})`);
     await assertFallthrough(fetchFn, { label });
     console.log('\n✅ deploy-smoke: the external build serves documents, assets, and server functions under node');
 } catch (err) {
