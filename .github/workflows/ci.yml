@@ -91,6 +91,40 @@ jobs:
       - name: Edge smoke test
         run: pnpm test:edge
 
+  hydration-smoke:
+    # #377: hydration has no success signal in a prod dist — both mismatch
+    # warnings are __DEV__-gated, so a page that bailed to a full client
+    # re-render still WORKS and reports nothing. This job asks the question
+    # directly: every `<!--$c:N-->` marker the server sent must still be in
+    # the live DOM after hydration (a bail's removeSSRRange takes the nested
+    # markers with it), over real production builds of the root-walk app and
+    # the islands app. See scripts/hydration-smoke.mjs for what the oracle
+    # does and does not catch.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+
+      # Chromium only: the gate needs a real browser to run hydration, and
+      # nothing here is browser-specific.
+      - name: Install Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Hydration smoke
+        run: pnpm smoke:hydration
+
   deploy-smoke-cloudflare:
     # rfc-deploy §6: the built reference apps under REAL workerd (Miniflare,
     # programmatic dispatchFetch — no ports, no login). Streamed document

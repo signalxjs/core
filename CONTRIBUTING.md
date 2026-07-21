@@ -49,6 +49,7 @@ packages/
 | Run tests in watch mode | `pnpm test:watch` |
 | Lint | `pnpm lint` |
 | Edge smoke test (after `pnpm build`) | `pnpm test:edge` |
+| Hydration smoke — did a prod build hydrate, or re-render client-side? (after `pnpm build`) | `pnpm smoke:hydration` (needs `pnpm exec playwright install chromium` once) |
 | SSR benchmarks (after `pnpm build`) | `pnpm bench:ssr:quick` (quick + regression table) / `pnpm bench:ssr` (vs Vue, React, Preact) |
 | Try a runnable example | `pnpm --filter @sigx/spa-example dev` |
 

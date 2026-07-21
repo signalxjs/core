@@ -47,6 +47,7 @@
         "wt": "node scripts/worktree.mjs",
         "clean": "node -e \"const fs=require('fs'),p=require('path');const rm=x=>fs.rmSync(x,{recursive:true,force:true});for(const d of fs.readdirSync('packages')){rm(p.join('packages',d,'dist'));rm(p.join('packages',d,'node_modules'));}rm('node_modules');rm('pnpm-lock.yaml');\"",
         "test:edge": "node --conditions production --import ./packages/server-renderer/scripts/edge-register.mjs packages/server-renderer/scripts/edge-smoke.mjs",
+        "smoke:hydration": "node scripts/hydration-smoke.mjs",
         "deploy-smoke:cloudflare": "node scripts/deploy-smoke/cloudflare.mjs",
         "deploy-smoke:node": "node scripts/deploy-smoke/node.mjs",
         "deploy-smoke:bun": "node scripts/deploy-smoke/bun.mjs",
