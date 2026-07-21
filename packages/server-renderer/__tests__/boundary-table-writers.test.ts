@@ -74,4 +74,13 @@ describe('createSSRContext({ baseComponentId })', () => {
         const ctx = createSSRContext();
         expect(ctx.nextId()).toBe(1);
     });
+
+    it('coerces a hostile seed to a safe integer floor', () => {
+        // Fractional seeds floor (markers are parseInt-parsed client-side)…
+        expect(createSSRContext({ baseComponentId: 10.9 }).nextId()).toBe(11);
+        // …and NaN/Infinity/negative seeds fall back to the default sequence.
+        expect(createSSRContext({ baseComponentId: Number.NaN }).nextId()).toBe(1);
+        expect(createSSRContext({ baseComponentId: Number.POSITIVE_INFINITY }).nextId()).toBe(1);
+        expect(createSSRContext({ baseComponentId: -5 }).nextId()).toBe(1);
+    });
 });

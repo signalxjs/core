@@ -206,6 +206,25 @@ describe('createBoundaryRefresh — declines (omission, never a throw)', () => {
         vi.restoreAllMocks();
     });
 
+    it('declines inherited object keys — only own registry entries are callable', async () => {
+        const Counter = makeCounter();
+        const ssr = createSSR().use(resumePlugin());
+        const renderBoundaries = createBoundaryRefresh({ ssr, components: { Counter } });
+
+        // `constructor`/`toString` resolve through the prototype chain of a
+        // plain-object registry; the own-property guard must keep them from
+        // ever reaching the lazy-loader call path.
+        const entries = await renderBoundaries(
+            [
+                { id: 3, component: 'constructor' },
+                { id: 5, component: 'toString' },
+                { id: 7, component: 'Counter' }
+            ],
+            BASE
+        );
+        expect(entries.map((e) => e.for)).toEqual([7]);
+    });
+
     it('declines unknown registry keys, keeps the rest', async () => {
         const Counter = makeCounter();
         const ssr = createSSR().use(resumePlugin());

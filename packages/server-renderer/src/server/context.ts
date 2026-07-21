@@ -263,7 +263,13 @@ export interface SSRContext {
  * Create a new SSR context for rendering
  */
 export function createSSRContext(options: SSRContextOptions = {}): SSRContext {
-    let componentId = options.baseComponentId ?? 0;
+    // Coerce the seed to a finite non-negative integer — markers are parsed
+    // with parseInt on the client, so a fractional/NaN/negative seed would
+    // emit ids the marker index mis-reads.
+    const seed = options.baseComponentId;
+    let componentId = typeof seed === 'number' && Number.isFinite(seed) && seed > 0
+        ? Math.floor(seed)
+        : 0;
     const componentStack: number[] = [];
     const head: string[] = [];
     const pluginData = new Map<string, any>();

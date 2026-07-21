@@ -161,10 +161,16 @@ export function createBoundaryRefresh(
             nextBase = seeded + MIN_ID_STRIDE;
             try {
                 if (!Number.isFinite(seeded) || seeded <= 0) break;
-                const component = await resolveComponent(
-                    options.components[request.component],
+                // Own-property lookup only: the key is attacker-controlled,
+                // and an inherited name (`constructor`, `toString`, …) must
+                // never reach the lazy-loader call path.
+                const registered = Object.prototype.hasOwnProperty.call(
+                    options.components,
                     request.component
-                );
+                )
+                    ? options.components[request.component]
+                    : undefined;
+                const component = await resolveComponent(registered, request.component);
                 if (!component) {
                     if (__DEV__) {
                         console.warn(
