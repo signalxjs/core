@@ -36,6 +36,8 @@ const rootDir = join(__dirname, '..');
 // live in their own repos under https://github.com/signalxjs and are published
 // from there.
 const PACKAGES = [
+    // Zero dependencies — the base of the stack, so it publishes first.
+    'packages/serialize',
     'packages/reactivity',
     'packages/runtime-core',
     'packages/runtime-dom',
