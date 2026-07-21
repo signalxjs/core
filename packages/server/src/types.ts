@@ -118,6 +118,14 @@ export interface WrappedServerFn {
      */
     __sigxCacheControl?: string;
     /**
+     * Present (true) when the options form declared `form: true`
+     * (rfc-server §6.4) — the function is a declared FORM TARGET: the
+     * endpoint accepts form content-types for it (FormData → single
+     * input → the same validator/pipeline → 303 PRG), and the build
+     * stamps `action`/`method` onto forms whose submit handler calls it.
+     */
+    __sigxForm?: boolean;
+    /**
      * Present when the options form declared `invalidates` (rfc-server
      * §6.2): VALIDATED input (stashed on the request context by the
      * pipeline) + settled result → cache keys the endpoint attaches to the

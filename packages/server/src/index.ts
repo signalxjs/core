@@ -141,6 +141,21 @@ export interface ServerFnOptions<S, R> {
      * not a read. Layering with `@sigx/cache`'s staleTime: §6.2.
      */
     cache?: ServerFnReadCache;
+    /**
+     * Marks the function a FORM TARGET (rfc-server §6.4): the endpoint
+     * accepts `application/x-www-form-urlencoded` / `multipart/form-data`
+     * for it — FormData is normalized to this fn's single input (flat
+     * object; repeated names → array; File passed through; values stay
+     * strings, so Standard Schema coercion like `z.coerce.number()` is
+     * the mapping tool) — and answers 303 POST-redirect-GET. The build
+     * stamps `action`/`method` onto a resume `<form>` whose submit
+     * handler calls this fn, so the native POST works before/without JS.
+     * Write the LITERAL `true` — the build reads it statically. Declare
+     * `input`: form fields are attacker-typable strings and the validator
+     * is what stands between them and the handler (§5.2b). Mutually
+     * exclusive with `cache` — a form target is a mutation.
+     */
+    form?: boolean;
     handler(rq: ServerFnContext, input: S): R | Promise<R>;
 }
 
@@ -229,13 +244,33 @@ export function serverFn(
             `mutations). The function stays callable, but pick one.`
         );
     }
+    // The §6.4 form-target marker: the endpoint's gate for accepting form
+    // content-types, and the build's for stamping action/method.
+    const form = typeof arg === 'function' ? false : arg.form === true;
+    if (__DEV__ && form) {
+        if (cache) {
+            console.warn(
+                `[sigx server] serverFn ${name ? `"${name}" ` : ''}declares both \`form\` and ` +
+                `\`cache\` — a form target is a mutation; a cacheable read cannot be one ` +
+                `(rfc-server §6.4). The function stays callable, but pick one.`
+            );
+        }
+        if (!(arg as ServerFnOptions<unknown, unknown>).input) {
+            console.warn(
+                `[sigx server] serverFn ${name ? `"${name}" ` : ''}declares \`form\` without ` +
+                `\`input\` — the no-JS transport delivers an attacker-shaped string map ` +
+                `straight to the handler. Declare a validator (rfc-server §5.2b).`
+            );
+        }
+    }
     return Object.assign(wrapper, {
         with: callWith,
         __sigxFn: invoke,
         __sigxName: name,
         ...(invalidates ? { __sigxInvalidates: invalidates } : {}),
         ...(refreshes ? { __sigxRefreshes: refreshes } : {}),
-        ...(cache ? { __sigxGet: true, __sigxCacheControl: cacheControlValue(cache) } : {})
+        ...(cache ? { __sigxGet: true, __sigxCacheControl: cacheControlValue(cache) } : {}),
+        ...(form ? { __sigxForm: true } : {})
     });
 }
 
