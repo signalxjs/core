@@ -37,6 +37,7 @@ import { parseAst } from 'vite';
 import {
     mintSymbols,
     readServerFnCacheOption,
+    readServerFnFormOption,
     readServerFnIdOption,
     readServerFnRefreshesOption,
     stubFlags,
@@ -68,6 +69,8 @@ export interface InlineServerFn {
     /** True for a refreshes-declaring mutation (rfc-server §6.3) — the stub
      *  sends the boundary inventory and applies the envelope's entries. */
     refreshes: boolean;
+    /** True for a declared form target (rfc-server §6.4, literal `form: true`). */
+    form: boolean;
     /** The appended SSR export the endpoint resolves. */
     mangled: string;
 }
@@ -508,6 +511,7 @@ export function extractInlineServerFns(
             }
             const isGet = !stream && readServerFnCacheOption(call);
             const declaresRefreshes = !stream && readServerFnRefreshesOption(call);
+            const isFormTarget = !stream && readServerFnFormOption(call);
             const minted = mintSymbols(
                 name,
                 callSource,
@@ -515,7 +519,8 @@ export function extractInlineServerFns(
                 options.stableId,
                 stream,
                 isGet,
-                declaresRefreshes
+                declaresRefreshes,
+                isFormTarget
             );
             const mangled = MANGLE_PREFIX + name;
             if (moduleLocals.has(mangled) || imports.has(mangled) || exportedNames.has(mangled)) {

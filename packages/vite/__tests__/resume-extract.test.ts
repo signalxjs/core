@@ -604,3 +604,184 @@ export const Toasty = component((ctx) => {
         expect(result.components[0].mode).toBe('hydrate');
     });
 });
+
+describe('zero-JS form actions — action/method stamping (rfc-server §6.4, #312)', () => {
+    const SYMBOL = 'app/api.server.ts#submitFeedback';
+    const ENCODED = encodeURIComponent(SYMBOL);
+    const resolveServerFn = (specifier: string, exportName: string) =>
+        specifier === './api.server' && exportName === 'submitFeedback'
+            ? { stableSymbol: SYMBOL, form: true }
+            : null;
+
+    const FEEDBACK = (body: string) => `
+import { component } from 'sigx';
+import { submitFeedback } from './api.server';
+export const Feedback = component((ctx) => {
+    const sent = ctx.signal(false);
+    return () => (
+        <form onSubmit={${body}}>
+            <input name="message" required />
+        </form>
+    );
+});
+`;
+
+    it('stamps action (percent-encoded stable symbol) + method on the form', () => {
+        const result = extractResumeHandlers(
+            FEEDBACK(`async (e) => { e.preventDefault(); await submitFeedback({}); sent.value = true; }`),
+            '/src/Feedback.tsx',
+            { resolveServerFn }
+        );
+        expect(result.warnings).toHaveLength(0);
+        expect(result.code).toContain(` action="/_sigx/fn/${ENCODED}" method="post"`);
+        expect(result.code).toContain('data-sigx-pd:submit=""');
+        expect(result.components[0].mode).toBe('resume');
+    });
+
+    it('FORCES data-sigx-pd:submit when the handler does not call preventDefault', () => {
+        const result = extractResumeHandlers(
+            FEEDBACK(`async () => { await submitFeedback({}); sent.value = true; }`),
+            '/src/Feedback.tsx',
+            { resolveServerFn }
+        );
+        expect(result.code).toContain(` action="/_sigx/fn/${ENCODED}" method="post"`);
+        const pd = result.code.match(/data-sigx-pd:submit=""/g);
+        expect(pd).toHaveLength(1);
+    });
+
+    it('honors a custom endpoint', () => {
+        const result = extractResumeHandlers(
+            FEEDBACK(`() => submitFeedback({})`),
+            '/src/Feedback.tsx',
+            { resolveServerFn, endpoint: '/api/rpc' }
+        );
+        expect(result.code).toContain(` action="/api/rpc/${ENCODED}" method="post"`);
+    });
+
+    it('does not stamp without a resolver (no sigx:server plugin)', () => {
+        const result = extractResumeHandlers(
+            FEEDBACK(`() => submitFeedback({})`),
+            '/src/Feedback.tsx'
+        );
+        expect(result.code).not.toContain('action=');
+        // …and pd is not forced either — nothing changed vs today.
+        expect(result.code).not.toContain('data-sigx-pd');
+    });
+
+    it('does not stamp when the serverFn is not form-marked (silent)', () => {
+        const result = extractResumeHandlers(
+            FEEDBACK(`() => submitFeedback({})`),
+            '/src/Feedback.tsx',
+            { resolveServerFn: () => ({ stableSymbol: SYMBOL, form: false }) }
+        );
+        expect(result.code).not.toContain('action=');
+        expect(result.warnings).toHaveLength(0);
+    });
+
+    it('does not stamp a submit handler on a non-form element', () => {
+        const result = extractResumeHandlers(`
+import { component } from 'sigx';
+import { submitFeedback } from './api.server';
+export const Odd = component((ctx) => {
+    const n = ctx.signal(0);
+    return () => <div onSubmit={() => submitFeedback({})}>x</div>;
+});
+`, '/src/Odd.tsx', { resolveServerFn });
+        expect(result.code).not.toContain('action=');
+    });
+
+    it('does not stamp non-submit events on a form', () => {
+        const result = extractResumeHandlers(`
+import { component } from 'sigx';
+import { submitFeedback } from './api.server';
+export const Odd = component((ctx) => {
+    const n = ctx.signal(0);
+    return () => <form onClick={() => submitFeedback({})}>x</form>;
+});
+`, '/src/Odd.tsx', { resolveServerFn });
+        expect(result.code).not.toContain('action=');
+    });
+
+    it('multiple form-marked captures are ambiguous — warning, no stamp', () => {
+        const result = extractResumeHandlers(`
+import { component } from 'sigx';
+import { submitFeedback, submitOther } from './api.server';
+export const Two = component((ctx) => {
+    const n = ctx.signal(0);
+    return () => <form onSubmit={(e) => { e.preventDefault(); submitFeedback({}); submitOther({}); }}>x</form>;
+});
+`, '/src/Two.tsx', {
+            resolveServerFn: (_spec, name) => ({ stableSymbol: `app#${name}`, form: true })
+        });
+        expect(result.code).not.toContain('action=');
+        expect(result.warnings).toHaveLength(1);
+        expect(result.warnings[0]).toContain('ambiguous');
+    });
+
+    it('an author-written action/method wins — warning, no stamp', () => {
+        const result = extractResumeHandlers(`
+import { component } from 'sigx';
+import { submitFeedback } from './api.server';
+export const Manual = component((ctx) => {
+    const n = ctx.signal(0);
+    return () => <form action="/legacy" onSubmit={(e) => { e.preventDefault(); submitFeedback({}); }}>x</form>;
+});
+`, '/src/Manual.tsx', { resolveServerFn });
+        expect(result.code).not.toContain('/_sigx/fn/');
+        expect(result.warnings).toHaveLength(1);
+        expect(result.warnings[0]).toContain('author-written');
+    });
+
+    it('two form-marked captures that resolve to the SAME symbol are not ambiguous', () => {
+        const result = extractResumeHandlers(`
+import { component } from 'sigx';
+import { submitFeedback } from './api.server';
+import { submitFeedback as again } from './api.server';
+export const Dup = component((ctx) => {
+    const n = ctx.signal(0);
+    return () => <form onSubmit={(e) => { e.preventDefault(); submitFeedback({}); again({}); }}>x</form>;
+});
+`, '/src/Dup.tsx', { resolveServerFn });
+        expect(result.code).toContain(` action="/_sigx/fn/${ENCODED}" method="post"`);
+        expect(result.warnings).toHaveLength(0);
+    });
+});
+
+describe('form-action stamping — spread props and default imports (#312 review)', () => {
+    it('spread props on the form are treated as author-provided — warning, no stamp', () => {
+        const result = extractResumeHandlers(`
+import { component } from 'sigx';
+import { submitFeedback } from './api.server';
+export const Spread = component((ctx) => {
+    const n = ctx.signal(0);
+    const extra = { class: 'x' };
+    return () => <form {...extra} onSubmit={(e) => { e.preventDefault(); submitFeedback({}); }}>x</form>;
+});
+`, '/src/Spread.tsx', {
+            resolveServerFn: () => ({ stableSymbol: 'app#submitFeedback', form: true })
+        });
+        expect(result.code).not.toContain('action=');
+        expect(result.warnings).toHaveLength(1);
+        expect(result.warnings[0]).toContain('spread props');
+    });
+
+    it('a default-imported serverFn is never a stamp target (not extracted server-side)', () => {
+        const resolved: string[] = [];
+        const result = extractResumeHandlers(`
+import { component } from 'sigx';
+import submitDefault from './api.server';
+export const Def = component((ctx) => {
+    const n = ctx.signal(0);
+    return () => <form onSubmit={(e) => { e.preventDefault(); submitDefault({}); }}>x</form>;
+});
+`, '/src/Def.tsx', {
+            resolveServerFn: (spec, name) => {
+                resolved.push(`${spec}#${name}`);
+                return { stableSymbol: 'should-not-happen', form: true };
+            }
+        });
+        expect(result.code).not.toContain('action=');
+        // The resolver is never even consulted for default imports.
+        expect(resolved).toHaveLength(0);
+    });
+});

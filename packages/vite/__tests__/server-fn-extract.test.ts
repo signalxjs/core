@@ -384,3 +384,47 @@ export const add = serverFn({ id: routeId, handler: async (rq, input) => input }
         expect(hashed.stubModule).toContain(`__serverFnStub("${hashed.fns[0].symbol}"`);
     });
 });
+
+describe('extractServerFns — form targets (rfc-server §6.4, #312)', () => {
+    const FORMS = `
+import { serverFn } from '@sigx/server';
+export const submitFeedback = serverFn({
+    form: true,
+    handler: async (rq, input) => input
+});
+export const addToCart = serverFn(async (rq, id) => id);
+`;
+
+    it('marks literal form: true fns only; stub output carries NO extra flag', () => {
+        const result = extractServerFns(FORMS, '/src/api.server.ts', opts('src/api.server.ts'));
+        const byName = Object.fromEntries(result.fns.map((f) => [f.name, f]));
+        expect(byName.submitFeedback.form).toBe(true);
+        expect(byName.addToCart.form).toBe(false);
+        // The form bit is build/runtime-side only — stubs are plain RPC.
+        expect(result.stubModule).toContain(
+            `export const submitFeedback = __serverFnStub("${byName.submitFeedback.symbol}", "submitFeedback", "${BASE}");`
+        );
+    });
+
+    it('requires the LITERAL true — false, computed, and truthy strings do not mark', () => {
+        for (const value of ['false', 'FORM_ON', '"true"', '1']) {
+            const code = `
+import { serverFn } from '@sigx/server';
+const FORM_ON = true;
+export const f = serverFn({ form: ${value}, handler: async (rq) => 1 });
+`;
+            const result = extractServerFns(code, '/src/api.server.ts', opts('src/api.server.ts'));
+            expect(result.fns[0].form).toBe(false);
+        }
+    });
+
+    it('survives export { x } indirection', () => {
+        const code = `
+import { serverFn } from '@sigx/server';
+const submit = serverFn({ form: true, handler: async (rq) => 1 });
+export { submit };
+`;
+        const result = extractServerFns(code, '/src/api.server.ts', opts('src/api.server.ts'));
+        expect(result.fns[0].form).toBe(true);
+    });
+});

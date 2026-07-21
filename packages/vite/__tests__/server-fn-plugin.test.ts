@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { sigxServer } from '../src/server-fn';
@@ -287,7 +287,12 @@ describe('sigxServer — rev 2: role, endpoint, stable symbols, scan (#320)', ()
         // rfc-deploy §3.3: the future `ssr.adapter` reads this to raise the
         // role:'client' × adapter config error.
         const defaults = sigxServer() as any;
-        expect(defaults.api).toEqual({ role: 'auto', base: '/_sigx/fn', endpoint: '/_sigx/fn' });
+        expect(defaults.api).toEqual({
+            role: 'auto',
+            base: '/_sigx/fn',
+            endpoint: '/_sigx/fn',
+            resolveServerFn: expect.any(Function)
+        });
         const client = sigxServer({
             role: 'client',
             base: '/rpc',
@@ -296,7 +301,8 @@ describe('sigxServer — rev 2: role, endpoint, stable symbols, scan (#320)', ()
         expect(client.api).toEqual({
             role: 'client',
             base: '/rpc',
-            endpoint: 'https://api.example.com/rpc'
+            endpoint: 'https://api.example.com/rpc',
+            resolveServerFn: expect.any(Function)
         });
     });
 
@@ -541,5 +547,56 @@ describe('sigxServer — rev 2: role, endpoint, stable symbols, scan (#320)', ()
         } finally {
             rmSync(root, { recursive: true, force: true });
         }
+    });
+});
+
+describe('sigxServer — api.resolveServerFn (rfc-server §6.4, #312)', () => {
+    const API = `
+import { serverFn } from '@sigx/server';
+export const submitFeedback = serverFn({
+    form: true,
+    handler: async (rq, input) => input
+});
+export const getQuote = serverFn(async (rq, i) => i);
+`;
+
+    it('resolves a relative specifier (with and without extension) to the stable symbol + form mark', () => {
+        const { plugin, root } = makeProject({ 'src/api.server.ts': API });
+        const importer = join(root, 'src/Feedback.tsx');
+        for (const spec of ['./api.server', './api.server.ts']) {
+            const hit = plugin.api.resolveServerFn(importer, spec, 'submitFeedback');
+            expect(hit).toEqual({ stableSymbol: 'src/api.server.ts#submitFeedback', form: true });
+        }
+        expect(plugin.api.resolveServerFn(importer, './api.server', 'getQuote')).toEqual({
+            stableSymbol: 'src/api.server.ts#getQuote',
+            form: false
+        });
+    });
+
+    it('resolves an inline serverFn module too', () => {
+        const { plugin, root } = makeProject({
+            'src/widget.ts': `
+import { serverFn } from '@sigx/server';
+const save = serverFn({ form: true, handler: async (rq, input) => input });
+export const use = () => save;
+`
+        });
+        // Inline extraction happens on transform, not discovery — feed it.
+        const file = join(root, 'src/widget.ts');
+        plugin.transform.call(
+            { environment: { name: 'ssr' }, warn: () => {}, error: () => {} },
+            readFileSync(file, 'utf-8'),
+            file
+        );
+        const hit = plugin.api.resolveServerFn(join(root, 'src/App.tsx'), './widget', 'save');
+        expect(hit).toEqual({ stableSymbol: 'src/widget.ts#save', form: true });
+    });
+
+    it('returns null for unknown exports, unknown files, and bare specifiers', () => {
+        const { plugin, root } = makeProject({ 'src/api.server.ts': API });
+        const importer = join(root, 'src/Feedback.tsx');
+        expect(plugin.api.resolveServerFn(importer, './api.server', 'nope')).toBeNull();
+        expect(plugin.api.resolveServerFn(importer, './missing.server', 'x')).toBeNull();
+        expect(plugin.api.resolveServerFn(importer, '@acme/api/feedback.server', 'x')).toBeNull();
     });
 });
