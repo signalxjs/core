@@ -125,8 +125,11 @@ function applyLiveState(forId: number, entry: RefreshEntry, seq: number): void {
     lastApplied.set(forId, seq);
     const scope = peekScope(forId)!;
     const fresh = reviveFromServer(entry.state) as Record<string, unknown> | undefined;
-    if (!fresh || typeof fresh !== 'object' || !scope._live) return;
-    for (const name in fresh) {
+    // Plain-object shape only — an array satisfies typeof 'object' but its
+    // numeric keys are never signal names, and a non-object record.state
+    // would break later resumption (scope._values spreads it).
+    if (!isPlainShape(fresh) || !scope._live) return;
+    for (const name of Object.keys(fresh)) {
         const live = scope._live[name];
         if (live) {
             live.value = fresh[name];
@@ -139,7 +142,12 @@ function applyLiveState(forId: number, entry: RefreshEntry, seq: number): void {
     }
     // Keep the table in step for SPA teardown / re-resume readers.
     const record = getBoundaryRecord(forId);
-    if (record && entry.state && typeof entry.state === 'object') record.state = entry.state;
+    if (record && isPlainShape(entry.state)) record.state = entry.state;
+}
+
+/** A non-null, non-array object — the only shape state/records may take. */
+function isPlainShape(value: unknown): value is Record<string, unknown> {
+    return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
 /** Resumed boundary: swap `[content root … old marker]` for the fresh HTML. */
@@ -201,8 +209,8 @@ function applySwap(forId: number, entry: RefreshEntry): void {
         removeBoundaryRecord(id);
         lastApplied.delete(id);
     }
-    if (entry.records && typeof entry.records === 'object') {
-        installBoundaryRecords(entry.records);
+    if (isPlainShape(entry.records)) {
+        installBoundaryRecords(entry.records as Record<string, SSRBoundaryRecord>);
     }
     invalidateMarkerIndex();
 

@@ -266,13 +266,27 @@ describe('apply() — resumed boundary swap', () => {
 
     it('ignores malformed entries without throwing', async () => {
         const Counter = makeCounter();
-        await mount(<Counter initial={7} />);
+        const { container, id } = await mount(<Counter initial={7} />);
         expect(() =>
             seam().apply(
-                [null, 42, {}, { for: -1 }, { for: 1, id: 0.5, html: '' }, { for: 999999, id: 5, html: 'x' }] as unknown[],
+                [
+                    null,
+                    42,
+                    {},
+                    { for: -1 },
+                    { for: 1, id: 0.5, html: '' },
+                    { for: 999999, id: 5, html: 'x' },
+                    // Array-shaped state/records must never reach the table
+                    // or the live signals (typeof 'object' is not enough).
+                    { for: id, id: (1 << 20) + 1, html: '<b>x</b>', state: [1, 2], records: [{}] }
+                ] as unknown[],
                 1
             )
         ).not.toThrow();
+        // The array-records entry swapped DOM (html is valid) but installed
+        // nothing array-shaped; the table stays an object keyed by ids.
+        expect(Array.isArray((window as any).__SIGX_BOUNDARIES__)).toBe(false);
+        void container;
     });
 });
 

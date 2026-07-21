@@ -137,17 +137,25 @@ export function dropScope(id: number): void {
     scopes.delete(id);
 }
 
-const resetHooks: Array<() => void> = [];
+const resetHooks = new Set<() => void>();
 
 /** Run a hook on every `resetResumeScopes()` — pack-internal, so modules
  *  with per-page state (the refresh seq guard) reset in step without a
- *  circular import. */
+ *  circular import. A Set: duplicate registration under HMR / duplicated
+ *  module graphs must not grow the list. */
 export function onResumeReset(hook: () => void): void {
-    resetHooks.push(hook);
+    resetHooks.add(hook);
 }
 
 /** Drop all cached scopes — SPA navigation (new boundary table) and tests. */
 export function resetResumeScopes(): void {
     scopes.clear();
-    for (const hook of resetHooks) hook();
+    for (const hook of resetHooks) {
+        try {
+            hook();
+        } catch (error) {
+            // A hook bug must never break SPA navigation's scope reset.
+            if (__DEV__) console.error('[sigx resume] reset hook threw:', error);
+        }
+    }
 }
