@@ -400,13 +400,18 @@ app.use(createRequestHandler({ /* unchanged */ }));
 POST {base=/_sigx/fn}/{symbol}
 content-type: application/json        ← REQUIRED media type (415 otherwise);
                                         parameters tolerated, e.g.
-                                        "application/json; charset=utf-8"
+                                        "application/json; charset=utf-8".
+                                        EXCEPTION: a fn declared `form: true`
+                                        also accepts the two native-form
+                                        media types — §6.4/§5.2b
 origin: <same-origin>                 ← REQUIRED by default (403 otherwise)
 
 {"args": [ ... ]}
 ```
 
-Responses (all `application/json`):
+Responses — `application/json` on the RPC transport; the §6.4 form
+transport instead answers `303` on success and `text/html` on error (the
+shape forks on the REQUEST content-type):
 
 - `200 {"data": <json>}` — absent `data` key ⇒ resolved `undefined`.
 - `<status> {"error": {"message", "status", "data"?}}` — a thrown
@@ -440,7 +445,7 @@ export interface ServerFnRequestOptions {
     resolve(symbol: string): Promise<Function | null | undefined>;
     /** Runs unconditionally before EVERY function — THE app-wide auth seam. */
     guard?(rq: ServerFnContext, fn: { symbol: string; name: string }): void | Promise<void>;
-    origin?: 'same-origin' | string[] | false;   // default 'same-origin'
+    origin?: 'same-origin' | 'verify-when-present' | string[] | false;   // default 'same-origin'
     maxBodyBytes?: number;                        // default 1_048_576, enforced while reading
     maxUrlBytes?: number;                         // default 8_192 — cap on a GET read's
                                                   // `args` query value (§4.1); 414 over it
