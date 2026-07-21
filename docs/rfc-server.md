@@ -400,19 +400,26 @@ app.use(createRequestHandler({ /* unchanged */ }));
 POST {base=/_sigx/fn}/{symbol}
 content-type: application/json        ← REQUIRED media type (415 otherwise);
                                         parameters tolerated, e.g.
-                                        "application/json; charset=utf-8"
+                                        "application/json; charset=utf-8".
+                                        EXCEPTION: a fn declared `form: true`
+                                        also accepts the two native-form
+                                        media types — §6.4/§5.2b
 origin: <same-origin>                 ← REQUIRED by default (403 otherwise)
 
 {"args": [ ... ]}
 ```
 
-Responses (all `application/json`):
+Responses — `application/json` on the RPC transport; the §6.4 form
+transport instead answers `303` on success and `text/html` on error (the
+shape forks on the REQUEST content-type):
 
 - `200 {"data": <json>}` — absent `data` key ⇒ resolved `undefined`.
 - `<status> {"error": {"message", "status", "data"?}}` — a thrown
   `ServerFnError(status, msg, data)` passes through verbatim; **any other
   throw is masked to `500 {"error":{"message":"Internal error"}}` in prod**
   (`__DEV__` includes message + stack).
+- `303` — form-mode success (§6.4): `Location` is handler-set >
+  same-origin `Referer` > `/`; no body, no envelope.
 - `400` malformed body / non-array args / validator rejection (validator
   issues in `data`); `403` origin; `404` unknown symbol (stub throws the
   skew-aware error); `405` for an unsupported method — before the symbol
@@ -420,8 +427,16 @@ Responses (all `application/json`):
   pre-resolution 405 (PUT, HEAD, …) advertises the endpoint's method
   universe `Allow: POST, GET`, while GET on a fn that is not a
   cache-marked read answers the resource-precise `Allow: POST` (§4.1);
-  `413` over `maxBodyBytes`; `414` over `maxUrlBytes` (GET only, §4.1);
-  `415` wrong content-type.
+  `413` over `maxBodyBytes` (form bodies gated by `content-length` —
+  `request.formData()` cannot enforce the cap mid-stream, so platform
+  body limits are the deeper backstop, §6.4); `414` over `maxUrlBytes`
+  (GET only, §4.1); `415` wrong content-type — including a form
+  content-type sent to a fn that is not `form: true` (§6.4: POST is an
+  allowed method on that resource; the *media type* is what it refuses).
+- Error SHAPE forks on the request content-type (§6.4): a form-typed
+  request gets every error as a minimal self-contained `text/html` page
+  (the requester has no JS to render JSON); JSON requests keep the JSON
+  error envelope above, byte-for-byte.
 
 Handler options (shared by `/server` and `/node`):
 
@@ -430,7 +445,7 @@ export interface ServerFnRequestOptions {
     resolve(symbol: string): Promise<Function | null | undefined>;
     /** Runs unconditionally before EVERY function — THE app-wide auth seam. */
     guard?(rq: ServerFnContext, fn: { symbol: string; name: string }): void | Promise<void>;
-    origin?: 'same-origin' | string[] | false;   // default 'same-origin'
+    origin?: 'same-origin' | 'verify-when-present' | string[] | false;   // default 'same-origin'
     maxBodyBytes?: number;                        // default 1_048_576, enforced while reading
     maxUrlBytes?: number;                         // default 8_192 — cap on a GET read's
                                                   // `args` query value (§4.1); 414 over it
@@ -706,6 +721,42 @@ What replaces the POST defenses, point by point:
   non-2xx `no-store` rule keeps attacker-induced errors out of shared
   caches.
 
+### §5.2b Form targets — giving up the content-type layer, deliberately (#312)
+
+Item 2 names three stacked CSRF defenses: POST-only, the non-safelisted
+`application/json` content-type, and the `Origin` check. A §6.4 form
+target **deliberately removes the middle one** —
+`application/x-www-form-urlencoded` and `multipart/form-data` are exactly
+the media types a cross-site `<form>` can send credentialed with no
+preflight; accepting them is the entire point of the feature. What holds
+the line:
+
+- **`Origin`, at full strength.** Unlike §5.2a's GET relaxation, the form
+  path relaxes **nothing**: browsers send `Origin` on every POST, form
+  submissions included, so under the default `'same-origin'` policy a
+  cross-site form POST is 403 and an Origin-less one is too (an
+  Origin-less POST is by construction not a mainstream browser's form
+  submission). The layer that was designed for exactly this attack is the
+  one that remains.
+- **The per-fn opt-in bounds the surface.** Only functions the author
+  explicitly declared `form: true` accept form bodies at all — a form
+  POST to any other symbol is a 415 before the pipeline runs. The
+  endpoint never becomes globally form-accepting.
+- **The validator is load-bearing.** Form fields are attacker-typable
+  strings; the `input` schema is what stands between them and the
+  handler. `form` without `input` is a `__DEV__` warning for this reason.
+
+The residual, stated plainly: `form: true` **combined with**
+`origin: 'verify-when-present'` or `origin: false` reopens classic CSRF
+for those functions — with both the content-type and Origin layers gone,
+any site can submit a credentialed mutation. That combination is the
+operator's informed choice (a deliberately public form endpoint);
+the default policy plus the item-2 caveat about Origin-stripping proxies
+is the recommended posture. Error responses on the form path render as
+HTML (a no-JS requester can't read JSON), which changes nothing about
+masking: §5 item 6 applies verbatim, prod pages carry the generic
+message only.
+
 ## §6 Beyond parity — what the architecture uniquely enables
 
 Phased (§7); designed here so the v1 envelope reserves the right fields.
@@ -830,15 +881,17 @@ code — the shipped design where it deviates from the sketch above:
   like `$cache`), and resume's idempotent `reviveFromServer` decodes at
   the existing read sites.
 
-### 6.4 Zero-JS form actions
+### 6.4 Zero-JS form actions (#312 — locked design)
 
 A `<form>` whose submit handler calls a server function gets real
 `action="/_sigx/fn/<symbol>" method="post"` stamped at build time. The
 endpoint goes dual-mode: `application/json` → RPC envelope;
-`application/x-www-form-urlencoded`/`multipart` → the `input` validator
-normalizes FormData, run the fn, `303` POST-redirect-GET.
+`application/x-www-form-urlencoded`/`multipart/form-data` → FormData
+normalized to the fn's single input, the same `input` validator, the same
+guard → validate → handler pipeline, then `303` POST-redirect-GET.
 
-- JS loaded: delegation intercepts submit → RPC → single-flight patch (6.3).
+- JS loaded: delegation intercepts submit → RPC → single-flight patch (6.3,
+  once it exists).
 - JS off, failed, or not yet loaded: the native POST works.
 
 The interaction resumability exists to never drop becomes *undroppable* —
@@ -846,6 +899,87 @@ it doesn't even need the loader. One `serverFn`, one validator, two
 transports. (Qwik City's `routeAction$`/`<Form>` has a progressive story;
 the sigx plus is that the same function serves both transports and the
 page still ships ≤1 KB of JS.)
+
+**The opt-in is `form: true`, options form only.** The read-side twin
+`cache` (§4.1) marks a fn GET-able; `form: true` marks it a **form
+target**: the endpoint accepts form content-types for it (and only it —
+see the gates below), and the build stamps the `action` attribute for it
+(and only it). Options form only, because only it has the single-input
+shape FormData can map onto, and restricting to it makes the compiler
+enforce that shape. The wrapper stamps `__sigxForm: true` (the
+`__sigxGet` capability-mark pattern); the build's detection is stricter
+than `cache`'s presence-only rule — a **literal `true`** is required,
+because a stamped action pointing at a fn whose runtime mark resolved
+false would 415 with no JS on the page to recover. `__DEV__` warns on
+`form` + `cache` together (a form target is a mutation; a cacheable read
+cannot be one) and on `form` without `input` (the no-JS transport
+delivers an attacker-shaped string map straight to the handler — declare
+a validator).
+
+**FormData → input.** One flat object, built with `getAll` per field
+name: a single value stays the value, repeated names become an array,
+`File` entries pass through untouched, and everything else **stays a
+string** — Standard Schema coercion (`z.coerce.number()`,
+`z.coerce.boolean()`, …) is the documented mapping tool, which is also
+what keeps the two transports honest: both run the same validator, so a
+shape mismatch fails loudly instead of silently diverging. Field names in
+`DANGEROUS_KEYS` are dropped (the JSON reviver posture). No `a[b]`/`a.b`
+nesting convention in v1 — flat only. An absent checkbox is an absent
+key; an empty file input is a zero-byte `File`; both are the validator's
+concern.
+
+**The equivalence contract.** The submit handler should send the same
+shape the form fields produce (`Object.fromEntries(new FormData(form))`
+or equivalent). The fn cannot tell the transports apart except via
+`rq.request`; the JS path is plain RPC, byte-identical to today.
+
+**Round-trip.** Success is a **`303`**: a handler-set `Location` (via the
+existing `rq.responseHeaders` seam) wins; otherwise the endpoint redirects
+back to the **same-origin-validated `Referer`** (its path + search),
+falling back to `/`. A handler that sets a non-3xx status via
+`rq.status()` gets it verbatim with no default Location — form-mode
+success is a redirect by contract, and anything else is the handler
+taking full ownership. Validation failure (and every other error) on the
+form path is answered with a minimal, self-contained **HTML** page —
+`__DEV__` lists the escaped validator issues; prod is generic — because
+the requester by definition has no JS to render a JSON error. The error
+shape forks on the **request content-type**, never on the fn: JSON
+callers of the same fn keep the JSON envelope and JSON errors
+byte-for-byte. The documented first line of no-JS validation UX is the
+platform's: `required`, `type=`, `min=`, `pattern=` work with zero JS.
+`§6.2 invalidates` does **not** run on the form branch — directives are
+wire-only (in-process calls already skip them), a 303 carries no envelope
+and no `@sigx/cache` client is listening; the redirected GET re-renders
+from source.
+
+**Build stamping.** In the resume extractor's attribute-emission pass: a
+`submit` handler on a host `<form>` element whose captured imports
+include **exactly one** form-marked serverFn — and whose element carries
+no author-written `action` or `method` — gets
+`action="{endpoint}/{encodeURIComponent(stableSymbol)}" method="post"`
+spliced beside its `data-sigx-on:submit`, plus a **forced**
+`data-sigx-pd:submit` when the handler body didn't call
+`preventDefault()` itself: the loader cancels the native submit
+synchronously only when that attribute is present, and without it a
+JS-loaded page would double-submit (RPC *and* native POST). The
+**stable** symbol (`<stableId>#<name>`) is used because a printed or
+long-cached page must survive redeploys — the endpoint's dual registry
+already resolves it. Ambiguity (multiple form-marked captures) and
+author-provided `action`/`method` warn at build time and skip the stamp;
+zero form-marked captures is silently today's behavior. The serverFn's
+symbol crosses plugin boundaries through a public seam —
+`resolveServerFn(importer, specifier, exportName)` on the sigx:server
+plugin's `api` — not through shared internals. `role: 'client'` builds
+never stamp (a live client posts cross-origin, which the Origin check
+would 403; declared live clients are JS-required by definition), and
+hydrate-mode components don't stamp in v1.
+
+**Deferred from v1**, recorded here so they are scope decisions rather
+than oversights: bare-specifier (scan-discovered package) serverFn
+imports don't stamp; hydrate-mode forms have no native fallback; an
+app-provided error-page hook (`formErrorPage` on the endpoint options) is
+the escape hatch for branded no-JS error pages; the single-flight patch
+composes when §6.3 ships.
 
 ### 6.5 Research: extracted DOM bindings — write without upgrade
 
@@ -1032,7 +1166,10 @@ option (revisit only if that proves painful).
   `.with(options)` per-call channel (pulled forward from v2; #353).
 - **v2**: `serverStream` → `useStream` (6.1 — **shipped**, #310);
   server-declared cache directives with `@sigx/cache` (6.2 — **shipped**,
-  #311); zero-JS forms (6.4); per-call options (**shipped**, #315 —
+  #311); zero-JS forms (6.4 — **design locked**, #312: `form: true`
+  opt-in, dual-mode endpoint, §5.2b posture, build-stamped stable-symbol
+  actions; deferred from its v1: bare-specifier stamping, hydrate-mode
+  fallback, `formErrorPage`); per-call options (**shipped**, #315 —
   `headers` merged over the transport's under the content-type rule, and
   the `fresh` GET-freshness bypass; the `.with(options)` channel itself
   shipped in v1.1 with AbortSignal, #353); GET + cache semantics for
