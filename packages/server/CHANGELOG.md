@@ -4,6 +4,29 @@
 
 ### Added
 
+- **GET + cache semantics for idempotent reads** (rfc-server §4.1/§5.2a,
+  #354) — the endpoint half. Declaring `cache: { maxAge, …}` on the options
+  form marks a function a **side-effect-free idempotent read**:
+  `handleServerFnRequest` now accepts GET for it (only for it — GET to
+  anything else is a resource-precise `405 Allow: POST`; methods other than
+  POST/GET answer `Allow: POST, GET` before symbol resolution), decodes the
+  arguments from `?args=<encoded>` (the same JSON text a POST body carries,
+  boundary-codec tags included, through the same reviver and error
+  vocabulary), and emits `Cache-Control` from the declaration:
+  `private, max-age=…` + `Vary: Cookie` by default;
+  `public, max-age=…, s-maxage=…` under `public: true`'s args-only contract
+  (§5.2a). `stale-while-revalidate` supported on both. A handler-set
+  `cache-control` wins outright; **every non-2xx GET is `no-store`** (a CDN
+  must never pin errors or 404s across a deploy). New endpoint option
+  `maxUrlBytes` (default 8 KiB) answers oversized query strings with 414.
+  Origin gets verify-when-present semantics on GET automatically — browsers
+  send no `Origin` on same-origin GET; a present, mismatching one is still
+  403. POST stays valid for every function; the guard/input/timeout/onError
+  pipeline is identical on both methods; `invalidates` never runs on GET
+  (`cache` and `invalidates` are mutually exclusive — `__DEV__` warns).
+  `__DEV__` also warns when a `public` read touches `rq.request` (identity
+  must not shape a shared-cacheable body). The client stub's GET emission
+  ships with the build-transform half.
 - **Renders are scoped automatically** (#309). `runWithServerFnContext` now
   publishes its runner as the `__SIGX_SERVERFN_SCOPE__` seam, which
   `createRequestHandler` / `createFetchHandler` use to wrap every document

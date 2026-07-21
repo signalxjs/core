@@ -50,6 +50,28 @@ export type {
     WrappedServerFn
 } from './types';
 
+/**
+ * HTTP cache declaration for an idempotent read (rfc-server §4.1).
+ * Declaring it marks the function a SIDE-EFFECT-FREE read: the stub issues
+ * GET and the endpoint emits `Cache-Control` from these values, so browser
+ * and edge caches can absorb read traffic. The promise is the author's —
+ * a mutating function marked `cache` re-opens CSRF completely (§5.2a).
+ */
+export interface ServerFnReadCache {
+    /** Seconds the response is fresh in HTTP caches (`max-age`). No invented default. */
+    maxAge: number;
+    /** `stale-while-revalidate` window, seconds. */
+    staleWhileRevalidate?: number;
+    /**
+     * Shared-cache opt-in: emits `public` (+ `s-maxage`) instead of the
+     * default `private`. Contract (§5.2a): a public read's output depends
+     * ONLY on its arguments — never cookies, auth, or request headers.
+     */
+    public?: boolean;
+    /** Shared-cache TTL when `public`; defaults to `maxAge`. */
+    sMaxAge?: number;
+}
+
 /** The options form — validation and middleware as part of the definition. */
 export interface ServerFnOptions<S, R> {
     /**
@@ -92,6 +114,16 @@ export interface ServerFnOptions<S, R> {
     ):
         | ReadonlyArray<string | readonly unknown[]>
         | Promise<ReadonlyArray<string | readonly unknown[]>>;
+    /**
+     * Marks the function a cacheable idempotent read (rfc-server §4.1):
+     * the client stub issues GET with the arguments in the query string,
+     * and the endpoint emits `Cache-Control` from this declaration
+     * (`private` + `Vary: Cookie` by default; `public` is an explicit
+     * opt-in under the args-only contract, §5.2a). POST stays valid.
+     * Mutually exclusive with `invalidates` — a read that invalidates is
+     * not a read. Layering with `@sigx/cache`'s staleTime: §6.2.
+     */
+    cache?: ServerFnReadCache;
     handler(rq: ServerFnContext, input: S): R | Promise<R>;
 }
 
@@ -151,12 +183,34 @@ export function serverFn(
     // The §6.2 seam for the ENDPOINT (wire-only — the wrapper above never
     // computes directives): validated input + settled result → keys.
     const invalidates = typeof arg === 'function' ? undefined : arg.invalidates;
+    // The §4.1 read marker: precompute the Cache-Control value once, at
+    // definition time — the endpoint's per-request cost is one header set.
+    const cache = typeof arg === 'function' ? undefined : arg.cache;
+    if (__DEV__ && cache && invalidates) {
+        console.warn(
+            `[sigx server] serverFn ${name ? `"${name}" ` : ''}declares both \`cache\` and ` +
+            `\`invalidates\` — a read that invalidates is not a read (rfc-server §4.1). ` +
+            `The function stays callable, but pick one.`
+        );
+    }
     return Object.assign(wrapper, {
         with: callWith,
         __sigxFn: invoke,
         __sigxName: name,
-        ...(invalidates ? { __sigxInvalidates: invalidates } : {})
+        ...(invalidates ? { __sigxInvalidates: invalidates } : {}),
+        ...(cache ? { __sigxGet: true, __sigxCacheControl: cacheControlValue(cache) } : {})
     });
+}
+
+/** rfc-server §4.1's header-emission table, as one precomputed string. */
+function cacheControlValue(cache: ServerFnReadCache): string {
+    const swr =
+        cache.staleWhileRevalidate !== undefined
+            ? `, stale-while-revalidate=${cache.staleWhileRevalidate}`
+            : '';
+    return cache.public
+        ? `public, max-age=${cache.maxAge}, s-maxage=${cache.sMaxAge ?? cache.maxAge}${swr}`
+        : `private, max-age=${cache.maxAge}${swr}`;
 }
 
 /**

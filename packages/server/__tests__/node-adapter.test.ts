@@ -18,6 +18,10 @@ const twoCookies = serverFn(async (rq) => {
     return 'ok';
 });
 const add = serverFn(async (_rq, a: number, b: number) => a + b);
+const cachedRead = serverFn({
+    cache: { maxAge: 60 },
+    handler: async (_rq, input: { id: string }) => ({ id: input.id })
+});
 
 let releaseSecondTick: () => void = () => {};
 const tickGate = new Promise<void>((resolve) => {
@@ -38,7 +42,8 @@ describe('createServerFnHandler over node:http', () => {
             functions: {
                 cookies_fn_00000001: async () => twoCookies,
                 add_fn_00000002: async () => add,
-                ticks_fn_00000003: async () => ticks
+                ticks_fn_00000003: async () => ticks,
+                read_fn_00000004: async () => cachedRead
             }
         });
         server = createServer((req, res) => {
@@ -68,6 +73,15 @@ describe('createServerFnHandler over node:http', () => {
         });
         expect(res.status).toBe(200);
         await expect(res.json()).resolves.toEqual({ data: 42 });
+    });
+
+    it('serves a cache-marked read over GET with its Cache-Control (rfc-server §4.1)', async () => {
+        const args = encodeURIComponent(JSON.stringify([{ id: 'p1' }]));
+        const res = await fetch(`${origin}/_sigx/fn/read_fn_00000004?args=${args}`);
+        expect(res.status).toBe(200);
+        expect(res.headers.get('cache-control')).toBe('private, max-age=60');
+        expect(res.headers.get('vary')).toBe('Cookie');
+        await expect(res.json()).resolves.toEqual({ data: { id: 'p1' } });
     });
 
     it('preserves MULTIPLE set-cookie headers end to end', async () => {

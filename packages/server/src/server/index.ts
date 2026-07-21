@@ -3,9 +3,11 @@
  * (rfc-server §4/§5). Request in, Response out — directly usable as an edge
  * fetch handler; `@sigx/server/node` adapts it to connect middleware.
  *
- * Security defaults (§5) are enforced HERE, unconditionally: POST-only,
- * required `application/json` media type, same-origin `Origin` check,
- * `maxBodyBytes` during the body read, reviver-based DROPPING of
+ * Security defaults (§5) are enforced HERE, unconditionally: POST for
+ * everything except cache-marked idempotent reads (which may GET, §4.1
+ * with its own posture, §5.2a), required `application/json` media type on
+ * POST, same-origin `Origin` check, `maxBodyBytes` during the body read
+ * (`maxUrlBytes` for a GET's query string), reviver-based DROPPING of
  * prototype-pollution keys (they are removed from the parsed value, not a
  * request error), and prod error masking. The `guard` hook runs
  * before EVERY function — the app-wide auth seam that no transport skips.
@@ -42,6 +44,12 @@ export interface ServerFnRequestOptions {
     /** Request body cap in bytes, enforced while reading. Default 1 MiB. */
     maxBodyBytes?: number;
     /**
+     * Cap on a GET read's encoded query string (rfc-server §4.1) — the
+     * URL analog of `maxBodyBytes`, answered with a 414. Default 8 KiB,
+     * under mainstream proxies' request-line caps.
+     */
+    maxUrlBytes?: number;
+    /**
      * Observability seam (#349): called for every MASKED failure — any
      * non-`ServerFnError` throw from guard/handler, timeouts included — in
      * dev AND prod, BEFORE the client response is built. `ServerFnError`s
@@ -69,6 +77,12 @@ const reviver = (key: string, value: unknown): unknown =>
     DANGEROUS_KEYS.has(key) ? undefined : value;
 
 const DEFAULT_MAX_BODY = 1_048_576;
+const DEFAULT_MAX_URL = 8_192;
+
+/** Every non-2xx GET response carries this (rfc-server §4.1): errors, 404s,
+ *  and 405s must never be pinned into a shared cache — a CDN-cached 404
+ *  would shadow a redeploy's fresh symbols. */
+const NO_STORE = { 'cache-control': 'no-store' } as const;
 
 /** JSON error response; headers merge on top of the content-type. */
 function errorResponse(
@@ -108,10 +122,19 @@ export function matchesServerFn(request: Request, base = '/_sigx/fn'): boolean {
     return new URL(request.url).pathname.startsWith(prefix);
 }
 
-function checkOrigin(request: Request, policy: ServerFnRequestOptions['origin']): boolean {
+function checkOrigin(
+    request: Request,
+    policy: ServerFnRequestOptions['origin'],
+    safeMethod = false
+): boolean {
     if (policy === false) return true;
     const origin = request.headers.get('origin');
-    if (origin === null) return policy === 'verify-when-present';
+    // Browsers send no Origin on same-origin GET fetches, so a safe-method
+    // request gets verify-when-present semantics automatically (rfc-server
+    // §5.2a): cross-site WRITING is excluded by the side-effect-free
+    // contract, cross-site READING by CORS (no ACAO is ever emitted). A
+    // present, mismatching Origin is still rejected below.
+    if (origin === null) return safeMethod || policy === 'verify-when-present';
     if (Array.isArray(policy)) return policy.includes(origin);
     // `Origin: null` (sandboxed iframe, some redirects) is a PRESENT header
     // with the literal value "null" — it fails this comparison, so
@@ -164,21 +187,57 @@ export async function handleServerFnRequest(
     request: Request,
     options: ServerFnRequestOptions
 ): Promise<Response> {
-    if (request.method !== 'POST') {
-        return errorResponse(405, 'Method not allowed', undefined, undefined, { Allow: 'POST' });
+    const isGet = request.method === 'GET';
+    if (request.method !== 'POST' && !isGet) {
+        // Pre-resolution the target's methods are unknowable, so this 405
+        // advertises the endpoint's method universe; the resource-precise
+        // `Allow: POST` waits for the symbol to resolve below (§4.1).
+        return errorResponse(405, 'Method not allowed', undefined, undefined, {
+            Allow: 'POST, GET',
+            ...NO_STORE
+        });
     }
-    if (!isJsonContentType(request)) {
+    if (!isGet && !isJsonContentType(request)) {
         return errorResponse(415, 'Content-Type must be application/json');
     }
-    if (!checkOrigin(request, options.origin)) {
-        return errorResponse(403, 'Cross-origin server-function calls are not allowed');
+    if (!checkOrigin(request, options.origin, isGet)) {
+        return errorResponse(
+            403,
+            'Cross-origin server-function calls are not allowed',
+            undefined,
+            undefined,
+            isGet ? NO_STORE : undefined
+        );
     }
 
-    const pathname = new URL(request.url).pathname;
+    const url = new URL(request.url);
+    const pathname = url.pathname;
     const symbol = decodeURIComponent(pathname.slice(pathname.lastIndexOf('/') + 1));
     const fn = (await options.resolve(symbol)) as Partial<WrappedServerFn> | null | undefined;
     if (!fn || typeof fn.__sigxFn !== 'function') {
-        return errorResponse(404, `Unknown server function "${symbol}"`);
+        // GET 404s are no-store like every non-2xx: a CDN-cached miss must
+        // not shadow a redeploy's fresh symbols (§4.1).
+        return errorResponse(
+            404,
+            `Unknown server function "${symbol}"`,
+            undefined,
+            undefined,
+            isGet ? NO_STORE : undefined
+        );
+    }
+    if (
+        isGet &&
+        (fn.__sigxGet !== true ||
+            fn.__sigxStream === true ||
+            // A wrapper that kept the mark but dropped the precomputed header
+            // must degrade to POST-only, not throw into a masked 500 later.
+            typeof fn.__sigxCacheControl !== 'string')
+    ) {
+        // Resource-precise: THIS function supports only POST (§4.1).
+        return errorResponse(405, 'Method not allowed', undefined, undefined, {
+            Allow: 'POST',
+            ...NO_STORE
+        });
     }
     // Captured: TS narrowing does not cross into the work closure below.
     const invoke = fn.__sigxFn;
@@ -195,18 +254,40 @@ export async function handleServerFnRequest(
                 : /^(.+)_fn_[0-9a-f]{8}$/.exec(symbol)?.[1] ?? fn.__sigxName ?? ''
     };
 
-    const body = await readBody(request, options.maxBodyBytes ?? DEFAULT_MAX_BODY);
-    if (body === null) {
-        return errorResponse(413, 'Request body too large');
-    }
     let parsed: unknown;
-    try {
-        parsed = body ? (JSON.parse(body, reviver) as { args?: unknown }).args : undefined;
-    } catch {
-        return errorResponse(400, 'Malformed JSON body');
+    if (isGet) {
+        // §4.1: the arguments ride the query string — the same JSON text a
+        // POST body carries as `args`, percent-encoded. Capped like a body
+        // (414, the request-line analog of 413); an absent `args` reads as
+        // [] for curl ergonomics.
+        if (url.search.length > (options.maxUrlBytes ?? DEFAULT_MAX_URL)) {
+            return errorResponse(414, 'Query string too large', undefined, undefined, NO_STORE);
+        }
+        const raw = url.searchParams.get('args');
+        try {
+            parsed = raw ? JSON.parse(raw, reviver) : [];
+        } catch {
+            return errorResponse(400, 'Malformed args query value', undefined, undefined, NO_STORE);
+        }
+    } else {
+        const body = await readBody(request, options.maxBodyBytes ?? DEFAULT_MAX_BODY);
+        if (body === null) {
+            return errorResponse(413, 'Request body too large');
+        }
+        try {
+            parsed = body ? (JSON.parse(body, reviver) as { args?: unknown }).args : undefined;
+        } catch {
+            return errorResponse(400, 'Malformed JSON body');
+        }
     }
     if (!Array.isArray(parsed)) {
-        return errorResponse(400, 'Body must be {"args": [...]}');
+        return errorResponse(
+            400,
+            isGet ? '"args" must be a JSON array' : 'Body must be {"args": [...]}',
+            undefined,
+            undefined,
+            isGet ? NO_STORE : undefined
+        );
     }
     // Rich types on the way IN (rfc-server §4) — decoded AFTER the
     // prototype-pollution reviver, so dangerous keys are already gone. A
@@ -215,7 +296,13 @@ export async function handleServerFnRequest(
     try {
         args = parsed.map((arg) => reviveWire(arg));
     } catch {
-        return errorResponse(400, 'Malformed encoded value in body');
+        return errorResponse(
+            400,
+            isGet ? 'Malformed encoded value in args' : 'Malformed encoded value in body',
+            undefined,
+            undefined,
+            isGet ? NO_STORE : undefined
+        );
     }
 
     const ctx = createRequestContext(request);
@@ -238,6 +325,11 @@ export async function handleServerFnRequest(
     // Unscoped where the runtime has no AsyncLocalStorage; nothing else moves.
     const work = runInScope(ctx as ServerFnContext, async (): Promise<Response> => {
         await options.guard?.(ctx as ServerFnContext, info);
+        // Installed AFTER the app-wide guard — it may legitimately read the
+        // request (it only rejects; it does not shape the body).
+        if (__DEV__ && isGet && fn.__sigxCacheControl?.startsWith('public')) {
+            warnPublicRequestTouch(ctx, info.name || symbol);
+        }
         const result = await invoke(ctx, info, args);
         if (fn.__sigxStream === true) {
             // `await` matters: a pre-first-yield throw must land in THIS
@@ -253,18 +345,39 @@ export async function handleServerFnRequest(
         }
         const headers = new Headers(ctx.responseHeaders);
         headers.set('content-type', 'application/json');
+        const status = ctx._status ?? 200;
+        if (isGet) {
+            if (status >= 200 && status < 300) {
+                // §4.1 header emission — a handler-set cache-control (the
+                // per-input dynamic-TTL escape hatch) wins outright, Vary
+                // included; otherwise the precomputed declaration applies,
+                // with `Vary: Cookie` on private responses so even one
+                // browser profile revalidates across a session switch.
+                if (!headers.has('cache-control')) {
+                    const value = fn.__sigxCacheControl!;
+                    headers.set('cache-control', value);
+                    if (!value.startsWith('public')) headers.append('vary', 'Cookie');
+                }
+            } else {
+                // Every non-2xx GET is no-store (§4.1) — deliberately no
+                // escape hatch: a cacheable negative lookup is exactly the
+                // attacker-pinned-error shape the rule exists to prevent.
+                headers.set('cache-control', 'no-store');
+            }
+        }
         const envelope: Record<string, unknown> = {};
         if (result !== undefined) envelope.data = encodeWire(result);
         // Server-declared cache directives (rfc-server §6.2) — computed
         // where the data changed, from the VALIDATED input the pipeline
-        // stashed; a throw here is a fn error (masked per §5).
-        if (fn.__sigxInvalidates) {
+        // stashed; a throw here is a fn error (masked per §5). Skipped on
+        // GET: `cache` and `invalidates` are mutually exclusive (§4.1).
+        if (!isGet && fn.__sigxInvalidates) {
             const invalidates = await fn.__sigxInvalidates(ctx._input, result);
             if (Array.isArray(invalidates) && invalidates.length > 0) {
                 envelope.$cache = { invalidates };
             }
         }
-        return new Response(JSON.stringify(envelope), { status: ctx._status ?? 200, headers });
+        return new Response(JSON.stringify(envelope), { status, headers });
     });
 
     try {
@@ -287,16 +400,60 @@ export async function handleServerFnRequest(
             // rejection when it eventually settles.
             void work.catch(() => {});
             await reportMasked(options, timeoutError, info, ctx);
-            return errorResponse(504, 'Server function timed out', undefined, ctx.responseHeaders);
+            return errorResponse(
+                504,
+                'Server function timed out',
+                undefined,
+                ctx.responseHeaders,
+                isGet ? NO_STORE : undefined
+            );
         }
         if (!isServerFnError(error)) {
             await reportMasked(options, error, info, ctx);
         }
         const shape = wireErrorShape(error, info.name || symbol);
-        return errorResponse(shape.status, shape.message, shape.data, ctx.responseHeaders);
+        return errorResponse(
+            shape.status,
+            shape.message,
+            shape.data,
+            ctx.responseHeaders,
+            isGet ? NO_STORE : undefined
+        );
     } finally {
         if (timer !== undefined) clearTimeout(timer);
     }
+}
+
+/**
+ * §5.2a heuristic (dev-only, callers gate on __DEV__): a PUBLIC read's
+ * output must depend only on its arguments, so touching `rq.request` —
+ * where cookies and auth headers live — is the common way to violate the
+ * args-only contract. The getter trip warns once per request. Installed
+ * after the app-wide guard ran (rejecting on identity is fine; shaping
+ * the body with it is not), so per-fn `use` guards and the handler are
+ * what it observes — a warning, never an error.
+ */
+function warnPublicRequestTouch(
+    ctx: ReturnType<typeof createRequestContext>,
+    label: string
+): void {
+    const real = ctx.request;
+    let warned = false;
+    Object.defineProperty(ctx, 'request', {
+        configurable: true,
+        get(): Request {
+            if (!warned) {
+                warned = true;
+                console.warn(
+                    `[sigx server] public read "${label}" touched rq.request — a public ` +
+                    `read's response may be served to OTHER users from a shared cache, so ` +
+                    `its output must depend only on its arguments (rfc-server §5.2a). ` +
+                    `Anything identity-derived belongs on a private read.`
+                );
+            }
+            return real;
+        }
+    });
 }
 
 /**
