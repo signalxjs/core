@@ -4,6 +4,18 @@
 
 ### Added
 
+- **Per-call `headers` and `fresh` on `.with(options)`** (rfc-server v2
+  per-call options, #315 — completes the channel #353 opened with
+  `signal`). `fn.with({ headers: {...} })(…)` sends one-off request
+  headers, merged over `configureServerFn`'s transport headers (the
+  per-call value wins) under the same rule — `content-type` is never
+  overridable. `fn.with({ fresh: true })(…)` is §4.1's deferred freshness
+  escape: on a cache-marked GET read the fetch runs with
+  `cache: 'no-cache'`, so the browser revalidates with the origin instead
+  of answering from `max-age`. Both are transport options: ignored with a
+  `__DEV__` warning on in-process (SSR-time) calls — the mirror of
+  `context` being ignored on the client — and `fresh` is likewise a
+  `__DEV__`-warned no-op on POST (never HTTP-cached).
 - **GET + cache semantics for idempotent reads** (rfc-server §4.1/§5.2a,
   #354) — the endpoint half. Declaring `cache: { maxAge, …}` on the options
   form marks a function a **side-effect-free idempotent read**:

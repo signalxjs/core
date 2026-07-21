@@ -177,6 +177,15 @@ export function serverFn(
         (options?: ServerFnCallOptions) =>
         (...args: unknown[]) => {
             assertNotLiveClient(name);
+            if (__DEV__ && options && ('headers' in options || 'fresh' in options)) {
+                // The mirror of `.with({ context })` being ignored on the
+                // client: transport options mean nothing without a transport.
+                console.warn(
+                    `[sigx server] .with({ ${'headers' in options ? 'headers' : 'fresh'} }) is ` +
+                    `ignored on an in-process (SSR-time) call — there is no HTTP request to ` +
+                    `apply it to. It only affects the client stub's fetch (#315).`
+                );
+            }
             return invoke(resolveInProcessContext(options?.signal, options?.context), { symbol: '', name }, args);
         };
     const wrapper = callWith();

@@ -309,8 +309,29 @@ const results = useData(
 
 Explicit by design (no trailing-argument sniffing — the wire args stay
 exactly your args); on an in-process (SSR) call the signal becomes
-`rq.abortSignal` directly. This is rfc-server v2's per-call options channel
-pulled forward — `headers` joins it there.
+`rq.abortSignal` directly.
+
+### Per-call `headers` and `fresh`
+
+The same channel carries the rest of rfc-server v2's per-call options
+(#315):
+
+```ts
+// One-off headers for THIS call — merged over configureServerFn's
+// transport headers (the per-call value wins). content-type is never
+// overridable, same as the transport rule.
+await exportReport.with({ headers: { 'x-trace-id': traceId } })(reportId);
+
+// Bypass HTTP caches for one call of a cache-marked GET read: the fetch
+// runs with cache: 'no-cache', so the browser revalidates with the
+// origin instead of answering from max-age.
+const latest = await getProduct.with({ fresh: true })({ id });
+```
+
+Both are transport options: on an in-process (SSR-time) call there is no
+HTTP request, so they are ignored with a `__DEV__` warning — the mirror
+of `.with({ context })` being ignored on the client. `fresh` is likewise
+a no-op on a POST call (POSTs are never HTTP-cached).
 
 ### What survives the wire
 

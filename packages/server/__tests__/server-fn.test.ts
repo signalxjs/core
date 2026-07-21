@@ -195,4 +195,16 @@ describe('serverFn — .with({ signal }) per-call options (#353)', () => {
             /Invalid input/
         );
     });
+
+    it('transport-only options (headers/fresh) are warned no-ops in-process (#315)', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const fn = serverFn(async () => 'ran');
+        await expect(fn.with({ headers: { 'x-trace-id': 't1' } })()).resolves.toBe('ran');
+        await expect(fn.with({ fresh: true })()).resolves.toBe('ran');
+        const ignored = warn.mock.calls.filter(([msg]) =>
+            String(msg).includes('ignored on an in-process')
+        );
+        expect(ignored).toHaveLength(2);
+        warn.mockRestore();
+    });
 });

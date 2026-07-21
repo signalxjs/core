@@ -45,6 +45,24 @@ export interface ServerFnCallOptions {
      */
     signal?: AbortSignal;
     /**
+     * One-off request headers for THIS call (rfc-server v2 per-call
+     * options, #315) — merged over `configureServerFn`'s transport headers
+     * (the per-call value wins), under the same rule: `content-type` is
+     * never overridable (stripped case-insensitively; the endpoint 415s
+     * anything else). Client-transport-only — an in-process (SSR-time)
+     * call makes no HTTP request, so it is ignored there with a `__DEV__`
+     * warning, the mirror of `context` being ignored on the client.
+     */
+    headers?: Record<string, string>;
+    /**
+     * Bypass HTTP caches for THIS call of a cache-marked GET read
+     * (rfc-server §4.1's deferred per-call freshness escape, #315): sets
+     * `cache: 'no-cache'` on the fetch, so the browser revalidates with
+     * the origin instead of answering from `max-age`. Meaningless on POST
+     * (never HTTP-cached) and in-process — a `__DEV__`-warned no-op there.
+     */
+    fresh?: boolean;
+    /**
      * The request context for an IN-PROCESS (SSR-time) call — a `Request`,
      * or a partial context to override more (#352).
      *
