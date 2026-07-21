@@ -63,6 +63,38 @@ export const vote = serverFn({
     }
 });
 
+/** Minimal Standard Schema — the validator IS the boundary (§5.2b): form
+ *  fields arrive as attacker-typable strings on the no-JS transport. */
+const FeedbackInput = {
+    '~standard': {
+        version: 1 as const,
+        vendor: 'sigx-example',
+        validate: (value: unknown) => {
+            const message = (value as { message?: unknown })?.message;
+            return typeof message === 'string' && message.trim().length > 0
+                ? { value: { message: message.trim() } }
+                : { issues: [{ message: 'message must not be empty', path: ['message'] }] };
+        }
+    }
+};
+
+/**
+ * A FORM TARGET (rfc-server §6.4): `form: true` makes the endpoint accept
+ * native form POSTs for this fn (FormData → the validator → 303 back to
+ * the page), and the build stamps `action`/`method` onto the <form> in
+ * `Feedback.tsx` — so submitting works before the loader runs, with JS
+ * disabled, or if it never arrives. With JS, the same fn is called as
+ * plain RPC. One function, one validator, two transports.
+ */
+export const submitFeedback = serverFn({
+    form: true,
+    input: FeedbackInput,
+    handler: async (_rq, input: { message: string }) => {
+        console.log(`[resume-example] feedback: ${input.message}`);
+        return { received: input.message };
+    }
+});
+
 export const getQuote = serverFn(async (rq, index: number) => {
     if (!Number.isInteger(index)) {
         throw new ServerFnError(400, 'index must be an integer');

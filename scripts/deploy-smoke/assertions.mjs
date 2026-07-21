@@ -125,6 +125,54 @@ export async function assertCatalogGet(fetchFn, { label }) {
     );
 }
 
+/**
+ * Zero-JS form action (rfc-server §6.4): a NATIVE urlencoded POST — no JS,
+ * no JSON — to the example's form-marked `submitFeedback`. Asserts the
+ * whole no-JS round-trip: 303 with Location echoing the same-origin
+ * Referer's path, and the §5.2b posture (an Origin-less form POST is 403
+ * under the default policy — Origin is the CSRF defense on this path).
+ * Also asserts the stamped attributes actually rendered into the document.
+ */
+export async function assertFormPost(fetchFn, { label, origin, html }) {
+    const symbol = '@sigx/resume-example/src/api.server.ts#submitFeedback';
+    const path = `/_sigx/fn/${encodeURIComponent(symbol)}`;
+    if (html) {
+        assert(
+            html.includes(`action="${path}"`) && html.includes('method="post"'),
+            `${label}: the <form> carries the build-stamped action/method`
+        );
+        assert(
+            html.includes('data-sigx-pd:submit'),
+            `${label}: the stamped form also carries data-sigx-pd:submit (no double submit)`
+        );
+    }
+    const res = await fetchFn(path, {
+        method: 'POST',
+        headers: {
+            'content-type': 'application/x-www-form-urlencoded',
+            origin,
+            referer: `${origin}/?from=smoke`
+        },
+        body: 'message=hello+from+the+smoke',
+        redirect: 'manual'
+    });
+    assert(res.status === 303, `${label}: form POST → 303 (got ${res.status})`);
+    assert(
+        res.headers.get('location') === '/?from=smoke',
+        `${label}: 303 Location echoes the Referer path (got ${res.headers.get('location')})`
+    );
+    const noOrigin = await fetchFn(path, {
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body: 'message=x',
+        redirect: 'manual'
+    });
+    assert(
+        noOrigin.status === 403,
+        `${label}: an Origin-less form POST is 403 (§5.2b; got ${noOrigin.status})`
+    );
+}
+
 /** Non-asset paths fall through the static tier to the worker/handler. */
 export async function assertFallthrough(fetchFn, { label }) {
     const res = await fetchFn('/definitely-not-an-asset', {
