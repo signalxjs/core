@@ -119,6 +119,12 @@ pnpm lint:fix
 pnpm size        # size-limit bundle-size check (.size-limit.mjs)
 pnpm verify:pack # verify npm pack output is sane
 pnpm test:edge   # WinterCG smoke: stream a document from the prod dist with node: imports forbidden (after pnpm build)
+pnpm smoke:hydration   # did the prod build actually HYDRATE, or silently re-render client-side? (after pnpm build)
+                       # Builds examples/spa-ssr + examples/ssr-islands, serves them, and drives Chromium:
+                       # every <!--$c:N--> marker the server sent must still be in the live DOM (a bail's
+                       # removeSSRRange takes nested markers with it). Both mismatch warnings are __DEV__-gated,
+                       # so this is the ONLY hydration signal a prod dist has (#377). Needs a browser:
+                       # `pnpm exec playwright install chromium` once. CI job: hydration-smoke.
 pnpm bench:ssr:quick   # sigx-only quick SSR bench + regression table vs the committed baseline (after pnpm build)
 pnpm bench:ssr         # full comparative SSR bench: equivalence check, then sigx vs Vue/React/Preact
                        # CI runs `verify` + the quick suite (bench-smoke job) as a CORRECTNESS gate: it catches
