@@ -17,7 +17,7 @@ import {
 } from 'sigx';
 import { patchProp, patchDirective, onElementMounted } from 'sigx/internals';
 import type { AppContext } from 'sigx';
-import { normalizeElement, setCurrentAppContext, getCurrentAppContext, getClientPlugins } from './hydrate-context';
+import { normalizeElement, setCurrentAppContext, getCurrentAppContext, getClientPlugins, isFormattingWhitespace } from './hydrate-context';
 import { hydrateComponent } from './hydrate-component';
 import { getHydrateDefaults } from './hydrate-defaults';
 import {
@@ -253,10 +253,7 @@ export function hydrateNode(vnode: VNode, dom: Node | null, parent: Node): Node 
             // page and drown the signal this warning exists to carry.
             let skippedRealContent = false;
             while (scan && !matchesTag(scan)) {
-                if (
-                    scan.nodeType !== Node.COMMENT_NODE
-                    && !(scan.nodeType === Node.TEXT_NODE && !/\S/.test((scan as globalThis.Text).data))
-                ) {
+                if (scan.nodeType !== Node.COMMENT_NODE && !isFormattingWhitespace(scan)) {
                     skippedRealContent = true;
                 }
                 scan = scan.nextSibling;

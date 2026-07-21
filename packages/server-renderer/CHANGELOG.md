@@ -17,10 +17,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   discarded the entire server-rendered subtree and re-rendered it on the
   client: hydration defeated by indentation alone, and on a root component
   that meant the whole page.
-- Whitespace-only leading text is now skipped instead. Text with **visible**
+- Leading **formatting whitespace** is now skipped instead. Text with visible
   content still bails — that is the real #115 orphan case, where hydration
   would otherwise abandon SSR text as content no VNode owns. The change
   strictly narrows the bail set; nothing that hydrated before starts bailing.
+- "Formatting whitespace" means HTML's ASCII whitespace (space, tab, LF, FF,
+  CR) — deliberately *not* JavaScript's `\s`, which also matches NBSP and the
+  other Unicode space separators. Those are visible characters: a
+  server-rendered `&nbsp;` is real content and still triggers the bail.
 - The dev-only `Skipped non-matching sibling(s)` warning is now gated on
   having skipped real content, so it no longer fires for every element on a
   formatted page.

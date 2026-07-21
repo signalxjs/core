@@ -139,6 +139,35 @@ describe('hydration against a whitespace-formatted container', () => {
         expect(container.querySelectorAll('.inner').length).toBe(1);
     });
 
+    it('still bails on leading NBSP — it is visible content, not indentation', async () => {
+        // JS `\s` matches NBSP, so a naive /\S/ whitespace test would skip a
+        // server-rendered `&nbsp;` and abandon it as a visible orphan. Only
+        // HTML's ASCII whitespace counts as formatting.
+        const Table = component(() => {
+            return () => (
+                <table class="t"><tbody><tr><td>row</td></tr></tbody></table>
+            );
+        });
+
+        container = createSSRContainer(
+            ssrComponentMarkers(1, ' <div class="empty">none</div>')
+        );
+
+        // Guard the fixture itself: if the NBSP is ever normalised to an ASCII
+        // space by an editor or the toolchain, this test would silently start
+        // asserting the plain-whitespace case instead.
+        expect(container.textContent).toContain(' ');
+
+        const vnode = { type: Table, props: {}, key: null, children: [], dom: null };
+        hydrate(vnode, container);
+        await nextTick();
+
+        expect(bailed(consoleWarnSpy)).toBe(true);
+        expect(container.querySelectorAll('table.t').length).toBe(1);
+        expect(container.textContent).not.toContain(' ');
+        expect(container.querySelectorAll('.empty').length).toBe(0);
+    });
+
     it('still bails when SSR rendered MEANINGFUL leading text (#115 orphan case)', async () => {
         // Negative control. If someone widens the whitespace carve-out into a
         // blanket "skip all text", this test fails — visible SSR text would be

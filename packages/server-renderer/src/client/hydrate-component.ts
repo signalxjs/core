@@ -34,7 +34,8 @@ import type { SchedulerJob } from 'sigx/internals';
 import {
     InternalVNode,
     getCurrentAppContext,
-    getClientPlugins
+    getClientPlugins,
+    isFormattingWhitespace
 } from './hydrate-context';
 import { hydrateNode } from './hydrate-core';
 
@@ -434,12 +435,12 @@ function subtreeMatchesSSRDom(subTree: VNode, startDom: Node | null, anchor: Nod
             return (node as Element).tagName.toLowerCase() === subTree.type.toLowerCase();
         }
         if (node.nodeType === Node.TEXT_NODE) {
-            // Whitespace-only text is a formatting artifact of the surrounding
-            // markup (an indented mount container, a pretty-printed template),
-            // not content SSR rendered for this component. Skip it: abandoning
-            // it leaves nothing visible, whereas bailing here would discard a
+            // Formatting whitespace is an artifact of the surrounding markup
+            // (an indented mount container, a pretty-printed template), not
+            // content SSR rendered for this component. Skip it: abandoning it
+            // leaves nothing visible, whereas bailing here would discard a
             // perfectly good server-rendered subtree over indentation alone.
-            if (!/\S/.test((node as globalThis.Text).data)) {
+            if (isFormattingWhitespace(node)) {
                 node = node.nextSibling;
                 continue;
             }
