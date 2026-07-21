@@ -304,6 +304,19 @@ describe('errors fork on request content-type, never on the fn (§6.4)', () => {
         expect(res.headers.get('content-type')).toContain('text/html');
     });
 
+    it('a malformed Content-Length is a 400, not a bypassed cap', async () => {
+        for (const bad of ['abc', '-5']) {
+            const res = await formPost(
+                'app/contact.server.ts#submit',
+                'message=hi',
+                { headers: { 'content-length': bad, 'content-type': 'application/x-www-form-urlencoded' } },
+                { maxBodyBytes: 1024 }
+            );
+            expect(res.status).toBe(400);
+            expect(res.headers.get('content-type')).toContain('text/html');
+        }
+    });
+
     it('a timeout on the form path is a 504 HTML page', async () => {
         const hung = serverFn({
             form: true,

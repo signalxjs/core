@@ -433,9 +433,19 @@ export async function handleServerFnRequest(
         // AND multipart, WinterCG-natively) — which also means the
         // `maxBodyBytes` cap can only be enforced via content-length up
         // front, not mid-stream; platform body limits are the backstop.
+        // Unlike readBody's cap (enforced DURING the stream), content-length
+        // is the only gate here — so a malformed value must not slip past
+        // as `NaN > cap === false`. Reject it outright; absent stays the
+        // documented pass-through (platform limits are the backstop).
         const declared = request.headers.get('content-length');
-        if (declared && Number(declared) > (options.maxBodyBytes ?? DEFAULT_MAX_BODY)) {
-            return formErrorResponse(413, 'Request body too large');
+        if (declared !== null) {
+            const bytes = Number(declared);
+            if (!Number.isFinite(bytes) || bytes < 0) {
+                return formErrorResponse(400, 'Malformed Content-Length');
+            }
+            if (bytes > (options.maxBodyBytes ?? DEFAULT_MAX_BODY)) {
+                return formErrorResponse(413, 'Request body too large');
+            }
         }
         let formData: FormData;
         try {
