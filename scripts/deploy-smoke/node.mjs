@@ -13,6 +13,7 @@ import {
     assertBotDocument,
     assertStaticAsset,
     assertServerFn,
+    assertCatalogGet,
     assertFallthrough,
     SSR_CONTEXT_MARKER
 } from './assertions.mjs';
@@ -69,6 +70,7 @@ try {
         args: [1],
         expectInData: 'Named = transferred.'
     });
+    await assertCatalogGet(fetchFn, { label });
     assert(/via Node\.js/.test(data), `${label}: fn ran under node (${data})`);
     await assertFallthrough(fetchFn, { label });
     console.log('\n✅ deploy-smoke: the external build serves documents, assets, and server functions under node');

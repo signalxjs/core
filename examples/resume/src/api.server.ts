@@ -26,6 +26,23 @@ export const requestSummary = serverFn(async (rq) => {
     return `SSR request: ${rq.request.method} ${rq.url.pathname}`;
 });
 
+/**
+ * A cache-marked idempotent read (rfc-server §4.1): the client stub calls
+ * it with GET and the endpoint answers with Cache-Control, so the browser
+ * and any edge cache can absorb repeats without touching the origin. The
+ * result carries rich types (#364) — the browser receives a live Date,
+ * Set, and BigInt, not their JSON shadows.
+ */
+export const getCatalog = serverFn({
+    cache: { maxAge: 60, staleWhileRevalidate: 300 },
+    handler: async (_rq, section: string) => ({
+        section,
+        total: 3n,
+        tags: new Set(['resumable', 'zero-js']),
+        updatedAt: new Date()
+    })
+});
+
 export const getQuote = serverFn(async (rq, index: number) => {
     if (!Number.isInteger(index)) {
         throw new ServerFnError(400, 'index must be an integer');

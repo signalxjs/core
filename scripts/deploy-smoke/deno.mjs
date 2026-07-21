@@ -12,6 +12,7 @@ import {
     assertBotDocument,
     assertStaticAsset,
     assertServerFn,
+    assertCatalogGet,
     assertFallthrough,
     SSR_CONTEXT_MARKER
 } from './assertions.mjs';
@@ -79,6 +80,7 @@ try {
         args: [1],
         expectInData: 'Named = transferred.'
     });
+    await assertCatalogGet(fetchFn, { label });
     // navigator.userAgent names the runtime — proof the fn ran HERE, not
     // in a Node process (`Deno/x.y.z`).
     assert(/via Deno\//.test(data), `${label}: fn ran under deno (${data})`);

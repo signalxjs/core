@@ -89,6 +89,42 @@ export async function assertServerFn(fetchFn, { label, origin, symbol, args, exp
     return envelope.data;
 }
 
+/**
+ * GET {base}/{symbol}?args=… → {data} + Cache-Control (rfc-server §4.1).
+ * Asserts the example's cache-marked `getCatalog` read end to end: the GET
+ * transport (no body, no content-type, no Origin — a browser's same-origin
+ * GET sends none), the declared Cache-Control + Vary, and the #364 rich
+ * types as their WIRE tags in the raw envelope (`$date`/`$set`/`$bigint` —
+ * this probe reads JSON directly, no codec). The revived-instance check
+ * (`instanceof Date/Set`, `typeof bigint`) lives in the example's Catalog
+ * component, which runs the real stub in the browser.
+ */
+export async function assertCatalogGet(fetchFn, { label }) {
+    const symbol = '@sigx/resume-example/src/api.server.ts#getCatalog';
+    const args = encodeURIComponent(JSON.stringify(['quotes']));
+    const res = await fetchFn(`/_sigx/fn/${encodeURIComponent(symbol)}?args=${args}`, {});
+    assert(res.status === 200, `${label}: GET read 200 (got ${res.status})`);
+    assert(
+        res.headers.get('cache-control') === 'private, max-age=60, stale-while-revalidate=300',
+        `${label}: GET read Cache-Control (got ${res.headers.get('cache-control')})`
+    );
+    assert(
+        (res.headers.get('vary') ?? '').toLowerCase().includes('cookie'),
+        `${label}: GET read Vary: Cookie (got ${res.headers.get('vary')})`
+    );
+    const { data } = await res.json();
+    assert(data?.section === 'quotes', `${label}: GET read echoed its query argument`);
+    assert(data?.total?.$bigint === '3', `${label}: BigInt survived as $bigint (got ${JSON.stringify(data?.total)})`);
+    assert(
+        Array.isArray(data?.tags?.$set) && data.tags.$set.includes('zero-js'),
+        `${label}: Set survived as $set (got ${JSON.stringify(data?.tags)})`
+    );
+    assert(
+        typeof data?.updatedAt?.$date === 'number',
+        `${label}: Date survived as $date (got ${JSON.stringify(data?.updatedAt)})`
+    );
+}
+
 /** Non-asset paths fall through the static tier to the worker/handler. */
 export async function assertFallthrough(fetchFn, { label }) {
     const res = await fetchFn('/definitely-not-an-asset', {
