@@ -8,7 +8,14 @@
  */
 
 import type { AsyncFetcherContext } from '@sigx/runtime-core';
-import { normalizeError, makeAbortController, inertAbortSignal } from '@sigx/runtime-core/internals';
+import {
+    normalizeError,
+    makeAbortController,
+    inertAbortSignal,
+    peekRestored,
+    invalidateRestored,
+    writeBack
+} from '@sigx/runtime-core/internals';
 import type { CacheDefaults } from './options.js';
 
 /** Store-side view of one mounted cell — notified when its entry changes. */
@@ -65,22 +72,6 @@ function domAttentionTrigger(revalidate: () => void): (() => void) | void {
     };
 }
 
-/** Read the page blob without consuming it (the store seeds from it once per key). */
-function peekBlob(key: string): { hit: boolean; value: unknown } {
-    if (typeof window === 'undefined') return { hit: false, value: undefined };
-    const blob = (globalThis as any).__SIGX_ASYNC__;
-    if (blob && Object.prototype.hasOwnProperty.call(blob, key)) {
-        return { hit: true, value: blob[key] };
-    }
-    return { hit: false, value: undefined };
-}
-
-/** Keep the blob in sync on successful writes — later default-engine mounts restore the latest value. */
-function writeBlob(key: string, value: unknown): void {
-    if (typeof window === 'undefined') return;
-    const blob = ((globalThis as any).__SIGX_ASYNC__ ??= Object.create(null));
-    blob[key] = value;
-}
 
 /**
  * Canonical-key pattern match for invalidate(): exact string equality, or —
@@ -137,7 +128,7 @@ export class CacheStore {
             // as fresh forever).
             if (!this.seeded.has(key)) {
                 this.seeded.add(key);
-                const seed = peekBlob(key);
+                const seed = peekRestored(key);
                 if (seed.hit) {
                     entry.hasValue = true;
                     entry.value = seed.value;
@@ -278,7 +269,7 @@ export class CacheStore {
         entry.error = null;
         entry.updatedAt = Date.now();
         entry.writeSeq++;
-        writeBlob(key, value);
+        writeBack(key, value);
         this.notify(entry);
         return entry.writeSeq;
     }
@@ -291,7 +282,7 @@ export class CacheStore {
         entry.value = snapshot.value;
         entry.updatedAt = snapshot.updatedAt;
         entry.writeSeq++;
-        if (snapshot.hasValue) writeBlob(key, snapshot.value);
+        if (snapshot.hasValue) writeBack(key, snapshot.value);
         this.notify(entry);
     }
 
@@ -303,10 +294,7 @@ export class CacheStore {
         for (const entry of this.entries.values()) {
             if (!keyMatches(entry.key, pattern)) continue;
             entry.updatedAt = 0; // stale for every future staleTime check
-            if (typeof window !== 'undefined') {
-                const blob = (globalThis as any).__SIGX_ASYNC__;
-                if (blob && Object.prototype.hasOwnProperty.call(blob, entry.key)) delete blob[entry.key];
-            }
+            invalidateRestored(entry.key);
             if (entry.subscribers.size > 0 && entry.fetcher) {
                 void this.fetch(entry.key, entry.fetcher, entry.rawArg, true);
             }

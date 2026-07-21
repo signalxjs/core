@@ -9,7 +9,13 @@
  * serialization site resolves the chain through `getTypeHandlers`.
  */
 
-import { TYPE_HANDLER_TOKEN, getProvided, type TypeHandler } from 'sigx/internals';
+import {
+    TYPE_HANDLER_TOKEN,
+    getProvided,
+    encodeWithHandlers,
+    BUILTIN_TYPE_HANDLERS,
+    type TypeHandler
+} from 'sigx/internals';
 import type { SSRContext } from './context';
 import type { SSRBoundaryRecord } from '../boundary';
 
@@ -48,6 +54,51 @@ export function scriptOpen(nonce?: string): string {
  * rather than shipped (prototype-pollution guard).
  */
 export const DANGEROUS_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
+/**
+ * Whether the boundary codec owns this value — a registered handler or one of
+ * `@sigx/serialize`'s built-in tags (`Date`, `Map`, `Set`, `BigInt`, …).
+ *
+ * The single question both payload serializers ask. `record.props` and
+ * `record.state` used to answer it differently: props consulted registered
+ * handlers only, state had no handler parameter at all, so the same `Date`
+ * survived as a prop and was dropped with a warning as signal state.
+ */
+export function codecOwns(value: unknown, handlers: readonly TypeHandler[]): boolean {
+    for (const h of handlers) if (h.test(value)) return true;
+    for (const h of BUILTIN_TYPE_HANDLERS) if (h.test(value)) return true;
+    return false;
+}
+
+/**
+ * The one admission check for a boundary payload entry: the key must be safe
+ * regardless of the value, then the value must either be codec-owned or
+ * survive a plain JSON round trip.
+ *
+ * Key safety is checked FIRST and unconditionally. Props previously skipped
+ * `isSerializable` entirely when a handler claimed the value, which took the
+ * `DANGEROUS_KEYS` rejection with it — a `__proto__` key holding a `Date`
+ * went through. (The null-prototype target in `assignmentJs` still contained
+ * it, so this was defence-in-depth rather than a live hole.)
+ */
+export function admitPayloadEntry(
+    key: string,
+    value: unknown,
+    what: string,
+    handlers: readonly TypeHandler[]
+): boolean {
+    if (DANGEROUS_KEYS.has(key)) {
+        if (__DEV__) {
+            console.warn(
+                `[SSR] ${what} key "${key}" is not allowed ` +
+                `(prototype-pollution risk) — value skipped. Pick another key.`
+            );
+        }
+        return false;
+    }
+    if (codecOwns(value, handlers)) return true;
+    return isSerializable(key, value, what);
+}
 
 /**
  * Validate that a value survives a JSON round trip. Dev-warns and returns
@@ -105,28 +156,22 @@ export function isSerializable(key: string, value: unknown, what = 'useAsync'): 
 }
 
 /**
- * JSON.stringify with the type-handler chain applied. Handlers receive the
- * RAW value (read off the holder, before toJSON) so types like Date — whose
- * toJSON would otherwise run first — are still matchable.
+ * JSON.stringify with the boundary codec applied — registered handlers first,
+ * then `@sigx/serialize`'s built-in vocabulary (`$date`, `$map`, …). Handlers
+ * see RAW values (the walk visits objects before `toJSON` runs), which is the
+ * only reason `Date` is matchable at all.
  *
- * NOTE: this still uses the registry chain ONLY — it deliberately does not
- * apply the built-in `$date`/`$map`/… vocabulary from `encodeWithHandlers`.
- * Emitting tags the client cannot yet revive would corrupt the state blob;
- * the switch happens together with wiring `reviveWithHandlers` into the
- * hydration read paths (`async/restore.ts`, resume scope, cache store).
+ * Every reader of what this emits decodes with `reviveWithHandlers`:
+ * `runtime-core/src/async/restore.ts`, `cache/src/store.ts`, and
+ * `server-renderer/src/client/scheduler.ts` (`getBoundaryTable`, the single
+ * accessor resume and islands both go through). Adding an emitter without a
+ * matching decode ships tags the client cannot read — see `docs/seams.md`.
  */
 export function stringifyWithHandlers(
     value: unknown,
     handlers: readonly TypeHandler[]
 ): string {
-    if (handlers.length === 0) return JSON.stringify(value);
-    return JSON.stringify(value, function (this: any, key: string, transformed: unknown) {
-        const raw = this[key];
-        for (const h of handlers) {
-            if (h.test(raw)) return h.serialize(raw);
-        }
-        return transformed;
-    });
+    return JSON.stringify(encodeWithHandlers(value, handlers));
 }
 
 /**
@@ -178,12 +223,7 @@ export function serializeBoundaryProps(
         // Event handlers (onX props).
         if (key.startsWith('on') && key.length > 2 && key[2] === key[2].toUpperCase()) continue;
 
-        // A type handler claiming the value trumps the JSON check.
-        let handled = false;
-        for (const h of handlers) {
-            if (h.test(value)) { handled = true; break; }
-        }
-        if (!handled && !isSerializable(key, value, 'boundary prop')) continue;
+        if (!admitPayloadEntry(key, value, 'boundary prop', handlers)) continue;
 
         result[key] = value;
         hasProps = true;

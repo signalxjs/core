@@ -72,6 +72,11 @@ export type { InjectionToken } from './di/token.js';
 // Async engine internals (for server renderers and cache packs)
 export { matchAsyncState, registerHandledAsyncOptionKeys, makeUnhandledReporter, normalizeError, makeAbortController, inertAbortSignal } from './async/shared.js';
 export { reportUnhandledAsyncError } from './app.js';
+// The `__SIGX_ASYNC__` page-blob accessors — THE decode point for that seam
+// (docs/seams.md). Exported so `@sigx/cache` reads the blob through the same
+// functions instead of re-implementing them; a second copy meant a second
+// place to apply the codec, and the decode was already missed once.
+export { peekRestored, invalidateRestored, writeBack, reviveFromServer } from './async/restore.js';
 // Live-client declaration (for non-web platform-identity modules — lynx/terminal;
 // NOT for @sigx/runtime-dom/platform, which SSR also evaluates)
 export { declareLiveClient, isLiveClient } from './async/environment.js';

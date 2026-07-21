@@ -18,6 +18,9 @@ import { getCurrentAppContext, setCurrentAppContext } from './plugin-registry';
 import { loadBoundaryComponent } from './chunk-loader';
 import { registerComponent, type ComponentFactory } from './registry';
 import { seedBoundaryState } from './boundary-state';
+// Decode server-sent boundary payloads here, in the LAZY chunk — never in the
+// eager scheduler, whose size guard forbids pulling a runtime (docs/seams.md).
+import { reviveFromServer } from 'sigx/internals';
 import {
     getBoundaryTable,
     getBoundaryRecord,
@@ -34,7 +37,7 @@ import {
 function recordVNode(component: ComponentFactory, record: SSRBoundaryRecord): VNode {
     return {
         type: component as any,
-        props: record.props || {},
+        props: (reviveFromServer(record.props) as Record<string, unknown>) || {},
         key: null,
         children: [],
         dom: null
@@ -59,7 +62,7 @@ export function hydrateBoundaryInPlace(marker: Comment, component: ComponentFact
         return;
     }
 
-    seedBoundaryState(record.state);
+    seedBoundaryState(reviveFromServer(record.state) as Record<string, any>);
     if (record.errorScope) {
         seedErrorScopeError(new Error(record.errorScope.message));
     }
@@ -137,7 +140,7 @@ export function scheduleWalkedBoundary(
         setCurrentAppContext(capturedAppContext);
         // Stage the freshest state snapshot for the pack's restore hook.
         const fresh = (componentId !== null ? getBoundaryRecord(componentId) : undefined) ?? record;
-        seedBoundaryState(fresh.state);
+        seedBoundaryState(reviveFromServer(fresh.state) as Record<string, any>);
         // A server-caught errorScope failure: seed the client scope errored
         // so the fallback hydrates against the server's fallback HTML and
         // retry() performs the remount (rfc-ssr-platform §2.2).
@@ -229,7 +232,7 @@ export async function hydrateAsyncBoundary(container: Element, record: SSRBounda
     }
 
     // Seed restored boundary signal state BEFORE hydrating.
-    seedBoundaryState(record.state);
+    seedBoundaryState(reviveFromServer(record.state) as Record<string, any>);
     try {
         hydrateComponent(recordVNode(component, record), container.firstChild, container);
     } finally {

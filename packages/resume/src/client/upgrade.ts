@@ -25,6 +25,7 @@
  * staging keeps the packs from ever racing over it.
  */
 
+import { reviveFromServer } from 'sigx/internals';
 import {
     getBoundaryRecord,
     loadBoundaryComponent,
@@ -71,7 +72,7 @@ const RESTORE_HOOK: SSRPlugin = {
             if (upgrading._rootRestored) return;
             upgrading._rootRestored = true;
             componentCtx.signal = createRestoringSignal(
-                (upgrading._record?.state as Record<string, unknown>) ?? {},
+                (reviveFromServer(upgrading._record?.state) as Record<string, unknown>) ?? {},
                 (name, live) => {
                     upgrading._live![name] = live;
                 }
@@ -151,7 +152,7 @@ async function runUpgrade(scope: InternalScope): Promise<void> {
 
     const vnode = {
         type: component,
-        props: record.props || {},
+        props: (reviveFromServer(record.props) as Record<string, unknown>) || {},
         key: null,
         children: [],
         dom: null

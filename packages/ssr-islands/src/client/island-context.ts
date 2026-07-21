@@ -10,6 +10,7 @@
 
 import type { IslandInfo, HydrationStrategy } from '../types';
 import type { SSRBoundaryRecord } from '@sigx/server-renderer';
+import { getBoundaryTable } from '@sigx/server-renderer/client/scheduler';
 
 // ============= Island Data Cache =============
 
@@ -47,9 +48,13 @@ export function getIslandData(): Record<string, IslandInfo> {
         return _cachedIslandData;
     }
 
-    const table = (typeof window !== 'undefined'
-        ? (window as any).__SIGX_BOUNDARIES__
-        : undefined) as Record<string, SSRBoundaryRecord> | undefined;
+    // Read through the ONE accessor rather than the raw global. This module
+    // used to reach for `window.__SIGX_BOUNDARIES__` directly to stay
+    // import-free, which made it invisible to anyone changing "the" boundary
+    // reader — a decode added to `getBoundaryTable` would have silently
+    // skipped every island. The scheduler is already bundled into this entry
+    // by its sibling modules, so the import costs nothing. See docs/seams.md.
+    const table = getBoundaryTable() as Record<string, SSRBoundaryRecord>;
 
     const view: Record<string, IslandInfo> = {};
     if (table) {

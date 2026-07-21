@@ -12,6 +12,7 @@
  */
 
 import { getBoundaryRecord } from '@sigx/server-renderer/client';
+import { reviveFromServer } from 'sigx/internals';
 import type { SSRBoundaryRecord } from '@sigx/server-renderer';
 import { scheduleUpgrade } from './upgrade';
 
@@ -73,10 +74,10 @@ function makeScope(id: number, record: SSRBoundaryRecord | null): InternalScope 
         _record: record,
         _status: 'resumed',
         _rootRestored: false,
-        _values: { ...record?.state },
+        _values: { ...(reviveFromServer(record?.state) as Record<string, unknown>) },
         _pendingWrites: [],
         _live: null,
-        props: (record?.props as Record<string, unknown>) ?? {},
+        props: (reviveFromServer(record?.props) as Record<string, unknown>) ?? {},
         // Unknown names still produce a facade (a named signal whose value
         // was unserializable resumes as undefined — dev-warned server-side).
         signals: new Proxy({} as Record<string, { value: unknown }>, {

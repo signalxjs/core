@@ -228,7 +228,7 @@ export function islandsPlugin(options?: IslandsPluginOptions): SSRPlugin & { ins
                 const data = ctx.getPluginData<IslandsPluginData>(PLUGIN_NAME);
                 const signalMap = data?.signalMaps.get(id);
                 if (signalMap && signalMap.size > 0) {
-                    const state = serializeSignalState(signalMap);
+                    const state = serializeSignalState(signalMap, getTypeHandlers(ctx));
                     if (state) {
                         record.state = state;
                     }
@@ -250,7 +250,7 @@ export function islandsPlugin(options?: IslandsPluginOptions): SSRPlugin & { ins
                 const data = ctx.getPluginData<IslandsPluginData>(PLUGIN_NAME);
                 const signalMap = data?.signalMaps.get(id);
                 if (signalMap && signalMap.size > 0) {
-                    const state = serializeSignalState(signalMap);
+                    const state = serializeSignalState(signalMap, getTypeHandlers(ctx));
                     if (state) {
                         record.state = state;
                     }
