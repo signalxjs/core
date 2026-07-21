@@ -171,7 +171,11 @@ describe('createDevRequestHandler', () => {
         const platform = { env: { KV: 'binding' } };
         const seen: unknown[] = [];
         const vite = mockVite({
-            createApp: (_url: string, p: unknown) => {
+            // THIRD argument (#304) — the second is the request, matching
+            // `createFetchHandler`'s `app(url, request, platform)`. The
+            // `document` callback below always used that shape; the entry
+            // factory used to take platform second and never see the request.
+            createApp: (_url: string, _req: unknown, p: unknown) => {
                 seen.push(p);
                 return defineApp((Home as any)({}));
             }
@@ -349,7 +353,7 @@ describe('createDevRequestHandler', () => {
         expect(res.body).toContain('dev page');
     });
 
-    it('omitting platform stays byte-compatible (undefined second arg)', async () => {
+    it('omitting platform leaves the THIRD argument undefined', async () => {
         const args: unknown[][] = [];
         const vite = mockVite({
             createApp: (...a: unknown[]) => {
@@ -359,6 +363,76 @@ describe('createDevRequestHandler', () => {
         });
         const handler = await createDevRequestHandler(vite, { entry: '/src/entry-server.tsx' });
         await run(handler, '/');
-        expect(args[0][1]).toBeUndefined();
+        // [0] url, [1] req (always present), [2] platform — absent here.
+        expect(args[0][1]).toBeDefined();
+        expect(args[0][2]).toBeUndefined();
+    });
+});
+
+describe('createDevRequestHandler — entry factory arguments (#304)', () => {
+    it('forwards the request as the second argument, like both prod handlers', async () => {
+        // The bug: dev called factory(url, platform) and dropped the request,
+        // so a factory reading a session cookie rendered logged-out in dev and
+        // correct in prod. `createRequestHandler` passes app(url, req);
+        // `createFetchHandler` passes app(url, request, platform).
+        let seen: { url?: string; req?: any; platform?: unknown } = {};
+        const vite = mockVite({
+            createApp: (url: string, req: any, platform: unknown) => {
+                seen = { url, req, platform };
+                return defineApp((Home as any)({}));
+            }
+        });
+        const handler = await createDevRequestHandler(vite, { entry: '/src/entry-server.tsx' });
+        await run(handler, '/dashboard');
+
+        expect(seen.url).toBe('/dashboard');
+        expect(seen.req).toBeDefined();
+        expect(seen.req.headers['user-agent']).toBe('Mozilla/5.0');
+    });
+
+    it('lets a factory read a cookie off the request — the reported failure', async () => {
+        let user: string | undefined;
+        const vite = mockVite({
+            createApp: (_url: string, req: any) => {
+                user = /session=(\w+)/.exec(req?.headers?.cookie ?? '')?.[1];
+                return defineApp((Home as any)({}));
+            }
+        });
+        const handler = await createDevRequestHandler(vite, { entry: '/src/entry-server.tsx' });
+        const res = new MockRes();
+        await handler(
+            {
+                url: '/',
+                headers: { 'user-agent': 'Mozilla/5.0', cookie: 'session=alice' }
+            } as unknown as IncomingMessage,
+            res as unknown as ServerResponse,
+            undefined
+        );
+        expect(user).toBe('alice');
+    });
+
+    it('passes platform THIRD, matching createFetchHandler', async () => {
+        const platform = { env: { KV: 'binding' } };
+        let seen: unknown;
+        const vite = mockVite({
+            createApp: (_url: string, _req: any, p: unknown) => {
+                seen = p;
+                return defineApp((Home as any)({}));
+            }
+        });
+        const handler = await createDevRequestHandler(vite, {
+            entry: '/src/entry-server.tsx',
+            platform
+        });
+        await run(handler, '/');
+        expect(seen).toBe(platform);
+    });
+
+    it('leaves a one-argument factory working', async () => {
+        const vite = mockVite({ createApp: (url: string) => defineApp((Home as any)({})) });
+        const handler = await createDevRequestHandler(vite, { entry: '/src/entry-server.tsx' });
+        const res = await run(handler, '/');
+        expect(res.status).toBe(200);
+        expect(res.body).toContain('<main class="dev">dev page</main>');
     });
 });
