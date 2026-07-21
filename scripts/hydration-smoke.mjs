@@ -26,7 +26,11 @@
 // The one legitimate way to lose a marker is a streaming placeholder: its
 // fallback content is replaced wholesale when the real content streams in, so
 // markers inside `[data-async-placeholder]` are excluded from the required
-// set — and the placeholders are then asserted to have actually resolved.
+// set. That exclusion is only sound if the stream actually landed, so every
+// placeholder is separately required to have RESOLVED — `$SIGX_REPLACE`
+// dispatches `sigx:async-ready` on it, recorded here from an init script that
+// runs before any page script. Without that, a boundary that never resolved
+// would silently shrink the required set instead of failing.
 //
 // `#app._vnode` is the second half: it proves the HYDRATOR ran, as opposed to
 // a plain client mount that produces a working-but-not-hydrated page. It is
@@ -107,12 +111,18 @@ const COLLECT = `(async () => {
     }
     const served = markerIds(doc, servedApp);
 
+    // Which boundaries streamed in: $SIGX_REPLACE dispatches sigx:async-ready
+    // on the placeholder, collected by the init script.
+    const resolved = window.__sigxResolved ?? new Set();
+    const placeholders = [...app.querySelectorAll('[data-async-placeholder]')]
+        .map((ph) => ph.getAttribute('data-async-placeholder'));
+
     return {
         served,
         required: served.filter((id) => !inPlaceholder.has(id)),
         live: markerIds(document, app),
-        servedPlaceholders: servedApp.querySelectorAll('[data-async-placeholder]').length,
-        livePlaceholders: app.querySelectorAll('[data-async-placeholder]').length,
+        placeholders,
+        unresolved: placeholders.filter((id) => !resolved.has(id)),
         hydratorRan: !!app._vnode
     };
 })()`;
@@ -146,7 +156,37 @@ async function assertMarkerSurvival(page, label) {
         + `${excluded ? `, ${excluded} excluded as streaming fallback` : ''}`
         + `${missing.length ? `, MISSING ${missing.join(' ')}` : ''})`
     );
+
+    // The exclusion above is only sound for a boundary that actually streamed
+    // in; an unresolved one would quietly shrink the required set.
+    if (ev.placeholders.length > 0) {
+        assert(
+            ev.unresolved.length === 0,
+            `${label}: every streaming boundary resolved `
+            + `(${ev.placeholders.length} placeholder(s)`
+            + `${ev.unresolved.length ? `, UNRESOLVED ${ev.unresolved.join(' ')}` : ''})`
+        );
+    }
     return ev;
+}
+
+/**
+ * Wait for every streaming boundary on the page to have landed, then give
+ * hydration a beat. A boundary that never resolves is not waited out forever —
+ * it falls through and fails the resolution assertion, which is the honest
+ * report.
+ */
+async function settle(page, timeoutMs = 10000) {
+    await page.waitForFunction(
+        () => {
+            const resolved = window.__sigxResolved ?? new Set();
+            return [...document.querySelectorAll('[data-async-placeholder]')]
+                .every((ph) => resolved.has(ph.getAttribute('data-async-placeholder')));
+        },
+        undefined,
+        { timeout: timeoutMs }
+    ).catch(() => { /* reported by the resolution assertion */ });
+    await page.waitForTimeout(300);
 }
 
 async function waitForServer(url, timeoutMs = 20000) {
@@ -188,6 +228,15 @@ async function withApp({ filter, dir, port }, drive) {
                 failures++;
                 console.error(`  ❌ uncaught page error: ${e.message}`);
             });
+            // Before any page script: record which streamed boundaries land.
+            // The event bubbles from the placeholder, and document exists
+            // from the start, so nothing is missed.
+            await page.addInitScript(() => {
+                window.__sigxResolved = new Set();
+                document.addEventListener('sigx:async-ready', (e) => {
+                    window.__sigxResolved.add(String(e.detail.id));
+                });
+            });
             await drive(page, origin);
         } finally {
             await browser.close();
@@ -206,8 +255,7 @@ await withApp({ filter: '@sigx/spa-ssr-example', dir: 'examples/spa-ssr', port: 
 
         for (const route of ['/', '/about', '/counter']) {
             await page.goto(origin + route, { waitUntil: 'load', timeout: 20000 });
-            // Let a streamed boundary land and its hydration settle.
-            await page.waitForTimeout(500);
+            await settle(page);
 
             const ev = await assertMarkerSurvival(page, `spa-ssr ${route}`);
             assert(ev.hydratorRan, `spa-ssr ${route}: the hydrator ran (#app._vnode set)`);
@@ -218,15 +266,18 @@ await withApp({ filter: '@sigx/spa-ssr-example', dir: 'examples/spa-ssr', port: 
         // replacement that happens to look identical.
         await page.goto(origin + '/counter', { waitUntil: 'load', timeout: 20000 });
         const value = await page.locator('.card strong').first().elementHandle();
-        assert(
-            (await value.textContent()).trim() === '0',
-            'spa-ssr /counter: the server rendered count: 0'
-        );
-        await page.locator('button', { hasText: 'Increment' }).first().click();
-        const inPlace = await page
-            .waitForFunction((el) => el.textContent.trim() === '1', value, { timeout: 10000 })
-            .then(() => true, () => false);
-        assert(inPlace, 'spa-ssr /counter: the server-rendered node updated IN PLACE (same DOM node)');
+        assert(value != null, 'spa-ssr /counter: the server rendered the counter');
+        if (value) {
+            assert(
+                (await value.textContent())?.trim() === '0',
+                'spa-ssr /counter: the server rendered count: 0'
+            );
+            await page.locator('button', { hasText: 'Increment' }).first().click();
+            const inPlace = await page
+                .waitForFunction((el) => el.textContent.trim() === '1', value, { timeout: 10000 })
+                .then(() => true, () => false);
+            assert(inPlace, 'spa-ssr /counter: the server-rendered node updated IN PLACE (same DOM node)');
+        }
         await assertMarkerSurvival(page, 'spa-ssr /counter after interaction');
     });
 
@@ -241,7 +292,7 @@ await withApp({ filter: '@sigx/ssr-islands-example', dir: 'examples/ssr-islands'
 
         for (const route of ['/', '/?deferred']) {
             await page.goto(origin + route, { waitUntil: 'load', timeout: 20000 });
-            await page.waitForTimeout(500);
+            await settle(page);
             await assertMarkerSurvival(page, `islands ${route}`);
         }
 
