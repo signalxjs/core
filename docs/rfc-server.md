@@ -437,13 +437,47 @@ parse
 step (it emits script assignments); the RPC envelope *does* parse, so it
 **adds** reviver-based rejection of those same three keys at both parse
 sites (server args, client result; the set is duplicated in `/client` to
-keep the stub dependency-free). **Rich
-type-handler serialization (Date, Map, custom classes) is deferred** until
-the client *revive* side of the serializer seam exists —
-`packages/runtime-core/src/ssr-serialize.ts` is explicitly serialize-only today
-("the client revive side ships with the cache-seed work"). When it lands,
-the RPC envelope adopts the same `SSRTypeHandler` registry on both
-directions; the envelope shape does not change.
+keep the stub dependency-free).
+
+**Rich type-handler serialization has landed** (#364). The revive half of the
+serializer seam now exists in `packages/runtime-core/src/ssr-serialize.ts`
+(`encodeWithHandlers` / `reviveWithHandlers`, around an `SSRTypeHandler` that
+gained a `tag` and a `revive` member), and the RPC envelope adopts the same
+vocabulary **on both directions** — arguments as well as results, plus stream
+chunks and `ServerFnError.data`. As promised, **the envelope shape does not
+change**: tags live *inside* the values, so `{"args": […]}` in and
+`{"data": …}` out are untouched, and `$cache` keeps working beside them.
+
+Encoded values take the single-key form `{ [tag]: payload }`. The built-in
+vocabulary works with zero configuration — `$date`, `$map`, `$set`,
+`$bigint`, `$url`, `$regexp`, `$undef` — and app-registered handlers are
+consulted *before* it, so a pack can own a type the built-ins also cover.
+Two rules make it safe to grow:
+
+- A user object whose sole key starts with `$` is emitted as
+  `{ $esc: original }` and unwrapped on revive **without** interpreting the
+  inner key. Without this, `{ $date: 'a string' }` would come back a `Date` —
+  data corruption, not a missing feature.
+- An unrecognized tag is left in its encoded shape rather than throwing, so a
+  peer on a newer vocabulary degrades instead of failing. That is why the
+  envelope still needs **no version field**.
+
+Decoding happens *after* the prototype-pollution reviver, so dangerous keys
+are already gone before any tag is interpreted; a malformed tag payload in a
+request is a **400**, not a masked 500. Circular structures remain the one
+unsupported shape and still fail — which is also why #351's interim
+`warnNonJsonSafe` dev guardrail is now **removed**: it existed to make the
+JSON-only wire's silent corruption visible, and the wire carries those types
+for real now.
+
+`@sigx/server` **reimplements** the codec (`packages/server/src/wire-codec.ts`)
+rather than importing runtime-core. The package has zero dependencies — not
+even `sigx` — because `@sigx/server/client` is dependency-free by contract
+(size-limit checks it with no ignore list, since resume handler chunks
+replicate stub imports). Importing the shared module would move those bytes
+out of the measurement and quietly weaken the guard. Same posture as the
+duplicated `DANGEROUS_KEYS`; the vocabulary above is the spec both copies
+obey, and changing one means changing the other.
 
 ## §5 Security — first-class design content
 
@@ -735,15 +769,16 @@ option (revisit only if that proves painful).
   the #349–#357 review sweep**: `onError` observability hook and
   `timeoutMs` on the endpoint options (post-RFC additive surface — the RFC
   originally promised neither; #349/#350), the `__DEV__` non-JSON-safe
-  result warning (the §4 interim guardrail, removed when the revive seam
-  lands; #351), and AbortSignal pass-through via the `.with(options)`
-  per-call channel (pulled forward from v2; #353).
+  result warning (the §4 interim guardrail; #351 — **since removed**, the
+  revive seam landed in #364), and AbortSignal pass-through via the
+  `.with(options)` per-call channel (pulled forward from v2; #353).
 - **v2**: `serverStream` → `useStream` (6.1 — **shipped**, #310);
   server-declared cache directives with `@sigx/cache` (6.2 — **shipped**,
   #311); zero-JS forms (6.4); per-call options (`headers` — the
   `.with(options)` channel itself shipped in v1.1 with AbortSignal, #353);
   GET + cache semantics for idempotent reads; rich type-handler
-  wire serialization once the revive side of the serializer seam ships.
+  wire serialization (**shipped**, #364 — the revive side of the serializer
+  seam landed with it).
 - **v2+**: single-flight boundary refresh (6.3) once the envelope and the
   per-request re-render path are proven.
 - **Native clients (rev 2, one milestone, independent of v2)**:

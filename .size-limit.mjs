@@ -137,8 +137,12 @@ export default [
     // 1 KB → 1.25 KB with #311: the entry absorbed the rev-2 transport
     // config (#329), the stream stub (#340), and $cache delivery (#311) —
     // all semantics, no dependencies (the ceiling #320 pre-approved).
+    // 1.25 KB → 1.75 KB with #364: the rfc-server §4 wire codec (encode +
+    // revive, seven built-in tags, both directions). It is INLINED rather
+    // than imported from runtime-core precisely to keep this guard honest —
+    // an import would move the bytes out of this measurement.
     name: '@sigx/server/client (fetch stubs)',
     path: 'packages/server/dist/client/index.prod.js',
-    limit: '1.25 KB',
+    limit: '1.75 KB',
   },
 ];

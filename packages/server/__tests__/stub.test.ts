@@ -207,3 +207,80 @@ describe('__serverFnStub — .with({ signal }) per-call options (#353)', () => {
         }
     });
 });
+
+describe('__serverFnStub — rich wire serialization (rfc-server §4)', () => {
+    const stub = (): ReturnType<typeof __serverFnStub> =>
+        __serverFnStub('rich_fn_00000001', 'rich', '/_sigx/fn');
+
+    it('revives a tagged Date into a live Date', async () => {
+        stubFetch(200, { data: { createdAt: { $date: 1_700_000_000_000 } } });
+        const out = (await stub()()) as { createdAt: Date };
+        expect(out.createdAt).toBeInstanceOf(Date);
+        expect(out.createdAt.getTime()).toBe(1_700_000_000_000);
+    });
+
+    it('revives every built-in tag', async () => {
+        stubFetch(200, {
+            data: {
+                at: { $date: 5 },
+                index: { $map: [['k', 1]] },
+                tags: { $set: ['a'] },
+                total: { $bigint: '42' },
+                home: { $url: 'https://example.com/' },
+                pattern: { $regexp: ['ab+c', 'gi'] },
+                nothing: { $undef: 0 }
+            }
+        });
+        const out = (await stub()()) as Record<string, unknown>;
+        expect(out.at).toBeInstanceOf(Date);
+        expect(out.index).toBeInstanceOf(Map);
+        expect(out.tags).toBeInstanceOf(Set);
+        expect(out.total).toBe(42n);
+        expect((out.home as URL).href).toBe('https://example.com/');
+        expect((out.pattern as RegExp).flags).toBe('gi');
+        expect('nothing' in out).toBe(true);
+        expect(out.nothing).toBeUndefined();
+    });
+
+    it('unwraps an escaped object without reading its key as a tag', async () => {
+        stubFetch(200, { data: { $esc: { $date: 'just a string' } } });
+        expect(await stub()()).toEqual({ $date: 'just a string' });
+    });
+
+    it('encodes rich types in ARGUMENTS on the way out', async () => {
+        const mock = stubFetch(200, { data: null });
+        await stub()(new Date(5), new Set(['a']), 7n);
+        const [, init] = mock.mock.calls[0] as [string, RequestInit];
+        expect(init.body).toBe(
+            '{"args":[{"$date":5},{"$set":["a"]},{"$bigint":"7"}]}'
+        );
+    });
+
+    it('leaves a plain payload untouched', async () => {
+        const mock = stubFetch(200, { data: { ok: [1, 2] } });
+        await expect(stub()(1, 'a')).resolves.toEqual({ ok: [1, 2] });
+        const [, init] = mock.mock.calls[0] as [string, RequestInit];
+        expect(init.body).toBe('{"args":[1,"a"]}');
+    });
+
+    it('does not mistake the $cache sidecar for a tag', async () => {
+        // A `$`-prefixed sole key at envelope level must not reach the codec.
+        stubFetch(200, { $cache: { invalidates: ['cart'] } });
+        await expect(stub()()).resolves.toBeUndefined();
+    });
+
+    it('revives rich types inside a ServerFnError data payload', async () => {
+        stubFetch(422, {
+            error: { message: 'nope', status: 422, data: { at: { $date: 5 } } }
+        });
+        await expect(stub()()).rejects.toMatchObject({
+            status: 422,
+            data: { at: expect.any(Date) }
+        });
+    });
+
+    it('leaves an unknown tag in its encoded shape rather than throwing', async () => {
+        stubFetch(200, { data: { v: { $fromTheFuture: 1 } } });
+        expect(await stub()()).toEqual({ v: { $fromTheFuture: 1 } });
+    });
+});
