@@ -25,24 +25,30 @@ interface ServerFnScope {
  * the ambient request for in-process server-function calls.
  *
  * Always returns a promise, even unscoped, so callers have one shape to await.
- * A scope that fails to open is not a render failure: `@sigx/server` degrades
- * to unscoped itself (a runtime without `node:async_hooks`), and anything
- * unexpected from a third-party scope is swallowed for the same reason — a
- * document must not 500 because ambient context was unavailable.
+ *
+ * A scope that fails to open must not fail the document — ambient context is
+ * an enhancement, and `createFetchHandler` owes its caller a Response either
+ * way. But "the scope broke" and "the render threw" arrive through the same
+ * channel, and re-running a render that already ran would render twice or bury
+ * a real error. So the fallback keys off whether `fn` actually STARTED: if it
+ * did, its failure is the render's and propagates untouched; if it never ran,
+ * the scope is at fault and the render is retried unscoped — whether `run`
+ * threw synchronously or rejected later.
  */
 export async function withServerFnScope<T>(source: unknown, fn: () => T | Promise<T>): Promise<T> {
     const scope = (globalThis as { __SIGX_SERVERFN_SCOPE__?: ServerFnScope }).__SIGX_SERVERFN_SCOPE__;
     if (!scope) return fn();
-    let opened: Promise<T>;
+    let started = false;
     try {
-        opened = scope.run(source, fn);
+        return await scope.run(source, () => {
+            started = true;
+            return fn();
+        });
     } catch (err) {
-        // A throw from `run` ITSELF means the scope never opened, so `fn` has
-        // not run — run it now, unscoped.
+        if (started) throw err; // the render's own failure, not the scope's
         if (__DEV__) {
             console.warn('[sigx] server-function scope failed to open; rendering unscoped:', err);
         }
         return fn();
     }
-    return opened;
 }

@@ -133,3 +133,50 @@ describe('createFetchHandler', () => {
         await expect(response.text()).resolves.toContain('ok');
     });
 });
+
+describe('a scope that cannot open', () => {
+    it('renders unscoped when run throws synchronously — fn never ran', async () => {
+        seamHolder.__SIGX_SERVERFN_SCOPE__ = {
+            run() {
+                throw new Error('no store');
+            }
+        };
+        const { Page } = scopeProbe(undefined, 'sync:throw');
+        const handler = createFetchHandler({ template: TEMPLATE, app: () => <Page /> });
+        const response = await handler(new Request('https://shop.test/'));
+        expect(response.status).toBe(200);
+        await expect(response.text()).resolves.toContain('ok');
+    });
+
+    it('renders unscoped when run rejects later — fn still never ran', async () => {
+        seamHolder.__SIGX_SERVERFN_SCOPE__ = {
+            run: () => Promise.reject(new Error('late failure'))
+        };
+        const { Page } = scopeProbe(undefined, 'async:reject');
+        const handler = createFetchHandler({ template: TEMPLATE, app: () => <Page /> });
+        // The handler's own try/catch sits INSIDE the wrap, so an escaping
+        // rejection would not even become a 500 — it would break the
+        // "always returns a Response" contract.
+        const response = await handler(new Request('https://shop.test/'));
+        expect(response.status).toBe(200);
+        await expect(response.text()).resolves.toContain('ok');
+    });
+
+    it('never re-runs a render that already started', async () => {
+        let renders = 0;
+        seamHolder.__SIGX_SERVERFN_SCOPE__ = {
+            async run(_source, fn) {
+                await fn();
+                throw new Error('scope bookkeeping blew up after the render');
+            }
+        };
+        const Page = component(() => {
+            renders++;
+            return () => <main>counted</main>;
+        });
+        const handler = createFetchHandler({ template: TEMPLATE, app: () => <Page /> });
+        await handler(new Request('https://shop.test/')).catch(() => {});
+        // Retrying here would render the document twice.
+        expect(renders).toBe(1);
+    });
+});
