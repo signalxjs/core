@@ -172,6 +172,21 @@ redundant assignment. A throwing resolver is swallowed — the detached
 context's descriptive error is more actionable than a leaked internal one.
 `fn.with({ context })` wins over whatever is ambient.
 
+### `__SIGX_SERVERFN_SERVICES__`
+
+| | |
+|---|---|
+| **Stamped by** | `server/src/service.ts` at import (lands with #399 — until then the seam is unstamped; **reserved**, rfc-server §2.2) |
+| **Read by** | `server/src/service.ts` only — `serviceStore()`, **the only accessor** (scope/endpoint disposal calls exported functions, never the global) |
+| **Contract** | `{ perRequest: WeakMap<object, Map<symbol, Entry>>; process: Map<symbol, Entry> }`, `Entry = { value: unknown; disposers: Array<() => void \| Promise<void>> }` |
+
+Instance store for `defineServerService` (rfc-server §2.2, #397/#399):
+per-request memoization keyed on the request's context source, plus lazy
+process singletons. A global for the same dual-module-copy reason as
+`__SIGX_SERVERFN_CONTEXT__` — in dev the Vite module runner and Node can hold
+two copies of `service.ts`, and a module-local map would give a guard and its
+handler two instances of one "shared" service.
+
 ### `__SIGX_LIVE_CLIENT__`
 
 | | |
