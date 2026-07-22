@@ -652,11 +652,13 @@ import { useDb } from './services.server';
 import * as cart from './cart.server';
 
 const restore = overrideServerService(useDb, () => fakeDb());
-const rq = { request: new Request('http://t.test/', { headers: { cookie } }) };
-
-await expect(cart.add.with({ context: rq })({ sku: 's1', qty: 2 }))
-    .resolves.toMatchObject({ count: 1 });     // guard ran, session decoded,
-restore();                                     // fakeDb hit — no HTTP anywhere
+try {
+    const request = new Request('http://t.test/', { headers: { cookie } });
+    await expect(cart.add.with({ context: request })({ sku: 's1', qty: 2 }))
+        .resolves.toMatchObject({ count: 1 }); // guard ran, session decoded,
+} finally {                                    // fakeDb hit — no HTTP anywhere
+    restore();
+}
 ```
 
 The dependency surface of `cart.server.ts` is its import list — no
