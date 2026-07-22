@@ -400,7 +400,7 @@ export type ServerServiceLifetime = 'request' | 'process';
 export interface ServerServiceSetupContext {
     /** Live request context. `'process'` setups get a throwing getter —
      *  a process-wide instance must not close over one request. */
-    rq: ServerFnContext;
+    get rq(): ServerFnContext;
     /** Teardown, LIFO. 'request': after the response has fully flushed
      *  (streams included). 'process': only via test restore. */
     onDispose(fn: () => void | Promise<void>): void;
