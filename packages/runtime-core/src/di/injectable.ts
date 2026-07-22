@@ -190,6 +190,7 @@ const ssrFallbackWarned = new Set<symbol>();
  * warning below can point at an injectable nobody named. Inline arrow factories
  * have no `.name`, and most authors will never pass `{ name }` — without this,
  * the warning names the literal string `sigx:injectable` and is unactionable.
+ * Called only when no name resolved, so a named injectable pays nothing.
  * Stack formats differ per engine, so every step is best-effort: an
  * unparseable stack yields `undefined` and the warning simply omits the site.
  */
@@ -323,11 +324,12 @@ export function defineInjectable<T>(
     const factory = factoryOrName;
     // Use a unique symbol as the token for this injectable; the description
     // only feeds diagnostics (dev warnings, devtools).
-    const token = Symbol(
-        (options as DefineInjectableOptions | undefined)?.name || factory.name || 'sigx:injectable'
-    );
-    // Dev-only: where this injectable was defined, for the fallback warning.
-    const site = __DEV__ ? captureDefinitionSite() : undefined;
+    const name = (options as DefineInjectableOptions | undefined)?.name || factory.name;
+    const token = Symbol(name || 'sigx:injectable');
+    // Dev-only, and only when there is no usable name: the definition site is
+    // the fallback for injectables diagnostics can't otherwise identify, so a
+    // named one pays no stack capture and its warning stays uncluttered.
+    const site = __DEV__ && !name ? captureDefinitionSite() : undefined;
 
     const useFn = (() => {
         // Try to find a provided instance

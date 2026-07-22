@@ -439,6 +439,22 @@ describe('SSR global-fallback warning', () => {
 
         expect(warn).toHaveBeenCalledTimes(1);
         expect(warn.mock.calls[0][0]).toContain('sessionStore');
+        // The site is a fallback for the unnamed — a named injectable neither
+        // captures a stack nor clutters its warning with one.
+        expect(warn.mock.calls[0][0]).not.toContain('defined at');
+    });
+
+    it('leaves the site off when the factory itself is named', () => {
+        vi.stubGlobal('window', undefined);
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        setCurrentInstance({ props: {}, provides: new Map(), parent: null } as unknown as ComponentSetupContext);
+
+        const useThing = defineInjectable(function namedFactory() { return {}; });
+        useThing();
+
+        expect(warn).toHaveBeenCalledTimes(1);
+        expect(warn.mock.calls[0][0]).toContain('namedFactory');
+        expect(warn.mock.calls[0][0]).not.toContain('defined at');
     });
 
     it('points at the definition site of an anonymous factory', () => {
