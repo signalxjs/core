@@ -16,7 +16,7 @@ import vm from 'node:vm';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const packages = resolve(__dirname, '../..');
 
-async function bundleIife(entrySource: string): Promise<string> {
+async function bundleIife(entrySource: string, { dev = false } = {}): Promise<string> {
     const result = await build({
         stdin: { contents: entrySource, resolveDir: __dirname, loader: 'ts' },
         bundle: true,
@@ -40,7 +40,9 @@ async function bundleIife(entrySource: string): Promise<string> {
                 });
             }
         }],
-        define: { 'process.env.NODE_ENV': '"production"', __DEV__: 'false' },
+        define: dev
+            ? { 'process.env.NODE_ENV': '"development"', __DEV__: 'true' }
+            : { 'process.env.NODE_ENV': '"production"', __DEV__: 'false' },
         logLevel: 'silent'
     });
     return result.outputFiles[0].text;
@@ -136,5 +138,59 @@ describe('runtime-core is platform-neutral', () => {
         expect(out.state).toBe('ready');
         expect(out.value).toBe(42);
         expect(out.streamed).toBe('ab');
+    });
+
+    it('a declared live client gets NO SSR-fallback warning for an unprovided injectable (issue #404)', async () => {
+        // Dev bundle: the warning is __DEV__-gated, so the prod define used by
+        // every other case here would strip the thing under test.
+        const code = await bundleIife(`
+            import { defineInjectable } from '@sigx/runtime-core';
+            import { setCurrentInstance, declareLiveClient } from '@sigx/runtime-core/internals';
+
+            const useThing = defineInjectable(() => ({ n: 1 }));
+            const useOther = defineInjectable(() => ({ n: 2 }), { name: 'perRequestThing' });
+
+            function inComponent(useFn: () => { n: number }): number {
+                const ctx: any = { props: {}, provides: new Map(), parent: null };
+                const prev = setCurrentInstance(ctx);
+                try {
+                    return useFn().n;
+                } finally {
+                    setCurrentInstance(prev);
+                }
+            }
+
+            export function probe(): number {
+                declareLiveClient(); // what a lynx/terminal platform module does on import
+                return inComponent(useThing);
+            }
+
+            // Negative control: same realm, same windowless-ness, but NOT a live
+            // client — proves the probe above can observe a warning at all.
+            export function probeServer(): number {
+                declareLiveClient(false);
+                return inComponent(useOther);
+            }
+        `, { dev: true });
+
+        const warnings: unknown[] = [];
+        const sandbox: Record<string, unknown> = {
+            console: { ...console, warn: (...args: unknown[]) => warnings.push(args[0]) },
+            setTimeout, clearTimeout, queueMicrotask,
+        };
+        sandbox.globalThis = sandbox;
+        const context = vm.createContext(sandbox);
+        vm.runInContext(code, context);
+
+        // The fallback fires (no provider) inside a component, in a realm with
+        // no window — the exact shape that used to warn about SSR leakage on a
+        // runtime with no server in the process.
+        expect(vm.runInContext('__result.probe()', context)).toBe(1);
+        expect(warnings).toEqual([]);
+
+        // …and the warning still reaches a genuine server render, named.
+        expect(vm.runInContext('__result.probeServer()', context)).toBe(2);
+        expect(warnings).toHaveLength(1);
+        expect(warnings[0]).toContain('perRequestThing');
     });
 });

@@ -193,7 +193,12 @@ export function provideOutsideSetupError(): SigxError {
     return prodError(code);
 }
 
-export function requiredInjectableNotProvidedError(name: string): SigxError {
+/**
+ * @param hint - Dev-only replacement for the generated suggestion. A pack whose
+ * injectable is satisfied by rendering something (`<NavigationRoot>`) rather
+ * than by `defineProvide` passes its own remedy here.
+ */
+export function requiredInjectableNotProvidedError(name: string, hint?: string): SigxError {
     const code = SigxErrorCode.REQUIRED_INJECTABLE_NOT_PROVIDED;
     if (__DEV__) {
         // Suggest the conventional use-function identifier only when the name
@@ -206,7 +211,7 @@ export function requiredInjectableNotProvidedError(name: string): SigxError {
             `Injectable "${name}" was used without being provided.`,
             {
                 code,
-                suggestion:
+                suggestion: hint ??
                     `Provide it before use: app.defineProvide(${useFn}, () => ...) before ` +
                     `mount/hydrate, or defineProvide(${useFn}, () => ...) in an ancestor ` +
                     "component's setup.",
