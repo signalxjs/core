@@ -122,7 +122,12 @@ export * from './messaging/index.js';
 
 // Dependency injection
 export { defineInjectable, defineProvide, useAppContext } from './di/injectable.js';
-export type { InjectableFunction, Providable } from './di/injectable.js';
+export type {
+    InjectableFunction,
+    Providable,
+    DefineInjectableOptions,
+    DefineRequiredInjectableOptions,
+} from './di/injectable.js';
 export * from './di/factory.js';
 
 // Directives

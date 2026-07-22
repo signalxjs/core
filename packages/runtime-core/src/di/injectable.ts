@@ -1,5 +1,6 @@
 import { getCurrentInstance, onUnmounted } from "../component.js";
 import type { AppContext } from "../app-types.js";
+import { isLiveClient } from "../async/environment.js";
 import {
     provideOutsideSetupError,
     provideInvalidInjectableError,
@@ -141,6 +142,35 @@ export interface InjectableFunction<T> {
 }
 
 /**
+ * Options for the factory form of `defineInjectable`.
+ */
+export interface DefineInjectableOptions {
+    /**
+     * Diagnostics name for this injectable — the token description used by dev
+     * warnings and devtools. Without it the name comes from `factory.name`,
+     * which inline arrow factories don't have.
+     */
+    name?: string;
+}
+
+/**
+ * Options for the required (name-string) form of `defineInjectable`.
+ */
+export interface DefineRequiredInjectableOptions {
+    /**
+     * Replaces the generated `suggestion` on the SIGX202 error thrown when the
+     * injectable is used unprovided. Use it when the remedy is not
+     * `defineProvide` — e.g. a pack whose injectable is satisfied by rendering
+     * something: `'Render the component as a route inside <Stack>.'`
+     *
+     * Read only in dev builds, but note the string lives in YOUR module, so it
+     * ships in your production bundle regardless. Gate it yourself if the bytes
+     * matter: `hint: __DEV__ ? '...' : undefined`.
+     */
+    hint?: string;
+}
+
+/**
  * The metadata defineProvide actually needs — satisfied by both
  * InjectableFunction and parameterized FactoryFunction use-functions.
  */
@@ -156,20 +186,59 @@ export interface Providable<T> {
 const ssrFallbackWarned = new Set<symbol>();
 
 /**
+ * Dev-only: the `file:line:col` a `defineInjectable` call was made from, so the
+ * warning below can point at an injectable nobody named. Inline arrow factories
+ * have no `.name`, and most authors will never pass `{ name }` — without this,
+ * the warning names the literal string `sigx:injectable` and is unactionable.
+ * Called only when no name resolved, so a named injectable pays nothing.
+ * Stack formats differ per engine, so every step is best-effort: an
+ * unparseable stack yields `undefined` and the warning simply omits the site.
+ */
+function captureDefinitionSite(): string | undefined {
+    const stack = new Error().stack;
+    if (!stack) return undefined;
+    // Frame 0 is the "Error" header on V8 and the first frame elsewhere, so
+    // match on our own function names instead of indexing blind: the caller is
+    // the first frame after the last one mentioning this module's helpers.
+    const lines = stack.split('\n');
+    let ours = -1;
+    for (let i = lines.length - 1; i >= 0; i--) {
+        const line = lines[i]!;
+        if (line.includes('captureDefinitionSite') || line.includes('defineInjectable')) {
+            ours = i;
+            break;
+        }
+    }
+    const frame = ours >= 0 ? lines[ours + 1] : undefined;
+    // Pull the innermost `path:line:col` out of whatever decoration the engine
+    // wrapped it in (`at fn (…)`, `fn@…`, a bare path).
+    const site = frame?.match(/([^\s()[\]]+:\d+:\d+)/)?.[1];
+    return site;
+}
+
+/**
  * Dev-only, server-only: warn when the global-singleton fallback fires while
  * an app exists (a component is rendering, or code runs inside
  * `app.runWithContext`). That singleton is shared across every SSR request in
  * the process — almost always a forgotten provide, not the zero-config usage
  * the fallback is meant for. Bare Node scripts and tests (no app anywhere)
  * stay silent, as does the client.
+ *
+ * The client check is `isLiveClient()`, NOT `typeof window` (#404): lynx's BG
+ * thread, the terminal runtime and browser Web Workers have no `window` yet are
+ * live clients with no server anywhere — they used to get this warning for
+ * every injectable resolving to its legitimate default. The `typeof window`
+ * fallback inside `isLiveClient()` keeps web behavior identical when nothing
+ * declares.
  */
-function warnSSRGlobalFallback(token: symbol): void {
-    if (typeof window !== 'undefined') return;
+function warnSSRGlobalFallback(token: symbol, site: string | undefined): void {
+    if (isLiveClient()) return;
     if (!getCurrentInstance() && !activeAppContext) return;
     if (ssrFallbackWarned.has(token)) return;
     ssrFallbackWarned.add(token);
     console.warn(
-        `[sigx] Injectable "${token.description || 'anonymous'}" resolved to a ` +
+        `[sigx] Injectable "${token.description || 'anonymous'}"` +
+        (site ? ` (defined at ${site})` : '') + ' resolved to a ' +
         'module-global singleton on the server because no provider was found. ' +
         'That instance is shared across ALL SSR requests in this process. ' +
         'Provide it per app — app.defineProvide(useX, () => ...) — or declare it ' +
@@ -190,6 +259,12 @@ function warnSSRGlobalFallback(token: symbol): void {
  * structured error (SIGX202) naming the injectable. Use this for services
  * that must be provided per app — e.g. per-request services under SSR.
  *
+ * Each form takes its own options: `{ name }` on the factory form gives
+ * diagnostics something to call an injectable whose factory is an inline arrow
+ * (see {@link DefineInjectableOptions}); `{ hint }` on the required form
+ * replaces the SIGX202 suggestion when the remedy isn't `defineProvide` (see
+ * {@link DefineRequiredInjectableOptions}).
+ *
  * @example
  * ```typescript
  * // Define a service with a zero-config fallback
@@ -204,27 +279,42 @@ function warnSSRGlobalFallback(token: symbol): void {
  * // A required service: no fallback, must be provided
  * const useRouter = defineInjectable<Router>('Router');
  * app.defineProvide(useRouter, () => createRouter(url));
+ *
+ * // A pack whose injectable is satisfied by rendering, not by defineProvide
+ * const useScreen = defineInjectable<Screen>('Screen', {
+ *     hint: 'Render the component as a route inside <Stack>.',
+ * });
  * ```
  */
-export function defineInjectable<T>(factory: () => T): InjectableFunction<T>;
-export function defineInjectable<T>(name: string): InjectableFunction<T>;
-export function defineInjectable<T>(factoryOrName: (() => T) | string): InjectableFunction<T> {
+export function defineInjectable<T>(
+    factory: () => T,
+    options?: DefineInjectableOptions
+): InjectableFunction<T>;
+export function defineInjectable<T>(
+    name: string,
+    options?: DefineRequiredInjectableOptions
+): InjectableFunction<T>;
+export function defineInjectable<T>(
+    factoryOrName: (() => T) | string,
+    options?: DefineInjectableOptions | DefineRequiredInjectableOptions
+): InjectableFunction<T> {
     if (typeof factoryOrName === 'string') {
         const name = factoryOrName;
         const token = Symbol(name);
+        const hint = (options as DefineRequiredInjectableOptions | undefined)?.hint;
 
         const useFn = (() => {
             const entry = lookupProvidedEntry(token);
             if (entry !== NOT_PROVIDED) {
                 return entry as T;
             }
-            throw requiredInjectableNotProvidedError(name);
+            throw requiredInjectableNotProvidedError(name, hint);
         }) as InjectableFunction<T>;
 
         // No default factory either: defineProvide(useFn) without an explicit
         // factory fails with the same clear, named error.
         useFn._factory = () => {
-            throw requiredInjectableNotProvidedError(name);
+            throw requiredInjectableNotProvidedError(name, hint);
         };
         useFn._token = token;
 
@@ -234,7 +324,12 @@ export function defineInjectable<T>(factoryOrName: (() => T) | string): Injectab
     const factory = factoryOrName;
     // Use a unique symbol as the token for this injectable; the description
     // only feeds diagnostics (dev warnings, devtools).
-    const token = Symbol(factory.name || 'sigx:injectable');
+    const name = (options as DefineInjectableOptions | undefined)?.name || factory.name;
+    const token = Symbol(name || 'sigx:injectable');
+    // Dev-only, and only when there is no usable name: the definition site is
+    // the fallback for injectables diagnostics can't otherwise identify, so a
+    // named one pays no stack capture and its warning stays uncluttered.
+    const site = __DEV__ && !name ? captureDefinitionSite() : undefined;
 
     const useFn = (() => {
         // Try to find a provided instance
@@ -245,7 +340,7 @@ export function defineInjectable<T>(factoryOrName: (() => T) | string): Injectab
 
         // Fallback to global singleton
         if (__DEV__) {
-            warnSSRGlobalFallback(token);
+            warnSSRGlobalFallback(token, site);
         }
         if (!globalInstances.has(token)) {
             globalInstances.set(token, factory());

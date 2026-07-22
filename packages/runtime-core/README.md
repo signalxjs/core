@@ -70,6 +70,24 @@ const router = useRouter();
 
 App-level provides are read live: a `defineProvide` call made after `app.mount()` is visible to components mounted afterwards. Component-tree provides (`defineProvide` in setup) always take precedence.
 
+That generated suggestion assumes `defineProvide` is the remedy. For a pack whose injectable is satisfied by *rendering* something, pass your own `hint` — it replaces the suggestion, keeping the `SIGX202` code and the name:
+
+```tsx
+export const useScreen = defineInjectable<Screen>('Screen', {
+    hint: 'useIsFocused must be called from a component rendered as a route by <Stack>.',
+});
+```
+
+The hint is only read in dev builds, but the string literal lives in *your* module, so it ships in your production bundle regardless — gate it yourself (`hint: __DEV__ ? '…' : undefined`) if the bytes matter.
+
+The dev SSR warning on the factory form names the injectable after `factory.name`, which inline arrow factories don't have. Pass `{ name }` to name it — otherwise the warning falls back to the definition site (`defined at file:line`), captured dev-only:
+
+```tsx
+export const useSessionStore = defineInjectable(() => createSessionStore(), { name: 'sessionStore' });
+```
+
+The warning is skipped on live clients. That check is `isLiveClient()`, not `typeof window`, so windowless-but-live runtimes (lynx, terminal, Web Workers) stay quiet — see the `declareLiveClient()` note in the async docs.
+
 ### Dependency injection outside components
 
 Use-functions from `defineInjectable`/`defineFactory` resolve to app-context instances inside components. Code that runs outside component setup — router navigation guards, socket handlers, entry-scope code — must opt in with `app.runWithContext(fn)`, or it silently gets a separate realm-level fallback instance:

@@ -251,6 +251,62 @@ describe('required injectables (defineInjectable(name))', () => {
         const useRouter = defineInjectable<object>('Router');
         expect(useRouter._token.description).toBe('Router');
     });
+
+    // #404: a pack whose injectable is satisfied by rendering something must be
+    // able to say so — the generated `defineProvide` advice is wrong for it.
+    it('a hint replaces the generated suggestion, keeping the SIGX202 code and name', () => {
+        const useScreen = defineInjectable<object>('Screen', {
+            hint: 'Render the component as a route inside <Stack>.',
+        });
+
+        let caught: unknown;
+        try {
+            useScreen();
+        } catch (e) {
+            caught = e;
+        }
+        expect(caught).toBeInstanceOf(SigxError);
+        expect((caught as SigxError).code).toBe('SIGX202');
+        expect((caught as SigxError).message).toContain('"Screen"');
+        expect((caught as SigxError).suggestion).toBe('Render the component as a route inside <Stack>.');
+        expect((caught as SigxError).suggestion).not.toContain('defineProvide');
+    });
+
+    it('the hint reaches the defineProvide-without-factory throw too', () => {
+        const mockInstance: MockComponentContext = {
+            props: {},
+            provides: new Map(),
+            parent: null
+        };
+        setCurrentInstance(mockInstance as ComponentSetupContext);
+
+        const useScreen = defineInjectable<object>('Screen', { hint: 'Mount <Stack>.' });
+        let caught: unknown;
+        try {
+            defineProvide(useScreen);
+        } catch (e) {
+            caught = e;
+        }
+        expect((caught as SigxError).suggestion).toBe('Mount <Stack>.');
+    });
+
+    it('carries neither hint nor suggestion in production', () => {
+        vi.stubEnv('NODE_ENV', 'production');
+        try {
+            const useScreen = defineInjectable<object>('Screen', { hint: 'Mount <Stack>.' });
+            let caught: unknown;
+            try {
+                useScreen();
+            } catch (e) {
+                caught = e;
+            }
+            expect((caught as SigxError).code).toBe('SIGX202');
+            expect((caught as SigxError).suggestion).toBeUndefined();
+            expect((caught as SigxError).message).not.toContain('Mount <Stack>.');
+        } finally {
+            vi.unstubAllEnvs();
+        }
+    });
 });
 
 describe('app-level provides (live lookup through the root AppContext)', () => {
@@ -369,5 +425,47 @@ describe('SSR global-fallback warning', () => {
         useThing();
 
         expect(warn).not.toHaveBeenCalled();
+    });
+
+    // #404: inline arrow factories have no `.name`, so without these two the
+    // warning names the literal string "sigx:injectable" and can't be acted on.
+    it('names the injectable from the { name } option', () => {
+        vi.stubGlobal('window', undefined);
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        setCurrentInstance({ props: {}, provides: new Map(), parent: null } as unknown as ComponentSetupContext);
+
+        const useThing = defineInjectable(() => ({}), { name: 'sessionStore' });
+        useThing();
+
+        expect(warn).toHaveBeenCalledTimes(1);
+        expect(warn.mock.calls[0][0]).toContain('sessionStore');
+        // The site is a fallback for the unnamed — a named injectable neither
+        // captures a stack nor clutters its warning with one.
+        expect(warn.mock.calls[0][0]).not.toContain('defined at');
+    });
+
+    it('leaves the site off when the factory itself is named', () => {
+        vi.stubGlobal('window', undefined);
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        setCurrentInstance({ props: {}, provides: new Map(), parent: null } as unknown as ComponentSetupContext);
+
+        const useThing = defineInjectable(function namedFactory() { return {}; });
+        useThing();
+
+        expect(warn).toHaveBeenCalledTimes(1);
+        expect(warn.mock.calls[0][0]).toContain('namedFactory');
+        expect(warn.mock.calls[0][0]).not.toContain('defined at');
+    });
+
+    it('points at the definition site of an anonymous factory', () => {
+        vi.stubGlobal('window', undefined);
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        setCurrentInstance({ props: {}, provides: new Map(), parent: null } as unknown as ComponentSetupContext);
+
+        const useThing = defineInjectable(() => ({}));
+        useThing();
+
+        expect(warn).toHaveBeenCalledTimes(1);
+        expect(warn.mock.calls[0][0]).toMatch(/defined at .*injectable\.test\.ts:\d+:\d+/);
     });
 });
