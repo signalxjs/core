@@ -375,6 +375,17 @@ export function serverFnPreset(base: { use: ServerFnGuard[] }): typeof serverFn;
   derived symbol — behavior changed, a stale client must 404 into the
   skew path. Plain functions' seeds stay byte-identical; stable symbols
   (N.3) are unaffected either way.
+- **Guards are before-only — a known, accepted limitation.** A guard
+  vetoes by throwing; there is no around-middleware that wraps the
+  handler (the tRPC/TanStack shape, or ASP.NET's endpoint filters).
+  Post-handler concerns are already structural — `invalidates` (§6.2),
+  `refreshes` (§6.3), `Cache-Control` (§4.1), `onError` + `timeoutMs`
+  (endpoint options) — and cross-cutting *around* needs (timing, tracing
+  spans) ride a request-scoped service whose `onDispose` fires when the
+  response has fully flushed (see `useTrace` in §2.3, which measures
+  strictly more than a wrapped handler would: the whole request,
+  streaming included). Extending the guard signature stays off the table
+  until a need appears that neither mechanism covers.
 - Companion guardrail (same milestone): the transform warns when a
   `serverFn({ … })` options literal contains a spread — `id`, `cache`,
   and `refreshes` inside a spread are invisible to the static reads
@@ -467,6 +478,30 @@ export const getOrders = serverFn({
   handled request) — it never silently serves a process instance. A
   session service leaking across requests is the one bug this design
   makes impossible.
+- **No captive dependencies — the `ValidateScopes` analog, always-on.**
+  `'process'` instances are created lazily, which means *during some
+  request* — so a process setup that resolved a `'request'` service
+  through the ambient scope would silently freeze one request's state
+  into a process-wide singleton (ASP.NET Core's classic captive-
+  dependency bug; it ships a dev-mode `ValidateScopes` check for exactly
+  this). The throwing `rq` getter blocks the direct capture; this rule
+  closes the indirect path: **while a `'process'` setup runs, resolving
+  any `'request'`-lifetime service throws** — always-on, not dev-only,
+  because the check is one flag on the resolution path and the bug is a
+  cross-tenant data leak.
+
+  ```ts
+  export const useMailer = defineServerService(() => {
+      const session = useSession();  // ✗ throws: 'request' service inside a
+                                     //   'process' setup — would capture one
+                                     //   request's session process-wide
+      return createMailer();
+  }, 'process');
+  ```
+
+  The remedy is always the same shape: take the request-scoped value as
+  an argument at *use* time (`mailer.send(session.user.email, …)`), or
+  make the service `'request'`-scoped if it truly varies per request.
 - **Workerd without `nodejs_compat`** (no ALS): `'process'` services are
   unaffected; `'request'` services require the explicit `useX(rq)` form,
   which guards and handlers always have in hand — ctx-first is the sigx
@@ -488,10 +523,40 @@ export const getOrders = serverFn({
   dual-module-copy hazard that made `ServerFnError` a brand check —
   registered in `docs/seams.md`.
 
-**The line against `rq.locals`:** locals are the guard→handler hand-off
-for *values* (an auth result has no lifecycle); services are for things
-with **identity and teardown**. Both stay; the docs draw exactly that
-line.
+**The line against `rq.locals` — and where the types flow:** locals are
+the guard→handler hand-off for *values* (an auth result has no
+lifecycle); services are for things with **identity and teardown**. Both
+stay. The corollary deserves its own sentence, because it is sigx's
+answer to the strongest card in tRPC's hand — typed middleware-context
+accumulation, where each chained middleware *adds* to `ctx` and
+downstream code sees `ctx.user` statically. sigx does not thread types
+through middleware position; **the typed hand-off is a shared service,
+not a mutated context**:
+
+```ts
+const requireUser: ServerFnGuard = async (rq) => {
+    const { user } = await useSession(rq);   // typed: Session
+    if (!user) throw new ServerFnError(401, 'Sign in');
+};
+
+export const getOrders = serverFn({
+    use: [requireUser],
+    handler: async (rq) => {
+        const { user } = await useSession(rq); // SAME memoized instance the
+        return byUser(user!.id);               // guard saw — and `Session`'s
+    },                                         // type arrives via the import,
+});                                            // not via middleware position
+```
+
+The guard's resolution and the handler's are one memoized instance, so
+the guarantee tRPC encodes in builder-chain types sigx gets from
+instance identity plus the accessor's ordinary import type. What this
+deliberately does NOT give is the *narrowing* (`user!` above: the
+handler cannot statically know the guard already rejected null) — the
+price of no chained builder, paid once per handler as one assertion or a
+`requireUser`-style throwing accessor (`getUser(rq)` returning
+`NonNullable<…>`). `locals: Record<string, unknown>` stays untyped **by
+design**: if a local wants a type, it wants to be a service.
 
 **What this is not:** not tRPC's `createContext` (one eager god-object
 per request, a single choke-point file, no per-service lifetime — a
@@ -501,6 +566,104 @@ appears), and not an app-DI bridge in any form (no per-request
 per-request service visible to SSR *components* composes it in userland:
 `app.defineProvide(useX, () => useXService(rq))` in their per-request
 entry — no framework coupling.
+
+### 2.3 Putting it together — a worked service
+
+Every piece of §1.5–§2.2 in one place: a services module, a service
+module riding a preset, the client, and a test.
+
+```ts
+// src/services.server.ts — services live where they're defined,
+// not in a composition root. Any module may define its own.
+import { defineServerService } from '@sigx/server';
+
+/** Process lifetime: one pool, closed only by test restore. */
+export const useDb = defineServerService(({ onDispose }) => {
+    const pool = createPool(process.env.DATABASE_URL!);
+    onDispose(() => pool.end());
+    return pool;
+}, 'process');
+
+/** Request lifetime (the default): async setup — the PROMISE is
+ *  memoized, so guard and handler share one in-flight decode. */
+export const useSession = defineServerService(async ({ rq }) =>
+    decodeSession(rq.request.headers.get('cookie')));
+
+/** The around-middleware substitute: opens with first touch, closes
+ *  when the response has fully flushed — streaming included. */
+export const useTrace = defineServerService(({ rq, onDispose }) => {
+    const span = tracer.startSpan(rq.url.pathname);
+    onDispose(() => span.end());
+    return span;
+});
+```
+
+```ts
+// src/cart.server.ts — the service IS the module (§1.5)
+import { serverFn, serverFnPreset, ServerFnError } from '@sigx/server';
+import type { ServerFnGuard } from '@sigx/server';
+import { useDb, useSession, useTrace } from './services.server';
+import { AddSchema } from './schemas';         // Standard Schema (zod/valibot/…)
+
+const requireUser: ServerFnGuard = async (rq) => {
+    useTrace(rq);                              // span opens with the request
+    const { user } = await useSession(rq);     // creates + memoizes
+    if (!user) throw new ServerFnError(401, 'Sign in');
+};
+
+const authed = serverFnPreset({ use: [requireUser] });   // same-module (§2.1)
+
+export const add = authed({
+    input: AddSchema,                          // statically-read options stay
+    invalidates: () => [['cart']],             // at the call site, never in
+    handler: async (rq, item) => {             // the preset
+        const { user } = await useSession(rq); // the instance the guard saw
+        return (await useDb()).cart.add(user!.id, item);
+    },
+});
+
+export const list = authed({
+    cache: { maxAge: 30 },                     // GET + Cache-Control (§4.1)
+    handler: async (rq) => {
+        const { user } = await useSession(rq);
+        return (await useDb()).cart.list(user!.id);
+    },
+});
+```
+
+```tsx
+// src/CartPage.tsx — client; the namespace import is the service handle
+import * as cart from './cart.server';
+
+const items = useData(() => ['cart'], () => cart.list());
+const add   = useAction(cart.add);             // server-declared invalidates
+                                               // refresh ['cart'] on success
+```
+
+During SSR, `cart.list()` called by `useData` runs in-process inside the
+document handler's ambient scope (v1.1): `useSession` resolves against
+the real incoming request, and every service instance created during the
+render is disposed when the stream finishes — same code, no wiring.
+
+```ts
+// cart.test.ts — override the process service, drive with an explicit context
+import { overrideServerService } from '@sigx/server';
+import { useDb } from './services.server';
+import * as cart from './cart.server';
+
+const restore = overrideServerService(useDb, () => fakeDb());
+try {
+    const request = new Request('http://t.test/', { headers: { cookie } });
+    await expect(cart.add.with({ context: request })({ sku: 's1', qty: 2 }))
+        .resolves.toMatchObject({ count: 1 }); // guard ran, session decoded,
+} finally {                                    // fakeDb hit — no HTTP anywhere
+    restore();
+}
+```
+
+The dependency surface of `cart.server.ts` is its import list — no
+container, no registration, no decorators, and nothing here ships a
+byte to the client beyond the per-function stubs.
 
 ## §3 The transform — `@sigx/vite/server`
 
@@ -1400,7 +1563,8 @@ option (revisit only if that proves painful).
   preset-seeded symbols + the spread-hidden-static-keys warning) and
   `defineServerService` (§2.2, #399 — `service.ts`, `CTX_SOURCE` keying,
   `__SIGX_SERVERFN_SERVICES__` seam, scope/endpoint/stream disposal
-  ownership, `overrideServerService`). Deferred from it, deliberately:
+  ownership, the captive-dependency throw, `overrideServerService`).
+  Deferred from it, deliberately:
   cross-module presets (plugin-level resolution over the extraction map —
   excluded from the per-file pure extractors), preset-carried
   `cache`/`id` defaults, automatic detached-call disposal, a `/testing`
