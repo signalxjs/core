@@ -33,7 +33,9 @@ let declared: boolean | null = null;
  */
 export function declareLiveClient(live = true): void {
     declared = live;
-    (globalThis as Record<string, unknown>).__SIGX_LIVE_CLIENT__ = live;
+    // `boolean`, not `true`: an explicit `declareLiveClient(false)` stamp is
+    // a legal not-live override — docs/seams.md carries the contract.
+    (globalThis as { __SIGX_LIVE_CLIENT__?: boolean }).__SIGX_LIVE_CLIENT__ = live;
 }
 
 /** Declaration wins; `typeof window` is the fallback. */

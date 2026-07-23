@@ -30,6 +30,13 @@ import { isLiveClient } from './environment.js';
 const MISS = { hit: false, value: undefined } as const;
 
 /**
+ * The `__SIGX_ASYNC__` seam's shape at its single accessor — the canonical
+ * contract lives in `docs/seams.md`. Null-prototype record of key →
+ * (server-encoded | live written-back) value.
+ */
+type AsyncBlobGlobal = { __SIGX_ASYNC__?: Record<string, unknown> };
+
+/**
  * Handlers for app/pack types, delivered through a page global rather than DI
  * — see `docs/seams.md`. The blob is itself a page global, so a per-app
  * decoder for it would be meaningless, and the read sites here run inside
@@ -74,7 +81,7 @@ export function reviveFromServer(value: unknown): unknown {
  */
 export function peekRestored(key: string): { hit: boolean; value: unknown } {
     if (!isLiveClient()) return MISS;
-    const blob = (globalThis as any).__SIGX_ASYNC__;
+    const blob = (globalThis as AsyncBlobGlobal).__SIGX_ASYNC__;
     // Own-property check: `in` would also see inherited keys (and misbehave
     // on keys like "__proto__"/"constructor").
     if (blob && Object.prototype.hasOwnProperty.call(blob, key)) {
@@ -86,7 +93,7 @@ export function peekRestored(key: string): { hit: boolean; value: unknown } {
 /** Invalidate a restored entry — called before fetching fresh data. */
 export function invalidateRestored(key: string): void {
     if (!isLiveClient()) return;
-    const blob = (globalThis as any).__SIGX_ASYNC__;
+    const blob = (globalThis as AsyncBlobGlobal).__SIGX_ASYNC__;
     if (blob && Object.prototype.hasOwnProperty.call(blob, key)) {
         delete blob[key];
     }
@@ -99,6 +106,7 @@ export function invalidateRestored(key: string): void {
  */
 export function writeBack(key: string, value: unknown): void {
     if (!isLiveClient()) return;
-    const blob = ((globalThis as any).__SIGX_ASYNC__ ??= Object.create(null));
+    const g = globalThis as AsyncBlobGlobal;
+    const blob = (g.__SIGX_ASYNC__ ??= Object.create(null) as Record<string, unknown>);
     blob[key] = value;
 }

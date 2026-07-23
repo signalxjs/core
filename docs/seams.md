@@ -246,7 +246,7 @@ handler two instances of one "shared" service.
 |---|---|
 | **Stamped by** | `declareLiveClient()` — non-web platform-identity modules (lynx, terminal) |
 | **Read by** | `runtime-core/src/async/environment.ts`, `server/src/index.ts` (`assertNotLiveClient`) |
-| **Contract** | `true` |
+| **Contract** | `boolean` — `true` declares a live client; an explicit `declareLiveClient(false)` stamps `false` as a not-live override (readers compare `=== true`) |
 
 Marks a runtime with no HTML page. A `serverFn` body reaching a live client is
 an unextracted call and throws. `@sigx/runtime-dom/platform` must **not** stamp
@@ -266,6 +266,13 @@ it.
 |---|---|
 | **Stamped by** | the devtools extension |
 | **Read by** | `reactivity/src/devtools-hook.ts` |
+| **Contract** | `DevtoolsHook \| undefined` (the type is exported from `@sigx/reactivity/internals`) |
+
+The one seam with a `declare global` (`devtools-hook.ts`): it is read by bare
+global reference, dev-only, and stamped from OUTSIDE the package graph (a
+browser extension), so an ambient declaration is the honest shape. Caveat:
+that ambient ships in the package's dts and lands in every dependent's global
+scope — acceptable for one dev-only seam, not a pattern to copy.
 
 ## Adding a seam
 
@@ -274,7 +281,13 @@ path — a dependency-free entry, a cross-bundle hand-off, or a call site with n
 app context. Then:
 
 1. Add a row here: name, direction, writer, reader, contract, data or control.
-2. Type the contract at **both** ends, even though the global is untyped.
+2. Type the contract at **both** ends as a **named structural type at the
+   single accessor** (`type FooSeam = { __SIGX_FOO__?: … }`), never a bare
+   `as any` and never a `declare global` (the ambient would leak into every
+   dependent's global scope via the shipped dts — the devtools hook is the
+   documented exception). This row's Contract line is the canonical shape
+   both ends copy; the two ends cannot share an import — a type-only import
+   across the gap is a dependency edge by another name.
 3. Make a missing seam a no-op, never a throw — the reader must work with the
    other package absent.
 4. Swallow throws from the far side. A pack bug must not break the caller.

@@ -86,9 +86,22 @@ export function loadHydrationCore(): Promise<HydrationCore> {
 
 // ============= Table access =============
 
+/**
+ * The `__SIGX_BOUNDARIES__` seam's shape at its accessor pair — the
+ * canonical contract lives in `docs/seams.md`. Null-prototype record of
+ * component id (stringified) → boundary record.
+ */
+type BoundaryTableGlobal = { __SIGX_BOUNDARIES__?: Record<string, SSRBoundaryRecord> };
+
 /** Read the boundary table (plain global — the executable assignment's target). */
 export function getBoundaryTable(): Record<string, SSRBoundaryRecord> {
-    return (typeof window !== 'undefined' && (window as any).__SIGX_BOUNDARIES__) || {};
+    return (
+        (typeof window !== 'undefined' &&
+            (window as unknown as BoundaryTableGlobal).__SIGX_BOUNDARIES__) ||
+        // Null-prototype like the real table: an empty fallback must not
+        // resurface inherited keys to callers indexing by untrusted strings.
+        (Object.create(null) as Record<string, SSRBoundaryRecord>)
+    );
 }
 
 /** Read one boundary record by component id. */
@@ -108,7 +121,7 @@ export function installBoundaryRecords(
     patch: Record<string | number, SSRBoundaryRecord>
 ): void {
     if (typeof window === 'undefined') return;
-    const w = window as unknown as { __SIGX_BOUNDARIES__?: Record<string, SSRBoundaryRecord> };
+    const w = window as unknown as BoundaryTableGlobal;
     w.__SIGX_BOUNDARIES__ = Object.assign(Object.create(null), w.__SIGX_BOUNDARIES__, patch);
 }
 
@@ -119,8 +132,7 @@ export function installBoundaryRecords(
  */
 export function removeBoundaryRecord(id: number): void {
     if (typeof window === 'undefined') return;
-    const table = (window as unknown as { __SIGX_BOUNDARIES__?: Record<string, SSRBoundaryRecord> })
-        .__SIGX_BOUNDARIES__;
+    const table = (window as unknown as BoundaryTableGlobal).__SIGX_BOUNDARIES__;
     if (table) delete table[String(id)];
 }
 
