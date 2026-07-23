@@ -98,7 +98,9 @@ export function getBoundaryTable(): Record<string, SSRBoundaryRecord> {
     return (
         (typeof window !== 'undefined' &&
             (window as unknown as BoundaryTableGlobal).__SIGX_BOUNDARIES__) ||
-        {}
+        // Null-prototype like the real table: an empty fallback must not
+        // resurface inherited keys to callers indexing by untrusted strings.
+        (Object.create(null) as Record<string, SSRBoundaryRecord>)
     );
 }
 

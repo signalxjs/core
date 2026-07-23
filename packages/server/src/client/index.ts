@@ -157,15 +157,22 @@ export interface ServerFnCacheDirectives {
 }
 
 /**
+ * The `__SIGX_SERVERFN_CACHE__` seam's shape at this (reading) end — the
+ * stamping end is `@sigx/cache`'s `ServerFnCacheSeam`; `docs/seams.md`
+ * carries the canonical contract both copy (no import in either direction).
+ */
+type ServerFnCacheSeamGlobal = {
+    __SIGX_SERVERFN_CACHE__?: (d: ServerFnCacheDirectives) => void;
+};
+
+/**
  * Surface `$cache` to the installed cache pack. The seam is a GLOBAL
  * (`__SIGX_SERVERFN_CACHE__`, stamped by `@sigx/cache`'s plugin install) —
  * no import in either direction, the live-client-marker pattern, keeping
  * this entry dependency-free. A hook failure never breaks the RPC result.
  */
 function deliverCacheDirectives(directives: ServerFnCacheDirectives): void {
-    const hook = (
-        globalThis as { __SIGX_SERVERFN_CACHE__?: (d: ServerFnCacheDirectives) => void }
-    ).__SIGX_SERVERFN_CACHE__;
+    const hook = (globalThis as ServerFnCacheSeamGlobal).__SIGX_SERVERFN_CACHE__;
     if (!hook) return;
     try {
         hook(directives);
@@ -189,11 +196,13 @@ export interface BoundaryRefreshSeam {
     apply(entries: unknown[], seq: number): void;
 }
 
+/** The `__SIGX_SERVERFN_BOUNDARIES__` seam's shape at this (reading) end. */
+type BoundaryRefreshSeamGlobal = { __SIGX_SERVERFN_BOUNDARIES__?: BoundaryRefreshSeam };
+
 let refreshSeq = 0;
 
 function refreshSeam(): BoundaryRefreshSeam | undefined {
-    return (globalThis as { __SIGX_SERVERFN_BOUNDARIES__?: BoundaryRefreshSeam })
-        .__SIGX_SERVERFN_BOUNDARIES__;
+    return (globalThis as BoundaryRefreshSeamGlobal).__SIGX_SERVERFN_BOUNDARIES__;
 }
 
 /** Create the typed client stub for one extracted server function. The 4th
