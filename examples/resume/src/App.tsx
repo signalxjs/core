@@ -73,10 +73,11 @@ export const App = component<{ ssrRequest: string }>((ctx) => {
             <div class="card">
                 <h3>5 — single-flight boundary refresh</h3>
                 <p class="hint">
-                    The vote mutation declares <code>refreshes</code> — its
-                    response carries this boundary's freshly re-rendered HTML
-                    and the client swaps it in. Fresh UI in ONE request, and
-                    the component chunk never loads.
+                    The vote mutation declares <code>invalidates</code> — and
+                    because this boundary read that data during SSR, the
+                    response carries its freshly re-rendered HTML and the
+                    client swaps it in. Fresh UI in ONE request, and the
+                    component chunk never loads.
                 </p>
                 <Poll />
             </div>

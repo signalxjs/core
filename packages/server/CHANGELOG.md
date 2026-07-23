@@ -15,6 +15,20 @@
 
 ### Changed
 
+- **BREAKING (pre-release)**: **`refreshes` is REMOVED — boundary refresh
+  keys off `invalidates` (#452).** The §6.3 sidecar/refresh path now
+  belongs to the `invalidates` declaration: the stub's sidecar flag means
+  "invalidates-declaring", descriptors carry the boundary's recorded
+  `deps` (validated: ≤32 keys/descriptor, ≤1024 chars/key; dep-less
+  descriptors dropped — they can never be admitted), and the endpoint
+  admits `deps ∩ invalidates` under `keyMatches` semantics (duplicated
+  from `@sigx/cache` in `server/key-match.ts` with a parity test — no
+  dependency edge). `__sigxRefreshes` and the `cache`+`refreshes` dev
+  warning are gone; the `invalidates` patterns are computed ONCE per call
+  and shared by `$cache` and the gate. Migration: replace
+  `refreshes: ['Poll']` with `invalidates: () => [getVotes]` and read the
+  data via `useData(getVotes)`.
+
 - **`form` is typed as the literal `true` (#437).** The extractor reads
   `form: true` statically and (since #412) the runtime requires `input` at
   definition time — but the TYPE still accepted any boolean, so

@@ -45,22 +45,25 @@ export const getCatalog = serverFn({
 
 /**
  * Single-flight boundary refresh (rfc-server §6.3). The vote count lives
- * here — server truth, per-process for the demo. `vote` declares which
- * boundary components it may refresh; the endpoint re-renders them through
- * `createBoundaryRefresh` (see server.mjs / src/dev-refresh.ts) and the
+ * here — server truth, per-process for the demo. `vote` declares what DATA
+ * it invalidates — a same-module fn reference, no component names anywhere
+ * — and the endpoint re-renders whichever boundaries recorded a dependency
+ * on that data during SSR (`useData(getVotes)` in Poll.tsx) through
+ * `createBoundaryRefresh` (see server.mjs / src/dev-refresh.ts). The
  * response carries fresh HTML the client patches in without ever loading
- * the Poll component chunk.
+ * the Poll component chunk; the same declaration drives `@sigx/cache`
+ * invalidation for hydrated pages.
  */
 let votes = 3;
 
 export const getVotes = serverFn(async () => votes);
 
 export const vote = serverFn({
-    refreshes: ['Poll'],
     handler: async () => {
         votes += 1;
         return votes;
-    }
+    },
+    invalidates: () => [getVotes]
 });
 
 /** Minimal Standard Schema — the validator IS the boundary (§5.2b): form

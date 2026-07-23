@@ -361,7 +361,7 @@ export function serverFnPreset(base: { use: ServerFnGuard[] }): typeof serverFn;
   registry, endpoint, or stub change of any kind.
 - **`use` only, no chaining.** `preset.use().input()` is the `query()`/
   `rpc()` builder the non-goals reject. Keeping the statically-read
-  options (`id`, `cache`, `refreshes`) at the call site also means the
+  options (`id`, `cache`, `invalidates`) at the call site also means the
   extractor's presence-detection never has to see through a preset.
 - **Extractor contract (§3):** the preset const must be declared in the
   same `*.server.ts` module as the functions derived from it — the pure
@@ -378,8 +378,8 @@ export function serverFnPreset(base: { use: ServerFnGuard[] }): typeof serverFn;
 - **Guards are before-only — a known, accepted limitation.** A guard
   vetoes by throwing; there is no around-middleware that wraps the
   handler (the tRPC/TanStack shape, or ASP.NET's endpoint filters).
-  Post-handler concerns are already structural — `invalidates` (§6.2),
-  `refreshes` (§6.3), `Cache-Control` (§4.1), `onError` + `timeoutMs`
+  Post-handler concerns are already structural — `invalidates`
+  (§6.2/§6.3), `Cache-Control` (§4.1), `onError` + `timeoutMs`
   (endpoint options) — and cross-cutting *around* needs (timing, tracing
   spans) ride a request-scoped service whose `onDispose` fires when the
   response has fully flushed (see `useTrace` in §2.3, which measures
@@ -388,9 +388,9 @@ export function serverFnPreset(base: { use: ServerFnGuard[] }): typeof serverFn;
   until a need appears that neither mechanism covers.
 - Companion guardrail (same milestone): the transform warns when a
   `serverFn({ … })` options literal contains a spread — `id`, `cache`,
-  and `refreshes` inside a spread are invisible to the static reads
-  today, and `refreshes` silently disabling §6.3 is the kind of bug that
-  deserves a build-time voice.
+  and `invalidates` inside a spread are invisible to the static reads
+  today, and `invalidates` silently disabling §6.3's sidecar is the kind
+  of bug that deserves a build-time voice.
 
 ### 2.2 `defineServerService` — request-scoped services (#399)
 
@@ -1194,12 +1194,21 @@ fetch, so the browser revalidates with the origin for that one call.
 ### 6.3 Single-flight boundary refresh
 
 Boundary records are self-describing — `SSRBoundaryRecord` carries the
-component registry key, `props`, and `state`
-(`packages/server-renderer/src/boundary.ts`). So a mutation call can name
-boundaries to refresh; the server re-renders **just those components**
-through the same machinery as the original request (the SSR instance's
-plugin set — fresh HTML *and* fresh state via the existing tracking-signal
-capture), and the envelope returns them next to `$cache`:
+component registry key, `props`, `state`, **and `deps`: the canonical
+`useData` keys the boundary read during SSR**, recorded automatically by
+`serverUseAsync` with a nearest-enclosing-boundary fold
+(`packages/server-renderer/src/boundary.ts`). So refresh is **data-keyed**:
+a mutation declares only `invalidates` — what data changed, server-local
+knowledge, the same declaration §6.2 already wants — and the endpoint
+re-renders **exactly the boundaries whose recorded deps intersect those
+patterns** (the cache pack's `keyMatches` semantics: exact string, or
+canonical tuple prefix, so a bare fn-ref pattern `[getVotes]` matches
+`useData(getVotes)` and every parameterized `[getVotes, ...args]` read).
+No component names anywhere; if a boundary stops reading the data it
+correctly stops refreshing. The re-render runs the same machinery as the
+original request (the SSR instance's plugin set — fresh HTML *and* fresh
+state via the existing tracking-signal capture, deps re-captured for the
+next mutation), and the envelope returns them next to `$cache`:
 
 - **Resumed (never-hydrated) boundaries:** DOM swap between the boundary
   element and its marker + record replacement + scope refresh. The
@@ -1229,10 +1238,12 @@ code — the shipped design where it deviates from the sketch above:
   and retires the old id. Nested-boundary refresh works instead of
   declining.
 - **The server is stateless — descriptors come from the client.** Props
-  live only in the browser's table, so the request carries
-  `{id, component, props}` per boundary (props verbatim in encoded form).
+  and deps live only in the browser's table, so the request carries
+  `{id, component, deps, props}` per boundary (props verbatim in encoded
+  form; dep-less records are never sent — they can never be admitted).
   Descriptors are attacker-controlled; three constraints bound them: the
-  fn's `refreshes` allowlist filters by component key, the explicit
+  deps ∩ `invalidates` gate admits only boundaries subscribed to data the
+  mutation actually declared changed, the explicit
   server-side `components` registry must know the key
   (`createBoundaryRefresh` in `@sigx/resume/server` — same explicit-pass
   posture as the fn registry), and the endpoint `guard` has already run.
@@ -1550,12 +1561,20 @@ option (revisit only if that proves painful).
   seam landed with it).
 - **v2+**: single-flight boundary refresh (6.3) — **shipped** (#313, three
   PRs): mechanism (`baseComponentId`, `refreshable` stamping,
-  `createBoundaryRefresh`, table write accessors); wire (`refreshes`
-  option, `renderBoundaries` endpoint option, stub sidecar +
-  `__SIGX_SERVERFN_BOUNDARIES__` seam, transform flag + dev parity);
-  client apply (status-gated swap/live-write in `@sigx/resume/client`,
-  proven end-to-end by examples/resume's smoke: mutation + fresh UI in
-  one request, zero component chunks).
+  `createBoundaryRefresh`, table write accessors); wire (`renderBoundaries`
+  endpoint option, stub sidecar + `__SIGX_SERVERFN_BOUNDARIES__` seam,
+  transform flag + dev parity); client apply (status-gated
+  swap/live-write in `@sigx/resume/client`, proven end-to-end by
+  examples/resume's smoke: mutation + fresh UI in one request, zero
+  component chunks). **Rev (pre-release, #452):** the `refreshes`
+  component-name allowlist was REMOVED before any release and replaced by
+  data-keyed admission — auto-captured `record.deps` ∩ the mutation's
+  `invalidates` patterns, with `useData(fn)` stable keys
+  (`__sigxKey = "<stableId>#<name>"`, all fn-derived keys tuples) making
+  the whole loop reference-based. One declaration drives §6.2 cache
+  invalidation and §6.3 refresh. Known trade recorded: a file move
+  without an explicit `id` changes stable keys — refresh silently stops
+  matching and converges via `$cache` until redeployed clients catch up.
 - **Native clients (rev 2, one milestone, independent of v2)**:
   `configureServerFn` + stub call-time resolution; `'verify-when-present'`;
   plugin `endpoint`/`role`/`scan`; stable-id seeds + stable symbols + dual

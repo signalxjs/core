@@ -39,7 +39,7 @@ import {
     readServerFnCacheOption,
     readServerFnFormOption,
     readServerFnIdOption,
-    readServerFnRefreshesOption,
+    readServerFnInvalidatesOption,
     stubFlags,
     type ServerFnExtractOptions
 } from './server-fn-extract.js';
@@ -66,9 +66,9 @@ export interface InlineServerFn {
     stream: boolean;
     /** True for a cache-marked read (rfc-server §4.1) — the stub issues GET. */
     get: boolean;
-    /** True for a refreshes-declaring mutation (rfc-server §6.3) — the stub
+    /** True for an invalidates-declaring mutation (rfc-server §6.2/§6.3) — the stub
      *  sends the boundary inventory and applies the envelope's entries. */
-    refreshes: boolean;
+    invalidates: boolean;
     /** True for a declared form target (rfc-server §6.4, literal `form: true`). */
     form: boolean;
     /** The appended SSR export the endpoint resolves. */
@@ -510,7 +510,7 @@ export function extractInlineServerFns(
                 );
             }
             const isGet = !stream && readServerFnCacheOption(call);
-            const declaresRefreshes = !stream && readServerFnRefreshesOption(call);
+            const declaresInvalidates = !stream && readServerFnInvalidatesOption(call);
             const isFormTarget = !stream && readServerFnFormOption(call);
             const minted = mintSymbols(
                 name,
@@ -519,7 +519,7 @@ export function extractInlineServerFns(
                 options.stableId,
                 stream,
                 isGet,
-                declaresRefreshes,
+                declaresInvalidates,
                 isFormTarget
             );
             const mangled = MANGLE_PREFIX + name;
@@ -534,7 +534,7 @@ export function extractInlineServerFns(
             const wireSymbol = options.stubSymbols === 'stable' ? minted.stableSymbol : minted.symbol;
             const factory = stream ? '__serverStreamStub' : '__serverFnStub';
             // 4th positional: the stable data key (fn stubs only). Flags
-            // after it: 5th = GET read (§4.1), 6th = refreshes (§6.3).
+            // after it: 5th = GET read (§4.1), 6th = invalidates (§6.2/§6.3).
             const keyArg = stream ? '' : `, ${JSON.stringify(minted.stableSymbol)}`;
             clientSplices.push({
                 start: call.start,

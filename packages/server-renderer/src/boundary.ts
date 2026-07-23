@@ -93,6 +93,16 @@ export interface SSRBoundaryRecord {
      * offering these; they converge via cache invalidation instead.
      */
     refreshable?: false;
+    /**
+     * Canonical `useData` keys this boundary's SSR read — its own reads and
+     * every non-boundary descendant's, folded to the NEAREST enclosing
+     * boundary (rfc-server §6.3). The mutation endpoint intersects these
+     * against the mutation's `invalidates` patterns to decide which
+     * boundaries a response refreshes; a record with no `deps` can never be
+     * admitted. Recorded by `serverUseAsync`, so a refresh re-render
+     * re-captures them automatically.
+     */
+    deps?: string[];
 }
 
 /**

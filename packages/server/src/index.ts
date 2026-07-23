@@ -115,6 +115,11 @@ export interface ServerFnOptions<S, R> {
      * server-fn REFERENCE — `[getVotes]` or bare `getVotes` — which the
      * endpoint resolves to the fn's stable-key tuple (`useData(getVotes)`'s
      * identity), so the declaration stays same-module and rename-safe.
+     * ALSO the single-flight boundary-refresh gate (rfc-server §6.3): the
+     * client sends its boundaries' recorded data deps up with the call,
+     * and the endpoint re-renders those whose deps intersect these
+     * patterns into `$boundaries` — a never-hydrated boundary then updates
+     * without loading its chunk. One declaration, both convergence paths.
      * Wire-only — in-process calls skip it (there is no envelope).
      * TypeScript note: write it AFTER `handler` in the options literal —
      * context-sensitive members infer in textual order, so `result` falls
@@ -124,23 +129,6 @@ export interface ServerFnOptions<S, R> {
         input: S,
         result: Awaited<R>
     ): ReadonlyArray<InvalidatePattern> | Promise<ReadonlyArray<InvalidatePattern>>;
-    /**
-     * Single-flight boundary refresh (rfc-server §6.3): the component
-     * registry keys (the resume transform's `__resumeId`) whose boundaries
-     * this MUTATION may refresh in its own response. The client sends its
-     * matching boundary descriptors up with the call; the endpoint filters
-     * them to this allowlist and re-renders through its `renderBoundaries`
-     * option, attaching fresh `{for, id, html, state, records}` entries as
-     * `$boundaries` — a never-hydrated boundary then updates without
-     * loading its chunk. Array form for a fixed set; function form receives
-     * the VALIDATED input and settled result (write it after `handler`,
-     * same inference note as `invalidates`). Wire-only, like `invalidates`
-     * — in-process calls have no envelope. Meaningless with `cache` (a
-     * read refreshes nothing).
-     */
-    refreshes?:
-        | ReadonlyArray<string>
-        | ((input: S, result: Awaited<R>) => ReadonlyArray<string> | Promise<ReadonlyArray<string>>);
     /**
      * Marks the function a cacheable idempotent read (rfc-server §4.1):
      * the client stub issues GET with the arguments in the query string,
@@ -290,21 +278,11 @@ export function serverFn(
     // The §4.1 read marker: precompute the Cache-Control value once, at
     // definition time — the endpoint's per-request cost is one header set.
     const cache = typeof arg === 'function' ? undefined : arg.cache;
-    // The §6.3 seam for the ENDPOINT (wire-only, like `invalidates`): which
-    // boundary components this mutation may single-flight refresh.
-    const refreshes = typeof arg === 'function' ? undefined : arg.refreshes;
     if (__DEV__ && cache && invalidates) {
         console.warn(
             `[sigx server] serverFn ${name ? `"${name}" ` : ''}declares both \`cache\` and ` +
             `\`invalidates\` — a read that invalidates is not a read (rfc-server §4.1). ` +
             `The function stays callable, but pick one.`
-        );
-    }
-    if (__DEV__ && cache && refreshes) {
-        console.warn(
-            `[sigx server] serverFn ${name ? `"${name}" ` : ''}declares both \`cache\` and ` +
-            `\`refreshes\` — a cacheable read refreshes nothing (rfc-server §6.3 is for ` +
-            `mutations). The function stays callable, but pick one.`
         );
     }
     // The §6.4 form-target marker: the endpoint's gate for accepting form
@@ -341,7 +319,6 @@ export function serverFn(
         __sigxFn: invoke,
         __sigxName: name,
         ...(invalidates ? { __sigxInvalidates: invalidates } : {}),
-        ...(refreshes ? { __sigxRefreshes: refreshes } : {}),
         ...(cache ? { __sigxGet: true, __sigxCacheControl: cacheControlValue(cache) } : {}),
         ...(form ? { __sigxForm: true } : {})
     }) as ServerFnCallable<unknown[], unknown>;

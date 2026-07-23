@@ -209,27 +209,28 @@ function refreshSeam(): BoundaryRefreshSeam | undefined {
  *  positional is the fn's STABLE data key (`<stableId>#<name>`), stamped as
  *  `__sigxKey` for `useData(fn)` keying. The 5th flag marks a cache-marked
  *  read (rfc-server §4.1): the stub issues GET so browser/edge caches can
- *  serve it; absent means POST. The 6th marks a `refreshes`-declaring
- *  mutation (§6.3): the stub sends the boundary inventory up and applies
- *  the envelope's fresh entries. */
+ *  serve it; absent means POST. The 6th marks an `invalidates`-declaring
+ *  mutation (§6.3): the stub sends the boundary inventory (each entry's
+ *  recorded data deps included) up and applies the envelope's fresh
+ *  entries. */
 export function __serverFnStub(
     symbol: string,
     name: string,
     endpoint: string,
     key?: string,
     get?: 0 | 1,
-    refreshes?: 0 | 1
+    boundaries?: 0 | 1
 ): ((...args: unknown[]) => Promise<unknown>) & {
     with(options?: ServerFnCallOptions): (...args: unknown[]) => Promise<unknown>;
     __sigxKey: string | undefined;
 } {
     const call = async (args: unknown[], options?: ServerFnCallOptions): Promise<unknown> => {
-        // §6.3 sidecar — only refresh-declaring mutations pay the inventory,
-        // and only when the pack has stamped the seam. Seam throws are
-        // swallowed like the cache hook's: never break the RPC.
+        // §6.3 sidecar — only invalidates-declaring mutations pay the
+        // inventory, and only when the pack has stamped the seam. Seam
+        // throws are swallowed like the cache hook's: never break the RPC.
         let sidecar: { base: number; refresh: unknown[] } | null | undefined;
         let seq = 0;
-        const seam = refreshes === 1 && get !== 1 ? refreshSeam() : undefined;
+        const seam = boundaries === 1 && get !== 1 ? refreshSeam() : undefined;
         if (seam) {
             try {
                 sidecar = seam.collect();

@@ -324,12 +324,14 @@ function createComponentState(
         }
         // A plugin may have replaced the context with a fresh object — keep
         // the useAsync/useStream provider wiring intact on whatever object
-        // setup() will actually receive.
+        // setup() will actually receive. `parent` rides along: the §6.3 dep
+        // fold walks it to find the nearest enclosing boundary.
         if (!(componentCtx as any)._useAsync) {
             (componentCtx as any).__ssrCtx = ctx;
             (componentCtx as any).__ssrId = id;
             (componentCtx as any)._useAsync = serverUseAsync;
             (componentCtx as any)._useStream = serverUseStream;
+            if (!componentCtx.parent) componentCtx.parent = parentCtx;
         }
     }
 
@@ -370,6 +372,34 @@ const INERT_PENDING_STATE = Object.freeze({
  * provider reads `server` and ignores the rest; pack options are the pack
  * provider's business.
  */
+/**
+ * §6.3 dep fold: attribute a useData key to the NEAREST enclosing boundary
+ * by walking the setup-context parent chain — correct across deferred
+ * (streamed) renders, where `ctx._componentStack` has already popped but
+ * `capturedComponentCtx` rides in as `parent`. The boundary record exists
+ * before setup runs, so `ctx._boundaries` is the membership test.
+ */
+function recordBoundaryDep(
+    ctx: SSRContext,
+    start: { __ssrId?: number; parent?: unknown },
+    key: string
+): void {
+    let owner: { __ssrId?: number; parent?: unknown } | undefined = start;
+    while (owner) {
+        const bid = owner.__ssrId;
+        const record = bid !== undefined ? ctx._boundaries.get(bid) : undefined;
+        if (record) {
+            if (!record.deps) record.deps = [key];
+            else if (!record.deps.includes(key)) record.deps.push(key);
+            else return; // already recorded — nothing new to flush
+            // Re-ship the record if the table already streamed out.
+            ctx._unflushedBoundaries.add(bid!);
+            return;
+        }
+        owner = owner.parent as typeof owner;
+    }
+}
+
 function serverUseAsync(
     this: any,
     key: string | null,
@@ -377,11 +407,16 @@ function serverUseAsync(
     options: { server?: boolean } & Record<string, unknown> = {}
 ) {
     if (key === null || options.server === false) {
+        // Deliberately unrecorded as a dep: nothing of this read is baked
+        // into the HTML (`server:false` renders the pending arm), so a
+        // §6.3 refresh on its account would change nothing.
         return INERT_PENDING_STATE;
     }
 
     const ctx: SSRContext = this.__ssrCtx;
     const ssrLoads: Promise<void>[] = this._ssrLoads;
+
+    recordBoundaryDep(ctx, this, key);
 
     const state = {
         st: 'pending' as 'pending' | 'ready' | 'errored',

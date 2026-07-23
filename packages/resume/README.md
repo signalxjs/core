@@ -76,7 +76,9 @@ SSR and decline the same way.
 
 The client half is automatic: `@sigx/resume/client` stamps the
 `__SIGX_SERVERFN_BOUNDARIES__` seam when it loads, so any
-`refreshes`-declaring mutation sends the page's boundary inventory and
+`invalidates`-declaring mutation sends the page's boundary inventory
+(each boundary's recorded `useData` deps included — the endpoint admits
+on deps ∩ `invalidates`) and
 applies the fresh entries — a never-hydrated boundary is DOM-swapped
 (delegation re-wires itself off the fresh attributes; its chunk never
 loads), an upgraded one gets live-signal writes. An in-flight upgrade,

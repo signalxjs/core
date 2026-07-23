@@ -60,7 +60,10 @@ export default [
     // 13.35 → 13.4 KB with #416: the typed pack contract's two context
     // accessors (currentComponentId/boundaries) + the appContext option;
     // sat at 13.36 KB.
-    limit: '13.4 KB',
+    // 13.4 → 13.5 KB with #452: §6.3 automatic boundary dep capture
+    // (recordBoundaryDep — the nearest-boundary parent-chain fold in
+    // serverUseAsync); sat at 13.44 KB.
+    limit: '13.5 KB',
     ignore: ['sigx', 'sigx/*', '@sigx/*', 'node:stream'],
   },
   {
