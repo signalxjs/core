@@ -11,6 +11,7 @@ import {
     stringifyWithHandlers,
     serializeBoundaryProps,
     getTypeHandlers,
+    admitPayloadEntry,
     type TypeHandler
 } from '../src/server/serialize';
 import { asyncAssignmentJs } from '../src/server/state';
@@ -123,6 +124,39 @@ describe('serializeBoundaryProps', () => {
         const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
         expect(serializeBoundaryProps({ big: 10n }, [bigintHandler])).toEqual({ big: 10n });
         expect(warn).not.toHaveBeenCalled();
+    });
+});
+
+describe('admitPayloadEntry — codec-aware admission (#420)', () => {
+    it('admits handler-owned values NESTED in plain structures', () => {
+        // Plain JSON.stringify THROWS on a nested bigint and flattens a
+        // nested Map — but the emitter tags both, so admission must agree.
+        expect(admitPayloadEntry('k', { total: 42n }, 'boundary prop', [])).toBe(true);
+        expect(admitPayloadEntry('k', { seen: new Map([['a', 1]]) }, 'boundary prop', [])).toBe(true);
+    });
+
+    it('consults registered handlers at depth too', () => {
+        class Money { constructor(public cents: number) {} }
+        const money: TypeHandler = {
+            name: 'money',
+            tag: '$money',
+            test: (v) => v instanceof Money,
+            serialize: (v) => (v as Money).cents,
+            revive: (v) => new Money(v as number)
+        };
+        // Money has no toJSON and no built-in tag: without the handler the
+        // value passes plain JSON as `{}` — WITH the handler it round-trips.
+        expect(admitPayloadEntry('k', { price: new Money(100) }, 'boundary prop', [money])).toBe(true);
+    });
+
+    it('still rejects circular structures and dangerous keys with a warning', () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const circular: any = {};
+        circular.self = circular;
+        expect(admitPayloadEntry('k', circular, 'boundary prop', [])).toBe(false);
+        expect(admitPayloadEntry('__proto__', { fine: 1 }, 'boundary prop', [])).toBe(false);
+        expect(warn).toHaveBeenCalledTimes(2);
+        warn.mockRestore();
     });
 });
 

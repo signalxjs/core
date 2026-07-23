@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+**Fixed: the `__SIGX_ASYNC__` blob's admission check is codec-aware (#420).**
+
+- The blob admitted values via a plain `JSON.stringify` test, blind to the
+  boundary codec: a top-level `bigint` was dropped with a dev warning, and a
+  handler-owned value NESTED in a snapshot (a `bigint` in a `toJSON` result,
+  a `Map` in a plain object) rejected the whole key — even though the
+  emitter tags all of those and the client revives them. Admission now goes
+  through `admitPayloadEntry` — the same check boundary props and state
+  signals use — whose fallback round trip runs `stringifyWithHandlers`
+  (registered handlers AND built-ins, at every depth) instead of plain JSON.
+  The nested-value fix applies to boundary props and state signals too.
+  Functions, circular structures, and dangerous keys are still rejected with
+  the same warnings. One behavioral edge inherited from the boundary paths:
+  a useAsync value of explicit `undefined` is now admitted (tagged `$undef`)
+  instead of warned-and-refetched.
+
 **Added: a public write path into the `__SIGX_ASYNC__` blob (#407).**
 
 - `SSRContext.registerSerializedState(key, value)` — the supported way for
