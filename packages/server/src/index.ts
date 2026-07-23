@@ -321,7 +321,7 @@ function cacheControlValue(cache: ServerFnReadCache): string {
  * runtime.
  */
 function assertNotLiveClient(name: string): void {
-    if ((globalThis as { __SIGX_LIVE_CLIENT__?: unknown }).__SIGX_LIVE_CLIENT__ === true) {
+    if ((globalThis as { __SIGX_LIVE_CLIENT__?: boolean }).__SIGX_LIVE_CLIENT__ === true) {
         throw new Error(
             `[sigx server] server function ${name ? `"${name}" ` : ''}reached a live client ` +
             `unextracted — this app must call its backend over stubs (set role: 'client' in ` +

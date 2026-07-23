@@ -67,6 +67,19 @@ declare module '@sigx/runtime-core' {
  * opt in per call site via the `cache` option; reads without it keep
  * core's default-engine semantics verbatim.
  */
+/**
+ * The `__SIGX_SERVERFN_CACHE__` seam's shape at this (consuming) end. Must
+ * match the stamping end's `ServerFnCacheDirectives` in
+ * `@sigx/server/client` — the two cannot share an import (the seam exists
+ * precisely so neither pack depends on the other); `docs/seams.md` carries
+ * the canonical contract both copy.
+ */
+type ServerFnCacheSeam = {
+    __SIGX_SERVERFN_CACHE__?: (directives: {
+        invalidates?: ReadonlyArray<string | readonly unknown[]>;
+    }) => void;
+};
+
 export function cachePlugin(defaults?: CacheDefaults): Plugin {
     return {
         name: 'sigx:cache',
@@ -83,11 +96,7 @@ export function cachePlugin(defaults?: CacheDefaults): Plugin {
             // server declared it where the data changed. One live client =
             // one app; a later install supersedes an earlier one, and
             // disposal only removes its OWN handler.
-            const seam = globalThis as {
-                __SIGX_SERVERFN_CACHE__?: (directives: {
-                    invalidates?: ReadonlyArray<string | readonly unknown[]>;
-                }) => void;
-            };
+            const seam = globalThis as ServerFnCacheSeam;
             const onDirectives: NonNullable<typeof seam.__SIGX_SERVERFN_CACHE__> = (
                 directives
             ) => {
