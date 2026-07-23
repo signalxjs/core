@@ -73,21 +73,47 @@ function domAttentionTrigger(revalidate: () => void): (() => void) | void {
 }
 
 
+/** A pattern with its canonical form precomputed, ready to test many keys. */
+export interface PatternMatcher {
+    /** True when `entryKey` matches the prepared pattern. */
+    match(entryKey: string): boolean;
+}
+
 /**
- * Canonical-key pattern match for invalidate(): exact string equality, or —
- * when the pattern is a tuple prefix — every entry whose canonical tuple
- * starts with those elements (`['posts']` matches `'["posts","u1",2]'`).
+ * Prepare a pattern for matching against many keys: exact string equality, or
+ * — for a tuple prefix — every entry whose canonical tuple starts with those
+ * elements (`['posts']` matches `'["posts","u1",2]'`). The tuple's
+ * `JSON.stringify` runs ONCE here, not once per entry — `invalidate()` scans
+ * the whole store, so re-stringifying the pattern per entry was pure waste
+ * (#469).
  *
  * DUPLICATED in `@sigx/server`'s §6.3 gate (packages/server/src/server/
  * key-match.ts) — keep the two in sync (a parity test pins them); one
  * `invalidates` declaration must mean the same thing on both sides.
  */
-export function keyMatches(entryKey: string, pattern: string | readonly unknown[]): boolean {
-    if (typeof pattern === 'string') return entryKey === pattern;
+export function preparePattern(pattern: string | readonly unknown[]): PatternMatcher {
+    if (typeof pattern === 'string') {
+        return { match: (entryKey) => entryKey === pattern };
+    }
     const canon = JSON.stringify(pattern); // '["posts","u1"]'
-    if (entryKey === canon) return true;
     const prefix = canon.slice(0, -1); // '["posts","u1"'
-    return entryKey.startsWith(prefix) && (entryKey[prefix.length] === ',' || entryKey[prefix.length] === ']');
+    const boundary = prefix.length;
+    return {
+        match: (entryKey) =>
+            entryKey === canon ||
+            (entryKey.startsWith(prefix) &&
+                (entryKey[boundary] === ',' || entryKey[boundary] === ']'))
+    };
+}
+
+/**
+ * One-shot match — exact string equality, or a tuple prefix (element-boundary
+ * guarded). The parity anchor (packages/server/__tests__/key-match.test.ts);
+ * `invalidate()` itself uses {@link preparePattern} so the canonical form is
+ * computed once, not once per entry.
+ */
+export function keyMatches(entryKey: string, pattern: string | readonly unknown[]): boolean {
+    return preparePattern(pattern).match(entryKey);
 }
 
 export class CacheStore {
@@ -295,8 +321,11 @@ export class CacheStore {
      * (entries with live subscribers and a known fetcher).
      */
     invalidate(pattern: string | readonly unknown[]): void {
+        // Prepare once: `invalidate` scans every entry, and re-stringifying
+        // the pattern inside the loop was the whole cost at scale (#469).
+        const matcher = preparePattern(pattern);
         for (const entry of this.entries.values()) {
-            if (!keyMatches(entry.key, pattern)) continue;
+            if (!matcher.match(entry.key)) continue;
             entry.updatedAt = 0; // stale for every future staleTime check
             invalidateRestored(entry.key);
             if (entry.subscribers.size > 0 && entry.fetcher) {
