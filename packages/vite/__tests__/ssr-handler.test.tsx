@@ -14,7 +14,8 @@ import { join } from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { ViteDevServer } from 'vite';
 import { component, defineApp } from 'sigx';
-import { createDevRequestHandler, SSR_NODE_VIRTUAL_ID } from '../src/ssr';
+import { createDevRequestHandler } from '../src/ssr';
+import { SSR_NODE_VIRTUAL_ID } from '../src/dev-runner';
 
 const TEMPLATE = `<!doctype html><html><head></head><body><div id="app"><!--ssr-outlet--></div></body></html>`;
 
@@ -177,6 +178,23 @@ describe('createDevRequestHandler', () => {
         const res = await run(handler, '/');
         expect(res.status).toBe(200);
         expect(res.body).toContain('<main class="dev">dev page</main>');
+    });
+
+    it('does NOT fall back when the renderer itself throws', async () => {
+        const vite = mockVite({ createApp: () => defineApp((Home as any)({})) });
+        // Retrying a module that resolved but threw would bury the real cause
+        // AND re-inline it as a root request — exactly the split the shim
+        // exists to close. Only "does not resolve" earns the fallback.
+        (vite.ssrLoadModule as any).mockImplementation(async (id: string) => {
+            if (id === SSR_NODE_VIRTUAL_ID) throw new Error('boom inside the renderer');
+            if (id === '@sigx/server-renderer/node') return import('@sigx/server-renderer/node');
+            return { createApp: () => defineApp((Home as any)({})) };
+        });
+        await expect(
+            createDevRequestHandler(vite, { entry: '/src/entry-server.tsx' })
+        ).rejects.toThrow('boom inside the renderer');
+        const ids = (vite.ssrLoadModule as any).mock.calls.map((c: string[]) => c[0]);
+        expect(ids).not.toContain('@sigx/server-renderer/node');
     });
 
     it('supports a custom entry export name', async () => {

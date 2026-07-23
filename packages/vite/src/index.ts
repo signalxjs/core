@@ -20,7 +20,7 @@ import {
     SSR_NODE_VIRTUAL_ID,
     SSR_NODE_RESOLVED_ID,
     generateSSRNodeShimCode
-} from './ssr.js';
+} from './dev-runner.js';
 
 // ============================================================================
 // Types
@@ -434,8 +434,21 @@ export function sigxPlugin(options: SigxPluginOptions = {}): Plugin {
 
         load(id) {
             // The dev handler's renderer, behind an import so the project's
-            // external/noExternal decision reaches it (#425 — see app-module).
-            if (id === SSR_NODE_RESOLVED_ID) return generateSSRNodeShimCode();
+            // external/noExternal decision reaches it (#425 — see dev-runner).
+            if (id === SSR_NODE_RESOLVED_ID) {
+                // Server-only, same as virtual:sigx-app: it re-exports a
+                // Node entry, and a client import would pull that into the
+                // browser bundle. Nobody but createDevRequestHandler should
+                // ask for this at all — say so rather than emit the shim.
+                if (this.environment?.name === 'client') {
+                    this.error(
+                        `${SSR_NODE_VIRTUAL_ID} is server-only - it re-exports ` +
+                        `@sigx/server-renderer/node for the dev request handler and must ` +
+                        `not be imported by client code.`
+                    );
+                }
+                return generateSSRNodeShimCode();
+            }
             if (id === MANIFESTS_RESOLVED_ID) {
                 // Dev packs are manifest-less by design (QRLs/chunks resolve
                 // through the virtual registries) — undefineds are correct.

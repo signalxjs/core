@@ -251,6 +251,15 @@ describe('virtual:sigx-ssr-node (#425)', () => {
         );
         expect(code).toBeUndefined();
     });
+
+    it('is server-only — a client-environment import fails loudly', () => {
+        // It re-exports a Node entry; emitting the shim into a browser bundle
+        // would fail later and further away.
+        const error = vi.fn((msg: string) => { throw new Error(msg); });
+        expect(() =>
+            serveModePlugin().load.call({ environment: { name: 'client' }, error }, '\0virtual:sigx-ssr-node')
+        ).toThrow(/server-only/);
+    });
 });
 
 describe('virtual:sigx-app codegen error surfaces', () => {
