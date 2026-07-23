@@ -281,6 +281,19 @@ iteration with the branded wire error (masked in prod unless it's a
 `ServerFnError`). One caveat vs `serverFn`'s buffered JSON: response
 headers and status freeze at the **first yield** — set them before it.
 
+A stream carries the same `.with()` per-call channel as a `serverFn`
+(minus `fresh` — a stream is never HTTP-cached), so an SSR-time stream can
+be handed the real request and a client stream can add one-off headers:
+
+```ts
+// SSR-time: the generator's rq.request/rq.url are the page's request
+for await (const token of explain.with({ context: ssrRequest })(id)) { … }
+
+// Client: one-off headers, and a caller signal on top of the consumer's
+// own break/return abort
+for await (const token of explain.with({ headers: { 'x-trace-id': traceId } })(id)) { … }
+```
+
 ## Context
 
 Every server function receives the request context as its **first
@@ -400,9 +413,7 @@ app.use(createServerFnHandler({
 
 ### Cancellation — `.with({ signal })`
 
-Every `serverFn` callable carries a per-call options channel
-(`serverStream` deliberately doesn't — a stream consumer's
-`break`/`return()` already aborts the fetch). Inside a
+Every `serverFn` callable carries a per-call options channel. Inside a
 `useData`/`useAction` fetcher the async engine already hands you an
 `AbortSignal` that fires when the query is superseded or unmounted — pass
 it through and the fetch aborts, firing `rq.abortSignal` server-side:
@@ -439,6 +450,28 @@ Both are transport options: on an in-process (SSR-time) call there is no
 HTTP request, so they are ignored with a `__DEV__` warning — the mirror
 of `.with({ context })` being ignored on the client. `fresh` is likewise
 a no-op on a POST call (POSTs are never HTTP-cached).
+
+### `.with()` on a `serverStream`
+
+A `serverStream` carries the same channel **minus `fresh`** — a stream is
+always POST and can never be answered from an HTTP cache, so passing it is
+a compile error rather than a dev-warned no-op:
+
+```ts
+// signal — composes WITH the consumer's own break/return abort, which
+// still works on its own; the caller's signal is additional, never a
+// replacement
+for await (const token of explain.with({ signal: ctx.signal })(id)) { … }
+
+// context — the SSR-time gap this closes: without it an in-process
+// stream's rq.request/rq.url throw unless a runWithServerFnContext scope
+// happens to be on the stack. Explicit beats ambient here too.
+for await (const token of explain.with({ context: ssrRequest })(id)) { … }
+
+// headers — one-off request headers for this stream's fetch, merged over
+// configureServerFn's the same way
+for await (const token of explain.with({ headers: { 'x-trace-id': t } })(id)) { … }
+```
 
 ### What survives the wire
 

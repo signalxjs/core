@@ -35,8 +35,9 @@ import type {
     ServerFnCallable,
     ServerFnGuard,
     ServerFnInvoke,
-    StandardSchemaV1,
-    WrappedServerFn
+    ServerStreamCallOptions,
+    ServerStreamCallable,
+    StandardSchemaV1
 } from './types';
 
 export { ServerFnError, isServerFnError, type ServerFnErrorShape } from './errors';
@@ -49,6 +50,8 @@ export type {
     ServerFnInfo,
     ServerFnInvoke,
     ServerFnKeyRef,
+    ServerStreamCallOptions,
+    ServerStreamCallable,
     StandardSchemaV1,
     WrappedServerFn
 } from './types';
@@ -362,10 +365,13 @@ function assertNotLiveClient(name: string): void {
  * string-yielding stream plugs into `useStream` as-is. Response headers
  * freeze at the first yield (unlike `serverFn`'s buffered JSON, where
  * `rq.responseHeaders`/`rq.status()` apply until the body is written).
+ *
+ * Carries the same `.with(options)` per-call channel as `serverFn` (#448),
+ * minus `fresh` — a stream is never HTTP-cached.
  */
 export function serverStream<A extends unknown[], T>(
     impl: (rq: ServerFnContext, ...args: A) => AsyncGenerator<T>
-): ((...args: A) => AsyncIterable<T>) & WrappedServerFn {
+): ServerStreamCallable<A, T> {
     const name = impl.name || '';
     // #412: same unvalidated-wire-args surface as serverFn's direct form,
     // same once-per-fn dev signal — but streams have no options form, so the
@@ -386,12 +392,34 @@ export function serverStream<A extends unknown[], T>(
         }
         return impl(rq, ...(args as A));
     };
-    const wrapper = (...args: A): AsyncIterable<T> => {
-        assertNotLiveClient(name);
-        // Ambient context applies here too: serverStream has no .with()
-        // channel (#362 excluded it -- consumer break/return aborts), but an
-        // SSR-time stream still needs the real request.
-        return impl(resolveInProcessContext(), ...args);
-    };
-    return Object.assign(wrapper, { __sigxFn: invoke, __sigxName: name, __sigxStream: true as const });
+    // `.with(options)` — the same per-call channel as serverFn's, minus
+    // `fresh` (#448). #362 left streams out on the strength of the signal
+    // argument alone (consumer break/return already aborts), which said
+    // nothing about the other two: an SSR-time stream needs the real request
+    // where ALS is unavailable, and a client stream needs one-off headers.
+    const callWith =
+        (options?: ServerStreamCallOptions) =>
+        (...args: A): AsyncIterable<T> => {
+            assertNotLiveClient(name);
+            if (__DEV__ && options && 'headers' in options) {
+                // The mirror of `.with({ context })` being ignored on the
+                // client: transport options mean nothing without a transport.
+                console.warn(
+                    `[sigx server] .with({ headers }) is ignored on an in-process ` +
+                    `(SSR-time) stream — there is no HTTP request to apply it to. It only ` +
+                    `affects the client stub's fetch (#315).`
+                );
+            }
+            // Explicit beats ambient, exactly as for serverFn: an explicit
+            // context wins over `runWithServerFnContext`, and with neither the
+            // detached context's `request`/`url` throw descriptively.
+            return impl(resolveInProcessContext(options?.signal, options?.context), ...args);
+        };
+    const wrapper = callWith();
+    return Object.assign(wrapper, {
+        with: callWith,
+        __sigxFn: invoke,
+        __sigxName: name,
+        __sigxStream: true as const
+    });
 }
