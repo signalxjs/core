@@ -8,7 +8,7 @@
  * core changes.
  */
 
-import type { VNode, ComponentSetupContext } from 'sigx';
+import type { VNode, ComponentSetupContext, App } from 'sigx';
 import type { SSRContext } from './server/context';
 import type { ResolvedBoundary } from './boundary';
 
@@ -33,8 +33,8 @@ export interface SSRPlugin {
 
         /**
          * The boundary seam (rfc-ssr-platform §1.3). Called once per component,
-         * after its id is allocated and pushed (read `ctx._componentStack` top
-         * if needed) but BEFORE the setup context is built and before
+         * after its id is allocated and pushed (`ctx.currentComponentId()`
+         * returns it) but BEFORE the setup context is built and before
          * `vnode.type.__setup` runs. First plugin to return an object wins.
          *
          * The returned axes flow into the render:
@@ -235,4 +235,19 @@ export interface SSRPlugin {
          */
         afterHydrate?(container: Element): void;
     };
+}
+
+/**
+ * The shape a strategy pack's factory returns: one object that is BOTH the
+ * SSR plugin (its hooks run in the render/hydration lifecycle) and an app
+ * plugin (`app.use(pack)` calls `install`, which registers the object via
+ * `provideSSRPlugin(app._context, pack)` — #413's one install shape).
+ *
+ * Type the factory's object as a `const pack: SSRPack` and reference `pack`
+ * from inside `install` — the closure replaces any `this` cast, and using
+ * one object keeps plugin identity stable for dedupe.
+ */
+export interface SSRPack extends SSRPlugin {
+    /** App-plugin face: called by `app.use(pack)`. */
+    install(app: App): void;
 }

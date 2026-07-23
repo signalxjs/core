@@ -74,6 +74,12 @@ export { seedBoundaryState, consumeBoundaryState } from './boundary-state';
 // factories from server-captured state (see server/state-signals).
 export { createRestoringSignal } from './restore-signal';
 
+// The boundary-codec revive half for client-side pack code (#416): decodes
+// serialized boundary state/props (record.state, refresh envelopes) with the
+// builtin + app-registered type-handler vocabulary. The public home for packs
+// — the sigx/internals re-export is not a contract.
+export { reviveFromServer } from 'sigx/internals';
+
 // Component registry + chunk loading for on-demand boundary mounting
 export {
     registerComponent,

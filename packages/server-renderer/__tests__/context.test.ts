@@ -54,6 +54,56 @@ describe('createSSRContext', () => {
         });
     });
 
+    describe('currentComponentId()', () => {
+        it('returns the id of the innermost pushed component', () => {
+            ctx.pushComponent(1);
+            expect(ctx.currentComponentId()).toBe(1);
+            ctx.pushComponent(2);
+            expect(ctx.currentComponentId()).toBe(2);
+            ctx.popComponent();
+            expect(ctx.currentComponentId()).toBe(1);
+        });
+
+        it('returns undefined outside any component', () => {
+            expect(ctx.currentComponentId()).toBeUndefined();
+            ctx.pushComponent(1);
+            ctx.popComponent();
+            expect(ctx.currentComponentId()).toBeUndefined();
+        });
+
+        it('reads without consuming (unlike popComponent)', () => {
+            ctx.pushComponent(7);
+            expect(ctx.currentComponentId()).toBe(7);
+            expect(ctx.currentComponentId()).toBe(7);
+            expect(ctx.popComponent()).toBe(7);
+        });
+    });
+
+    describe('boundaries()', () => {
+        it('exposes recorded boundaries as a live read-only map', () => {
+            expect(ctx.boundaries().size).toBe(0);
+
+            ctx.recordBoundary(1, { hydrate: 'load' });
+            ctx.recordBoundary(2, { hydrate: 'never' });
+
+            const table = ctx.boundaries();
+            expect(table.size).toBe(2);
+            expect(table.get(1)).toEqual({ hydrate: 'load' });
+            expect([...table.keys()]).toEqual([1, 2]);
+
+            // Live view, not a snapshot: later records are visible.
+            ctx.recordBoundary(3, { hydrate: 'visible' });
+            expect(table.size).toBe(3);
+        });
+
+        it('is the same table getBoundary reads — record mutations are shared', () => {
+            ctx.recordBoundary(1, { hydrate: 'load' });
+            const record = ctx.getBoundary(1)!;
+            record.state = { count: 5 };
+            expect(ctx.boundaries().get(1)!.state).toEqual({ count: 5 });
+        });
+    });
+
     describe('getPluginData / setPluginData', () => {
         it('should store and retrieve plugin data by name', () => {
             const data = { strategy: 'load', componentId: 'Counter' };
@@ -181,6 +231,17 @@ describe('createSSRContext', () => {
         it('should accept streaming=false', () => {
             const ctx = createSSRContext({ streaming: false });
             expect(ctx).toBeDefined();
+        });
+
+        it('seeds _appContext from the appContext option', () => {
+            const appContext = { provides: new Map() } as any;
+            const seeded = createSSRContext({ appContext });
+            expect(seeded._appContext).toBe(appContext);
+        });
+
+        it('defaults _appContext to null', () => {
+            expect(createSSRContext()._appContext).toBeNull();
+            expect(createSSRContext({ appContext: null })._appContext).toBeNull();
         });
     });
 

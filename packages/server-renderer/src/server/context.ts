@@ -73,6 +73,16 @@ export interface SSRContextOptions {
      * collide with ids already live on the page it patches into.
      */
     baseComponentId?: number;
+
+    /**
+     * The app context supplying per-app DI (serializer type handlers and
+     * other app-level provides read at request time). The render entry
+     * points set it on the contexts they create; pass it here when creating
+     * a context yourself — e.g. a boundary refresh re-rendering in a fresh
+     * context that must see the same app's provides (rfc-server §6.3).
+     * Default: null (a bare-element render with no app).
+     */
+    appContext?: AppContext | null;
 }
 
 export interface RenderOptions {
@@ -89,7 +99,8 @@ export interface SSRContext {
     _componentId: number;
 
     /**
-     * Stack of component IDs for nested tracking
+     * Stack of component IDs for nested tracking.
+     * @internal Read the top via the public `currentComponentId()`.
      */
     _componentStack: number[];
 
@@ -131,6 +142,8 @@ export interface SSRContext {
      * element). Set by the render entry points; the DI source for per-app
      * serializer type handlers and other app-level provides read at request
      * time.
+     * @internal Seed it via `SSRContextOptions.appContext` when creating a
+     * context yourself.
      */
     _appContext: AppContext | null;
 
@@ -192,6 +205,8 @@ export interface SSRContext {
      * Per-request boundary table (id → record). Populated by core when a
      * plugin's `resolveBoundary` accepts a component; emitted as
      * `__SIGX_BOUNDARIES__` when non-empty.
+     * @internal Iterate via the public `boundaries()`; read one record via
+     * `getBoundary(id)`.
      */
     _boundaries: Map<number, SSRBoundaryRecord>;
     /**
@@ -224,6 +239,15 @@ export interface SSRContext {
      * Pop the current component from stack
      */
     popComponent(): number | undefined;
+
+    /**
+     * The id of the component currently rendering — the top of the component
+     * stack, `undefined` outside any component. The attribution primitive for
+     * strategy packs: `resolveBoundary` and `transformComponentContext` run
+     * after the component's id is pushed, so this is "the component this hook
+     * call is about".
+     */
+    currentComponentId(): number | undefined;
 
     /**
      * Add a head element
@@ -259,6 +283,15 @@ export interface SSRContext {
      * later mutations ship via the per-id mid-stream patch.
      */
     getBoundary(id: number): SSRBoundaryRecord | undefined;
+
+    /**
+     * The per-request boundary table, read-only — for packs that scan or
+     * encode the whole table (islands' "any schedulable island?" check,
+     * resume's refresh envelope). The map is live, not a snapshot. Mutate
+     * individual records through `getBoundary(id)`; the table's shape
+     * (add/remove) belongs to core's `recordBoundary`.
+     */
+    boundaries(): ReadonlyMap<number, SSRBoundaryRecord>;
 
     /**
      * Register a request-scoped value for the `__SIGX_ASYNC__` hydration
@@ -308,7 +341,7 @@ export function createSSRContext(options: SSRContextOptions = {}): SSRContext {
         _renderError: options.renderError,
         _nonce: options.nonce,
         _phase: 'shell',
-        _appContext: null,
+        _appContext: options.appContext ?? null,
         _streaming: false,
         _pendingAsync: [],
         _headConfigs: [],
@@ -334,6 +367,10 @@ export function createSSRContext(options: SSRContextOptions = {}): SSRContext {
             return componentStack.pop();
         },
 
+        currentComponentId() {
+            return componentStack[componentStack.length - 1];
+        },
+
         addHead(html: string) {
             head.push(html);
         },
@@ -357,6 +394,10 @@ export function createSSRContext(options: SSRContextOptions = {}): SSRContext {
 
         getBoundary(id: number): SSRBoundaryRecord | undefined {
             return boundaries.get(id);
+        },
+
+        boundaries(): ReadonlyMap<number, SSRBoundaryRecord> {
+            return boundaries;
         },
 
         registerSerializedState(key: string, value: unknown): void {

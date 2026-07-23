@@ -38,7 +38,9 @@ export function mergeSSRPlugins(
 
 /**
  * Attach a resolved plugin set to a context and run the server `setup`
- * hooks. Call AFTER `ctx._appContext` is assigned — setup hooks may read it.
+ * hooks. Call AFTER the context has its app context (pass
+ * `SSRContextOptions.appContext` to `createSSRContext`) — setup hooks may
+ * read it.
  */
 export function initPluginContext(ctx: SSRContext, plugins: readonly SSRPlugin[]): void {
     ctx._plugins = plugins as SSRPlugin[];

@@ -145,7 +145,33 @@ Keys share the useAsync/useStream namespace, so prefix them
 merge is last-write-wins. The client half is `peekRestored` /
 `invalidateRestored` / `reviveFromServer` from
 `@sigx/runtime-core/internals` — the blob's single accessor
-(`docs/seams.md`).
+(`docs/seams.md`). `reviveFromServer` — the boundary codec's revive half —
+is also a public export of `./client`, for pack code that decodes
+serialized boundary state itself.
+
+## The pack contract (SSRContext accessors)
+
+Strategy packs — first-party (`@sigx/ssr-islands`, `@sigx/resume`) and
+third-party alike — build on the same typed public surface; nothing they
+need lives behind underscore fields or internals imports (#416):
+
+- **`ctx.currentComponentId()`** — the id of the component currently
+  rendering. `resolveBoundary` and `transformComponentContext` run after
+  the component's id is pushed, so this is "the component this hook call
+  is about".
+- **`ctx.boundaries()`** — the per-request boundary table as a
+  `ReadonlyMap<number, SSRBoundaryRecord>` (live, not a snapshot), for
+  whole-table scans: islands' "any schedulable island?" preload check,
+  resume's refresh-envelope encoding. Mutate individual records through
+  `ctx.getBoundary(id)`; the table's shape belongs to core.
+- **`createSSRContext({ appContext })`** — seed a self-created context
+  with an app's DI (type handlers, provides). A boundary refresh
+  re-rendering in a fresh context passes the app context here instead of
+  writing a private field.
+- **`SSRPack`** — the factory return type for packs installed with
+  `app.use(pack)`: the one object that is both the `SSRPlugin` (render
+  and hydration hooks) and the app plugin (`install(app)` registers it
+  via `provideSSRPlugin(app._context, pack)`).
 
 ## The eager scheduler vs the lazy hydration core
 
