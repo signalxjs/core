@@ -91,9 +91,11 @@ export interface ServerFnOptions<S, R> {
      * ALWAYS runs server-side before the handler, on every transport;
      * rejection throws a `ServerFnError(400, 'Invalid input', { issues })`.
      * Also the inference source for `S`: omit it and `S` falls back to the
-     * handler's annotation — with neither, the client stub degrades to
-     * `(input: unknown)` and wire input reaches the handler unvalidated
-     * (dev-warned, #437).
+     * handler's annotation — with neither the input is undeclared, `S`
+     * defaults to `void`, and the callable takes no argument (#454). Wire
+     * input can still arrive and reaches the handler unvalidated
+     * (dev-warned, #437) — the zero-argument signature types your own call
+     * sites, it does not gate the transport.
      */
     input?: StandardSchemaV1<S>;
     /**
@@ -169,9 +171,11 @@ export interface ServerFnOptions<S, R> {
     /**
      * The implementation. `input` arrives validated when {@link input} is
      * declared. WITHOUT a schema, annotate this parameter — `S` infers from
-     * the schema or from the annotation, and with neither the client stub's
-     * argument type silently becomes `unknown` (and wire input reaches the
-     * handler unvalidated — dev-warned, #437).
+     * the schema or from the annotation. Declaring neither is the
+     * input-less shape: `S` defaults to `void` and the callable takes no
+     * argument (#454), while wire input can still arrive unvalidated
+     * (dev-warned, #437). So omit the parameter when there is genuinely no
+     * input, and annotate it when there is one.
      */
     handler(rq: ServerFnContext, input: S): R | Promise<R>;
 }
