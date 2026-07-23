@@ -31,12 +31,12 @@ export const TYPE_HANDLER_TOKEN = createToken<TypeHandler[]>('sigx:typeHandlers'
  *
  * ```ts
  * install(app) {
- *     provideTypeHandlers(app._context, [{
+ *     provideTypeHandlers(app._context, [defineTypeHandler({
  *         name: 'money', tag: '$money',
- *         test: (v) => v instanceof Money,
- *         serialize: (v) => (v as Money).cents,
- *         revive: (c) => new Money(c as number),
- *     }]);
+ *         test: (v): v is Money => v instanceof Money,
+ *         serialize: (m) => m.cents,           // m: Money
+ *         revive: (cents) => new Money(cents), // cents: number
+ *     })]);
  * }
  * ```
  */

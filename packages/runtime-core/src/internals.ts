@@ -92,6 +92,7 @@ export { TYPE_HANDLER_TOKEN, provideTypeHandlers } from './ssr-serialize.js';
 // its client stub must not pull runtime-core.
 export {
     BUILTIN_TYPE_HANDLERS,
+    defineTypeHandler,
     encodeWithHandlers,
     reviveWithHandlers,
 } from '@sigx/serialize';

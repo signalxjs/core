@@ -64,19 +64,33 @@ escapes those shapes.
 
 ### Custom types
 
-Register a handler for your own classes. Inside a sigx app, use the per-app
-registry from `sigx/internals` (it is consulted **before** the built-ins, so a
-pack can own a type they also cover):
+Author a handler with `defineTypeHandler` — declare `test` as a type guard
+and `serialize`/`revive` infer their parameter types and pairing from it, no
+casts:
+
+```ts
+import { defineTypeHandler } from '@sigx/serialize';
+
+const money = defineTypeHandler({
+    name: 'money', tag: '$money',
+    test: (v): v is Money => v instanceof Money,
+    serialize: (m) => m.cents,           // m: Money
+    revive: (cents) => new Money(cents), // cents: number — serialize's output
+});
+```
+
+(`TypeHandler<T, Encoded>` is generic; a plain object literal still works —
+bare `TypeHandler` is exactly the pre-generic `unknown`-based shape. One
+inference caveat: a compound test like
+`(v) => typeof URL !== 'undefined' && v instanceof URL` infers `boolean`,
+not a predicate — annotate it `(v): v is URL =>` explicitly.)
+
+Inside a sigx app, register through the per-app registry from
+`sigx/internals` (it is consulted **before** the built-ins, so a pack can
+own a type they also cover):
 
 ```ts
 import { provideTypeHandlers } from 'sigx/internals';
-
-const money = {
-    name: 'money', tag: '$money',
-    test: (v) => v instanceof Money,
-    serialize: (v) => v.cents,
-    revive: (c) => new Money(c),
-};
 
 export const moneyPack = {
     install(app) {

@@ -27,8 +27,18 @@
  * package's `createToken`. This module stays a pure pair of functions.
  */
 
-/** One pluggable codec entry for a type JSON cannot represent. */
-export interface TypeHandler {
+/**
+ * One pluggable codec entry for a type JSON cannot represent.
+ *
+ * Generic over the handled type and its wire form — author handlers with
+ * {@link defineTypeHandler} to get both inferred from the `test` guard. The
+ * members are METHOD-declared on purpose: strictFunctionTypes exempts method
+ * declarations from contravariant parameter checks, which is what lets a
+ * `TypeHandler<Date, number>` flow into the `readonly TypeHandler[]` chains
+ * every consumer takes. Bare `TypeHandler` (= `TypeHandler<unknown, unknown>`)
+ * is exactly the pre-generic shape, so existing handlers compile unchanged.
+ */
+export interface TypeHandler<T = unknown, Encoded = unknown> {
     /** Identifies the handler (dev warnings, dedupe by consumers). */
     name: string;
     /**
@@ -41,16 +51,55 @@ export interface TypeHandler {
      * emitted as-is and never revived.
      */
     tag?: string;
-    /** Whether this handler owns the value. Receives the RAW value (before any toJSON). */
+    /**
+     * Whether this handler owns the value. Receives the RAW value (before any
+     * toJSON). Deliberately `boolean`, not a type predicate — a predicate
+     * member would reject every boolean-returning test; the predicate lives on
+     * {@link defineTypeHandler}'s parameter, where it drives inference.
+     */
     test(value: unknown): boolean;
     /**
      * Return a JSON-safe payload. The result is wrapped as `{ [tag]: payload }`
      * when `tag` is set, and is itself walked — so a handler may return values
      * other handlers own (a `Map`'s entries containing `Date`s, say).
      */
-    serialize(value: unknown): unknown;
+    serialize(value: T): Encoded;
     /** Turn a payload produced by `serialize` back into the live value. */
-    revive?(encoded: unknown): unknown;
+    revive?(encoded: Encoded): T;
+}
+
+/**
+ * Author a typed handler without casts: declare `test` as a type guard
+ * (`(v): v is Money => v instanceof Money`) and `serialize`/`revive` infer
+ * their parameter and pairing from it.
+ *
+ * ```ts
+ * const moneyHandler = defineTypeHandler({
+ *     name: 'money',
+ *     tag: '$money',
+ *     test: (v): v is Money => v instanceof Money,
+ *     serialize: (m) => m.cents,          // m: Money
+ *     revive: (cents) => new Money(cents) // cents: number (from serialize)
+ * });
+ * ```
+ *
+ * Inference caveat: TypeScript only infers a predicate from a bare
+ * `instanceof`/`typeof` arrow — a compound test
+ * (`(v) => hasDom && v instanceof URL`) infers `boolean` and collapses `T`
+ * to `unknown`, so annotate those explicitly (`(v): v is URL => …`).
+ *
+ * Runtime-wise this is the identity function; it exists purely so the guard
+ * can drive inference, which the {@link TypeHandler} interface itself cannot
+ * do without breaking boolean-returning tests.
+ */
+export function defineTypeHandler<T, Encoded = unknown>(handler: {
+    name: string;
+    tag?: string;
+    test(value: unknown): value is T;
+    serialize(value: T): Encoded;
+    revive?(encoded: Encoded): T;
+}): TypeHandler<T, Encoded> {
+    return handler;
 }
 
 /**
@@ -68,49 +117,46 @@ export const BUILTIN_TYPE_HANDLERS: readonly TypeHandler[] = [
         test: (v) => v instanceof Date,
         // NaN is not representable in JSON; null round-trips to Invalid Date.
         serialize: (v) => {
-            const t = (v as Date).getTime();
+            const t = v.getTime();
             return Number.isNaN(t) ? null : t;
         },
-        revive: (v) => new Date(v === null ? NaN : (v as number)),
-    },
+        revive: (v) => new Date(v === null ? NaN : v),
+    } satisfies TypeHandler<Date, number | null>,
     {
         name: 'map',
         tag: '$map',
         test: (v) => v instanceof Map,
-        serialize: (v) => [...(v as Map<unknown, unknown>).entries()],
-        revive: (v) => new Map(v as [unknown, unknown][]),
-    },
+        serialize: (v) => [...v.entries()],
+        revive: (v) => new Map(v),
+    } satisfies TypeHandler<Map<unknown, unknown>, [unknown, unknown][]>,
     {
         name: 'set',
         tag: '$set',
         test: (v) => v instanceof Set,
-        serialize: (v) => [...(v as Set<unknown>)],
-        revive: (v) => new Set(v as unknown[]),
-    },
+        serialize: (v) => [...v],
+        revive: (v) => new Set(v),
+    } satisfies TypeHandler<Set<unknown>, unknown[]>,
     {
         name: 'bigint',
         tag: '$bigint',
         test: (v) => typeof v === 'bigint',
-        serialize: (v) => (v as bigint).toString(),
-        revive: (v) => BigInt(v as string),
-    },
+        serialize: (v) => v.toString(),
+        revive: (v) => BigInt(v),
+    } satisfies TypeHandler<bigint, string>,
     {
         name: 'url',
         tag: '$url',
         test: (v) => typeof URL !== 'undefined' && v instanceof URL,
-        serialize: (v) => (v as URL).href,
-        revive: (v) => new URL(v as string),
-    },
+        serialize: (v) => v.href,
+        revive: (v) => new URL(v),
+    } satisfies TypeHandler<URL, string>,
     {
         name: 'regexp',
         tag: '$regexp',
         test: (v) => v instanceof RegExp,
-        serialize: (v) => [(v as RegExp).source, (v as RegExp).flags],
-        revive: (v) => {
-            const [source, flags] = v as [string, string];
-            return new RegExp(source, flags);
-        },
-    },
+        serialize: (v) => [v.source, v.flags],
+        revive: ([source, flags]) => new RegExp(source, flags),
+    } satisfies TypeHandler<RegExp, [string, string]>,
     {
         name: 'undefined',
         tag: '$undef',
@@ -119,7 +165,7 @@ export const BUILTIN_TYPE_HANDLERS: readonly TypeHandler[] = [
         test: (v) => v === undefined,
         serialize: () => 0,
         revive: () => undefined,
-    },
+    } satisfies TypeHandler<undefined, number>,
 ];
 
 /** Registered handlers win over built-ins, so a pack can own e.g. `Date`. */
@@ -218,12 +264,16 @@ function encode(
  * An unrecognized `$`-tag is left untouched — data written by a newer
  * vocabulary degrades to its raw shape rather than throwing, which is why the
  * format needs no version field.
+ *
+ * The type parameter is an ASSERTION, not a validation — it types the result
+ * for call sites that know what the tree encodes (`reviveWithHandlers<Cart>`);
+ * nothing checks the wire data against it. Omitted, the result is `unknown`.
  */
-export function reviveWithHandlers(
+export function reviveWithHandlers<T = unknown>(
     value: unknown,
     handlers: readonly TypeHandler[] = []
-): unknown {
-    return revive(value, chain(handlers));
+): T {
+    return revive(value, chain(handlers)) as T;
 }
 
 function revive(value: unknown, handlers: readonly TypeHandler[]): unknown {
