@@ -70,12 +70,12 @@ const MANIFEST_SCHEMA = {
 
 const ALIGN_SCHEMA = {
     type: 'object',
-    required: ['repo', 'status', 'summary'],
+    required: ['status', 'summary'],
     properties: {
         repo: {
             type: 'string',
             description:
-                'The BARE repo name exactly as it appears in docs/ecosystem.json — "router", NOT "signalxjs/router". The between-tier halt barrier matches on this.',
+                'Optional, debug only — which repo you worked on, in whatever form. Nothing matches on it: the workflow attributes each result to its manifest entry positionally, because relying on this field is what silently disabled the tier barrier (#465).',
         },
         status: {
             type: 'string',

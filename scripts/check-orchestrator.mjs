@@ -41,13 +41,14 @@ const raw = readFileSync(path, 'utf8');
 // the next reader understands what went wrong — matching against the raw file would
 // flag that explanation as the bug itself, which would either delete a useful comment
 // or train someone to ignore this check.
+// Block comments go first, so their `*` continuation lines are already gone — only
+// whole-line `//` comments remain to strip. Dropping `*`-leading lines as well would
+// also eat real code (a generator method) and prompt text (a markdown bullet), which
+// is how a source lint starts producing confident wrong answers of its own.
 const src = raw
-    .replace(/\/\*[\s\S]*?\*\//g, '') // block comments
+    .replace(/\/\*[\s\S]*?\*\//g, '')
     .split('\n')
-    .filter((l) => {
-        const t = l.trim();
-        return !t.startsWith('//') && !t.startsWith('*');
-    })
+    .filter((l) => !l.trim().startsWith('//'))
     .join('\n');
 
 const errors = [];
