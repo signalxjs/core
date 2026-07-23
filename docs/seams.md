@@ -25,6 +25,36 @@ the `__SIGX_ASYNC__` accessors. Both were invisible to anyone changing "the"
 reader — a decode added to the single accessor would have silently skipped
 every island. Both were united in #374.
 
+## DI tokens assume ONE module graph
+
+Every `provide*` seam is a `Symbol()` token (`createToken` in
+`runtime-core/src/di/token.ts` — deliberately not `Symbol.for`, so versions
+can never blur together). Identity therefore lives in **one module graph**: if
+two copies of the defining package are live, the writer's token and the
+reader's token are different symbols and the provide is simply not found.
+
+That failure used to be silent, because a miss is also what "nothing was
+provided" looks like, and every seam treats that as a legitimate default —
+`getSSRPlugins()` returns `[]`, hydrate defaults fall back to core's,
+`provideTypeHandlers` yields the built-ins. #425 rode that ambiguity into a
+production-looking dev server: `createDevRequestHandler` force-inlined the
+renderer while the app's `@sigx/*` imports externalized, and resumable pages
+rendered with **no boundary table at all** while nothing anywhere complained.
+
+`hasForeignToken(provides, token)` (same module, `sigx/internals`) closes it.
+The signal is a provides key carrying the token's description that is not the
+token — which reads as a duplicated graph **because of the contract above**,
+not as a fact about JavaScript: descriptions are namespaced `sigx:*` and each
+is minted in exactly one place, so nothing else legitimately produces one.
+(Any code *may* call `Symbol('sigx:ssrPlugins')`; a token declared twice under
+one description would trip it too — also worth knowing. Keep descriptions
+unique.)
+
+`mergeSSRPlugins` calls it under `__DEV__` and warns. Adopt the same check at
+any seam whose miss path silently degrades — on the MISS path only, never
+inside `getProvided`, which is the hot injection path where a miss is
+ordinarily fine.
+
 ## Data seams — payloads the server writes and the client reads
 
 ### `__SIGX_ASYNC__`

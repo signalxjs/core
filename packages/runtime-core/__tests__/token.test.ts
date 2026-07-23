@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { createToken, getProvided, setProvided, type InjectionToken } from '../src/di/token';
+import {
+    createToken,
+    getProvided,
+    setProvided,
+    hasForeignToken,
+    type InjectionToken
+} from '../src/di/token';
 
 describe('typed DI tokens', () => {
     it('createToken returns a plain symbol carrying the description', () => {
@@ -31,6 +37,53 @@ describe('typed DI tokens', () => {
         expect(getProvided(undefined, token)).toBeUndefined();
         expect(getProvided(null, token)).toBeUndefined();
         expect(getProvided(new Map<symbol, unknown>(), token)).toBeUndefined();
+    });
+
+    it('hasForeignToken spots a token provided by a SECOND copy of the module', () => {
+        // What two live copies of a package look like from here: same
+        // description, different symbol. (This test mints the second one
+        // by hand — which is why the helper's claim is scoped to the seam
+        // contract, where each description is minted in exactly one place.)
+        const ours = createToken<string>('sigx:duplicated');
+        const theirs = createToken<string>('sigx:duplicated');
+        const provides = new Map<symbol, unknown>();
+        setProvided(provides, theirs, 'from the other graph');
+
+        expect(getProvided(provides, ours)).toBeUndefined();   // the silent failure
+        expect(hasForeignToken(provides, ours)).toBe(true);    // …now identified
+    });
+
+    it('hasForeignToken stays quiet for a healthy or simply-absent provide', () => {
+        const token = createToken<string>('sigx:healthy');
+        const other = createToken<string>('sigx:unrelated');
+
+        // Provided through OUR token — the normal case.
+        const provided = new Map<symbol, unknown>();
+        setProvided(provided, token, 'ok');
+        expect(hasForeignToken(provided, token)).toBe(false);
+
+        // Never provided at all — a legitimate miss, not a duplicated graph.
+        expect(hasForeignToken(new Map<symbol, unknown>(), token)).toBe(false);
+
+        // Other tokens present, ours absent.
+        const unrelated = new Map<symbol, unknown>();
+        setProvided(unrelated, other, 'x');
+        expect(hasForeignToken(unrelated, token)).toBe(false);
+
+        // No map at all.
+        expect(hasForeignToken(undefined, token)).toBe(false);
+        expect(hasForeignToken(null, token)).toBe(false);
+    });
+
+    it('hasForeignToken cannot false-alarm on a description-less token', () => {
+        // `undefined === undefined` would otherwise match this token against
+        // every other anonymous symbol in the map. No createToken call is
+        // description-less, but a raw Symbol() reaching the helper must not
+        // be reported as a duplicated graph.
+        const anonymous = Symbol() as InjectionToken<string>;
+        const provides = new Map<symbol, unknown>([[Symbol(), 'unrelated']]);
+
+        expect(hasForeignToken(provides, anonymous)).toBe(false);
     });
 
     it('an InjectionToken is assignable wherever a symbol is expected', () => {

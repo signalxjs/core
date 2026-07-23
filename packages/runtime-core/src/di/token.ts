@@ -55,3 +55,44 @@ export const setProvided = <T>(
     token: InjectionToken<T>,
     value: T
 ): void => void provides.set(token, value);
+
+/**
+ * Was this token provided by a DIFFERENT copy of the module that defines it?
+ *
+ * The "fail loudly" half of the one-module-graph rule above. A miss on a
+ * provides Map is ambiguous — nothing provided it, or something provided it
+ * through a second copy of this package — and every seam reads the ambiguity
+ * as the former, so a duplicated graph degrades to defaults in silence. That
+ * is how #425 shipped a plugin-less SSR render: `getSSRPlugins()` returned
+ * `[]` and the renderer simply believed the app had installed no packs.
+ *
+ * The signal is a key carrying this token's description that is NOT this
+ * token. That reads as a duplicated graph under the seam contract — token
+ * descriptions are namespaced (`sigx:*`) and minted in exactly one place, so
+ * the only thing that legitimately produces a second one is a second copy of
+ * the defining module. It is not a general JavaScript guarantee: any code
+ * MAY call `Symbol('sigx:ssrPlugins')`, and a token accidentally declared
+ * twice with one description would trip this too — which is itself worth
+ * knowing. Treat a hit as "these provides were written by something that
+ * isn't us", and keep descriptions unique.
+ *
+ * Call it on the MISS path only, from `__DEV__` blocks — never from
+ * `getProvided`, the hot injection path where a miss is ordinarily
+ * legitimate.
+ *
+ * @internal
+ */
+export const hasForeignToken = (
+    provides: Map<symbol, unknown> | null | undefined,
+    token: InjectionToken<unknown>
+): boolean => {
+    // A description-less token has nothing to match ON: `undefined ===
+    // undefined` would report every other anonymous symbol in the map as a
+    // duplicate of it. No `createToken` call is description-less, but the
+    // helper must not turn one into a false alarm.
+    if (!provides || !token.description || provides.has(token)) return false;
+    for (const key of provides.keys()) {
+        if (key.description === token.description) return true;
+    }
+    return false;
+};
