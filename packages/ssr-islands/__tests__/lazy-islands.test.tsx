@@ -2,7 +2,7 @@
  * Tests for lazy registry, chunk loader, and async island hydration
  *
  * Covers the per-island code splitting infrastructure:
- * - __registerIslandChunk / resolveComponent / hasComponent
+ * - registerComponentChunk / resolveComponent / hasComponent
  * - loadIslandComponent (eager → lazy → chunkUrl resolution)
  * - hydrateIslands() with lazily-registered components
  */
@@ -14,7 +14,7 @@ import {
     getComponent,
     hasComponent,
     resolveComponent,
-    __registerIslandChunk,
+    registerComponentChunk,
     type ComponentFactory
 } from '../src/client/registry';
 import { loadIslandComponent } from '../src/client/chunk-loader';
@@ -61,10 +61,10 @@ function uniqueName(base: string): string {
 // ─── Registry Tests ────────────────────────────────────────────────
 
 describe('lazy registry', () => {
-    describe('__registerIslandChunk', () => {
+    describe('registerComponentChunk', () => {
         it('should register a lazy loader', () => {
             const name = uniqueName('LazyReg');
-            __registerIslandChunk(name, () => Promise.resolve(LazyCounter));
+            registerComponentChunk(name, () => Promise.resolve(LazyCounter));
 
             // Not in eager registry
             expect(getComponent(name)).toBeUndefined();
@@ -76,8 +76,8 @@ describe('lazy registry', () => {
             const name = uniqueName('LazyOverwrite');
             let callCount = 0;
 
-            __registerIslandChunk(name, () => { callCount++; return Promise.resolve(LazyCounter); });
-            __registerIslandChunk(name, () => { callCount += 10; return Promise.resolve(LazyWidget); });
+            registerComponentChunk(name, () => { callCount++; return Promise.resolve(LazyCounter); });
+            registerComponentChunk(name, () => { callCount += 10; return Promise.resolve(LazyWidget); });
 
             expect(hasComponent(name)).toBe(true);
         });
@@ -92,7 +92,7 @@ describe('lazy registry', () => {
 
         it('should return true for lazily registered components', () => {
             const name = uniqueName('LazyHas');
-            __registerIslandChunk(name, () => Promise.resolve(LazyCounter));
+            registerComponentChunk(name, () => Promise.resolve(LazyCounter));
             expect(hasComponent(name)).toBe(true);
         });
 
@@ -113,7 +113,7 @@ describe('lazy registry', () => {
         it('should resolve lazily registered component via loader', async () => {
             const name = uniqueName('LazyResolve');
             const loader = vi.fn(() => Promise.resolve(LazyWidget));
-            __registerIslandChunk(name, loader);
+            registerComponentChunk(name, loader);
 
             const result = await resolveComponent(name);
             expect(result).toBe(LazyWidget);
@@ -123,7 +123,7 @@ describe('lazy registry', () => {
         it('should cache resolved lazy component in eager registry', async () => {
             const name = uniqueName('LazyCache');
             const loader = vi.fn(() => Promise.resolve(LazyCounter));
-            __registerIslandChunk(name, loader);
+            registerComponentChunk(name, loader);
 
             // First resolve
             await resolveComponent(name);
@@ -140,7 +140,7 @@ describe('lazy registry', () => {
             const name = uniqueName('LazyDedup');
             let resolveLoader!: (val: ComponentFactory) => void;
             const loader = vi.fn(() => new Promise<ComponentFactory>((r) => { resolveLoader = r; }));
-            __registerIslandChunk(name, loader);
+            registerComponentChunk(name, loader);
 
             // Start two concurrent resolves
             const p1 = resolveComponent(name);
@@ -157,7 +157,7 @@ describe('lazy registry', () => {
 
         it('should unwrap { default: Component } module format', async () => {
             const name = uniqueName('LazyDefault');
-            __registerIslandChunk(name, () => Promise.resolve({ default: LazyWidget } as any));
+            registerComponentChunk(name, () => Promise.resolve({ default: LazyWidget } as any));
 
             const result = await resolveComponent(name);
             expect(result).toBe(LazyWidget);
@@ -167,7 +167,7 @@ describe('lazy registry', () => {
             const name = uniqueName('LazyNamed');
             // Simulates: import('./module') resolving to { [name]: Component }
             const mod = { [name]: AnotherComponent } as any;
-            __registerIslandChunk(name, () => Promise.resolve(mod));
+            registerComponentChunk(name, () => Promise.resolve(mod));
 
             const result = await resolveComponent(name);
             expect(result).toBe(AnotherComponent);
@@ -182,7 +182,7 @@ describe('lazy registry', () => {
             const name = uniqueName('LazyError');
             const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-            __registerIslandChunk(name, () => Promise.reject(new Error('Network failure')));
+            registerComponentChunk(name, () => Promise.reject(new Error('Network failure')));
 
             const result = await resolveComponent(name);
             // A failed chunk load resolves to undefined (not a throw) and logs.
@@ -211,7 +211,7 @@ describe('loadIslandComponent', () => {
 
     it('should resolve from lazy registry when not eagerly registered', async () => {
         const name = uniqueName('ChunkLazy');
-        __registerIslandChunk(name, () => Promise.resolve(LazyWidget));
+        registerComponentChunk(name, () => Promise.resolve(LazyWidget));
 
         const result = await loadIslandComponent({
             strategy: 'load',
@@ -245,7 +245,7 @@ describe('loadIslandComponent', () => {
         const name = uniqueName('ChunkPrefer');
         registerComponent(name, LazyCounter);
         const lazySpy = vi.fn(() => Promise.resolve(LazyWidget));
-        __registerIslandChunk(name, lazySpy);
+        registerComponentChunk(name, lazySpy);
 
         const result = await loadIslandComponent({
             strategy: 'load',
@@ -284,7 +284,7 @@ describe('hydrateIslands with lazy components', () => {
         }, { name: name });
 
         // Register lazily (simulating what the Vite plugin does)
-        __registerIslandChunk(name, () => Promise.resolve(LazyLoadComp));
+        registerComponentChunk(name, () => Promise.resolve(LazyLoadComp));
 
         container = createSSRContainer(`<span class="lazy-load">Loaded</span><!--$c:1-->`);
         createIslandDataScript({
@@ -398,7 +398,7 @@ describe('hydrateIslands with lazy components', () => {
             return idleCallbacks.length;
         };
 
-        __registerIslandChunk(name, () => Promise.resolve(LazyIdleComp));
+        registerComponentChunk(name, () => Promise.resolve(LazyIdleComp));
 
         container = createSSRContainer(`<span class="lazy-idle">Idle</span><!--$c:1-->`);
         createIslandDataScript({
@@ -426,7 +426,7 @@ describe('hydrateIslands with lazy components', () => {
         const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
         const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-        __registerIslandChunk(name, () => Promise.reject(new Error('chunk failed')));
+        registerComponentChunk(name, () => Promise.reject(new Error('chunk failed')));
 
         container = createSSRContainer(`<span>Fail</span><!--$c:1-->`);
         createIslandDataScript({

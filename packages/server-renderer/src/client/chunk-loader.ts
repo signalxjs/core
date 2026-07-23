@@ -7,7 +7,7 @@
  *
  * Resolution order:
  * 1. Eager registry (already loaded via registerComponent)
- * 2. Lazy registry (registered via __registerIslandChunk by the Vite plugin)
+ * 2. Lazy registry (registered via registerComponentChunk by the Vite plugin)
  * 3. Direct chunk URL (the record's `chunk` ref from the SSR manifest)
  *
  * Moved here from the islands pack (rfc-ssr-platform §1.2); operates on

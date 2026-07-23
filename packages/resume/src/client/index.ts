@@ -6,6 +6,9 @@
  * `invoke`/`wake` pair is the `ResumeRuntime` the loader drives.
  */
 
+// Load the setup-context augmentation ($sigxB — the transform↔runtime contract)
+import '../setup-context';
+
 import { resolveQrl } from './qrl-registry';
 import { getScope, getDetachedScope } from './scope';
 import { installBoundaryRefreshSeam } from './refresh';

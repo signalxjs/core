@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+**BREAKING — `__registerIslandChunk` is now `registerComponentChunk` (#439).**
+
+- The lazy chunk-registration entry (`./client`, `./client/scheduler`) was
+  renamed: the underscore island name misdescribed a strategy-neutral
+  registry — the islands AND resume Vite transforms both emit calls to it.
+  Hard rename, no alias (pre-1.0). Generated registry modules are re-emitted
+  by the transforms automatically; update hand-written calls.
+
 **Added: the typed pack contract — no more underscore reads for strategy packs (#416).**
 
 - `SSRContext.currentComponentId()` — the id of the component currently

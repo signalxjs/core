@@ -13,7 +13,7 @@ import {
     getComponent,
     hasComponent,
     resolveComponent,
-    __registerIslandChunk,
+    registerComponentChunk,
     HydrationRegistry,
     type ComponentFactory
 } from '../src/client/registry';
@@ -61,7 +61,7 @@ describe('resolveComponent unwrap edge cases', () => {
         // Module exports the component under a key that is neither `default`
         // nor the component name — forces the Object.values() fallback scan.
         const mod = { somethingElse: Comp } as any;
-        __registerIslandChunk(name, () => Promise.resolve(mod));
+        registerComponentChunk(name, () => Promise.resolve(mod));
 
         const result = await resolveComponent(name);
         expect(result).toBe(Comp);
@@ -73,7 +73,7 @@ describe('resolveComponent unwrap edge cases', () => {
         const name = uniqueName('NoComp');
         const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
         // A module object with only plain values — nothing has __setup.
-        __registerIslandChunk(name, () => Promise.resolve({ foo: 1, bar: 'baz' } as any));
+        registerComponentChunk(name, () => Promise.resolve({ foo: 1, bar: 'baz' } as any));
 
         const result = await resolveComponent(name);
         expect(result).toBeUndefined();

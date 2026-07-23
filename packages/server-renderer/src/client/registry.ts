@@ -65,10 +65,12 @@ export function registerComponents(components: Record<string, ComponentFactory>)
  * The loader function is only called when the hydration strategy triggers.
  * After first resolution, the component is cached in the eager registry.
  *
- * Called automatically by the `sigxIslandsPlugin` Vite transform — users
- * don't need to call this manually.
+ * Strategy-neutral — every pack's generated registry module uses it (the
+ * islands AND resume Vite transforms emit calls; users don't call it
+ * manually). Renamed from `__registerIslandChunk` in #439: the underscore
+ * island name misdescribed a shared chunk registry.
  */
-export function __registerIslandChunk(name: string, loader: LazyComponentLoader): void {
+export function registerComponentChunk(name: string, loader: LazyComponentLoader): void {
     lazyRegistry.set(name, loader);
 }
 

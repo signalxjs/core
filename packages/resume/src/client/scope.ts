@@ -12,7 +12,7 @@
  */
 
 import { getBoundaryRecord } from '@sigx/server-renderer/client';
-import { reviveFromServer } from 'sigx/internals';
+import { reviveFromServer } from '@sigx/server-renderer/client';
 import type { SSRBoundaryRecord } from '@sigx/server-renderer';
 import { scheduleUpgrade } from './upgrade';
 

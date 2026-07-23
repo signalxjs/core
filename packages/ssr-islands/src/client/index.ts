@@ -28,7 +28,7 @@ export {
     getComponent,
     hasComponent,
     resolveComponent,
-    __registerIslandChunk,
+    registerComponentChunk,
     HydrationRegistry
 } from './registry';
 export type { ComponentFactory, LazyComponentLoader } from './registry';

@@ -45,7 +45,9 @@ import {
 } from '@sigx/server-renderer/server';
 import { jsx } from 'sigx';
 import type { App, AppContext, JSXElement } from 'sigx';
-import { encodeWithHandlers, reviveWithHandlers } from 'sigx/internals';
+// The boundary codec, from its public home — a pack imports the package,
+// not the `sigx/internals` re-export (#416).
+import { encodeWithHandlers, reviveWithHandlers } from '@sigx/serialize';
 
 /** One boundary the client asks to have re-rendered (untrusted input). */
 export interface BoundaryRefreshRequest {
@@ -213,11 +215,12 @@ export function createBoundaryRefresh(
                 let failed = false;
                 const ctx = createSSRContext({
                     baseComponentId: seeded,
+                    // Per-app DI (type handlers, provides) for the re-render.
+                    appContext,
                     onError: () => {
                         failed = true;
                     }
                 });
-                ctx._appContext = appContext;
                 initPluginContext(ctx, plugins);
                 const handlers = getTypeHandlers(ctx);
 
@@ -255,7 +258,7 @@ export function createBoundaryRefresh(
                 // Encode with the boundary codec — the same discipline as
                 // emitBoundaryTable, so the client-side table stays uniform.
                 const records: Record<number, unknown> = {};
-                ctx._boundaries.forEach((entry: SSRBoundaryRecord, id: number) => {
+                ctx.boundaries().forEach((entry: SSRBoundaryRecord, id: number) => {
                     records[id] = encodeWithHandlers(entry, handlers);
                 });
                 entries.push({

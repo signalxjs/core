@@ -109,7 +109,7 @@ describe('sigxIslands end-to-end (real vite build)', () => {
         // Side effects matter: a no-op stub gets DCE'd and takes the dynamic
         // island imports (and their chunks) with it.
         writeFileSync(join(root, 'node_modules', '@sigx', 'ssr-islands', 'client.js'),
-            `export const __registered = [];\nexport function __registerIslandChunk(name, loader) { __registered.push(name); }`);
+            `export const __registered = [];\nexport function registerComponentChunk(name, loader) { __registered.push(name); }`);
         writeFileSync(join(root, 'node_modules', '@sigx', 'ssr-islands', 'index.js'),
             `export * from './client.js';`);
     }, 60_000);

@@ -105,7 +105,7 @@ export const Widget = component(() => {
             'index.js': `export {};\n`,
             'client.js':
                 `export const __chunks = [];\n` +
-                `export function __registerIslandChunk(name, loader) { __chunks.push(name); }\n`
+                `export function registerComponentChunk(name, loader) { __chunks.push(name); }\n`
         });
         stub('@sigx/server', {
             'index.js':
