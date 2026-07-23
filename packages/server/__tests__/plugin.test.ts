@@ -206,4 +206,20 @@ describe('serverPlugin — types (the #411 one-registration story)', () => {
         expect(codec[0]).toBe(v2); // same tag → replaced in place
         expect(codec[1]).toBe(other); // new tag → appended
     });
+
+    it('tag-less handlers append once by identity (module-level constants)', async () => {
+        const { registerWireTypeHandlers } = await load();
+        // A serialize-only handler (no tag, no revive) — the legacy shape.
+        const tagless: TypeHandler = {
+            name: 'legacy',
+            test: () => false,
+            serialize: (v) => v
+        };
+        registerWireTypeHandlers([tagless]);
+        registerWireTypeHandlers([tagless]); // same reference → no duplicate
+        const codec = (globalThis as { __SIGX_SERVERFN_CODEC__?: TypeHandler[] })
+            .__SIGX_SERVERFN_CODEC__!;
+        expect(codec).toHaveLength(1);
+        expect(codec[0]).toBe(tagless);
+    });
 });
