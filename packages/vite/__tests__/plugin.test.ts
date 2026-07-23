@@ -273,3 +273,108 @@ describe('dev cache headers for workspace dists (#272)', () => {
         expect(source.headers['Cache-Control']).toBe('max-age=31536000,immutable'); // untouched
     });
 });
+
+// ============================================================================
+// hotUpdate — full-reload for server-only source (#450)
+// ============================================================================
+
+describe('hotUpdate — full-reload for server-only source (#450)', () => {
+    /**
+     * Invoke the plugin's `hotUpdate` hook the way Vite does: bound to a
+     * DevEnvironment (`environment`), given a changed `file`, the client-graph
+     * `modules` affected, and a `server` whose ssr environment reports whether
+     * the file is in the SSR module graph. Returns the payloads the client hot
+     * channel received.
+     */
+    function runHotUpdate(opts: {
+        envName?: string;
+        file: string;
+        clientModules?: unknown[];
+        inSsrGraph?: boolean;
+        pluginOptions?: Parameters<typeof sigxPlugin>[0];
+    }): { sent: unknown[] } {
+        const sent: unknown[] = [];
+        const plugin: any = sigxPlugin(opts.pluginOptions ?? {});
+        const ssrModuleGraph = {
+            getModulesByFile: (f: string) =>
+                opts.inSsrGraph && f === opts.file ? new Set([{ id: f }]) : undefined
+        };
+        const environment = {
+            name: opts.envName ?? 'client',
+            hot: { send: (payload: unknown) => sent.push(payload) }
+        };
+        const server = { environments: { ssr: { moduleGraph: ssrModuleGraph } } };
+        plugin.hotUpdate.call({ environment }, {
+            type: 'update',
+            file: opts.file,
+            timestamp: 0,
+            modules: opts.clientModules ?? [],
+            read: () => '',
+            server
+        });
+        return { sent };
+    }
+
+    it('full-reloads a server-only source module (in SSR graph, absent from the client graph)', () => {
+        const { sent } = runHotUpdate({
+            file: '/proj/src/App.tsx',
+            clientModules: [],
+            inSsrGraph: true
+        });
+        expect(sent).toEqual([{ type: 'full-reload' }]);
+    });
+
+    it('leaves client-graph modules to Vite (in-place component/CSS HMR untouched)', () => {
+        const { sent } = runHotUpdate({
+            file: '/proj/src/Island.tsx',
+            clientModules: [{ id: '/proj/src/Island.tsx' }],
+            inSsrGraph: true
+        });
+        expect(sent).toEqual([]);
+    });
+
+    it('does nothing for a source file that is in neither graph', () => {
+        const { sent } = runHotUpdate({
+            file: '/proj/src/unused.ts',
+            clientModules: [],
+            inSsrGraph: false
+        });
+        expect(sent).toEqual([]);
+    });
+
+    it('ignores non-JS/TS assets even when server-only', () => {
+        const { sent } = runHotUpdate({
+            file: '/proj/src/logo.png',
+            clientModules: [],
+            inSsrGraph: true
+        });
+        expect(sent).toEqual([]);
+    });
+
+    it('ignores node_modules and dist churn', () => {
+        for (const file of ['/proj/node_modules/dep/index.js', '/proj/packages/x/dist/index.js']) {
+            const { sent } = runHotUpdate({ file, clientModules: [], inSsrGraph: true });
+            expect(sent).toEqual([]);
+        }
+    });
+
+    it('runs once — only the client environment reaches the browser', () => {
+        const { sent } = runHotUpdate({
+            envName: 'ssr',
+            file: '/proj/src/App.tsx',
+            clientModules: [],
+            inSsrGraph: true
+        });
+        expect(sent).toEqual([]);
+    });
+
+    it('is inert when hmr is disabled', () => {
+        const { sent } = runHotUpdate({
+            file: '/proj/src/App.tsx',
+            clientModules: [],
+            inSsrGraph: true,
+            pluginOptions: { hmr: false }
+        });
+        expect(sent).toEqual([]);
+    });
+});

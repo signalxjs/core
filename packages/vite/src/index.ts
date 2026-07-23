@@ -1,5 +1,5 @@
 // Vite plugin for sigx with HMR support
-import type { Plugin, ResolvedConfig, UserConfig, ViteBuilder } from 'vite';
+import type { DevEnvironment, HotUpdateOptions, Plugin, ResolvedConfig, UserConfig, ViteBuilder } from 'vite';
 import { createRequire } from 'module';
 import * as fs from 'fs';
 import * as net from 'net';
@@ -604,6 +604,46 @@ if (import.meta.hot) {
             }
 
             return null;
+        },
+
+        // Dev-only full-reload for server-only source (#450). A zero-JS /
+        // resumable page — and any server-rendered route shell — never loads
+        // its component modules in the browser: they live ONLY in the SSR
+        // module graph, never the client graph. Vite's HMR propagates through
+        // the client graph, so an edit to such a module has no boundary to
+        // update and Vite stays silent — the browser keeps stale HTML ("save
+        // and nothing happens"). The SSR module is already invalidated, so a
+        // full page reload re-renders it fresh.
+        //
+        // Modules the browser DID load (hydrated islands, upgraded resume
+        // components) show up in the client graph — `modules` is non-empty —
+        // and are left to Vite's own HMR (the `import.meta.hot.accept()` the
+        // transform injects, CSS HMR): in-place updates stay untouched.
+        hotUpdate(
+            this: { environment: DevEnvironment },
+            { file, modules, server }: HotUpdateOptions
+        ) {
+            // Run once, from the client environment — its hot channel reaches
+            // the browser (`server.environments.ssr.hot` would go nowhere).
+            if (!hmr || this.environment.name !== 'client') return;
+            // The client graph carries this file: Vite's own HMR handles it.
+            // Forcing a reload here would defeat in-place component/CSS HMR.
+            if (modules.length > 0) return;
+            // Only our own source. `file` is an absolute fs path; skip
+            // dependency/build-output churn and non-JS/TS assets Vite routes.
+            if (
+                (!/\.[cm]?[jt]sx?$/.test(file)) ||
+                file.includes('node_modules') ||
+                file.includes('/dist/') ||
+                file.includes('\\dist\\')
+            ) {
+                return;
+            }
+            // Server-only source that the render depends on → reload the page.
+            const ssrModules = server.environments.ssr.moduleGraph.getModulesByFile(file);
+            if (ssrModules && ssrModules.size > 0) {
+                this.environment.hot.send({ type: 'full-reload' });
+            }
         }
     };
 }
