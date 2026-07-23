@@ -5,6 +5,20 @@ repository-root `CHANGELOG.md`.
 
 ## [Unreleased]
 
+### Breaking
+
+- **`optimistic.apply` drops `any` (#445).** The member is now
+  method-declared `apply(current: unknown, input: unknown): unknown` —
+  annotate your lambda's parameters to type it
+  (`apply: (current: User | null, next: Rename) => …` is accepted;
+  method-syntax members are checked bivariantly, and `current` is `null`
+  when the target key has no cached value). An UNannotated lambda that
+  dereferences `current`/`input` is now a compile error until annotated —
+  previously `any` silently disabled checking. `current` cannot be inferred:
+  `optimistic.key` targets an arbitrary other read's cached state (see
+  `CachedAsyncState<T>` for the read-side view), and `ActionOptions` carries
+  no generics to thread the input through.
+
 ### Added
 
 - Server-declared invalidation (rfc-server §6.2, core#311): `cachePlugin()`

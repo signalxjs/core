@@ -10,7 +10,7 @@ import { component, signal, jsx, defineApp, useData, useAction, type AsyncState,
 import { declareLiveClient } from '@sigx/runtime-core/internals';
 import '@sigx/runtime-dom'; // installs the default mount
 import { cachePlugin } from '@sigx/cache';
-import type { CachedAsyncState } from '@sigx/cache';
+import type { CachedAsyncState, CacheActionOptions } from '@sigx/cache';
 
 function tick(): Promise<void> {
     return new Promise(resolve => queueMicrotask(resolve));
@@ -843,5 +843,36 @@ describe('@sigx/cache', () => {
         apps[1].unmount();
         expect(seam()).toBeUndefined();
         apps.splice(0); // already unmounted — keep afterEach idempotent
+    });
+});
+
+describe('optimistic.apply typing (#445) — compile-time contract', () => {
+    it('accepts annotated lambdas; unannotated params are unknown', () => {
+        type User = { name: string };
+
+        // Annotated params narrower than `unknown` are accepted — the member
+        // is method-declared, so the check is bivariant — and fully typed.
+        // `current` is null when the target key has no cached value.
+        const annotated: CacheActionOptions = {
+            optimistic: {
+                key: 'user',
+                apply: (current: User | null, next: string) => ({
+                    ...(current ?? { name: '' }),
+                    name: next
+                })
+            }
+        };
+
+        const unannotated: CacheActionOptions = {
+            optimistic: {
+                key: 'user',
+                // @ts-expect-error unannotated params are `unknown` — a
+                // dereference does not compile until you annotate them
+                apply: (current, next) => ({ ...current, name: next.name })
+            }
+        };
+
+        expect(annotated.optimistic?.key).toBe('user');
+        expect(unannotated.optimistic?.key).toBe('user');
     });
 });
