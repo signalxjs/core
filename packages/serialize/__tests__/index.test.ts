@@ -2,6 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
     encodeWithHandlers,
     reviveWithHandlers,
+    defineTypeHandler,
     BUILTIN_TYPE_HANDLERS,
     type TypeHandler,
 } from '../src/index';
@@ -353,5 +354,81 @@ describe('revive is idempotent — safe on already-live values', () => {
         const blob = Object.assign(Object.create(null), { at: { $date: 5 } });
         const out = reviveWithHandlers(blob) as any;
         expect(out.at).toBeInstanceOf(Date);
+    });
+});
+
+describe('defineTypeHandler + generic TypeHandler', () => {
+    class Money {
+        constructor(public cents: number) {}
+    }
+
+    const moneyHandler = defineTypeHandler({
+        name: 'money',
+        tag: '$money',
+        test: (v): v is Money => v instanceof Money,
+        serialize: (m) => m.cents,
+        revive: (cents) => new Money(cents),
+    });
+
+    it('round-trips through the inferred handler', () => {
+        const out = roundTrip({ price: new Money(1250) }, [moneyHandler]) as {
+            price: Money;
+        };
+        expect(out.price).toBeInstanceOf(Money);
+        expect(out.price.cents).toBe(1250);
+    });
+
+    it('reviveWithHandlers<T> types the result (assertion, not validation)', () => {
+        const encoded = encodeWithHandlers(new Date(5));
+        const revived = reviveWithHandlers<Date>(JSON.parse(JSON.stringify(encoded)));
+        expect(revived.getTime()).toBe(5);
+    });
+
+    // ---- compile-time contract (checked by root `pnpm typecheck`) ----------
+
+    it('typed, legacy, and heterogeneous handlers all satisfy the chain type', () => {
+        // A typed handler flows into the unparameterized chains every
+        // consumer takes (method-syntax bivariance).
+        const asBase: TypeHandler = moneyHandler;
+
+        // A pre-generic hand-cast handler compiles unchanged.
+        const legacy: TypeHandler = {
+            name: 'legacy-money',
+            tag: '$legacy',
+            test: (v) => v instanceof Money,
+            serialize: (v) => (v as Money).cents,
+            revive: (c) => new Money(c as number),
+        };
+
+        // Heterogeneous arrays need no cast or alias.
+        const chain: readonly TypeHandler[] = [
+            moneyHandler,
+            legacy,
+            ...BUILTIN_TYPE_HANDLERS,
+        ];
+
+        // The guard is what drives inference. Simple tests infer a predicate
+        // on their own (TS 5.5 rules) — but a compound test with an
+        // environment check (the url builtin's exact shape) infers plain
+        // boolean, and the helper rejects it until annotated `(v): v is URL`.
+        defineTypeHandler<URL>({
+            name: 'bad',
+            // @ts-expect-error compound test infers boolean, not a type guard —
+            // annotate `(v): v is URL =>` (see the defineTypeHandler JSDoc)
+            test: (v) => typeof URL !== 'undefined' && v instanceof URL,
+            serialize: () => 0,
+        });
+
+        // Pairing is checked: revive must accept what serialize produced.
+        defineTypeHandler<Money, number>({
+            name: 'mismatched',
+            test: (v): v is Money => v instanceof Money,
+            serialize: (m) => m.cents,
+            // @ts-expect-error string is not the number `serialize` produced
+            revive: (s: string) => new Money(Number(s)),
+        });
+
+        expect(asBase.name).toBe('money');
+        expect(chain.length).toBeGreaterThan(2);
     });
 });

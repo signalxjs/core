@@ -4,6 +4,18 @@
 
 ### Added
 
+- **Generic `TypeHandler<T = unknown, Encoded = unknown>` and
+  `defineTypeHandler` (#435).** The handler interface is now generic over the
+  handled type and its wire form; `defineTypeHandler` infers both from a
+  type-guard `test` (`(v): v is Money => …`), so `serialize`/`revive` are
+  typed without a single cast and their pairing is checked. Members stay
+  method-declared on purpose — that is what lets a `TypeHandler<Date, number>`
+  flow into every `readonly TypeHandler[]` chain — and bare `TypeHandler` is
+  exactly the pre-generic shape, so existing handler objects compile
+  unchanged. `reviveWithHandlers<T = unknown>` gained an assertion-only result
+  type parameter. The built-in vocabulary now type-checks against its own
+  interface (`satisfies`, per handler) instead of hand-casting.
+
 - **Initial release** (#364). The boundary codec: `encodeWithHandlers` /
   `reviveWithHandlers` around a `TypeHandler` interface, plus a built-in
   vocabulary that works with zero configuration — `$date`, `$map`, `$set`,
