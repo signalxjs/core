@@ -97,12 +97,26 @@ Driving the full rollout in dependency order is what
 The default `GITHUB_TOKEN` **cannot** dispatch to other repos, so the job
 authenticates with an **`ECOSYSTEM_DISPATCH_TOKEN`** secret. To activate the loop:
 
-1. Create a **fine-grained PAT** (or a GitHub App installation token) with
-   **`repository_dispatch: write`** (Actions → Repository dispatch) on every repo in
-   `docs/ecosystem.json`. No other scopes are needed. List them with:
-   ```sh
-   node -e "for (const c of require('./docs/ecosystem.json').consumers) console.log(c.repo)"
-   ```
+1. Create a **fine-grained PAT** at
+   <https://github.com/settings/personal-access-tokens/new>:
+   - **Resource owner**: `signalxjs` — *not* your personal account, or the repos
+     will not appear in the list below.
+   - **Repository access**: *Only select repositories* → every repo in
+     `docs/ecosystem.json`. List them with:
+     ```sh
+     node -e "for (const c of require('./docs/ecosystem.json').consumers) console.log(c.repo)"
+     ```
+   - **Permissions**: Repository permissions → **`Contents: Read and write`**.
+     Nothing else (`Metadata: Read` is added automatically and is expected).
+
+   **There is no "Repository dispatch" permission** — `POST /repos/{owner}/{repo}/dispatches`
+   requires `Contents: Read and write`, which is broader than this job needs and is the
+   narrowest GitHub offers for it (a GitHub App needs the same). The token can
+   therefore write contents on those repos even though the workflow only sends an
+   event; prefer a shorter expiry over hunting for a tighter scope.
+
+   If the org requires approval for fine-grained tokens the request sits pending
+   under Organization → Settings → Personal access tokens → Pending requests.
 2. Store it as the `ECOSYSTEM_DISPATCH_TOKEN` Actions secret **in this (core)
    repo**: `gh secret set ECOSYSTEM_DISPATCH_TOKEN -R signalxjs/core`.
 3. Confirm each consumer has `core-sync.yml` on its default branch:
@@ -119,6 +133,21 @@ gh api repos/signalxjs/router/dispatches \
   -f event_type=core-released -F 'client_payload[version]=0.12.0'
 gh run list -R signalxjs/router --workflow core-sync.yml --limit 1
 ```
+
+A run appearing within ~30s means the token works end to end; the log should read
+`sync-core: catalog already aligned to core 0.12 (no change)` and no PR should open.
+When it does not:
+
+| Symptom | Cause |
+| --- | --- |
+| `403` / `Resource not accessible by personal access token` | the token lacks `Contents: Read and write`, or that repo was not selected under *Only select repositories* |
+| `404` | resource owner is your personal account instead of `signalxjs` |
+| Dispatch accepted, no workflow run | `core-sync.yml` is not on that repo's default branch — check with the command above |
+
+**Watch the expiry.** The job's guard catches an *unset* token, not an expired one:
+every `gh api` call fails and each failure is swallowed per-repo, so an expired token
+degrades silently back to the weekly cron with one line in a job log as the only
+signal. Put a reminder on the expiry date.
 
 If the secret is absent, `notify-consumers` logs that it's skipping and exits 0 —
 consumers still pick up the release on `core-sync.yml`'s weekly cron.
