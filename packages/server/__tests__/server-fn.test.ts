@@ -349,6 +349,17 @@ describe('serverFn — options form with an undeclared input (#451)', () => {
         void (() => viaAnnotation(1));
     });
 
+    it('an `any` input is a DECLARED one — it keeps its required argument', async () => {
+        // `any` satisfies `unknown extends S` as well, so the undeclared
+        // check must exclude it: an annotated `any` (or a schema whose
+        // output is `any`) is a declaration, just an unhelpful one.
+        const loose = serverFn({ handler: async (_rq, i: any) => i as string });
+        await expect(loose('x')).resolves.toBe('x');
+
+        // @ts-expect-error a declared `any` input is still REQUIRED
+        void (() => loose());
+    });
+
     it('an unannotated handler parameter stays contextually typed (no overload poisoning)', async () => {
         // Regression guard for the approach: discriminating on handler ARITY
         // needs an overload ordered ahead of the input-taking one, and

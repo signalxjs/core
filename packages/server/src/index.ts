@@ -193,7 +193,18 @@ export interface ServerFnOptions<S, R> {
  * annotating the parameter) is what buys the precise type, and the
  * unvalidated-wire-input dev warning (#437) already pushes toward it.
  */
-type ServerFnInputArgs<S> = unknown extends S ? [input?: unknown] : [S];
+type ServerFnInputArgs<S> = IsAny<S> extends true
+    ? [input: S]
+    : unknown extends S
+      ? [input?: unknown]
+      : [S];
+
+/**
+ * `any` satisfies `unknown extends S` too, but an `any` input is a DECLARED
+ * one (an annotated parameter, or a schema whose output is `any`) — it keeps
+ * its required argument rather than falling into the undeclared case.
+ */
+type IsAny<T> = 0 extends 1 & T ? true : false;
 
 /** Wrap a server-only function. Client callers get `(...args) => Promise<R>`. */
 export function serverFn<A extends unknown[], R>(
