@@ -13,7 +13,7 @@
  * still in agreement.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { keyMatches as serverMatch, preparePattern as serverPrepare } from '../src/server/key-match';
 import { keyMatches as cacheMatch, preparePattern as cachePrepare } from '../../cache/src/store';
 
@@ -54,13 +54,25 @@ describe('preparePattern — server/cache parity (#469)', () => {
         expect(cachePrepare(pattern).match(entryKey)).toBe(expected);
     });
 
-    it('a prepared matcher stringifies a tuple once, then tests many keys', () => {
-        // The optimization's contract: the canonical form is computed at
-        // prepare time, so match() must not re-derive it. A prepared tuple
-        // matcher agrees with the one-shot keyMatches on every key.
-        const matcher = cachePrepare(['posts', 'u1']);
-        for (const [entryKey, , ] of CASES) {
-            expect(matcher.match(entryKey)).toBe(cacheMatch(entryKey, ['posts', 'u1']));
+    it('a prepared tuple matcher stringifies once at prepare, never during match (#469)', () => {
+        // The whole optimization: the canonical form is computed at prepare
+        // time and match() must NOT re-derive it. Assert the contract
+        // directly — a match() that re-stringified would pass a
+        // result-parity test but reintroduce the exact cost this fixes.
+        const spy = vi.spyOn(JSON, 'stringify');
+        const cacheMatcher = cachePrepare(['posts', 'u1']);
+        const serverMatcher = serverPrepare(['posts', 'u1']);
+        // Each prepare canonicalizes its tuple exactly once — no more, and
+        // (string patterns aside) no fewer.
+        expect(spy.mock.calls.length).toBe(2);
+
+        const afterPrepare = spy.mock.calls.length;
+        for (const [entryKey] of CASES) {
+            cacheMatcher.match(entryKey);
+            serverMatcher.match(entryKey);
         }
+        // Not one more JSON.stringify across every match on both sides.
+        expect(spy.mock.calls.length).toBe(afterPrepare);
+        spy.mockRestore();
     });
 });
