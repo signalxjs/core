@@ -10,8 +10,9 @@ repository-root `CHANGELOG.md`.
 - **`optimistic.apply` drops `any` (#445).** The member is now
   method-declared `apply(current: unknown, input: unknown): unknown` —
   annotate your lambda's parameters to type it
-  (`apply: (current: User | undefined, next: Rename) => …` is accepted;
-  method-syntax members are checked bivariantly). An UNannotated lambda that
+  (`apply: (current: User | null, next: Rename) => …` is accepted;
+  method-syntax members are checked bivariantly, and `current` is `null`
+  when the target key has no cached value). An UNannotated lambda that
   dereferences `current`/`input` is now a compile error until annotated —
   previously `any` silently disabled checking. `current` cannot be inferred:
   `optimistic.key` targets an arbitrary other read's cached state (see

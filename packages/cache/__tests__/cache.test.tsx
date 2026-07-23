@@ -852,10 +852,11 @@ describe('optimistic.apply typing (#445) — compile-time contract', () => {
 
         // Annotated params narrower than `unknown` are accepted — the member
         // is method-declared, so the check is bivariant — and fully typed.
+        // `current` is null when the target key has no cached value.
         const annotated: CacheActionOptions = {
             optimistic: {
                 key: 'user',
-                apply: (current: User | undefined, next: string) => ({
+                apply: (current: User | null, next: string) => ({
                     ...(current ?? { name: '' }),
                     name: next
                 })
