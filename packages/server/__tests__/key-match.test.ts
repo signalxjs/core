@@ -13,7 +13,7 @@
  * still in agreement.
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import { keyMatches as serverMatch, preparePattern as serverPrepare } from '../src/server/key-match';
 import { keyMatches as cacheMatch, preparePattern as cachePrepare } from '../../cache/src/store';
 
@@ -49,6 +49,11 @@ describe('keyMatches — server/cache parity (#452)', () => {
 });
 
 describe('preparePattern — server/cache parity (#469)', () => {
+    // A spy on the global JSON.stringify must never leak past its test — a
+    // thrown assertion would otherwise cascade into unrelated failures in
+    // this worker.
+    afterEach(() => vi.restoreAllMocks());
+
     it.each(CASES)('%s vs %j → %s (prepared, both sides agree)', (entryKey, pattern, expected) => {
         expect(serverPrepare(pattern).match(entryKey)).toBe(expected);
         expect(cachePrepare(pattern).match(entryKey)).toBe(expected);
@@ -72,7 +77,7 @@ describe('preparePattern — server/cache parity (#469)', () => {
             serverMatcher.match(entryKey);
         }
         // Not one more JSON.stringify across every match on both sides.
+        // (afterEach restores the spy even if this throws.)
         expect(spy.mock.calls.length).toBe(afterPrepare);
-        spy.mockRestore();
     });
 });
