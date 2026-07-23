@@ -97,7 +97,7 @@ describe('serverFn — invalidates (endpoint envelope)', () => {
     it('in-process calls never compute directives (wire-only)', async () => {
         const invalidates = vi.fn(() => [['cart']]);
         const fn = serverFn({ invalidates, handler: async () => 'ok' });
-        await expect(fn({})).resolves.toBe('ok');
+        await expect(fn()).resolves.toBe('ok');
         expect(invalidates).not.toHaveBeenCalled();
     });
 });
