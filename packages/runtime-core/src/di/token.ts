@@ -55,3 +55,32 @@ export const setProvided = <T>(
     token: InjectionToken<T>,
     value: T
 ): void => void provides.set(token, value);
+
+/**
+ * Was this token provided by a DIFFERENT copy of the module that defines it?
+ *
+ * The "fail loudly" half of the one-module-graph rule above. A miss on a
+ * provides Map is ambiguous — nothing provided it, or something provided it
+ * through a second copy of this package — and every seam reads the ambiguity
+ * as the former, so a duplicated graph degrades to defaults in silence. That
+ * is how #425 shipped a plugin-less SSR render: `getSSRPlugins()` returned
+ * `[]` and the renderer simply believed the app had installed no packs.
+ *
+ * A key carrying this token's description that is NOT this token can only
+ * exist if two copies of the defining module are live, so this identifies a
+ * duplicated graph outright rather than guessing at one. Call it on the MISS
+ * path only, from `__DEV__` blocks — never from `getProvided`, which is the
+ * hot injection path and where a miss is ordinarily legitimate.
+ *
+ * @internal
+ */
+export const hasForeignToken = (
+    provides: Map<symbol, unknown> | null | undefined,
+    token: InjectionToken<unknown>
+): boolean => {
+    if (!provides || provides.has(token)) return false;
+    for (const key of provides.keys()) {
+        if (key.description === token.description) return true;
+    }
+    return false;
+};

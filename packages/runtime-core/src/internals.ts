@@ -66,7 +66,7 @@ export { getComponentPlugins, applyContextExtensions, registerComponentPlugin, r
 export { getAppContextToken, provideAppContext } from './di/injectable.js';
 // Typed seam tokens: create + read/write helpers that carry the value type,
 // so seam reads need no `as X | undefined` casts
-export { createToken, getProvided, setProvided } from './di/token.js';
+export { createToken, getProvided, setProvided, hasForeignToken } from './di/token.js';
 export type { InjectionToken } from './di/token.js';
 
 // Async engine internals (for server renderers and cache packs)

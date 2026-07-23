@@ -248,3 +248,47 @@ describe('document default state plugin vs app-carried plugins', () => {
         expect(html).not.toContain('__SIGX_ASYNC__');
     });
 });
+
+/**
+ * A duplicated module graph (#430). The whole seam is a `Symbol()` token, so
+ * a second copy of this package provides under a token this copy can never
+ * match — and the miss is indistinguishable from "no packs installed", which
+ * is how #425 rendered pages with no boundary table and said nothing.
+ */
+describe('app-carried plugins — a duplicated module graph is not silent', () => {
+    afterEach(() => vi.restoreAllMocks());
+
+    /** What a second copy of @sigx/server-renderer's token looks like. */
+    const foreignToken = Symbol('sigx:ssrPlugins');
+
+    it('warns when the app provided its plugins through a SECOND copy', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const app = defineApp((Page as any)({}) as JSXElement);
+        app._context.provides.set(foreignToken, [recorderPlugin('islands', [])]);
+
+        await createSSR().renderDocument(app, { template: TEMPLATE });
+
+        const message = warn.mock.calls.map(c => String(c[0])).join('\n');
+        expect(message).toContain('SECOND copy');
+        expect(message).toContain('no pack plugins');
+    });
+
+    it('says nothing for a healthy app-carried install', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const app = defineApp((Page as any)({}) as JSXElement);
+        app.use(packOf(recorderPlugin('islands', [])));
+
+        await createSSR().renderDocument(app, { template: TEMPLATE });
+
+        expect(warn.mock.calls.map(c => String(c[0])).join('\n')).not.toContain('SECOND copy');
+    });
+
+    it('says nothing for an app that simply installed no packs', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const app = defineApp((Page as any)({}) as JSXElement);
+
+        await createSSR().renderDocument(app, { template: TEMPLATE });
+
+        expect(warn.mock.calls.map(c => String(c[0])).join('\n')).not.toContain('SECOND copy');
+    });
+});
