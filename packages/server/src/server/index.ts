@@ -191,7 +191,19 @@ function resolveInvalidatePatterns(
             out.push((mapped ?? pattern) as readonly unknown[]);
             continue;
         }
-        out.push(pattern as string);
+        if (typeof pattern === 'string') {
+            out.push(pattern);
+            continue;
+        }
+        // Typed away, but `invalidates` output is runtime data — junk must
+        // never reach the wire contract (string | tuple only).
+        if (__DEV__) {
+            console.warn(
+                `[sigx server] "${fnName}" \`invalidates\` returned a non-pattern value ` +
+                `(${typeof pattern}) — dropped. Patterns are canonical strings, tuples, ` +
+                `or server-fn references.`
+            );
+        }
     }
     return out;
 }

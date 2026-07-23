@@ -322,3 +322,20 @@ describe('endpoint — fn-ref invalidates patterns (#452)', () => {
         await expect(res.json()).resolves.toEqual({ data: 'ok' });
     });
 });
+
+describe('endpoint — non-pattern invalidates values (#452 review)', () => {
+    it('drops numbers/objects instead of forwarding them onto the wire', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const vote = serverFn({
+            handler: async () => 'ok',
+            invalidates: () => [42, { nope: true }, 'plain'] as never
+        });
+        const res = await post(vote, { args: [{}] });
+        await expect(res.json()).resolves.toEqual({
+            data: 'ok',
+            $cache: { invalidates: ['plain'] }
+        });
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining('non-pattern'));
+        warn.mockRestore();
+    });
+});
