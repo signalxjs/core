@@ -1,3 +1,5 @@
+/// <reference types="vite/client" />
+
 // Generated bootstraps (side effects only).
 declare module 'virtual:sigx-resume/entry';
 declare module 'virtual:sigx-islands';
@@ -20,5 +22,3 @@ declare module 'virtual:sigx-manifests' {
     export const islandsManifest: IslandsManifestV2 | undefined;
     export const resumeManifest: ResumeManifest | undefined;
 }
-// Type-only: enables the client:* directive props on JSX components.
-import '@sigx/ssr-islands/jsx';

@@ -32,6 +32,7 @@
         "dev:sigx": "pnpm --filter sigx run dev",
         "dev:vite": "pnpm --filter @sigx/vite run dev",
         "typecheck": "tsc --noEmit",
+        "typecheck:examples": "node scripts/typecheck-examples.mjs",
         "lint": "oxlint --deny-warnings packages/serialize/src packages/reactivity/src packages/runtime-core/src packages/runtime-dom/src packages/sigx/src packages/server-renderer/src packages/ssr-islands/src packages/resume/src packages/cache/src packages/server/src packages/vite/src packages/cloudflare/src packages/vercel/src packages/netlify/src",
         "lint:fix": "oxlint --fix packages/serialize/src packages/reactivity/src packages/runtime-core/src packages/runtime-dom/src packages/sigx/src packages/server-renderer/src packages/ssr-islands/src packages/resume/src packages/cache/src packages/server/src packages/vite/src packages/cloudflare/src packages/vercel/src packages/netlify/src",
         "publish:dry": "node scripts/publish.js --dry-run",

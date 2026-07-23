@@ -19,6 +19,9 @@ docs/dist/
 !packages/ssr-islands/src/jsx.d.ts
 !packages/*/src/env.d.ts
 !examples/*/src/*.d.ts
+# Shared ambients for the examples' type-check (__DEV__) — sits at the
+# examples root, so the per-example exception above does not cover it.
+!examples/env.d.ts
 *.js
 *.js.map
 

@@ -155,6 +155,16 @@ pnpm test -- -t "name of test"     # single test by name (vitest -t)
 pnpm test:watch
 pnpm test:coverage
 pnpm typecheck   # tsc (TypeScript 7 native compiler), config: tsconfig.json
+pnpm typecheck:examples   # each example against its OWN tsconfig — `pnpm typecheck`'s
+                          # program is the packages (tsconfig.json excludes `examples`),
+                          # and the examples are the copy-paste surface, so a type error
+                          # there is a user-facing bug. One program per example, never a
+                          # shared one: several declare the same `virtual:*` ambient
+                          # modules differently and a merged program invents collisions.
+                          # Also fails an example that has NO tsconfig, and one whose
+                          # config resolves to an empty program (TS18003 reads like a
+                          # pass — that is how this went uncovered, #456). CI job step:
+                          # "Typecheck examples".
 pnpm lint        # oxlint over all packages' src (warnings fail: --deny-warnings)
 pnpm lint:fix
 pnpm size        # size-limit bundle-size check (.size-limit.mjs)
@@ -294,6 +304,7 @@ surfaces, two rules:
 | add / rename / remove a package | `AGENTS.md` "Packages" and the README package table — plus, **whichever of these the repo has**: `CONTRIBUTING.md` layout, the issue-template package dropdowns, `.size-limit.mjs`, and the `tsconfig` / `vitest` path aliases. Also `docs/ecosystem.json` → `corePackages` (`pnpm verify:ecosystem` fails until you do), and `CORE_PACKAGES` in [`repo-template`](https://github.com/signalxjs/repo-template)'s `scripts/sync-core.mjs` + `scripts/check-catalog.mjs` — a core package missing from those never reaches a consumer's catalog |
 | add / remove an ecosystem repo, or change which sibling packages one consumes | `docs/ecosystem.json` — the manifest driving `release.yml`'s consumer fan-out and the release **order** in `docs/ecosystem-release.md`. A sibling dependency can change a repo's tier; `pnpm verify:ecosystem` checks that tiers stay a valid topological order. Never hardcode a consumer list anywhere |
 | change a build / test / lint script | `AGENTS.md` "Build, Test, Lint", `CONTRIBUTING.md` "Common tasks", `package.json` |
+| add an example under `examples/` | give it a `tsconfig.json` extending the ROOT config with its own `"exclude": ["node_modules", "**/dist"]` (inheriting the root's `"exclude": ["examples"]` would exclude the example's own sources — the program resolves to nothing and `tsc -p` "passes" on TS18003) and `"../env.d.ts"` in `include` (the `__DEV__` flag the path-aliased package sources reference). `pnpm typecheck:examples` fails on both mistakes, and on an example with no tsconfig at all |
 | change or add public API / behaviour | the package's own `README.md` and `CHANGELOG.md` under `[Unreleased]` |
 | add / change a `globalThis.__SIGX_*` seam | `docs/seams.md` — the registry of every cross-package global: name, direction, writer, reader, contract. A global with no entry there is a bug; the map used to exist only by grepping, and a read site got missed because of it |
 | change the workflow / process itself | `AGENTS.md` here — and, since it is the shared standard, upstream the same change to [`signalxjs/repo-template`](https://github.com/signalxjs/repo-template) |
