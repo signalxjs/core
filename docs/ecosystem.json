@@ -76,8 +76,7 @@
       ],
       "consumesCore": ["@sigx/reactivity", "@sigx/runtime-core", "@sigx/vite"],
       "consumesSiblings": [],
-      "catalog": "partial",
-      "catalogTodo": "@sigx/vite is pinned inline (^0.12.0) in 5 packages — move it into the catalog block",
+      "catalog": "complete",
       "verify": { "unit": "pnpm test", "browser": null, "manual": "pnpm showcase — a TUI, not a browser surface" }
     },
     {
@@ -95,8 +94,7 @@
       "publishes": ["@sigx/monaco-editor"],
       "consumesCore": ["sigx", "@sigx/vite"],
       "consumesSiblings": [],
-      "catalog": "missing",
-      "catalogTodo": "no catalog block at all — core deps are inline ^0.12.0",
+      "catalog": "complete",
       "verify": { "unit": "pnpm test", "browser": "pnpm dev:basic" }
     },
     {
@@ -105,8 +103,7 @@
       "publishes": ["@sigx/cli", "@sigx/create"],
       "consumesCore": ["@sigx/vite"],
       "consumesSiblings": ["@sigx/args", "@sigx/terminal"],
-      "catalog": "missing",
-      "catalogTodo": "no catalog block at all — @sigx/vite is inline ^0.12.0",
+      "catalog": "complete",
       "verify": { "unit": "pnpm test", "browser": null }
     },
     {
@@ -116,7 +113,7 @@
       "consumesCore": ["@sigx/reactivity", "@sigx/runtime-core", "@sigx/vite", "sigx"],
       "consumesSiblings": ["@sigx/store"],
       "catalog": "missing",
-      "catalogTodo": "no catalog block at all — core deps are inline ^0.12.0",
+      "catalogTodo": "the ONLY consumer still without the machinery — adopted in signalxjs/i18n#16, which is open pending an approving review. Flip to \"complete\" when that merges.",
       "unpublished": true,
       "verify": { "unit": "pnpm test", "browser": "examples/* — run the example app" }
     },
@@ -126,8 +123,7 @@
       "publishes": ["@sigx/live-code"],
       "consumesCore": ["sigx", "@sigx/vite"],
       "consumesSiblings": ["@sigx/daisyui", "@sigx/monaco-editor", "@sigx/router", "@sigx/store"],
-      "catalog": "missing",
-      "catalogTodo": "no catalog block at all — core deps are inline ^0.12.0",
+      "catalog": "complete",
       "verify": { "unit": "pnpm test", "browser": null }
     },
     {
@@ -145,8 +141,8 @@
         "@sigx/vite"
       ],
       "consumesSiblings": ["@sigx/router", "@sigx/store", "@sigx/daisyui"],
-      "catalog": "missing",
-      "catalogTodo": "no catalog block; also pins @sigx/daisyui to an exact stale 0.8.0 (current is 0.9.0)",
+      "catalog": "complete",
+      "catalogTodo": "pins @sigx/daisyui to an exact stale 0.8.0 (current is 0.9.0) — a SIBLING, so sync:core leaves it alone; bump it by hand on this repo's tier",
       "verify": { "unit": "pnpm test", "browser": "pnpm smoke (playwright) — the only repo with a real e2e suite" }
     },
     {
@@ -155,8 +151,8 @@
       "publishes": ["@sigx/ssg", "@sigx/ssg-theme-daisyui"],
       "consumesCore": ["@sigx/server-renderer", "@sigx/vite", "sigx"],
       "consumesSiblings": ["@sigx/router", "@sigx/cli", "@sigx/args"],
-      "catalog": "partial",
-      "catalogTodo": "sibling pins are stale: @sigx/cli ^0.4.2 (current 0.6.0), @sigx/args ^0.6.1 (current 0.8.0)",
+      "catalog": "complete",
+      "catalogTodo": "sibling pins are stale: @sigx/cli ^0.4.2 (current 0.6.0), @sigx/args ^0.6.1 (current 0.8.0) — SIBLINGS, so sync:core leaves them alone; bump by hand on this repo's tier",
       "verify": { "unit": "pnpm test", "browser": "examples/* — build and serve a generated site" }
     },
     {
