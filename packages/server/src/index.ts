@@ -168,7 +168,7 @@ export interface ServerFnOptions<S, R> {
      * The implementation. `input` arrives validated when {@link input} is
      * declared. WITHOUT a schema, annotate this parameter — `S` infers from
      * the schema or from the annotation. Declaring neither is the
-     * input-LESS shape: `S` defaults to `void` and the callable takes no
+     * input-less shape: `S` defaults to `void` and the callable takes no
      * argument (#454), while wire input can still arrive unvalidated
      * (dev-warned, #437). So omit the parameter when there is genuinely no
      * input, and annotate it when there is one.

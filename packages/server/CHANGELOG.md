@@ -30,7 +30,10 @@
   now warns symmetrically (once per function, wire calls only, prod
   unchanged), teaching `input`. JSDoc on `input`/`handler` documents the
   inference contract: `S` comes from the schema or the handler annotation —
-  with neither, the client stub's argument type silently becomes `unknown`.
+  with neither the input is undeclared, and the callable takes no argument
+  (see the `[Unreleased]` Fixed entry for #451). Undeclared is a typing
+  statement, not a gate: the wire can still carry an input, which is what
+  this warning is for.
 - **`ServerFnTransport` is exported from `@sigx/server/plugin` (#437)** —
   the type needed to author `serverPlugin({ transport })` no longer has to
   be imported from the stubs entry (`./client`). `serverPlugin`'s declared
