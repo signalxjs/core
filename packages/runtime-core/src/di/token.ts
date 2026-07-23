@@ -86,7 +86,11 @@ export const hasForeignToken = (
     provides: Map<symbol, unknown> | null | undefined,
     token: InjectionToken<unknown>
 ): boolean => {
-    if (!provides || provides.has(token)) return false;
+    // A description-less token has nothing to match ON: `undefined ===
+    // undefined` would report every other anonymous symbol in the map as a
+    // duplicate of it. No `createToken` call is description-less, but the
+    // helper must not turn one into a false alarm.
+    if (!provides || !token.description || provides.has(token)) return false;
     for (const key of provides.keys()) {
         if (key.description === token.description) return true;
     }

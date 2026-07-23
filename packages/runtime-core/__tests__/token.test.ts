@@ -75,6 +75,17 @@ describe('typed DI tokens', () => {
         expect(hasForeignToken(null, token)).toBe(false);
     });
 
+    it('hasForeignToken cannot false-alarm on a description-less token', () => {
+        // `undefined === undefined` would otherwise match this token against
+        // every other anonymous symbol in the map. No createToken call is
+        // description-less, but a raw Symbol() reaching the helper must not
+        // be reported as a duplicated graph.
+        const anonymous = Symbol() as InjectionToken<string>;
+        const provides = new Map<symbol, unknown>([[Symbol(), 'unrelated']]);
+
+        expect(hasForeignToken(provides, anonymous)).toBe(false);
+    });
+
     it('an InjectionToken is assignable wherever a symbol is expected', () => {
         const token: InjectionToken<number> = createToken<number>('sigx:assignable');
         const asSymbol: symbol = token;
