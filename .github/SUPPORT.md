@@ -35,5 +35,7 @@ how to set up the workspace, run tests, and the pre-push checklist.
 
 ## Status
 
-SignalX is in early public release (`0.4.x`). The API surface is small and
-stabilising; feedback is especially valuable right now.
+SignalX is pre-1.0 — the API surface is small and stabilising, and breaking
+changes ship without compat shims. Feedback is especially valuable right now.
+The current release is whatever [npm](https://www.npmjs.com/package/sigx) and
+the [releases page](https://github.com/signalxjs/core/releases) show.
