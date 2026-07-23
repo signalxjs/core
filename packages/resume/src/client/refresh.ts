@@ -77,11 +77,15 @@ function collect(): { base: number; refresh: unknown[] } | null {
         const record = table[key];
         if (!record || record.hydrate !== 'never' || !record.component) continue;
         if (record.refreshable === false) continue;
+        // No recorded data deps ⇒ the endpoint's deps ∩ invalidates gate
+        // could never admit it — save the sidecar bytes.
+        if (!Array.isArray(record.deps) || record.deps.length === 0) continue;
         // An in-flight upgrade would drop the entry anyway — save the bytes.
         if (peekScope(id)?._status === 'upgrading') continue;
         refresh.push({
             id,
             component: record.component,
+            deps: record.deps,
             // Verbatim encoded snapshot — the server side revives it.
             ...(record.props ? { props: record.props } : {})
         });

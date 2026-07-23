@@ -4,6 +4,16 @@
 
 ### Changed
 
+- **BREAKING (pre-release) — boundary refresh is data-keyed (#452).**
+  `collect()` now forwards each boundary's recorded `useData` deps
+  (`record.deps`) in its descriptors and skips dep-less records outright
+  (they can never be admitted by the endpoint's deps ∩ `invalidates`
+  gate — the `refreshes` component allowlist is removed from
+  `@sigx/server`). `BoundaryRefreshRequest` gains an optional `deps`
+  pass-through; the `createBoundaryRefresh` registry, trust model, and
+  all `apply()` semantics are unchanged, and a refresh re-render
+  re-captures deps on the fresh record automatically.
+
 - **The pack rides only the public contract (#416, #439).** The refresh
   re-render passes `createSSRContext({ appContext })` and iterates
   `ctx.boundaries()`; component attribution uses `ctx.currentComponentId()`;

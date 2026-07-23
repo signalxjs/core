@@ -77,6 +77,10 @@ function domAttentionTrigger(revalidate: () => void): (() => void) | void {
  * Canonical-key pattern match for invalidate(): exact string equality, or —
  * when the pattern is a tuple prefix — every entry whose canonical tuple
  * starts with those elements (`['posts']` matches `'["posts","u1",2]'`).
+ *
+ * DUPLICATED in `@sigx/server`'s §6.3 gate (packages/server/src/server/
+ * key-match.ts) — keep the two in sync (a parity test pins them); one
+ * `invalidates` declaration must mean the same thing on both sides.
  */
 export function keyMatches(entryKey: string, pattern: string | readonly unknown[]): boolean {
     if (typeof pattern === 'string') return entryKey === pattern;
