@@ -24,23 +24,26 @@
 
 import type { SSRPlugin } from '../plugin';
 import type { SSRContext } from './context';
-import { asyncAssignmentJs, serializeAsyncScript, isSerializable } from './state';
-import { getTypeHandlers } from './serialize';
+import { asyncAssignmentJs, serializeAsyncScript } from './state';
+import { getTypeHandlers, admitPayloadEntry } from './serialize';
 
 const PLUGIN_NAME = 'sigx:state';
 
 /**
  * Drain the dirty-set: collect every registered-but-unemitted key's value,
  * clearing the set (#279 discipline — O(flush), never a rescan of every
- * result per async resolution).
+ * result per async resolution). Admission is the shared codec-aware check
+ * (#420) — a `bigint`, a `Map`, or a handler-owned custom type is admitted
+ * (the emitter tags it) instead of being dropped by a plain-JSON test.
  */
 function drainUnflushed(ctx: SSRContext): Record<string, unknown> | null {
+    const handlers = getTypeHandlers(ctx);
     let out: Record<string, unknown> | null = null;
 
     for (const key of ctx._unflushedAsyncKeys) {
         if (!ctx._asyncResults.has(key)) continue;
         const value = ctx._asyncResults.get(key);
-        if (!isSerializable(key, value)) continue;
+        if (!admitPayloadEntry(key, value, 'useAsync', handlers)) continue;
         (out ??= {})[key] = value;
     }
     ctx._unflushedAsyncKeys.clear();

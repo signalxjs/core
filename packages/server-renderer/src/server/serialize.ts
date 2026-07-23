@@ -71,15 +71,23 @@ export function codecOwns(value: unknown, handlers: readonly TypeHandler[]): boo
 }
 
 /**
- * The one admission check for a boundary payload entry: the key must be safe
- * regardless of the value, then the value must either be codec-owned or
- * survive a plain JSON round trip.
+ * The one admission check for a serialized payload entry — boundary props,
+ * state signals, and the `__SIGX_ASYNC__` blob (#420) all ask it: the key
+ * must be safe regardless of the value, then the value must either be
+ * codec-owned or survive the CODEC-AWARE round trip.
  *
  * Key safety is checked FIRST and unconditionally. Props previously skipped
  * `isSerializable` entirely when a handler claimed the value, which took the
  * `DANGEROUS_KEYS` rejection with it — a `__proto__` key holding a `Date`
  * went through. (The null-prototype target in `assignmentJs` still contained
  * it, so this was defence-in-depth rather than a live hole.)
+ *
+ * The fallback round trip runs `stringifyWithHandlers`, not plain
+ * `JSON.stringify` (#420): a handler-owned value NESTED inside a plain
+ * object (a `bigint` in a snapshot, a `Map` in a props bag) is encodable
+ * even though plain JSON would throw on it or drop it — the admission test
+ * must ask the same encoder the emitter uses, or it rejects values the wire
+ * handles fine.
  */
 export function admitPayloadEntry(
     key: string,
@@ -89,24 +97,38 @@ export function admitPayloadEntry(
 ): boolean {
     if (DANGEROUS_KEYS.has(key)) {
         if (__DEV__) {
+            const label = what === 'useAsync' ? 'useAsync/useStream key' : `${what} key`;
             console.warn(
-                `[SSR] ${what} key "${key}" is not allowed ` +
+                `[SSR] ${label} "${key}" is not allowed ` +
                 `(prototype-pollution risk) — value skipped. Pick another key.`
             );
         }
         return false;
     }
     if (codecOwns(value, handlers)) return true;
-    return isSerializable(key, value, what);
+    return isSerializable(key, value, what, handlers);
 }
 
 /**
- * Validate that a value survives a JSON round trip. Dev-warns and returns
- * false for dangerous keys, functions, bigints, undefined, and circular
- * structures. `what` labels the warning's source (default: the useAsync
- * wording this check originally shipped with).
+ * Validate that a value survives a wire round trip. Dev-warns and returns
+ * false for dangerous keys, functions, and circular structures. `what`
+ * labels the warning's source (default: the useAsync wording this check
+ * originally shipped with).
+ *
+ * With `handlers` passed (the codec-aware mode `admitPayloadEntry` uses,
+ * #420) the round trip is `stringifyWithHandlers` — registered handlers AND
+ * the built-in vocabulary apply at every depth, so a nested `bigint`/`Map`
+ * is admitted. Without it, the test is plain `JSON.stringify` — top-level
+ * bigints and undefined are rejected outright (callers wanting the codec's
+ * answer go through `admitPayloadEntry`, whose `codecOwns` short-circuit
+ * admits those before this check runs).
  */
-export function isSerializable(key: string, value: unknown, what = 'useAsync'): boolean {
+export function isSerializable(
+    key: string,
+    value: unknown,
+    what = 'useAsync',
+    handlers?: readonly TypeHandler[]
+): boolean {
     // Consequence differs by payload: a skipped useAsync value refetches on
     // the client; a skipped boundary prop / signal snapshot is simply absent.
     const consequence = what === 'useAsync'
@@ -122,7 +144,9 @@ export function isSerializable(key: string, value: unknown, what = 'useAsync'): 
         }
         return false;
     }
-    if (typeof value === 'function' || typeof value === 'bigint' || value === undefined) {
+    // Functions never serialize. bigint/undefined are plain-JSON rejects only:
+    // in codec-aware mode the built-in vocabulary tags both ($bigint, $undef).
+    if (typeof value === 'function' || (!handlers && (typeof value === 'bigint' || value === undefined))) {
         if (__DEV__) {
             console.warn(
                 `[SSR] ${what}("${key}") resolved to a ${typeof value} — not ` +
@@ -134,7 +158,8 @@ export function isSerializable(key: string, value: unknown, what = 'useAsync'): 
     try {
         // stringify can also RETURN undefined (symbols, toJSON() returning
         // undefined) — the key would silently vanish from the blob.
-        if (JSON.stringify(value) === undefined) {
+        const json = handlers ? stringifyWithHandlers(value, handlers) : JSON.stringify(value);
+        if (json === undefined) {
             if (__DEV__) {
                 console.warn(
                     `[SSR] ${what}("${key}") resolved to a value JSON cannot ` +

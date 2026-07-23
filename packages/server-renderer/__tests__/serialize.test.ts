@@ -11,6 +11,7 @@ import {
     stringifyWithHandlers,
     serializeBoundaryProps,
     getTypeHandlers,
+    admitPayloadEntry,
     type TypeHandler
 } from '../src/server/serialize';
 import { asyncAssignmentJs } from '../src/server/state';
@@ -123,6 +124,48 @@ describe('serializeBoundaryProps', () => {
         const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
         expect(serializeBoundaryProps({ big: 10n }, [bigintHandler])).toEqual({ big: 10n });
         expect(warn).not.toHaveBeenCalled();
+    });
+});
+
+describe('admitPayloadEntry — codec-aware admission (#420)', () => {
+    it('admits handler-owned values NESTED in plain structures', () => {
+        // Plain JSON.stringify THROWS on a nested bigint and flattens a
+        // nested Map — but the emitter tags both, so admission must agree.
+        expect(admitPayloadEntry('k', { total: 42n }, 'boundary prop', [])).toBe(true);
+        expect(admitPayloadEntry('k', { seen: new Map([['a', 1]]) }, 'boundary prop', [])).toBe(true);
+    });
+
+    it('consults registered handlers at depth too', () => {
+        // Self-referential: plain JSON AND the built-in walk throw on the
+        // cycle — only the registered handler, applied AT DEPTH, breaks it
+        // by serializing the id. Admission must flip with the handler.
+        class Selfish {
+            self: Selfish;
+            constructor(public id: number) { this.self = this; }
+        }
+        const selfish: TypeHandler = {
+            name: 'selfish',
+            tag: '$selfish',
+            test: (v) => v instanceof Selfish,
+            serialize: (v) => (v as Selfish).id,
+            revive: (v) => new Selfish(v as number)
+        };
+        const value = { node: new Selfish(7) };
+
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        expect(admitPayloadEntry('k', value, 'boundary prop', [])).toBe(false);
+        warn.mockRestore();
+        expect(admitPayloadEntry('k', value, 'boundary prop', [selfish])).toBe(true);
+    });
+
+    it('still rejects circular structures and dangerous keys with a warning', () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const circular: any = {};
+        circular.self = circular;
+        expect(admitPayloadEntry('k', circular, 'boundary prop', [])).toBe(false);
+        expect(admitPayloadEntry('__proto__', { fine: 1 }, 'boundary prop', [])).toBe(false);
+        expect(warn).toHaveBeenCalledTimes(2);
+        warn.mockRestore();
     });
 });
 
