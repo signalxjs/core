@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+**Changed: one install shape — `app.use(islandsPlugin())` (#413).**
+
+- `install(app)` now also registers the pack's SERVER render hooks (via
+  `@sigx/server-renderer`'s new `provideSSRPlugin` seam), so installing in
+  the entry-server's per-request app factory is the whole install;
+  `createSSR().use(islandsPlugin())` is gone (`SSRInstance.use()` was
+  removed upstream).
+- The client plugin-registry registration inside `install(app)` is now
+  client-only (skipped when `document` is undefined) — per-request server
+  apps no longer touch the module-level registry.
+- Prod manifests reach the factory via `virtual:sigx-manifests`
+  (`@sigx/vite`): `islandsPlugin({ manifest: islandsManifest })`.
+- `IslandsManifestV2` and `IslandManifestEntry` types are now exported from
+  the package root.
+
 **The walk fallback forwards the hydration region bound.** (#373)
 
 - Core now passes `regionEnd` — the enclosing component's trailing marker — to

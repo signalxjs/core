@@ -18,7 +18,7 @@ describe('createSSR — plugin lifecycle', () => {
     it('calls plugin server.setup once per render with the SSRContext', async () => {
         const setup = vi.fn();
         const plugin: SSRPlugin = { name: 'test-setup', server: { setup } };
-        const ssr = createSSR().use(plugin);
+        const ssr = createSSR({ plugins: [plugin] });
 
         await ssr.render((TestText as any)({ text: 'a' }));
         await ssr.render((TestText as any)({ text: 'b' }));
@@ -29,7 +29,7 @@ describe('createSSR — plugin lifecycle', () => {
 
     it('createContext attaches plugins and runs setup', () => {
         const setup = vi.fn();
-        const ssr = createSSR().use({ name: 'p', server: { setup } });
+        const ssr = createSSR({ plugins: [{ name: 'p', server: { setup } }] });
         const ctx = ssr.createContext();
         expect(ctx._plugins).toHaveLength(1);
         expect(setup).toHaveBeenCalledWith(ctx);
@@ -55,20 +55,20 @@ describe('createSSR — App instance input (extractInput / isApp)', () => {
 
 describe('createSSR.render — sync fast path with plugin getInjectedHTML', () => {
     it('appends synchronous injected HTML string after the shell', async () => {
-        const ssr = createSSR().use({
+        const ssr = createSSR({ plugins: [{
             name: 'inj-sync',
             server: { getInjectedHTML: () => '<script>/*injected*/</script>' }
-        });
+        }] });
         const html = await ssr.render((TestText as any)({ text: 'core' }));
         expect(html).toContain('core');
         expect(html).toContain('/*injected*/');
     });
 
     it('awaits async injected HTML promise', async () => {
-        const ssr = createSSR().use({
+        const ssr = createSSR({ plugins: [{
             name: 'inj-async',
             server: { getInjectedHTML: () => Promise.resolve('<!-- async-inj -->') }
-        });
+        }] });
         const html = await ssr.render((TestText as any)({ text: 'core' }));
         expect(html).toContain('async-inj');
     });
@@ -78,10 +78,10 @@ describe('createSSR.render — sync fast path with plugin getInjectedHTML', () =
             yield '<chunk-a/>';
             yield '<chunk-b/>';
         }
-        const ssr = createSSR().use({
+        const ssr = createSSR({ plugins: [{
             name: 'gs',
             server: { getStreamingChunks: () => gen() }
-        });
+        }] });
         const html = await ssr.render((TestText as any)({ text: 'c' }));
         expect(html).toContain('<chunk-a/>');
         expect(html).toContain('<chunk-b/>');
@@ -172,7 +172,7 @@ describe('createSSR.renderChunks via toNodeStream — async chunk streaming', ()
             }
         };
 
-        const ssr = createSSR().use(plugin);
+        const ssr = createSSR({ plugins: [plugin] });
         const stream = toNodeStream(ssr.renderChunks((Async as any)({})));
         const html = await collectReadable(stream);
         // The plugin script is appended verbatim (not JSON-escaped) per render-api
@@ -189,10 +189,10 @@ describe('createSSR.renderStreamWithCallbacks — error path', () => {
         const onComplete = vi.fn();
         const onError = vi.fn();
 
-        const ssr = createSSR().use({
+        const ssr = createSSR({ plugins: [{
             name: 'bad',
             server: { getInjectedHTML: () => Promise.reject(new Error('inj-fail')) }
-        });
+        }] });
 
         await ssr.renderStreamWithCallbacks((TestText as any)({ text: 'x' }), {
             onShellReady, onAsyncChunk, onComplete, onError
@@ -239,10 +239,10 @@ describe('streamAllAsyncChunks — plugin-only streaming (no core async)', () =>
             yield '<plugin-chunk-only/>';
         }
 
-        const ssr = createSSR().use({
+        const ssr = createSSR({ plugins: [{
             name: 'streamer',
             server: { getStreamingChunks: () => gen() }
-        });
+        }] });
 
         const stream = toNodeStream(ssr.renderChunks((TestText as any)({ text: 'shell' })));
         const html = await collectReadable(stream);
@@ -261,10 +261,10 @@ describe('streamAllAsyncChunks — plugin-only streaming (no core async)', () =>
             yield '<plugin-chunk-3/>';
         }
 
-        const ssr = createSSR().use({
+        const ssr = createSSR({ plugins: [{
             name: 'streamer',
             server: { getStreamingChunks: () => gen() }
-        });
+        }] });
 
         const stream = toNodeStream(ssr.renderChunks((TestText as any)({ text: 'shell' })));
         const html = await collectReadable(stream);
@@ -286,9 +286,10 @@ describe('streamAllAsyncChunks — plugin-only streaming (no core async)', () =>
             yield '<b-2/>';
         }
 
-        const ssr = createSSR()
-            .use({ name: 'a', server: { getStreamingChunks: () => genA() } })
-            .use({ name: 'b', server: { getStreamingChunks: () => genB() } });
+        const ssr = createSSR({ plugins: [
+            { name: 'a', server: { getStreamingChunks: () => genA() } },
+            { name: 'b', server: { getStreamingChunks: () => genB() } }
+        ] });
 
         const stream = toNodeStream(ssr.renderChunks((TestText as any)({ text: 'shell' })));
         const html = await collectReadable(stream);

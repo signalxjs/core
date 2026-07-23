@@ -1,14 +1,13 @@
 // The islands reference server (rfc-ssr-platform §3.3) — same two-mode shape
-// as examples/spa-ssr/server.mjs, plus one thing: the SSR instance carries
-// islandsPlugin(), which maps client:* directives onto boundary records.
+// as examples/spa-ssr/server.mjs. The islands pack installs in the app
+// factory (src/entry-server.tsx, #413: app.use is the one install shape),
+// so this wiring is pure transport: no SSR instance, no manifests to thread.
 // Run production with `--conditions production` for the NODE_ENV-stripped
 // dist builds (works without it too).
 import express from 'express';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { readFile } from 'node:fs/promises';
-import { createSSR } from '@sigx/server-renderer';
-import { islandsPlugin } from '@sigx/ssr-islands';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const isProd = process.env.NODE_ENV === 'production';
@@ -21,10 +20,9 @@ async function createServer() {
     const app = express();
 
     if (!isProd) {
-        // Dev: Vite middleware + ONE handler. The @sigx family is
-        // externalized from the runner (vite.config.ts), so this module's
-        // islandsPlugin() import and the handler's renderer are the same
-        // instances — one module graph.
+        // Dev: Vite middleware + ONE handler. The app factory carries the
+        // islands pack; no manifest in dev — the client resolves island
+        // chunks through the loaders `virtual:sigx-islands` registers.
         const { createServer: createViteServer } = await import('vite');
         const { createDevRequestHandler } = await import('@sigx/vite/ssr');
 
@@ -36,15 +34,12 @@ async function createServer() {
         app.use(vite.middlewares);
         app.use(await createDevRequestHandler(vite, {
             entry: '/src/entry-server.tsx',
-            isBot,
-            // No manifest in dev — the client resolves island chunks through
-            // the loaders `virtual:sigx-islands` registers.
-            ssr: createSSR().use(islandsPlugin())
+            isBot
         }));
     } else {
-        // Prod: static assets + ONE handler, with BOTH manifests — Vite's
-        // client manifest feeds entry preloads, the islands manifest feeds
-        // per-island chunk URLs into the boundary table.
+        // Prod: static assets + ONE handler. Vite's client manifest feeds
+        // entry preloads; the islands manifest reaches the pack inside the
+        // app factory via virtual:sigx-manifests — nothing to read here.
         const { createRequestHandler } = await import('@sigx/server-renderer/node');
         const { collectAssets } = await import('@sigx/vite/ssr');
 
@@ -52,9 +47,6 @@ async function createServer() {
         const template = await readFile(resolve(clientDir, 'index.html'), 'utf-8');
         const manifest = JSON.parse(
             await readFile(resolve(clientDir, '.vite/manifest.json'), 'utf-8')
-        );
-        const islandsManifest = JSON.parse(
-            await readFile(resolve(clientDir, '.vite/sigx-islands-manifest.json'), 'utf-8')
         );
         const { createApp } = await import(
             new URL('./dist/server/entry-server.js', import.meta.url).href
@@ -65,7 +57,6 @@ async function createServer() {
             template,
             app: (url) => createApp(url),
             isBot,
-            ssr: createSSR().use(islandsPlugin({ manifest: islandsManifest })),
             document: {
                 assets: collectAssets(manifest, ['index.html'])
             }

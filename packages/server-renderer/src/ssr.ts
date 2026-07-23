@@ -1,20 +1,24 @@
 /**
  * SSR Factory
  *
- * Creates an SSR instance with plugin support.
- * Plugins are registered via `.use()` and called at appropriate points
- * during server rendering and client hydration.
+ * Creates an SSR instance. Strategy packs install on the APP
+ * (`app.use(islandsPlugin())` — their `install(app)` registers the server
+ * hooks via `provideSSRPlugin`), and every render method that receives the
+ * App merges those app-carried plugins in. Instance-level plugins
+ * (`createSSR({ plugins })`) are the advanced/engine-internal channel.
  *
  * @example
  * ```ts
+ * import { defineApp } from 'sigx';
  * import { createSSR } from '@sigx/server-renderer';
  *
- * const ssr = createSSR().use(myPlugin);
- * const html = await ssr.render(<App />);
+ * const app = defineApp(<App />).use(islandsPlugin({ manifest }));
+ * const html = await createSSR().render(app);
  * ```
  */
 
 import type { SSRPlugin } from './plugin';
+import { mergeSSRPlugins, initPluginContext } from './server/plugin-setup';
 import type { JSXElement } from 'sigx';
 import type { App, AppContext } from 'sigx';
 import { SSRContext, createSSRContext, SSRContextOptions, SSRErrorInfo } from './server/context';
@@ -290,9 +294,6 @@ async function* streamAllAsyncChunks(
 }
 
 export interface SSRInstance {
-    /** Register a plugin */
-    use(plugin: SSRPlugin): SSRInstance;
-
     /** Render to a complete HTML string */
     render(input: JSXElement | App, options?: SSRContextOptions | SSRContext): Promise<string>;
 
@@ -338,27 +339,44 @@ export interface SSRInstance {
     /** Stream a complete HTML document as UTF-8 bytes (edge-friendly). Default mode: 'stream'. */
     renderDocumentToWebStream(input: JSXElement | App, options: DocumentOptions): ReadableStream<Uint8Array>;
 
-    /** Create a raw SSRContext with plugins pre-configured */
+    /**
+     * Create a raw SSRContext with the INSTANCE plugins pre-configured.
+     * App-carried plugins require passing the App to a render method — this
+     * shape has no input to extract an app context from.
+     */
     createContext(options?: SSRContextOptions): SSRContext;
 }
 
-/**
- * Create an SSR instance with plugin support.
- */
-export function createSSR(): SSRInstance {
-    const plugins: SSRPlugin[] = [];
+export interface CreateSSROptions {
+    /**
+     * Instance-level plugins. Advanced/internal: the public install path is
+     * `app.use(pack())` on the rendered App — app-carried plugins are merged
+     * in per render call (after instance plugins, deduped by name, first
+     * wins). Used by the engine itself (default state plugin), tests, and
+     * custom-engine injection.
+     */
+    plugins?: SSRPlugin[];
+}
 
-    function makeContext(options?: SSRContextOptions | SSRContext): SSRContext {
+/**
+ * Create an SSR instance.
+ */
+export function createSSR(instanceOptions?: CreateSSROptions): SSRInstance {
+    const instancePlugins: SSRPlugin[] = instanceOptions?.plugins ?? [];
+
+    function makeContext(
+        options: SSRContextOptions | SSRContext | undefined,
+        appContext: AppContext | null
+    ): { ctx: SSRContext; plugins: SSRPlugin[] } {
         // Accept an existing SSRContext (has _componentId) or create one from options
         const ctx = (options && '_componentId' in options)
             ? options as SSRContext
             : createSSRContext(options as SSRContextOptions | undefined);
-        ctx._plugins = plugins;
-        // Run plugin setup hooks
-        for (const plugin of plugins) {
-            plugin.server?.setup?.(ctx);
-        }
-        return ctx;
+        // App context first — plugin setup hooks may read it.
+        ctx._appContext = appContext;
+        const plugins = mergeSSRPlugins(instancePlugins, appContext);
+        initPluginContext(ctx, plugins);
+        return { ctx, plugins };
     }
 
     // Closure-scoped (not a `this`-sensitive method — survives destructuring):
@@ -367,10 +385,9 @@ export function createSSR(): SSRInstance {
         input: JSXElement | App,
         options?: SSRContextOptions | SSRContext
     ): AsyncGenerator<string> {
-        const ctx = makeContext(options);
-        ctx._streaming = true;
         const { element, appContext } = extractInput(input);
-        ctx._appContext = appContext;
+        const { ctx, plugins } = makeContext(options, appContext);
+        ctx._streaming = true;
 
         async function* generateAll(): AsyncGenerator<string> {
             // Phase 1: Render main page with chunk batching (4KB threshold).
@@ -423,18 +440,12 @@ export function createSSR(): SSRInstance {
     }
 
     return {
-        use(plugin: SSRPlugin): SSRInstance {
-            plugins.push(plugin);
-            return this;
-        },
-
         async render(input, options?) {
             const { element, appContext } = extractInput(input);
 
             // Single walk: fully-sync trees complete without suspending, async
             // trees suspend at their awaits — no sync-attempt/re-render fallback.
-            const ctx = makeContext(options);
-            ctx._appContext = appContext;
+            const { ctx, plugins } = makeContext(options, appContext);
             let result = await renderVNodeToString(element, ctx, appContext);
 
             // Collect injected HTML from all plugins
@@ -503,10 +514,9 @@ export function createSSR(): SSRInstance {
         },
 
         async renderStreamWithCallbacks(input, callbacks, options?) {
-            const ctx = makeContext(options);
-            ctx._streaming = true;
             const { element, appContext } = extractInput(input);
-            ctx._appContext = appContext;
+            const { ctx, plugins } = makeContext(options, appContext);
+            ctx._streaming = true;
 
             try {
                 // Enable head collection
@@ -551,38 +561,41 @@ export function createSSR(): SSRInstance {
 
         renderDocument(input, options) {
             const { element, appContext } = extractInput(input);
-            const engine = makeDocumentEngine(options);
+            const engine = makeDocumentEngine(options, appContext);
             return renderDocumentImpl(engine, { element, appContext }, options);
         },
 
         renderDocumentChunks(input, options) {
             const { element, appContext } = extractInput(input);
-            const engine = makeDocumentEngine(options);
+            const engine = makeDocumentEngine(options, appContext);
             return renderDocumentChunksImpl(engine, { element, appContext }, options);
         },
 
         renderDocumentToWebStream(input, options) {
             const { element, appContext } = extractInput(input);
-            const engine = makeDocumentEngine(options);
+            const engine = makeDocumentEngine(options, appContext);
             return renderDocumentToWebStreamImpl(engine, { element, appContext }, options);
         },
 
         createContext(options?) {
-            return makeContext(options);
+            // No input to extract an app from — instance plugins only.
+            return makeContext(options, null).ctx;
         }
     };
 
     /**
-     * Document engine: instance plugins, with stateSerializationPlugin
-     * appended by default (serializeState: false opts out; an instance that
-     * already registered it is left as-is).
+     * Document engine: instance + app-carried plugins, with
+     * stateSerializationPlugin appended LAST by default (serializeState:
+     * false opts out; a plugin named 'sigx:state' from either source
+     * suppresses the default).
      */
-    function makeDocumentEngine(options: DocumentOptions): DocumentEngine {
+    function makeDocumentEngine(options: DocumentOptions, appContext: AppContext | null): DocumentEngine {
+        const merged = mergeSSRPlugins(instancePlugins, appContext);
         const wantsState = options.serializeState !== false;
-        const hasState = plugins.some(p => p.name === 'sigx:state');
+        const hasState = merged.some(p => p.name === 'sigx:state');
         const effective = wantsState && !hasState
-            ? [...plugins, stateSerializationPlugin()]
-            : plugins;
+            ? [...merged, stateSerializationPlugin()]
+            : merged;
         return {
             plugins: effective,
             streamAsyncChunks: (ctx) => streamAllAsyncChunks(ctx, effective)

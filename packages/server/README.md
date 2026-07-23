@@ -421,18 +421,35 @@ export const getOrder = serverFn(async (rq, id: string) => ({
 ```
 
 Class instances lose their prototype unless a handler is registered for
-them. Register custom types on `globalThis.__SIGX_SERVERFN_CODEC__` (the
-same global-seam pattern `$cache` uses, so the stub entry stays
-dependency-free):
+them. Register custom types ONCE with the app-plugin face (#413, #411) —
+one `types` array covers the RPC wire AND every other boundary (the SSR
+state blob, boundary table, refresh, cache seed):
 
 ```ts
-globalThis.__SIGX_SERVERFN_CODEC__ = [{
-    name: 'money', tag: '$money',
-    test: (v) => v instanceof Money,
-    serialize: (v) => v.cents,
-    revive: (c) => new Money(c)
-}];
+import { serverPlugin } from '@sigx/server/plugin';
+
+app.use(serverPlugin({
+    types: [{
+        name: 'money', tag: '$money',
+        test: (v) => v instanceof Money,
+        serialize: (v) => v.cents,
+        revive: (c) => new Money(c)
+    }]
+}));
 ```
+
+App-less contexts (an endpoint-only process, a zero-JS loader page) use
+`registerWireTypeHandlers(handlers)` from the same entry — it stamps the
+`globalThis.__SIGX_SERVERFN_CODEC__` seam tag-keyed (the same global-seam
+pattern `$cache` uses, so the stub entry stays dependency-free; stamping
+the global directly still works).
+
+The plugin also carries the stub transport (`configureServerFn`'s options,
+app-scoped with teardown): `serverPlugin({ transport: { endpoint, headers,
+fetch } })`. Transport installs on live clients only — the browser, or a
+native client that called `declareLiveClient()`; a per-request server app's
+install skips it (in-process calls never use the stub transport, and a
+process-global write would bleed across requests).
 
 Registered handlers are consulted **before** the built-ins, so a pack can own
 a type they also cover. Encoded values take the form

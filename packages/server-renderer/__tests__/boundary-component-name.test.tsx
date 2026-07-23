@@ -43,7 +43,7 @@ function makeAnonymous(): any {
 describe('ResolvedBoundary.component', () => {
     it('names the record from the resolveBoundary winner', async () => {
         const Comp = makeAnonymous();
-        const html = await createSSR().use(claimStamped('PackName')).render(<Comp />);
+        const html = await createSSR({ plugins: [claimStamped('PackName')] }).render(<Comp />);
         const record = Object.values(parseBoundaryTable(html))[0];
         expect(record.component).toBe('PackName');
     });
@@ -51,7 +51,7 @@ describe('ResolvedBoundary.component', () => {
     it('falls back to core derivation when the winner names nothing', async () => {
         const Comp = makeAnonymous();
         (Comp as any).__name = 'CoreName';
-        const html = await createSSR().use(claimStamped(undefined)).render(<Comp />);
+        const html = await createSSR({ plugins: [claimStamped(undefined)] }).render(<Comp />);
         const record = Object.values(parseBoundaryTable(html))[0];
         expect(record.component).toBe('CoreName');
     });
@@ -59,7 +59,7 @@ describe('ResolvedBoundary.component', () => {
     it('winner name beats core derivation', async () => {
         const Comp = makeAnonymous();
         (Comp as any).__islandId = 'IslandName';
-        const html = await createSSR().use(claimStamped('PackName')).render(<Comp />);
+        const html = await createSSR({ plugins: [claimStamped('PackName')] }).render(<Comp />);
         const record = Object.values(parseBoundaryTable(html))[0];
         expect(record.component).toBe('PackName');
     });
@@ -86,7 +86,7 @@ describe("modulepreload policy (#281)", () => {
                 }
             }
         };
-        const ssr = createSSR().use(pack);
+        const ssr = createSSR({ plugins: [pack] });
         const html = await ssr.renderDocument(<div><Never /><Load /></div>, {
             template: '<!doctype html><html><head></head><body><div id="app"><!--ssr-outlet--></div></body></html>'
         });

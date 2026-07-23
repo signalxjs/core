@@ -144,6 +144,19 @@ deliverable. In dev the virtual throws (dev has no manifests;
 `ssr.adapter` with `sigxServer({ role: 'client' })` is a config-time error —
 a client-role build has no server for an adapter to shape.
 
+The narrow sibling `virtual:sigx-manifests` exports just `islandsManifest`
+and `resumeManifest`, and — unlike `virtual:sigx-app` — resolves in EVERY
+mode: real inlined literals in the SSR build, `undefined` under dev (the
+packs run manifest-less there). It exists for the entry-server's app
+factory, the pack install site (#413):
+
+```tsx
+// src/entry-server.tsx
+import { islandsManifest } from 'virtual:sigx-manifests';
+export const createApp = (url) =>
+    defineApp(<App />).use(islandsPlugin({ manifest: islandsManifest }));
+```
+
 ## Islands
 
 `sigxIslands()` (from `@sigx/vite/islands`) completes the

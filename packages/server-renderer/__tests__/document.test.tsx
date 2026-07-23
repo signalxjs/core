@@ -251,7 +251,7 @@ describe('createSSR().renderDocument with instance plugins', () => {
             server: { setup: () => { seen.push('setup'); } }
         };
         const Page = makePage('Inst');
-        const html = await createSSR().use(probe).renderDocument((Page as any)({}), { template: TEMPLATE });
+        const html = await createSSR({ plugins: [probe] }).renderDocument((Page as any)({}), { template: TEMPLATE });
 
         expect(seen).toEqual(['setup']);
         expect(html).toContain('window.__SIGX_ASYNC__');

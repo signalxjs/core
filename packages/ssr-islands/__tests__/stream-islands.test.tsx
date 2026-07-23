@@ -59,7 +59,7 @@ function createCallbackTracker() {
 describe('island rendering (renderToString)', () => {
     describe('signal state tracking', () => {
         it('should track signal state for island components', async () => {
-            const ssr = createSSR().use(islandsPlugin());
+            const ssr = createSSR({ plugins: [islandsPlugin()] });
             const html = await ssr.render(
                 <IslandCounter client:load initial={5} />
             );
@@ -76,7 +76,7 @@ describe('island rendering (renderToString)', () => {
         });
 
         it('should not track signals for non-island components', async () => {
-            const ssr = createSSR().use(islandsPlugin());
+            const ssr = createSSR({ plugins: [islandsPlugin()] });
             const html = await ssr.render(<WithSignal />);
 
             // No islands registered
@@ -86,14 +86,14 @@ describe('island rendering (renderToString)', () => {
 
     describe('island rendering', () => {
         it('should render client:load island with content', async () => {
-            const ssr = createSSR().use(islandsPlugin());
+            const ssr = createSSR({ plugins: [islandsPlugin()] });
             const html = await ssr.render(<IslandCounter client:load initial={5} />);
             expect(html).toContain('<div class="island-counter">');
             expect(html).toContain('5');
         });
 
         it('skips SSR for client:only — emits an empty placeholder, no component content (#122)', async () => {
-            const ssr = createSSR().use(islandsPlugin());
+            const ssr = createSSR({ plugins: [islandsPlugin()] });
             const html = await ssr.render(<IslandCounter client:only initial={5} />);
             // True skip-SSR: the component never runs server-side, so its content
             // is absent and a <div data-boundary> placeholder stands in its place.
@@ -111,14 +111,14 @@ describe('island rendering (renderToString)', () => {
         });
 
         it('skips SSR for client:only in streaming mode too (#122)', async () => {
-            const ssr = createSSR().use(islandsPlugin());
+            const ssr = createSSR({ plugins: [islandsPlugin()] });
             const html = await collectStream(ssr.renderStream(<IslandCounter client:only initial={5} />));
             expect(html).toContain('data-boundary=');
             expect(html).not.toContain('island-counter');
         });
 
         it('should include __SIGX_BOUNDARIES__ JSON for islands', async () => {
-            const ssr = createSSR().use(islandsPlugin());
+            const ssr = createSSR({ plugins: [islandsPlugin()] });
             const html = await ssr.render(<IslandCounter client:load />);
             // Executable assignment sharing the __SIGX_ASYNC__ discipline —
             // null-prototype merge target, plain-global client read.
@@ -128,13 +128,13 @@ describe('island rendering (renderToString)', () => {
         });
 
         it('should not include __SIGX_BOUNDARIES__ when no islands', async () => {
-            const ssr = createSSR().use(islandsPlugin());
+            const ssr = createSSR({ plugins: [islandsPlugin()] });
             const html = await ssr.render(<SimpleDiv />);
             expect(html).not.toContain('__SIGX_BOUNDARIES__');
         });
 
         it('should serialize island props', async () => {
-            const ssr = createSSR().use(islandsPlugin());
+            const ssr = createSSR({ plugins: [islandsPlugin()] });
             const html = await ssr.render(<IslandCounter client:load initial={42} />);
 
             const islandData = parseIslandData(html);
@@ -144,7 +144,7 @@ describe('island rendering (renderToString)', () => {
         });
 
         it('should filter non-serializable props from islands', async () => {
-            const ssr = createSSR().use(islandsPlugin());
+            const ssr = createSSR({ plugins: [islandsPlugin()] });
             const html = await ssr.render(<IslandCounter client:idle initial={5} />);
 
             const islandData = parseIslandData(html);
@@ -157,7 +157,7 @@ describe('island rendering (renderToString)', () => {
 
 describe('island streaming (renderToStream)', () => {
     it('should include __SIGX_BOUNDARIES__ for island content', async () => {
-        const ssr = createSSR().use(islandsPlugin());
+        const ssr = createSSR({ plugins: [islandsPlugin()] });
         const html = await collectStream(ssr.renderStream(<IslandCounter client:load />));
         expect(html).toContain('__SIGX_BOUNDARIES__');
     });
@@ -176,7 +176,7 @@ describe('island streaming (renderToStream)', () => {
                 );
             }, { name: 'AsyncIsland' });
 
-            const ssr = createSSR().use(islandsPlugin());
+            const ssr = createSSR({ plugins: [islandsPlugin()] });
             const html = await collectStream(ssr.renderStream(<AsyncIsland client:load />));
             // Should contain placeholder
             expect(html).toContain('data-async-placeholder=');
@@ -195,7 +195,7 @@ describe('island streaming (renderToStream)', () => {
                 return () => <div>{data.value ?? 'Loading'}</div>;
             }, { name: 'AsyncIsland' });
 
-            const ssr = createSSR().use(islandsPlugin());
+            const ssr = createSSR({ plugins: [islandsPlugin()] });
             const html = await collectStream(ssr.renderStream(<AsyncIsland client:load />));
             // The streaming script should be present
             expect(html).toContain('$SIGX_REPLACE');
@@ -211,7 +211,7 @@ describe('island streaming (renderToStream)', () => {
                 return () => <div>{data.error ? `error: ${data.error.message}` : 'Loading'}</div>;
             }, { name: 'FailingAsync' });
 
-            const ssr = createSSR().use(islandsPlugin());
+            const ssr = createSSR({ plugins: [islandsPlugin()] });
             const html = await collectStream(ssr.renderStream(<FailingAsync client:load />));
             // The replacement carries the error branch, not the red fallback
             expect(html).toContain('error: Stream async fail');
@@ -232,7 +232,7 @@ describe('island streaming (renderToStreamWithCallbacks)', () => {
             }, { name: 'AsyncIsland' });
 
             const { callbacks } = createCallbackTracker();
-            const ssr = createSSR().use(islandsPlugin());
+            const ssr = createSSR({ plugins: [islandsPlugin()] });
             await ssr.renderStreamWithCallbacks(<AsyncIsland client:load />, callbacks);
 
             // Should have async chunks
@@ -245,7 +245,7 @@ describe('island streaming (renderToStreamWithCallbacks)', () => {
 
         it('should include sync island data in shell', async () => {
             const { callbacks } = createCallbackTracker();
-            const ssr = createSSR().use(islandsPlugin());
+            const ssr = createSSR({ plugins: [islandsPlugin()] });
             await ssr.renderStreamWithCallbacks(<IslandCounter client:load initial={10} />, callbacks);
 
             const shellHtml = (callbacks.onShellReady as any).mock.calls[0][0] as string;
@@ -263,7 +263,7 @@ describe('island streaming (renderToStreamWithCallbacks)', () => {
             }, { name: 'AsyncIsland' });
 
             const { calls, callbacks } = createCallbackTracker();
-            const ssr = createSSR().use(islandsPlugin());
+            const ssr = createSSR({ plugins: [islandsPlugin()] });
             await ssr.renderStreamWithCallbacks(<AsyncIsland client:load />, callbacks);
 
             const asyncChunks = calls.filter(c => c.type === 'async');
@@ -280,7 +280,7 @@ describe('island streaming (renderToStreamWithCallbacks)', () => {
             }, { name: 'FailingAsync' });
 
             const { calls, callbacks } = createCallbackTracker();
-            const ssr = createSSR().use(islandsPlugin());
+            const ssr = createSSR({ plugins: [islandsPlugin()] });
             await ssr.renderStreamWithCallbacks(<FailingAsync client:load />, callbacks);
 
             // Soft error: the async chunk replacement carries the component's
@@ -303,7 +303,7 @@ describe('island streaming (renderToStreamWithCallbacks)', () => {
             }, { name: 'AsyncIsland' });
 
             const { calls, callbacks } = createCallbackTracker();
-            const ssr = createSSR().use(islandsPlugin());
+            const ssr = createSSR({ plugins: [islandsPlugin()] });
             await ssr.renderStreamWithCallbacks(<AsyncIsland client:load />, callbacks);
 
             const types = calls.map(c => c.type);
@@ -329,7 +329,7 @@ describe('signal state serialization', () => {
             return () => <span>{count.value}</span>;
         }, { name: 'StatefulIsland' });
 
-        const ssr = createSSR().use(islandsPlugin());
+        const ssr = createSSR({ plugins: [islandsPlugin()] });
         const html = await ssr.render(<StatefulIsland client:load />);
 
         // Island should have state captured
@@ -352,7 +352,7 @@ describe('signal state serialization', () => {
             return () => <div>{name.value} is {age.value}</div>;
         }, { name: 'MultiSignal' });
 
-        const ssr = createSSR().use(islandsPlugin());
+        const ssr = createSSR({ plugins: [islandsPlugin()] });
         const html = await ssr.render(<MultiSignal client:load />);
 
         const islandData = parseIslandData(html);
@@ -376,7 +376,7 @@ describe('signal state serialization', () => {
             return () => <div>{a.value},{b.value}</div>;
         }, { name: 'Unkeyed' });
 
-        const ssr = createSSR().use(islandsPlugin());
+        const ssr = createSSR({ plugins: [islandsPlugin()] });
         const html = await ssr.render(<Unkeyed client:load />);
 
         const islandData = parseIslandData(html);
@@ -401,7 +401,7 @@ describe('signal state serialization', () => {
             return () => <div>Test</div>;
         }, { name: 'NonSerializable' });
 
-        const ssr = createSSR().use(islandsPlugin());
+        const ssr = createSSR({ plugins: [islandsPlugin()] });
         await ssr.render(<NonSerializable client:load />);
 
         consoleSpy.mockRestore();
@@ -412,7 +412,7 @@ describe('signal state serialization', () => {
             return () => <div>No state</div>;
         }, { name: 'NoState' });
 
-        const ssr = createSSR().use(islandsPlugin());
+        const ssr = createSSR({ plugins: [islandsPlugin()] });
         const html = await ssr.render(<NoState client:load />);
 
         const islandData = parseIslandData(html);
@@ -423,7 +423,7 @@ describe('signal state serialization', () => {
 
 describe('island edge cases', () => {
     it('should handle multiple islands on one page', async () => {
-        const ssr = createSSR().use(islandsPlugin());
+        const ssr = createSSR({ plugins: [islandsPlugin()] });
         const html = await ssr.render(
             <div>
                 <IslandCounter client:load initial={1} />
@@ -450,7 +450,7 @@ describe('island edge cases', () => {
             );
         }, { name: 'Wrapper' });
 
-        const ssr = createSSR().use(islandsPlugin());
+        const ssr = createSSR({ plugins: [islandsPlugin()] });
         const html = await ssr.render(<Wrapper />);
 
         expect(html).toContain('<div class="page">');

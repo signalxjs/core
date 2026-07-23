@@ -9,8 +9,12 @@ import {
     APP_VIRTUAL_ID,
     APP_RESOLVED_ID,
     APP_FILE,
+    MANIFESTS_VIRTUAL_ID,
+    MANIFESTS_RESOLVED_ID,
     generateAppModuleCode,
-    generateServeError
+    generateServeError,
+    generateManifestsModuleCode,
+    generateManifestsServeCode
 } from './app-module.js';
 
 // ============================================================================
@@ -401,6 +405,7 @@ export function sigxPlugin(options: SigxPluginOptions = {}): Plugin {
         },
 
         resolveId(id, importer) {
+            if (id === MANIFESTS_VIRTUAL_ID) return MANIFESTS_RESOLVED_ID;
             if (id !== APP_VIRTUAL_ID) return;
             // External builds materialize the module as dist/server/sigx-app.js
             // (emitFile below). App imports of the virtual resolve to that
@@ -422,6 +427,24 @@ export function sigxPlugin(options: SigxPluginOptions = {}): Plugin {
         },
 
         load(id) {
+            if (id === MANIFESTS_RESOLVED_ID) {
+                // Dev packs are manifest-less by design (QRLs/chunks resolve
+                // through the virtual registries) — undefineds are correct.
+                if (isServe) return generateManifestsServeCode();
+                if (this.environment?.name === 'client') {
+                    this.warn(
+                        'virtual:sigx-manifests is a server concern - client imports resolve to ' +
+                        'undefined manifests.'
+                    );
+                    return generateManifestsServeCode();
+                }
+                try {
+                    return generateManifestsModuleCode(clientDir);
+                } catch (err) {
+                    this.error(err instanceof Error ? err.message : String(err));
+                }
+                return;
+            }
             if (id !== APP_RESOLVED_ID) return;
             // Dev has no manifests and already solves template/assets live.
             if (isServe) return generateServeError();

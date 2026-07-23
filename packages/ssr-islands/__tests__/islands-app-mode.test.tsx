@@ -95,7 +95,7 @@ describe('islands app mode (app.use(islandsPlugin()))', () => {
         }, { name });
 
         // Server: the directive maps onto the hydrate axis in the table
-        const ssr = createSSR().use(islandsPlugin());
+        const ssr = createSSR({ plugins: [islandsPlugin()] });
         const html = await ssr.render((Tap as any)({ 'client:interaction': true }));
         const records = parseBoundaryTable(html);
         expect(records['1']).toMatchObject({ hydrate: 'interaction', component: name });

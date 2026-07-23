@@ -40,7 +40,7 @@ describe('DocumentOptions.assets', () => {
                 })
             }
         };
-        const html = await createSSR().use(recorder).renderDocument((Page as any)({}), {
+        const html = await createSSR({ plugins: [recorder] }).renderDocument((Page as any)({}), {
             template: TEMPLATE,
             assets: { modulepreload: ['/assets/Widget-abc.js', '/assets/entry.js'] }
         });
@@ -57,7 +57,7 @@ describe('DocumentOptions.assets', () => {
                 resolveBoundary: () => ({ hydrate: 'idle', chunk: { url: '/assets/Late-9.js' } })
             }
         };
-        const html = await createSSR().use(recorder).renderDocument((Page as any)({}), { template: TEMPLATE });
+        const html = await createSSR({ plugins: [recorder] }).renderDocument((Page as any)({}), { template: TEMPLATE });
         const headEnd = html.indexOf('</head>');
         expect(html.slice(0, headEnd)).toContain('<link rel="modulepreload" href="/assets/Late-9.js">');
     });
@@ -78,7 +78,7 @@ describe('DocumentOptions.assets', () => {
                 })
             }
         };
-        const html = await createSSR().use(contributes).renderDocument((Page as any)({}), {
+        const html = await createSSR({ plugins: [contributes] }).renderDocument((Page as any)({}), {
             template: TEMPLATE
         });
         const headEnd = html.indexOf('</head>');
@@ -102,7 +102,7 @@ describe('DocumentOptions.assets', () => {
                 }
             }
         };
-        const html = await createSSR().use(inspects).renderDocument((Page as any)({}), { template: TEMPLATE });
+        const html = await createSSR({ plugins: [inspects] }).renderDocument((Page as any)({}), { template: TEMPLATE });
         expect(sawBoundary).toBe(true);
         expect(html).toContain('<link rel="modulepreload" href="/assets/rt.js">');
     });

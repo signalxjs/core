@@ -87,7 +87,7 @@ describe('streamed failures route through the seam', () => {
                 resolveBoundary: () => ({ hydrate: 'load' })
             }
         };
-        await collectStream(createSSR().use(recorder).renderStream((Failing as any)({}), { onError }) as ReadableStream<string>);
+        await collectStream(createSSR({ plugins: [recorder] }).renderStream((Failing as any)({}), { onError }) as ReadableStream<string>);
         expect(onError).toHaveBeenCalledOnce();
         const [, info] = onError.mock.calls[0] as unknown as [Error, SSRErrorInfo];
         expect(info.boundaryId).toBe(1);

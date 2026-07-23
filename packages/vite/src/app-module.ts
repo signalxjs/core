@@ -18,6 +18,35 @@ export const APP_VIRTUAL_ID = 'virtual:sigx-app';
 export const APP_RESOLVED_ID = '\0' + APP_VIRTUAL_ID;
 export const APP_FILE = 'sigx-app.js';
 
+// virtual:sigx-manifests — the narrow sibling for the ENTRY-SERVER side
+// (#413): just the pack manifests, resolvable in every mode, so the
+// per-request app factory can construct its packs
+// (`app.use(islandsPlugin({ manifest: islandsManifest }))`) without the
+// server wiring threading manifests in. Serve mode exports undefineds —
+// dev packs are manifest-less by design (QRLs/chunks resolve through the
+// virtual registries).
+export const MANIFESTS_VIRTUAL_ID = 'virtual:sigx-manifests';
+export const MANIFESTS_RESOLVED_ID = '\0' + MANIFESTS_VIRTUAL_ID;
+
+/** Serve mode / client builds: no manifests, and none are needed. */
+export function generateManifestsServeCode(): string {
+    return 'export const islandsManifest = undefined;\nexport const resumeManifest = undefined;\n';
+}
+
+/**
+ * Build mode: inline the pack manifests from the client build's outputs.
+ * Same client-before-ssr `buildApp` ordering guarantee as virtual:sigx-app.
+ */
+export function generateManifestsModuleCode(clientDir: string): string {
+    const islandsManifest = readJsonIfExists(join(clientDir, '.vite/sigx-islands-manifest.json'));
+    const resumeManifest = readJsonIfExists(join(clientDir, '.vite/sigx-resume-manifest.json'));
+    return [
+        `export const islandsManifest = ${islandsManifest === undefined ? 'undefined' : JSON.stringify(islandsManifest)};`,
+        `export const resumeManifest = ${resumeManifest === undefined ? 'undefined' : JSON.stringify(resumeManifest)};`,
+        ''
+    ].join('\n');
+}
+
 /** Serve mode has no manifests — dev already solves template/assets live. */
 export function generateServeError(): string {
     return (

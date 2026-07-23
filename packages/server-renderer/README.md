@@ -9,6 +9,13 @@ records them in the per-request `__SIGX_BOUNDARIES__` table, and the built-in
 boundary hydrator schedules each one client-side — selective hydration without
 a framework switch. `@sigx/ssr-islands` is the first-party pack on these seams.
 
+Packs install on the APP — `app.use(pack())` is the one install shape (#413).
+A pack's `install(app)` registers its server render hooks through the
+`provideSSRPlugin` seam, and every render method that receives the App
+(`createSSR().render(app)`, the request/fetch handlers' `app` option) picks
+them up. `createSSR({ plugins })` remains as the instance-level channel for
+engine internals, tests, and custom engines; there is no `SSRInstance.use()`.
+
 📚 **Full guides, API reference and live examples → <https://sigx.dev/server/>**
 
 ## Install

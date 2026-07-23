@@ -41,7 +41,7 @@ async function collectStream(stream: ReadableStream<string>): Promise<string> {
 describe('stateSerializationPlugin — server capture', () => {
     it('emits a __SIGX_ASYNC__ blob for blocked keyed useData (string mode)', async () => {
         const { User } = makeUserComponent('blob-user');
-        const ssr = createSSR().use(stateSerializationPlugin());
+        const ssr = createSSR({ plugins: [stateSerializationPlugin()] });
         const html = await ssr.render((User as any)({}));
 
         expect(html).toContain('>Ada<');
@@ -66,7 +66,7 @@ describe('stateSerializationPlugin — server capture', () => {
             return () => <span>{data.value ?? data.state}</span>;
         }, { name: 'Plain' });
 
-        const ssr = createSSR().use(stateSerializationPlugin());
+        const ssr = createSSR({ plugins: [stateSerializationPlugin()] });
         const html = await ssr.render((Plain as any)({}));
         // Falsy key: the fetcher never runs on the server — SSR renders idle
         expect(html).toContain('<span>idle</span>');
@@ -76,7 +76,7 @@ describe('stateSerializationPlugin — server capture', () => {
 
     it('escapes </script> and friends in captured values (XSS)', async () => {
         const { User } = makeUserComponent('xss-user', { name: '</script><script>alert(1)</script>' });
-        const ssr = createSSR().use(stateSerializationPlugin());
+        const ssr = createSSR({ plugins: [stateSerializationPlugin()] });
         const html = await ssr.render((User as any)({}));
 
         const stateScript = html.slice(html.indexOf('window.__SIGX_ASYNC__'));
@@ -92,7 +92,7 @@ describe('stateSerializationPlugin — server capture', () => {
             return () => <div>x</div>;
         }, { name: 'Bad' });
 
-        const ssr = createSSR().use(stateSerializationPlugin());
+        const ssr = createSSR({ plugins: [stateSerializationPlugin()] });
         const html = await ssr.render((Bad as any)({}));
 
         expect(html).toContain('"good-data":"fine"');
@@ -110,7 +110,7 @@ describe('non-representable values', () => {
             return () => <div>{data.loading ? 'loading' : 'done'}</div>;
         }, { name: 'Sym' });
 
-        const ssr = createSSR().use(stateSerializationPlugin());
+        const ssr = createSSR({ plugins: [stateSerializationPlugin()] });
         const html = await ssr.render((Sym as any)({}));
 
         expect(html).not.toContain('sym-key');
@@ -127,7 +127,7 @@ describe('prototype-pollution guards', () => {
             return () => <div>{data.value ? 'loaded' : 'loading'}</div>;
         }, { name: 'Bad' });
 
-        const ssr = createSSR().use(stateSerializationPlugin());
+        const ssr = createSSR({ plugins: [stateSerializationPlugin()] });
         const html = await ssr.render((Bad as any)({}));
 
         expect(html).not.toContain('polluted');
@@ -141,7 +141,7 @@ describe('prototype-pollution guards', () => {
             return () => <div>{data.value ?? 'loading'}</div>;
         }, { name: 'Page' });
 
-        const ssr = createSSR().use(stateSerializationPlugin());
+        const ssr = createSSR({ plugins: [stateSerializationPlugin()] });
         const html = await ssr.render((Page as any)({}));
 
         // Object.assign onto a plain target routes "__proto__" through the
@@ -153,7 +153,7 @@ describe('prototype-pollution guards', () => {
 describe('stateSerializationPlugin — streaming', () => {
     it('installs state via preScript BEFORE the $SIGX_REPLACE call', async () => {
         const { User } = makeUserComponent('stream-user');
-        const ssr = createSSR().use(stateSerializationPlugin());
+        const ssr = createSSR({ plugins: [stateSerializationPlugin()] });
         const html = await collectStream(ssr.renderStream((User as any)({})));
 
         const stateIdx = html.indexOf('window.__SIGX_ASYNC__');
@@ -179,7 +179,7 @@ describe('request-level dedupe', () => {
         const A = makeCard('a');
         const B = makeCard('b');
 
-        const ssr = createSSR().use(stateSerializationPlugin());
+        const ssr = createSSR({ plugins: [stateSerializationPlugin()] });
         const html = await ssr.render(
             <div>
                 {(A as any)({})}
@@ -202,7 +202,7 @@ describe('registerSerializedState — public registration (#407)', () => {
             return () => <div>page</div>;
         }, { name: 'Page' });
 
-        const ssr = createSSR().use(stateSerializationPlugin());
+        const ssr = createSSR({ plugins: [stateSerializationPlugin()] });
         const html = await ssr.render((Page as any)({}));
 
         expect(html).toContain('window.__SIGX_ASYNC__=Object.assign(Object.create(null),window.__SIGX_ASYNC__,');
@@ -221,7 +221,7 @@ describe('registerSerializedState — public registration (#407)', () => {
             return () => <span>{data.value}</span>;
         }, { name: 'Mutator' });
 
-        const ssr = createSSR().use(stateSerializationPlugin());
+        const ssr = createSSR({ plugins: [stateSerializationPlugin()] });
         const html = await ssr.render(
             <div>
                 {(Registrar as any)({})}
@@ -249,7 +249,7 @@ describe('registerSerializedState — public registration (#407)', () => {
             return () => <div>{data.value ? (Child as any)({}) : 'loading'}</div>;
         }, { name: 'Parent' });
 
-        const ssr = createSSR().use(stateSerializationPlugin());
+        const ssr = createSSR({ plugins: [stateSerializationPlugin()] });
         const html = await collectStream(ssr.renderStream((Parent as any)({})));
 
         const lateIdx = html.indexOf('"store:late":{"seeded":true}');
@@ -274,7 +274,7 @@ describe('registerSerializedState — public registration (#407)', () => {
             return () => <p>{data.value ? (data.value as any).name : 'loading'}</p>;
         }, { name: 'Inner' });
 
-        const ssr = createSSR().use(stateSerializationPlugin());
+        const ssr = createSSR({ plugins: [stateSerializationPlugin()] });
         const html = await collectStream(ssr.renderStream(
             <Defer fallback={<span>wait</span>}>
                 {(Inner as any)({})}
@@ -300,7 +300,7 @@ describe('registerSerializedState — public registration (#407)', () => {
         };
         const Page = component(() => () => <div>page</div>, { name: 'Page' });
 
-        const ssr = createSSR().use(stateSerializationPlugin()).use(late);
+        const ssr = createSSR({ plugins: [stateSerializationPlugin(), late] });
         const html = await collectStream(ssr.renderStream((Page as any)({}), { nonce: 'abc123' }));
 
         const idx = html.indexOf('"plugin:late":{"fromGenerator":true}');
@@ -328,7 +328,7 @@ describe('registerSerializedState — public registration (#407)', () => {
         };
         const Page = component(() => () => <div>page</div>, { name: 'Page' });
 
-        const ssr = createSSR().use(stateSerializationPlugin()).use(late);
+        const ssr = createSSR({ plugins: [stateSerializationPlugin(), late] });
         const html = await ssr.render((Page as any)({}));
 
         expect(html).toContain('"plugin:late-string":{"v":1}');
@@ -348,7 +348,7 @@ describe('registerSerializedState — public registration (#407)', () => {
             return () => <div>{data.value ? (Child as any)({}) : 'loading'}</div>;
         }, { name: 'Parent' });
 
-        const ssr = createSSR().use(stateSerializationPlugin());
+        const ssr = createSSR({ plugins: [stateSerializationPlugin()] });
         const html = await collectStream(ssr.renderStream((Parent as any)({})));
 
         const shellIdx = html.indexOf('"store:patched":{"phase":"shell"}');
@@ -372,7 +372,7 @@ describe('server → client round trip', () => {
 
     it('renders on the server, restores on the client, never refetches', async () => {
         const { User, fetcher: serverFetch } = makeUserComponent('rt-user');
-        const ssr = createSSR().use(stateSerializationPlugin());
+        const ssr = createSSR({ plugins: [stateSerializationPlugin()] });
         const html = await ssr.render((User as any)({}));
         expect(serverFetch).toHaveBeenCalledTimes(1);
 

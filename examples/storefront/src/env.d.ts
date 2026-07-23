@@ -12,5 +12,13 @@ declare module 'virtual:sigx-app' {
     export const islandsManifest: unknown | undefined;
     export const resumeManifest: unknown | undefined;
 }
+// The pack manifests for the entry-server's app factory (#413) — resolved
+// in every mode; undefined under dev (packs run manifest-less there).
+declare module 'virtual:sigx-manifests' {
+    import type { IslandsManifestV2 } from '@sigx/ssr-islands';
+    import type { ResumeManifest } from '@sigx/resume';
+    export const islandsManifest: IslandsManifestV2 | undefined;
+    export const resumeManifest: ResumeManifest | undefined;
+}
 // Type-only: enables the client:* directive props on JSX components.
 import '@sigx/ssr-islands/jsx';

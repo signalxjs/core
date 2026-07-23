@@ -18,11 +18,11 @@ const ManifestIsland = component<{ initial?: number }>((ctx) => {
 
 describe('islandsPlugin manifest', () => {
     it('attaches chunkUrl and exportName from the manifest to island data', async () => {
-        const ssr = createSSR().use(islandsPlugin({
+        const ssr = createSSR({ plugins: [islandsPlugin({
             manifest: {
                 ManifestIsland: { chunkUrl: '/assets/manifest-island.abc.js', exportName: 'ManifestIsland' }
             }
-        }));
+        })] });
 
         const html = await ssr.render(<ManifestIsland client:visible initial={7} />);
         const island = Object.values(parseIslandData(html))[0] as any;
@@ -33,11 +33,11 @@ describe('islandsPlugin manifest', () => {
     });
 
     it('leaves chunkUrl unset when the component is absent from the manifest', async () => {
-        const ssr = createSSR().use(islandsPlugin({
+        const ssr = createSSR({ plugins: [islandsPlugin({
             manifest: {
                 SomeOtherComponent: { chunkUrl: '/assets/other.js', exportName: 'SomeOtherComponent' }
             }
-        }));
+        })] });
 
         const html = await ssr.render(<ManifestIsland client:load />);
         const island = Object.values(parseIslandData(html))[0] as any;
@@ -48,7 +48,7 @@ describe('islandsPlugin manifest', () => {
     });
 
     it('accepts manifest v2 and reads islands from the nested map', async () => {
-        const ssr = createSSR().use(islandsPlugin({
+        const ssr = createSSR({ plugins: [islandsPlugin({
             manifest: {
                 version: 2,
                 islands: {
@@ -56,7 +56,7 @@ describe('islandsPlugin manifest', () => {
                 },
                 runtimePreload: ['/assets/hydrate-core-x.js']
             }
-        }));
+        })] });
 
         const html = await ssr.render(<ManifestIsland client:visible />);
         const island = Object.values(parseIslandData(html))[0] as any;
@@ -67,11 +67,11 @@ describe('islandsPlugin manifest', () => {
         // The v2 discriminator is the version TAG — an entry named "islands"
         // (an object!) must not flip shape detection.
         const Islands = component(() => () => <div class="named-islands" />, { name: 'islands' });
-        const ssr = createSSR().use(islandsPlugin({
+        const ssr = createSSR({ plugins: [islandsPlugin({
             manifest: {
                 islands: { chunkUrl: '/assets/islands-island.js', exportName: 'islands' }
             }
-        }));
+        })] });
 
         const html = await ssr.render(<Islands client:visible />);
         const island = Object.values(parseIslandData(html))[0] as any;
@@ -85,14 +85,14 @@ describe('islandsPlugin manifest', () => {
         });
 
         // A schedulable island on the page → both runtime chunks preload.
-        const withIsland = await createSSR().use(plugin).renderDocument(
+        const withIsland = await createSSR({ plugins: [plugin] }).renderDocument(
             (ManifestIsland as any)({ 'client:visible': true }), { template: TEMPLATE });
         expect(withIsland).toContain('<link rel="modulepreload" href="/assets/hydrate-core-x.js">');
         expect(withIsland).toContain('<link rel="modulepreload" href="/assets/sigx-y.js">');
 
         // No islands → no speculative runtime bytes.
         const Plain = component(() => () => <p>static</p>, { name: 'Plain' });
-        const without = await createSSR().use(plugin).renderDocument(
+        const without = await createSSR({ plugins: [plugin] }).renderDocument(
             (Plain as any)({}), { template: TEMPLATE });
         expect(without).not.toContain('modulepreload');
     });

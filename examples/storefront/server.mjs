@@ -1,12 +1,11 @@
-// The storefront showcase server (#265): BOTH strategy packs on one SSR
-// instance — resumePlugin for the ~48 product cards/forms, islandsPlugin for
-// the cart badge + HUD. Run production with `--conditions production`.
+// The storefront showcase server (#265): BOTH strategy packs — resumePlugin
+// for the ~48 product cards/forms, islandsPlugin for the cart badge + HUD.
+// They install in the app factory (src/entry-server.tsx, islands first —
+// #413: app.use is the one install shape); this wiring is pure transport.
+// Run production with `--conditions production`.
 import express from 'express';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
-import { createSSR } from '@sigx/server-renderer';
-import { resumePlugin } from '@sigx/resume';
-import { islandsPlugin } from '@sigx/ssr-islands';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const isProd = process.env.NODE_ENV === 'production';
@@ -29,17 +28,16 @@ async function createServer() {
         app.use(vite.middlewares);
         app.use(await createDevRequestHandler(vite, {
             entry: '/src/entry-server.tsx',
-            isBot,
-            // Islands first: client:* usage sites are theirs by convention.
-            ssr: createSSR().use(islandsPlugin()).use(resumePlugin())
+            isBot
         }));
     } else {
         const { createRequestHandler } = await import('@sigx/server-renderer/node');
 
         // ONE import replaces four readFiles + inline collectAssets
-        // (rfc-deploy §3.2): the build materializes template/assets/manifests
-        // as dist/server/sigx-app.js.
-        const { template, assets, islandsManifest, resumeManifest } = await import(
+        // (rfc-deploy §3.2): the build materializes template/assets as
+        // dist/server/sigx-app.js. The pack manifests reach the packs inside
+        // the app factory via virtual:sigx-manifests — nothing to thread.
+        const { template, assets } = await import(
             new URL('./dist/server/sigx-app.js', import.meta.url).href
         );
         const { createApp } = await import(
@@ -51,9 +49,6 @@ async function createServer() {
             template,
             app: (url) => createApp(url),
             isBot,
-            ssr: createSSR()
-                .use(islandsPlugin({ manifest: islandsManifest }))
-                .use(resumePlugin({ manifest: resumeManifest })),
             document: { assets }
         }));
     }

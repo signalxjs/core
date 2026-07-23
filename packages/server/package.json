@@ -34,6 +34,12 @@
             "development": "./dist/node.js",
             "production": "./dist/node.prod.js",
             "import": "./dist/node.js"
+        },
+        "./plugin": {
+            "types": "./dist/plugin.d.ts",
+            "development": "./dist/plugin.js",
+            "production": "./dist/plugin.prod.js",
+            "import": "./dist/plugin.js"
         }
     },
     "files": [
@@ -74,6 +80,7 @@
         "access": "public"
     },
     "dependencies": {
-        "@sigx/serialize": "workspace:^"
+        "@sigx/serialize": "workspace:^",
+        "sigx": "workspace:^"
     }
 }

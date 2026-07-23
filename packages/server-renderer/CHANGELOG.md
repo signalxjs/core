@@ -41,6 +41,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `_asyncKeysByComponent` is removed), so every registration ships with the
   next flush regardless of which component was resolving.
 
+**Changed (BREAKING): `app.use(...)` is the one pack-install shape (#413).**
+
+- `SSRInstance.use()` is removed. Instance-level plugins move to
+  `createSSR({ plugins })` — an advanced/engine channel (the default state
+  plugin, tests, custom engines); the public install path is
+  `app.use(pack())` on the rendered App.
+- New app-carried plugin seam: `provideSSRPlugin(appContext, plugin)` /
+  `getSSRPlugins(appContext)` / `SSR_PLUGINS_TOKEN` (root, `/client`, and
+  `/server` entries). A pack's `install(app)` registers its server render
+  hooks through it; every render path that receives the App merges
+  app-carried plugins after instance plugins, deduped by `name` (first wins,
+  dev-warned). App-carried order is `app.use()` order, so pack consult order
+  stays an app decision.
+- `plugin.server.setup(ctx)` now always runs AFTER `ctx._appContext` is
+  assigned — setup hooks can resolve app-level provides on every render
+  path (previously only the document path got this right).
+- `mergeSSRPlugins` / `initPluginContext` exported from `/server` for packs
+  that build their own render contexts (e.g. `@sigx/resume`'s boundary
+  refresh).
+- The document engine's default `stateSerializationPlugin` now also yields
+  to an app-carried plugin named `sigx:state`.
+
 **Added: the single-flight boundary-refresh mechanism (rfc-server §6.3, #313).**
 
 - `SSRContextOptions.baseComponentId` — seed the component-id counter so a

@@ -93,8 +93,9 @@ wiring. Adapters are therefore build-time packages, not runtime layers.
 
 The platform entry is the `server.mjs` of the edge world — and it stays
 user-owned and copyable, exactly like `createRequestHandler`'s "the dispatch
-every hand-written server repeats" posture. The SSR plugin stack
-(`createSSR().use(...)`), the server-fn mount and its `guard`, `isBot`, and
+every hand-written server repeats" posture. The SSR strategy packs install in
+the entry-server's app factory (`app.use(pack())`, #413); the server-fn
+mount and its `guard`, `isBot`, and
 the static-asset fallthrough are app decisions the user should see in their
 own file. The composition order is fixed and documented everywhere:
 
@@ -396,16 +397,15 @@ independent; neither blocks the other.
 // src/entry.cloudflare.ts — user-owned, ~20 lines, THE documentation
 import { createFetchHandler } from '@sigx/server-renderer/server';
 import { handleServerFnRequest, matchesServerFn } from '@sigx/server/server';
-import { createSSR } from '@sigx/server-renderer';
-import { islandsPlugin } from '@sigx/ssr-islands';
-import { template, assets, islandsManifest } from 'virtual:sigx-app';
+import { template, assets } from 'virtual:sigx-app';
 import { serverFns } from 'virtual:sigx-server-fns';
+// The strategy packs install in createApp (app.use, #413); their manifests
+// arrive there via virtual:sigx-manifests.
 import { createApp } from './entry-server';
 
 const handler = createFetchHandler<{ env: Env; ctx: ExecutionContext }>({
     template,
     app: (url) => createApp(url),
-    ssr: createSSR().use(islandsPlugin({ manifest: islandsManifest })),
     document: { assets }
 });
 

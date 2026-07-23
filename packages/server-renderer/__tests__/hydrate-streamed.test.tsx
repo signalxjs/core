@@ -72,7 +72,7 @@ describe('hydrating streamed async components (placeholder wrappers)', () => {
         const { Page } = makeHomeLike();
         const Server = Page(() => new Promise<{ stars: number }>(r => setTimeout(() => r({ stars: 42 }), 5)));
 
-        const ssr = createSSR().use(stateSerializationPlugin());
+        const ssr = createSSR({ plugins: [stateSerializationPlugin()] });
         const html = await collectStream(ssr.renderStream((Server as any)({})));
 
         // Build the post-stream DOM exactly as a browser would see it

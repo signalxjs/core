@@ -28,8 +28,8 @@ export interface ResumePluginOptions {
      *
      * @example
      * ```ts
-     * import manifest from './dist/client/.vite/sigx-resume-manifest.json';
-     * const ssr = createSSR().use(resumePlugin({ manifest }));
+     * import { resumeManifest } from 'virtual:sigx-manifests';
+     * const app = defineApp(<App />).use(resumePlugin({ manifest: resumeManifest }));
      * ```
      */
     manifest?: ResumeManifest;

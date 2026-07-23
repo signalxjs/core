@@ -1,4 +1,3 @@
-import { createSSR } from '@sigx/server-renderer';
 import { resumePlugin } from '@sigx/resume';
 import { createBoundaryRefresh } from '@sigx/resume/server';
 import { refreshComponents } from './entry-server';
@@ -11,6 +10,6 @@ import { refreshComponents } from './entry-server';
  * graph. No manifest in dev: QRLs resolve through the virtual registry.
  */
 export const renderBoundaries = createBoundaryRefresh({
-    ssr: createSSR().use(resumePlugin()),
+    plugins: [resumePlugin()],
     components: refreshComponents
 });
