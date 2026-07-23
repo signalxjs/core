@@ -110,7 +110,7 @@ authenticates with an **`ECOSYSTEM_DISPATCH_TOKEN`** secret. To activate the loo
      Nothing else (`Metadata: Read` is added automatically and is expected).
 
    **There is no "Repository dispatch" permission** — `POST /repos/{owner}/{repo}/dispatches`
-   is gated on `Contents: write`, which is broader than this job needs and is the
+   requires `Contents: Read and write`, which is broader than this job needs and is the
    narrowest GitHub offers for it (a GitHub App needs the same). The token can
    therefore write contents on those repos even though the workflow only sends an
    event; prefer a shorter expiry over hunting for a tighter scope.
