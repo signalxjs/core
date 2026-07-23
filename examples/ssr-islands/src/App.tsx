@@ -11,7 +11,7 @@ import { ServerDice } from './islands/ServerDice';
  * islands ships as static HTML and is never hydrated (in islands mode the
  * client skips the root walk entirely — only boundary-table entries mount).
  */
-export const App = component((ctx: { props: { deferred?: boolean } }) => {
+export const App = component<{ deferred?: boolean }>((ctx) => {
     // `?deferred` renders only islands whose strategies CANNOT fire at load
     // (interaction / visible-below-the-fold) — the smoke's proof page that
     // zero sigx runtime executes until a strategy actually fires (#293).
