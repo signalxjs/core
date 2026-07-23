@@ -136,17 +136,26 @@ describe('admitPayloadEntry — codec-aware admission (#420)', () => {
     });
 
     it('consults registered handlers at depth too', () => {
-        class Money { constructor(public cents: number) {} }
-        const money: TypeHandler = {
-            name: 'money',
-            tag: '$money',
-            test: (v) => v instanceof Money,
-            serialize: (v) => (v as Money).cents,
-            revive: (v) => new Money(v as number)
+        // Self-referential: plain JSON AND the built-in walk throw on the
+        // cycle — only the registered handler, applied AT DEPTH, breaks it
+        // by serializing the id. Admission must flip with the handler.
+        class Selfish {
+            self: Selfish;
+            constructor(public id: number) { this.self = this; }
+        }
+        const selfish: TypeHandler = {
+            name: 'selfish',
+            tag: '$selfish',
+            test: (v) => v instanceof Selfish,
+            serialize: (v) => (v as Selfish).id,
+            revive: (v) => new Selfish(v as number)
         };
-        // Money has no toJSON and no built-in tag: without the handler the
-        // value passes plain JSON as `{}` — WITH the handler it round-trips.
-        expect(admitPayloadEntry('k', { price: new Money(100) }, 'boundary prop', [money])).toBe(true);
+        const value = { node: new Selfish(7) };
+
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        expect(admitPayloadEntry('k', value, 'boundary prop', [])).toBe(false);
+        warn.mockRestore();
+        expect(admitPayloadEntry('k', value, 'boundary prop', [selfish])).toBe(true);
     });
 
     it('still rejects circular structures and dangerous keys with a warning', () => {
