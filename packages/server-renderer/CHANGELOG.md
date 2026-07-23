@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+**Added: the typed pack contract — no more underscore reads for strategy packs (#416).**
+
+- `SSRContext.currentComponentId()` — the id of the component currently
+  rendering (top of the component stack, `undefined` outside a component).
+  The attribution primitive `resolveBoundary` / `transformComponentContext`
+  implementations previously got by reading the private `_componentStack`.
+- `SSRContext.boundaries()` — the per-request boundary table as a live
+  `ReadonlyMap<number, SSRBoundaryRecord>`, for whole-table scans (islands'
+  preload check, resume's refresh envelope). Record mutation stays on
+  `getBoundary(id)`; table shape stays core's.
+- `SSRContextOptions.appContext` — seed a self-created context with an
+  app's DI (type handlers, provides) at creation, replacing the private
+  `_appContext` write a boundary refresh needed.
+- `SSRPack` (type) — the factory return shape for packs installed with
+  `app.use(pack)`: `SSRPlugin` + `install(app)`. Typing the factory's
+  object as `SSRPack` and closing over it removes the
+  `this as unknown as SSRPlugin` cast packs needed.
+- `reviveFromServer` is re-exported from `./client` — the public home for
+  the boundary codec's revive half in pack client code (the
+  `sigx/internals` re-export is not a contract).
+- The `_componentStack` / `_boundaries` / `_appContext` fields are now
+  marked `@internal`, each pointing at its public accessor.
+
 **Fixed: the `__SIGX_ASYNC__` blob's admission check is codec-aware (#420).**
 
 - The blob admitted values via a plain `JSON.stringify` test, blind to the

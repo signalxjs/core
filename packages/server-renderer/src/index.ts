@@ -42,7 +42,7 @@
 // Plugin system
 export { createSSR } from './ssr.js';
 export type { SSRInstance, CreateSSROptions } from './ssr.js';
-export type { SSRPlugin } from './plugin.js';
+export type { SSRPlugin, SSRPack } from './plugin.js';
 
 // App-carried SSR plugins — the install(app) seam packs register through
 // so `app.use(pack())` is the one install shape (#413)

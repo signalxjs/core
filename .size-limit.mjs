@@ -57,7 +57,10 @@ export default [
     // 13.25 → 13.35 KB with #413: the app-carried plugin seam
     // (provideSSRPlugin/getSSRPlugins + per-render merge) — the one-install-
     // shape refactor's bytes; sat at 13.28 KB after trims.
-    limit: '13.35 KB',
+    // 13.35 → 13.4 KB with #416: the typed pack contract's two context
+    // accessors (currentComponentId/boundaries) + the appContext option;
+    // sat at 13.36 KB.
+    limit: '13.4 KB',
     ignore: ['sigx', 'sigx/*', '@sigx/*', 'node:stream'],
   },
   {
