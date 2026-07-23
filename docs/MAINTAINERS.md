@@ -120,7 +120,7 @@ Settings → Rules → Rulesets → New branch ruleset:
 ## Releasing
 
 1. Bump versions: `node scripts/bump-version.js patch` (or `minor` / `major`,
-   or an exact version like `X.Y.Z`). Skip `pnpm version:patch` — pnpm v11's
+   or an exact version like `1.2.3`). Skip `pnpm version:patch` — pnpm v11's
    pre-run deps-status check fails interactively here.
 2. Update `CHANGELOG.md` — move `Unreleased` content under a new heading
    `## [X.Y.Z] — YYYY-MM-DD`, add the `[X.Y.Z]: …/releases/tag/vX.Y.Z` link,
@@ -134,8 +134,9 @@ Settings → Rules → Rulesets → New branch ruleset:
 5. Commit: `git commit -am "chore: release vX.Y.Z"`.
 6. Tag and push: `git tag -a vX.Y.Z -m "vX.Y.Z" && git push --follow-tags`.
 7. `release.yml` takes over — see the two-job structure above. End state:
-   every package lives at `vX.Y.Z` on npm with provenance, GitHub Release
-   marked latest.
+   every package lives at `X.Y.Z` on npm with provenance (npm versions carry no
+   leading `v` — that is the git-tag convention), and the `vX.Y.Z` GitHub
+   Release is marked latest.
 
 ### If something fails mid-release
 
@@ -145,13 +146,13 @@ Settings → Rules → Rulesets → New branch ruleset:
   release if one was created (`gh release delete vX.Y.Z`), fix the issue,
   re-tag.
 - **Some packages published, others didn't**: do NOT delete the tag.
-  npm versions are immutable. Bump to the next patch (`X.Y.Z+1`) so the
+  npm versions are immutable. Bump to the next patch (`1.2.3` → `1.2.4`) so the
   failed packages can publish at the new version while the succeeded
   packages move forward too.
 
 ### Prereleases
 
-Use a prerelease version (e.g. `X.Y.Z-rc.0`) and push the matching tag.
+Use a prerelease version (e.g. `1.2.3-rc.0`) and push the matching tag.
 The publish script does not pass `--tag` automatically; add `--tag beta`
 (or similar) to `release.yml`'s publish step if a non-`latest` dist-tag is
 needed.

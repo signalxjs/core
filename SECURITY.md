@@ -6,8 +6,8 @@ SignalX is pre-1.0. Security fixes are applied to the latest published release
 only — there are no backports to earlier lines, so upgrading is the fix. The
 current release is on the
 [releases page](https://github.com/signalxjs/core/releases) and on
-[npm](https://www.npmjs.com/package/sigx); every `@sigx/*` package in this repo
-is published at that same version.
+[npm](https://www.npmjs.com/package/sigx); `sigx` and every framework package
+under `packages/` publish together at that same version.
 
 | Version        | Supported |
 |----------------|-----------|
