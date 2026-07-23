@@ -77,7 +77,7 @@ export const Counter = component((ctx) => {
                 // let the minifier DCE the registration AND its dynamic
                 // import, deleting the component chunk from the build.
                 `export const __chunks = [];\n` +
-                `export function __registerIslandChunk(name, loader) { __chunks.push(name); }\n`
+                `export function registerComponentChunk(name, loader) { __chunks.push(name); }\n`
         });
     }, 60_000);
 

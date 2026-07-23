@@ -25,7 +25,7 @@ component chunk.
 | Capture named-signal state during SSR | `transformComponentContext` (signal factory swap) + `afterRenderComponent` / `onAsyncComponentResolved` → `record.state` |
 | Ship QRL references in the HTML | ordinary string props — `serializeOpenTagProps` renders `data-sigx-on:*` verbatim and drops `on*` (guarded by `resume-attr-guard.test.tsx`) |
 | Per-element boundary identity | a transform-injected dynamic prop reading a context field the pack sets (`data-sigx-b={ctx.$sigxB}`) — lexical ownership, no core hook |
-| Load component chunks on demand | core's `loadBoundaryComponent` / registry / `__registerIslandChunk` |
+| Load component chunks on demand | core's `loadBoundaryComponent` / registry / `registerComponentChunk` |
 | Hydrate one boundary on upgrade | core's exported `hydrateComponent` + the client-plugin `transformComponentContext` for state restore |
 | Streaming | nothing extra — the table patch re-emission (`onAsyncComponentResolved`) and document-level delegation make streamed content interactive on arrival |
 

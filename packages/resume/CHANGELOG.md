@@ -4,6 +4,19 @@
 
 ### Changed
 
+- **The pack rides only the public contract (#416, #439).** The refresh
+  re-render passes `createSSRContext({ appContext })` and iterates
+  `ctx.boundaries()`; component attribution uses `ctx.currentComponentId()`;
+  the boundary codec (`encodeWithHandlers`/`reviveWithHandlers`) comes from
+  a direct `@sigx/serialize` dependency and `reviveFromServer` from
+  `@sigx/server-renderer/client` — no `sigx/internals` imports remain, and
+  a structural guard test keeps it that way. `$sigxB` — the
+  transform↔runtime contract — is now a typed `ComponentSetupContext`
+  augmentation instead of inline casts. `resumePlugin()` returns the new
+  `SSRPack` type. The generated registry modules call
+  `registerComponentChunk` (renamed from `__registerIslandChunk`, see
+  `@sigx/server-renderer`'s breaking note).
+
 - **BREAKING — one install shape: `app.use(resumePlugin())` (#413).**
   `install(app)` now also registers the pack's server render hooks (via
   `@sigx/server-renderer`'s new `provideSSRPlugin` seam), so installing in

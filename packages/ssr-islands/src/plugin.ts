@@ -21,7 +21,7 @@
  * ```
  */
 
-import type { SSRPlugin, ResolvedBoundary } from '@sigx/server-renderer';
+import type { SSRPack, ResolvedBoundary } from '@sigx/server-renderer';
 import type { SSRContext } from '@sigx/server-renderer';
 import { serializeBoundaryProps, getTypeHandlers } from '@sigx/server-renderer/server';
 import { registerClientPlugin, provideHydrateDefaults, provideSSRPlugin } from '@sigx/server-renderer/client';
@@ -121,9 +121,9 @@ function normalizeManifest(manifest: IslandsPluginOptions['manifest']): {
  * The standalone `hydrateIslands()` entry remains for app-less pages; pair
  * it with `registerClientPlugin(islandsPlugin())` for state restoration.
  */
-export function islandsPlugin(options?: IslandsPluginOptions): SSRPlugin & { install(app: App): void } {
+export function islandsPlugin(options?: IslandsPluginOptions): SSRPack {
     const { islands: manifestIslands, runtimePreload } = normalizeManifest(options?.manifest);
-    return {
+    const pack: SSRPack = {
         name: PLUGIN_NAME,
 
         install(app: App) {
@@ -131,13 +131,15 @@ export function islandsPlugin(options?: IslandsPluginOptions): SSRPlugin & { ins
             // never implied by a package import (rfc-ssr-platform open
             // question 5, resolved as plugin-provided via the DI seam).
             provideHydrateDefaults(app._context, { boundaries: 'explicit' });
-            // Hand the server render hooks to the SSR pipeline (#413).
-            provideSSRPlugin(app._context, this as unknown as SSRPlugin);
+            // Hand the server render hooks to the SSR pipeline (#413). The
+            // closed-over `pack` is the one object both faces share — plugin
+            // identity stays stable for dedupe, and no `this` cast is needed.
+            provideSSRPlugin(app._context, pack);
             // Client-only: a per-request SERVER app must not touch the
             // module-level client registry (its first-wins dedup would fire
             // on every request, and the hooks are never consumed there).
             if (typeof document !== 'undefined') {
-                registerClientPlugin(this as unknown as SSRPlugin);
+                registerClientPlugin(pack);
             }
         },
 
@@ -191,8 +193,8 @@ export function islandsPlugin(options?: IslandsPluginOptions): SSRPlugin & { ins
                 // resolveBoundary consult precedes context construction). No
                 // record means another plugin won the consult — leave it alone.
                 // client:only never reaches here: its setup is suppressed.
-                const id = ctx._componentStack[ctx._componentStack.length - 1];
-                if (!ctx.getBoundary(id)) return;
+                const id = ctx.currentComponentId();
+                if (id === undefined || !ctx.getBoundary(id)) return;
 
                 const data = ctx.getPluginData<IslandsPluginData>(PLUGIN_NAME)!;
 
@@ -213,7 +215,7 @@ export function islandsPlugin(options?: IslandsPluginOptions): SSRPlugin & { ins
                 // strategy to fire. `hydrate: 'never'` records are another
                 // pack's to wake — never a reason to warm OUR runtime.
                 if (runtimePreload.length === 0) return;
-                for (const record of ctx._boundaries.values()) {
+                for (const record of ctx.boundaries().values()) {
                     if (record.hydrate && record.hydrate !== 'never') {
                         return { modulepreload: runtimePreload };
                     }
@@ -272,4 +274,5 @@ export function islandsPlugin(options?: IslandsPluginOptions): SSRPlugin & { ins
         // the same hooks eagerly — full runtime by definition.
         client: islandsClientHooks.client
     };
+    return pack;
 }

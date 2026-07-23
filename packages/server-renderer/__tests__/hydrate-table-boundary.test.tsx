@@ -12,7 +12,7 @@ import {
     findBoundaryMarker,
     invalidateMarkerIndex,
     registerComponent,
-    __registerIslandChunk
+    registerComponentChunk
 } from '../src/client/index';
 import { createSSR } from '../src/ssr';
 import type { SSRPlugin } from '../src/plugin';
@@ -119,7 +119,7 @@ describe('mid-flight table changes', () => {
     it('returns false when the record disappears while the chunk loads', async () => {
         const Counter = makeCounter('Vanishing');
         const id = await mount(<Counter initial={1} />);
-        __registerIslandChunk('Vanishing', async () => {
+        registerComponentChunk('Vanishing', async () => {
             delete (window as any).__SIGX_BOUNDARIES__[id]; // patch removes it
             return Counter;
         });
@@ -133,7 +133,7 @@ describe('mid-flight table changes', () => {
         const Replacement = makeCounter('SwappedTo');
         registerComponent('SwappedTo', Replacement);
         const id = await mount(<Counter initial={2} />);
-        __registerIslandChunk('SwappedFrom', async () => {
+        registerComponentChunk('SwappedFrom', async () => {
             (window as any).__SIGX_BOUNDARIES__[id] = { hydrate: 'never', component: 'SwappedTo', props: { initial: 2 } };
             return Counter;
         });

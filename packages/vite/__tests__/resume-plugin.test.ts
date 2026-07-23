@@ -116,7 +116,7 @@ describe('sigxResume — path-separator normalization (#324)', () => {
                     warnings.filter((w) => w.includes('duplicate resume component name'))
                 ).toHaveLength(0);
                 expect(registry.match(/__registerResumeQrl\("Counter_click_/g)).toHaveLength(1);
-                expect(registry.match(/__registerIslandChunk\("Counter"/g)).toHaveLength(1);
+                expect(registry.match(/registerComponentChunk\("Counter"/g)).toHaveLength(1);
             } finally {
                 spy.mockRestore();
             }
@@ -144,11 +144,11 @@ describe('sigxResume — virtual modules', () => {
         expect(resolved).toBe('\0virtual:sigx-resume');
         const registry = plugin.load.call({}, resolved);
         expect(registry).toContain("import { __registerResumeQrl } from '@sigx/resume/client';");
-        expect(registry).toContain("import { __registerIslandChunk } from '@sigx/server-renderer/client';");
+        expect(registry).toContain("import { registerComponentChunk } from '@sigx/server-renderer/client';");
         expect(registry).toMatch(
             /__registerResumeQrl\("Counter_click_[0-9a-f]{8}", \(\) => import\("virtual:sigx-resume:src\/resume\/Counter\.tsx\.handlers\.ts"\)/
         );
-        expect(registry).toContain('__registerIslandChunk("Counter", () => import("/src/resume/Counter.tsx")');
+        expect(registry).toContain('registerComponentChunk("Counter", () => import("/src/resume/Counter.tsx")');
     });
 
     it('loads the per-file handlers module with replicated imports (type-stripped)', async () => {
@@ -233,7 +233,7 @@ describe('sigxResume — duplicate component names', () => {
         });
         try {
             const registry = plugin.load.call({}, '\0virtual:sigx-resume');
-            const registrations = registry.split('\n').filter((l: string) => l.includes('__registerIslandChunk("Counter"'));
+            const registrations = registry.split('\n').filter((l: string) => l.includes('registerComponentChunk("Counter"'));
             expect(registrations).toHaveLength(1);
             expect(warn).toHaveBeenCalledWith(expect.stringContaining('duplicate resume component name "Counter"'));
         } finally {

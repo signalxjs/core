@@ -25,5 +25,8 @@
  * either directly.
  */
 
+// Load the setup-context augmentation ($sigxB — the transform↔runtime contract)
+import './setup-context';
+
 export { resumePlugin } from './plugin';
 export type { ResumePluginOptions, ResumeManifest, ResumeChunkRef } from './types';

@@ -210,7 +210,7 @@ export function sigxResume(options: SigxResumeOptions = {}): Plugin {
             if (id === RESOLVED_VIRTUAL_ID) {
                 const lines = [
                     "import { __registerResumeQrl } from '@sigx/resume/client';",
-                    "import { __registerIslandChunk } from '@sigx/server-renderer/client';"
+                    "import { registerComponentChunk } from '@sigx/server-renderer/client';"
                 ];
                 for (const [file, extraction] of extractions) {
                     const handlersSpec = JSON.stringify(handlersIdFor(file));
@@ -223,7 +223,7 @@ export function sigxResume(options: SigxResumeOptions = {}): Plugin {
                     for (const comp of stampable(extraction)) {
                         if (!ownedBy(comp.exported, file)) continue;
                         lines.push(
-                            `__registerIslandChunk(${JSON.stringify(comp.exported)}, () => import(${moduleSpec}).then(m => m[${JSON.stringify(comp.exported)}]));`
+                            `registerComponentChunk(${JSON.stringify(comp.exported)}, () => import(${moduleSpec}).then(m => m[${JSON.stringify(comp.exported)}]));`
                         );
                     }
                 }

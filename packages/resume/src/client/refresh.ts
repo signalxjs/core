@@ -39,7 +39,7 @@ import {
     invalidateMarkerIndex
 } from '@sigx/server-renderer/client';
 import type { SSRBoundaryRecord } from '@sigx/server-renderer';
-import { reviveFromServer } from 'sigx/internals';
+import { reviveFromServer } from '@sigx/server-renderer/client';
 import { peekScope, dropScope, onResumeReset } from './scope';
 
 /** One `$boundaries` envelope entry (produced by `createBoundaryRefresh`). */

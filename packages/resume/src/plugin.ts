@@ -37,7 +37,7 @@
  * ```
  */
 
-import type { SSRPlugin, ResolvedBoundary, SSRContext } from '@sigx/server-renderer';
+import type { SSRPack, ResolvedBoundary, SSRContext } from '@sigx/server-renderer';
 import { serializeBoundaryProps, getTypeHandlers } from '@sigx/server-renderer/server';
 import { provideHydrateDefaults, provideSSRPlugin } from '@sigx/server-renderer/client';
 import type { VNode, ComponentSetupContext, App } from 'sigx';
@@ -91,14 +91,16 @@ interface ResumeStamps {
  *   entry) get it for free and this module stays free of client-runtime
  *   imports.
  */
-export function resumePlugin(options?: ResumePluginOptions): SSRPlugin & { install(app: App): void } {
-    return {
+export function resumePlugin(options?: ResumePluginOptions): SSRPack {
+    const pack: SSRPack = {
         name: PLUGIN_NAME,
 
         install(app: App) {
             provideHydrateDefaults(app._context, { boundaries: 'explicit' });
-            // Hand the server render hooks to the SSR pipeline (#413).
-            provideSSRPlugin(app._context, this as unknown as SSRPlugin);
+            // Hand the server render hooks to the SSR pipeline (#413). The
+            // closed-over `pack` is the one object both faces share — plugin
+            // identity stays stable for dedupe, and no `this` cast is needed.
+            provideSSRPlugin(app._context, pack);
         },
 
         server: {
@@ -142,9 +144,10 @@ export function resumePlugin(options?: ResumePluginOptions): SSRPlugin & { insta
                 const { children: _children, slots: _slots, $models: _models, ...propsData } = allProps;
                 const props = serializeBoundaryProps(propsData, getTypeHandlers(ctx));
 
-                // Remember the claim — the component id is already at the
-                // stack top when resolveBoundary runs.
-                const id = ctx._componentStack[ctx._componentStack.length - 1];
+                // Remember the claim — the component's id is current when
+                // resolveBoundary runs.
+                const id = ctx.currentComponentId();
+                if (id === undefined) return undefined;
                 const data = ctx.getPluginData<ResumePluginData>(PLUGIN_NAME);
                 data?.claimed.add(id);
 
@@ -191,7 +194,8 @@ export function resumePlugin(options?: ResumePluginOptions): SSRPlugin & { insta
                 // Transform hooks run for EVERY plugin — only boundaries
                 // resume itself claimed in resolveBoundary are touched
                 // (declined client:* sites and other packs' wins are not).
-                const id = ctx._componentStack[ctx._componentStack.length - 1];
+                const id = ctx.currentComponentId();
+                if (id === undefined) return;
                 const data = ctx.getPluginData<ResumePluginData>(PLUGIN_NAME);
                 if (!data?.claimed.has(id)) return;
                 if (!ctx.getBoundary(id)) return;
@@ -204,8 +208,9 @@ export function resumePlugin(options?: ResumePluginOptions): SSRPlugin & { insta
                 // The transform-injected `data-sigx-b={ctx.$sigxB}` prop reads
                 // this — every QRL-carrying element self-describes its
                 // boundary. Props evaluate inside the owning component's
-                // render, so ownership is lexical.
-                (componentCtx as ComponentSetupContext & { $sigxB?: string }).$sigxB = String(id);
+                // render, so ownership is lexical. (Typed by the
+                // setup-context augmentation, #416.)
+                componentCtx.$sigxB = String(id);
 
                 return componentCtx;
             },
@@ -268,4 +273,5 @@ export function resumePlugin(options?: ResumePluginOptions): SSRPlugin & { insta
             }
         }
     };
+    return pack;
 }

@@ -372,6 +372,9 @@ importers:
 
   packages/resume:
     dependencies:
+      '@sigx/serialize':
+        specifier: workspace:^
+        version: link:../serialize
       '@sigx/server-renderer':
         specifier: workspace:^
         version: link:../server-renderer

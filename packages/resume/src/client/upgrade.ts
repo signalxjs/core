@@ -25,7 +25,7 @@
  * staging keeps the packs from ever racing over it.
  */
 
-import { reviveFromServer } from 'sigx/internals';
+import { reviveFromServer } from '@sigx/server-renderer/client';
 import {
     getBoundaryRecord,
     loadBoundaryComponent,
@@ -77,7 +77,8 @@ const RESTORE_HOOK: SSRPlugin = {
                     upgrading._live![name] = live;
                 }
             ) as ComponentSetupContext['signal'];
-            (componentCtx as ComponentSetupContext & { $sigxB?: string }).$sigxB = String(upgrading._id);
+            // Typed by the setup-context augmentation (#416).
+            componentCtx.$sigxB = String(upgrading._id);
             return componentCtx;
         }
     }

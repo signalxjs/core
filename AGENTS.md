@@ -203,7 +203,10 @@ free port automatically).
 - `packages/ssr-islands` → `@sigx/ssr-islands` — islands architecture (selective
   hydration via `client:*` directives). The first-party *reference* strategy pack
   riding `@sigx/server-renderer`'s public plugin API; a drop-in equal of any
-  third-party pack, with no privileged access to core. Installed via
+  third-party pack, with no privileged access to core — enforced structurally
+  since #416: a per-pack guard test rejects `/internals` imports and underscore
+  `SSRContext` reads (the typed contract is `currentComponentId()`,
+  `boundaries()`, `createSSRContext({ appContext })`, `SSRPack`). Installed via
   `app.use(islandsPlugin())` in the entry-server's app factory (#413 — one
   install shape; the server hooks ride the `provideSSRPlugin` seam). Its
   runnable example app lives at `examples/ssr-islands/` (private workspace
@@ -212,9 +215,11 @@ free port automatically).
   handlers via `data-sigx-on:*` attributes, zero-JS pages, upgrade-on-write
   hydration). The second first-party strategy pack riding
   `@sigx/server-renderer`'s public plugin API — a drop-in equal of any
-  third-party pack, no privileged access to core. Installed via
-  `app.use(resumePlugin())` in the entry-server's app factory (#413). Its
-  Vite transform lives at `@sigx/vite/resume`.
+  third-party pack, no privileged access to core (same #416 guard test as
+  islands; the boundary codec comes from a direct `@sigx/serialize`
+  dependency, `$sigxB` is typed by a `ComponentSetupContext` augmentation).
+  Installed via `app.use(resumePlugin())` in the entry-server's app factory
+  (#413). Its Vite transform lives at `@sigx/vite/resume`.
 - `packages/cache` → `@sigx/cache` — cache policy for value-first async
   (staleTime/gcTime, revalidation, `invalidate()`, optimistic `mutate()`). The
   first-party pack on the rfc-async §7 engine seam — a drop-in equal of any

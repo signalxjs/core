@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+**BREAKING — `__registerIslandChunk` is now `registerComponentChunk` (#439).**
+
+- The lazy chunk-registration entry point (re-exported from
+  `@sigx/server-renderer/client`) was renamed: the underscore island name
+  misdescribed a strategy-neutral registry that the resume transform emits
+  calls to as well. Hard rename, no alias (pre-1.0) — generated registry
+  modules are re-emitted by the Vite transforms automatically; update any
+  hand-written `__registerIslandChunk` call to `registerComponentChunk`.
+
+**Changed: the pack rides only the public contract (#416, #439).**
+
+- `islandsPlugin()` returns the new `SSRPack` type and registers the one
+  closed-over pack object (no more internal `this` casts); the current
+  component id and the boundary-table scan go through the public
+  `ctx.currentComponentId()` / `ctx.boundaries()` accessors. A structural
+  guard test now rejects `/internals` imports and underscore `SSRContext`
+  reads in this package — the "drop-in equal of any third-party pack" claim
+  is enforced, not aspirational.
+
 **Changed: one install shape — `app.use(islandsPlugin())` (#413).**
 
 - `install(app)` now also registers the pack's SERVER render hooks (via

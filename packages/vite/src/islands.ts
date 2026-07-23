@@ -14,7 +14,7 @@
  *    transform can't key stay local-only.
  * 3. **Client registration** — provides `virtual:sigx-islands`: importing it
  *    from the client entry registers a lazy loader per island
- *    (`__registerIslandChunk(name, () => import(...))`), so island chunks
+ *    (`registerComponentChunk(name, () => import(...))`), so island chunks
  *    code-split and load on demand when their hydration strategy fires.
  * 4. **Build manifest** — the client build emits
  *    `.vite/sigx-islands-manifest.json` mapping island names to
@@ -184,11 +184,11 @@ export function sigxIslands(options: SigxIslandsOptions = {}): Plugin {
             // Import from the LIGHT client entry — the package root pulls the
             // plugin (and through it the sigx runtime) onto the page's eager
             // graph, defeating the lazy hydration core (#293).
-            const lines = ["import { __registerIslandChunk } from '@sigx/ssr-islands/client';"];
+            const lines = ["import { registerComponentChunk } from '@sigx/ssr-islands/client';"];
             for (const [name, file] of islands) {
                 const spec = JSON.stringify('/' + path.relative(root, file).replace(/\\/g, '/'));
                 lines.push(
-                    `__registerIslandChunk(${JSON.stringify(name)}, () => import(${spec}).then(m => m[${JSON.stringify(name)}]));`
+                    `registerComponentChunk(${JSON.stringify(name)}, () => import(${spec}).then(m => m[${JSON.stringify(name)}]));`
                 );
             }
             return lines.join('\n');
