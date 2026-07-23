@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.13.0] — 2026-07-23
+
 ### Changed
 
 - **Breaking (pre-release)** — **single-flight boundary refresh is now data-keyed: the `refreshes` option is REMOVED** (#452; the option never shipped in a release). A mutation no longer names UI components; it declares only `invalidates` — what data changed — and that one declaration now drives BOTH `@sigx/cache` invalidation and §6.3 boundary refresh. During SSR every boundary automatically records the canonical `useData` keys it (or any non-boundary descendant) read — `SSRBoundaryRecord.deps`, folded to the nearest enclosing boundary, correct across streamed/deferred subtrees; the client sends those deps up with an `invalidates`-declaring mutation, and the endpoint re-renders exactly the boundaries whose deps intersect the mutation's patterns (the cache pack's `keyMatches` semantics — a bare fn-ref pattern `[getVotes]` matches `useData(getVotes)` and every `[getVotes, ...args]` read). Component names can no longer drift out of sync, and a boundary that stops reading the data correctly stops refreshing. The explicit `createBoundaryRefresh` component registry and all client apply semantics are unchanged. Migration: replace `refreshes: ['Poll']` with `invalidates: () => [getVotes]` (the fn the boundary reads) and read data via `useData(getVotes)`.
@@ -467,7 +469,8 @@ Initial public release of the SignalX (`sigx`) ecosystem on npm. Six packages pu
 - Node `^20.19.0 || >=22.12.0`
 - `@sigx/vite` peer-depends on `vite >=8.0.0`
 
-[Unreleased]: https://github.com/signalxjs/core/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/signalxjs/core/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/signalxjs/core/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/signalxjs/core/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/signalxjs/core/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/signalxjs/core/compare/v0.9.0...v0.10.0

@@ -1,6 +1,6 @@
 {
     "name": "@sigx/serialize",
-    "version": "0.12.0",
+    "version": "0.13.0",
     "description": "The boundary codec for SignalX — how Date, Map, Set, BigInt and custom types survive every server↔client boundary: the SSR state blob, resume boundary props, the cache seed, and the server-function RPC wire",
     "type": "module",
     "main": "./dist/index.js",
