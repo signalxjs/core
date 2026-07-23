@@ -8,16 +8,15 @@
 // wrangler.jsonc) serves matching files before the worker is invoked.
 import { createFetchHandler } from '@sigx/server-renderer/server';
 import { handleServerFnRequest, matchesServerFn } from '@sigx/server/server';
-import { createSSR } from '@sigx/server-renderer';
-import { resumePlugin } from '@sigx/resume';
-import { template, assets, resumeManifest } from 'virtual:sigx-app';
+import { template, assets } from 'virtual:sigx-app';
 import { serverFns } from 'virtual:sigx-server-fns';
+// The resume pack installs in the app factory (#413) — its manifest arrives
+// there via virtual:sigx-manifests; no SSR instance to build here.
 import { createApp } from './entry-server';
 
 const handler = createFetchHandler({
     template,
     app: (url) => createApp(url),
-    ssr: createSSR().use(resumePlugin({ manifest: resumeManifest })),
     document: { assets }
 });
 

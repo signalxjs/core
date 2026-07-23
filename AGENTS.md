@@ -203,14 +203,18 @@ free port automatically).
 - `packages/ssr-islands` → `@sigx/ssr-islands` — islands architecture (selective
   hydration via `client:*` directives). The first-party *reference* strategy pack
   riding `@sigx/server-renderer`'s public plugin API; a drop-in equal of any
-  third-party pack, with no privileged access to core. Its runnable example app
-  lives at `examples/ssr-islands/` (private workspace package).
+  third-party pack, with no privileged access to core. Installed via
+  `app.use(islandsPlugin())` in the entry-server's app factory (#413 — one
+  install shape; the server hooks ride the `provideSSRPlugin` seam). Its
+  runnable example app lives at `examples/ssr-islands/` (private workspace
+  package).
 - `packages/resume` → `@sigx/resume` — resumability (QRL event
   handlers via `data-sigx-on:*` attributes, zero-JS pages, upgrade-on-write
   hydration). The second first-party strategy pack riding
   `@sigx/server-renderer`'s public plugin API — a drop-in equal of any
-  third-party pack, no privileged access to core. Its Vite transform lives at
-  `@sigx/vite/resume`.
+  third-party pack, no privileged access to core. Installed via
+  `app.use(resumePlugin())` in the entry-server's app factory (#413). Its
+  Vite transform lives at `@sigx/vite/resume`.
 - `packages/cache` → `@sigx/cache` — cache policy for value-first async
   (staleTime/gcTime, revalidation, `invalidate()`, optimistic `mutate()`). The
   first-party pack on the rfc-async §7 engine seam — a drop-in equal of any
@@ -218,10 +222,14 @@ free port automatically).
 - `packages/server` → `@sigx/server` — server functions (RPC): `serverFn` in
   `*.server.ts` modules, extracted to typed fetch stubs by `@sigx/vite/server`;
   WinterCG endpoint (`./server`) + Node adapter (`./node`) with security
-  defaults (rfc-server, #302). NOT `@sigx/server-renderer` (that renders
-  documents; this is how the app talks to the server). Platform adapters
-  (cloudflare/deno/bun) would be separate top-level packages — `./node` is
-  interface bridging, not platform integration. Rides public seams only.
+  defaults (rfc-server, #302); app-plugin face (`./plugin`):
+  `app.use(serverPlugin({ transport, types }))` for client-side config, with
+  `types` registering custom type handlers once for both the RPC wire and
+  the state/boundary registry (#413, #411). NOT `@sigx/server-renderer`
+  (that renders documents; this is how the app talks to the server).
+  Platform adapters (cloudflare/deno/bun) would be separate top-level
+  packages — `./node` is interface bridging, not platform integration.
+  Rides public seams only.
 - `packages/vite` → `@sigx/vite` — Vite plugin for dev/build/HMR.
 - `packages/cloudflare` → `@sigx/cloudflare` — Cloudflare Workers deployment
   adapter (rfc-deploy §4.2): `cloudflare()` rides `@sigx/vite`'s public

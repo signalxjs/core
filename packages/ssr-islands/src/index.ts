@@ -4,13 +4,14 @@
  * Islands architecture plugin for SigX SSR.
  * Provides selective hydration via client:* directives.
  *
- * ## Server Usage
+ * ## Server Usage (the entry-server's per-request app factory)
  * ```ts
+ * import { defineApp } from 'sigx';
  * import { createSSR } from '@sigx/server-renderer';
  * import { islandsPlugin } from '@sigx/ssr-islands';
  *
- * const ssr = createSSR().use(islandsPlugin());
- * const html = await ssr.render(<App />);
+ * const app = defineApp(<App />).use(islandsPlugin({ manifest }));
+ * const html = await createSSR().render(app);
  * ```
  *
  * ## Client Usage
@@ -38,7 +39,7 @@
 
 // Plugin
 export { islandsPlugin } from './plugin';
-export type { IslandsPluginOptions } from './plugin';
+export type { IslandsPluginOptions, IslandsManifestV2, IslandManifestEntry } from './plugin';
 
 // Client
 export {

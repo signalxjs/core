@@ -4,10 +4,12 @@
  * A mutation server function can name boundaries to refresh; the endpoint
  * (rfc-server's `renderBoundaries` option) hands the client's boundary
  * descriptors to the implementation this factory returns. Each descriptor is
- * re-rendered through the SAME machinery as the original request — the SSR
- * instance's plugin set (resume's tracking-signal capture included), a fresh
- * per-request context — and comes back as `{for, id, html, state, records}`:
- * fresh HTML for the DOM swap plus the re-render's boundary-table patch.
+ * re-rendered through the SAME machinery as the original request — the app's
+ * plugin set (resume's tracking-signal capture included; explicit via
+ * `plugins:` or carried by the `app` option's `app.use(resumePlugin())`), a
+ * fresh per-request context — and comes back as `{for, id, html, state,
+ * records}`: fresh HTML for the DOM swap plus the re-render's boundary-table
+ * patch.
  *
  * Ids: a re-render context starts its component-id counter at a client-chosen
  * floor (`base`), never 0 — the fresh HTML's `<!--$c:N-->` markers and
@@ -26,15 +28,21 @@
  * import { createBoundaryRefresh } from '@sigx/resume/server';
  *
  * const renderBoundaries = createBoundaryRefresh({
- *     ssr,                                  // the instance with resumePlugin()
- *     components: { Tracker, Cart }         // __resumeId → server component
+ *     plugins: [resumePlugin({ manifest })], // or omit and let `app` carry them
+ *     components: { Tracker, Cart }          // __resumeId → server component
  * });
  * // pass as handleServerFnRequest({ ..., renderBoundaries })
  * ```
  */
 
-import type { SSRInstance, SSRBoundaryRecord } from '@sigx/server-renderer';
-import { renderVNodeToString, getTypeHandlers } from '@sigx/server-renderer/server';
+import type { SSRPlugin, SSRBoundaryRecord } from '@sigx/server-renderer';
+import {
+    createSSRContext,
+    renderVNodeToString,
+    getTypeHandlers,
+    initPluginContext,
+    getSSRPlugins
+} from '@sigx/server-renderer/server';
 import { jsx } from 'sigx';
 import type { App, AppContext, JSXElement } from 'sigx';
 import { encodeWithHandlers, reviveWithHandlers } from 'sigx/internals';
@@ -64,8 +72,13 @@ export interface BoundaryRefreshEntry {
 }
 
 export interface BoundaryRefreshOptions {
-    /** The SSR instance with the app's plugins registered (resumePlugin at least). */
-    ssr: SSRInstance;
+    /**
+     * SSR plugins the re-render runs with (resumePlugin at least) —
+     * explicit, matching the endpoint's explicit-registry posture. May be
+     * omitted when `app` is given and the app carries its plugins
+     * (`app.use(resumePlugin(...))` in its factory): the app's set is used.
+     */
+    plugins?: SSRPlugin[];
     /**
      * Registry-key → server component. Values may be the component factory
      * itself or a lazy loader (`() => import(...)` resolving to the factory
@@ -155,6 +168,17 @@ export function createBoundaryRefresh(
             }
         }
 
+        // Explicit plugins win; otherwise the app carries them (#413:
+        // app.use(resumePlugin()) in the factory).
+        const plugins = options.plugins ?? getSSRPlugins(appContext);
+        if (__DEV__ && !plugins.some(p => p.name === 'resume')) {
+            console.warn(
+                '[sigx resume] boundary refresh: no resume plugin in the re-render plugin ' +
+                'set — signal state will not be captured. Pass `plugins: [resumePlugin(...)]` ' +
+                'or install it on the `app` option\'s app.'
+            );
+        }
+
         let nextBase = Math.floor(base);
         for (const request of requests) {
             const seeded = nextBase;
@@ -187,13 +211,14 @@ export function createBoundaryRefresh(
                 // is still a decline: fresh-but-broken HTML must not replace
                 // stale-but-consistent DOM.
                 let failed = false;
-                const ctx = options.ssr.createContext({
+                const ctx = createSSRContext({
                     baseComponentId: seeded,
                     onError: () => {
                         failed = true;
                     }
                 });
                 ctx._appContext = appContext;
+                initPluginContext(ctx, plugins);
                 const handlers = getTypeHandlers(ctx);
 
                 // The descriptor's props are the client table's encoded

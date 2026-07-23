@@ -35,8 +35,10 @@ Open the network/console panels and watch the JS HUD (bottom right):
 - `src/islands/**` — the two deliberate JS spends (`sigxIslands()` owns it):
   `CartBadge` (`client:load`) listens for `cart:add`; `JsHud` (`client:idle`)
   watches the resource timeline so the page proves its own claim.
-- `server.mjs` — one SSR instance with BOTH packs:
-  `createSSR().use(islandsPlugin({manifest})).use(resumePlugin({manifest}))`.
+- `src/entry-server.tsx` — the app factory installs BOTH packs (#413:
+  `app.use(...)` is the one install shape, islands first):
+  `defineApp(<App />).use(islandsPlugin({manifest})).use(resumePlugin({manifest}))`;
+  `server.mjs` is pure transport.
 - Cross-boundary communication is plain `CustomEvent`s — resumable cards and
   the badge island never import each other.
 

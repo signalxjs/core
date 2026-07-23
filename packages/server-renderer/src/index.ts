@@ -16,12 +16,14 @@
  * const html = await renderToString(<App />);
  * ```
  * 
- * ## Plugin-driven rendering (recommended for custom strategies, async, etc.)
+ * ## Plugin-driven rendering (custom strategies, async, etc.)
  * ```ts
+ * import { defineApp } from 'sigx';
  * import { createSSR } from '@sigx/server-renderer';
- * 
- * const ssr = createSSR().use(myPlugin);
- * const html = await ssr.render(<App />);
+ *
+ * // Packs install on the app — one install shape everywhere (#413)
+ * const app = defineApp(<App />).use(myPack());
+ * const html = await createSSR().render(app);
  * ```
  * 
  * ## Client Usage
@@ -39,8 +41,12 @@
 
 // Plugin system
 export { createSSR } from './ssr.js';
-export type { SSRInstance } from './ssr.js';
+export type { SSRInstance, CreateSSROptions } from './ssr.js';
 export type { SSRPlugin } from './plugin.js';
+
+// App-carried SSR plugins — the install(app) seam packs register through
+// so `app.use(pack())` is the one install shape (#413)
+export { SSR_PLUGINS_TOKEN, provideSSRPlugin, getSSRPlugins } from './client/ssr-plugins.js';
 
 // Re-export from server (convenience)
 export { renderToStream, renderToString, renderVNodeToString } from './server/index.js';

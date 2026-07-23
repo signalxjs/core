@@ -14,10 +14,9 @@
 // (rfc-deploy §5.2).
 import { createFetchHandler } from '@sigx/server-renderer/server';
 import { handleServerFnRequest, matchesServerFn } from '@sigx/server/server';
-import { createSSR } from '@sigx/server-renderer';
-import { resumePlugin } from '@sigx/resume';
-// ONE import replaces four readFiles (rfc-deploy §3.2).
-import { template, assets, resumeManifest } from './dist/server/sigx-app.js';
+// ONE import replaces four readFiles (rfc-deploy §3.2). The resume pack
+// installs in the app factory (#413) — no SSR instance to build here.
+import { template, assets } from './dist/server/sigx-app.js';
 import { createApp } from './dist/server/entry-server.js';
 import { serverFns } from './dist/server/sigx-server-fns.js';
 import { join, resolve, sep } from 'node:path';
@@ -28,7 +27,6 @@ const clientDir = resolve(fileURLToPath(new URL('./dist/client/', import.meta.ur
 const handler = createFetchHandler({
     template,
     app: (url: string) => createApp(url),
-    ssr: createSSR().use(resumePlugin({ manifest: resumeManifest })),
     document: { assets }
 });
 

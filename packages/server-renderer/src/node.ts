@@ -14,8 +14,8 @@
  * import { createSSR } from '@sigx/server-renderer';
  * import { toNodeStream } from '@sigx/server-renderer/node';
  *
- * const ssr = createSSR().use(islandsPlugin());
- * toNodeStream(ssr.renderChunks(<App />)).pipe(res);
+ * const app = defineApp(<App />).use(islandsPlugin({ manifest }));
+ * toNodeStream(createSSR().renderChunks(app)).pipe(res);
  * ```
  */
 

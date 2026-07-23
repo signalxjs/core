@@ -45,7 +45,7 @@ describe('resolveBoundary — consult position and precedence', () => {
             return () => <div>never on the server</div>;
         }, { name: 'Island' });
 
-        const ssr = createSSR().use(boundaryPlugin('skip-all', () => ({ flush: 'skip' })));
+        const ssr = createSSR({ plugins: [boundaryPlugin('skip-all', () => ({ flush: 'skip' }))] });
         const html = await ssr.render((Island as any)({}));
         expect(setupSpy).not.toHaveBeenCalled();
         expect(html).not.toContain('never on the server');
@@ -54,9 +54,10 @@ describe('resolveBoundary — consult position and precedence', () => {
     it('first plugin to return wins', async () => {
         const Comp = component(() => () => <span>x</span>, { name: 'C' });
         const second = vi.fn(() => ({ hydrate: 'idle' }) as ResolvedBoundary);
-        const ssr = createSSR()
-            .use(boundaryPlugin('first', () => ({ hydrate: 'visible' })))
-            .use({ name: 'second', server: { resolveBoundary: second } });
+        const ssr = createSSR({ plugins: [
+            boundaryPlugin('first', () => ({ hydrate: 'visible' })),
+            { name: 'second', server: { resolveBoundary: second } }
+        ] });
         const html = await ssr.render((Comp as any)({}));
         expect(html).toContain('"hydrate":"visible"');
         expect(html).not.toContain('"hydrate":"idle"');
@@ -77,14 +78,14 @@ describe('resolveBoundary — consult position and precedence', () => {
                 }
             }
         };
-        await createSSR().use(probe).render((Outer as any)({}));
+        await createSSR({ plugins: [probe] }).render((Outer as any)({}));
         // Outer = 1, Inner = 2 — each consult sees its own freshly-pushed id
         expect(seen).toEqual([1, 2]);
     });
 
     it('no plugin return → no record, no table, unchanged render', async () => {
         const Comp = component(() => () => <span>plain</span>, { name: 'C' });
-        const ssr = createSSR().use(boundaryPlugin('quiet', () => undefined));
+        const ssr = createSSR({ plugins: [boundaryPlugin('quiet', () => undefined)] });
         const html = await ssr.render((Comp as any)({}));
         expect(html).toBe('<span>plain</span><!--$c:1-->');
     });
@@ -93,7 +94,7 @@ describe('resolveBoundary — consult position and precedence', () => {
 describe('flush: "skip" — wire bytes and hook contract', () => {
     it('emits the wrapper, no content, and the trailing marker', async () => {
         const Island = component(() => () => <div>content</div>, { name: 'Island' });
-        const ssr = createSSR().use(boundaryPlugin('skip', () => ({ flush: 'skip', hydrate: 'load' })));
+        const ssr = createSSR({ plugins: [boundaryPlugin('skip', () => ({ flush: 'skip', hydrate: 'load' }))] });
         const html = await ssr.render((Island as any)({}));
         expect(html).toContain('<div data-boundary="1" style="display:contents;"></div><!--$c:1-->');
         expect(html).toContain('"1":{"flush":"skip","hydrate":"load","component":"Island"}');
@@ -101,10 +102,10 @@ describe('flush: "skip" — wire bytes and hook contract', () => {
 
     it('renders the fallback thunk inside the wrapper', async () => {
         const Island = component(() => () => <div>content</div>, { name: 'Island' });
-        const ssr = createSSR().use(boundaryPlugin('skip', () => ({
+        const ssr = createSSR({ plugins: [boundaryPlugin('skip', () => ({
             flush: 'skip',
             fallback: () => <p class="ph">loading widget</p>
-        })));
+        }))] });
         const html = await ssr.render((Island as any)({}));
         expect(html).toContain(
             '<div data-boundary="1" style="display:contents;"><p class="ph">loading widget</p></div><!--$c:1-->'
@@ -114,7 +115,7 @@ describe('flush: "skip" — wire bytes and hook contract', () => {
     it('a throwing fallback routes through the component error path', async () => {
         const Island = component(() => () => <div>content</div>, { name: 'Island' });
         const boom = () => { throw new Error('fallback boom'); };
-        const ssr = createSSR().use(boundaryPlugin('skip', () => ({ flush: 'skip', fallback: boom as any })));
+        const ssr = createSSR({ plugins: [boundaryPlugin('skip', () => ({ flush: 'skip', fallback: boom as any }))] });
         const html = await ssr.render((Island as any)({}));
         expect(html).toContain('<!--ssr-error:1-->');
         expect(html).toContain('</div><!--$c:1-->');
@@ -132,14 +133,14 @@ describe('flush: "skip" — wire bytes and hook contract', () => {
                 afterRenderComponent: () => { after(); }
             }
         };
-        await createSSR().use(plugin).render((Island as any)({}));
+        await createSSR({ plugins: [plugin] }).render((Island as any)({}));
         expect(transform).not.toHaveBeenCalled();
         expect(after).not.toHaveBeenCalled();
     });
 
     it('core derives the props snapshot when the plugin omits props', async () => {
         const Island = component(() => () => <div>x</div>, { name: 'Island' });
-        const ssr = createSSR().use(boundaryPlugin('skip', () => ({ flush: 'skip' })));
+        const ssr = createSSR({ plugins: [boundaryPlugin('skip', () => ({ flush: 'skip' }))] });
         const html = await ssr.render((Island as any)({ start: 5, onClick: () => {} }));
         expect(html).toContain('"props":{"start":5}');
         expect(html).not.toContain('onClick');
@@ -147,7 +148,7 @@ describe('flush: "skip" — wire bytes and hook contract', () => {
 
     it('a plugin-supplied props snapshot wins over the core derivation', async () => {
         const Island = component(() => () => <div>x</div>, { name: 'Island' });
-        const ssr = createSSR().use(boundaryPlugin('skip', () => ({ flush: 'skip', props: { only: 1 } })));
+        const ssr = createSSR({ plugins: [boundaryPlugin('skip', () => ({ flush: 'skip', props: { only: 1 } }))] });
         const html = await ssr.render((Island as any)({ start: 5 }));
         expect(html).toContain('"props":{"only":1}');
         expect(html).not.toContain('"start":5');
@@ -157,7 +158,7 @@ describe('flush: "skip" — wire bytes and hook contract', () => {
 describe('flush axis × async setup work — the truth table', () => {
     it('flush:"inline" blocks a streaming async component in place', async () => {
         const Async = makeAsyncComponent('inline-under-stream');
-        const ssr = createSSR().use(boundaryPlugin('inline', () => ({ flush: 'inline' })));
+        const ssr = createSSR({ plugins: [boundaryPlugin('inline', () => ({ flush: 'inline' }))] });
         const out = await collectStream(ssr.renderStream((Async as any)({})) as ReadableStream<string>);
         expect(out).toContain('>42<');
         expect(out).not.toContain('data-async-placeholder');
@@ -166,7 +167,7 @@ describe('flush axis × async setup work — the truth table', () => {
 
     it('flush:"stream" in string mode degrades to block', async () => {
         const Async = makeAsyncComponent('stream-under-string');
-        const ssr = createSSR().use(boundaryPlugin('stream', () => ({ flush: 'stream' })));
+        const ssr = createSSR({ plugins: [boundaryPlugin('stream', () => ({ flush: 'stream' }))] });
         const html = await ssr.render((Async as any)({}));
         expect(html).toContain('>42<');
         expect(html).not.toContain('data-async-placeholder');
@@ -174,7 +175,7 @@ describe('flush axis × async setup work — the truth table', () => {
 
     it('flush:"stream" with no async work renders inline (nothing to defer)', async () => {
         const Sync = component(() => () => <div class="sync">ok</div>, { name: 'Sync' });
-        const ssr = createSSR().use(boundaryPlugin('stream', () => ({ flush: 'stream' })));
+        const ssr = createSSR({ plugins: [boundaryPlugin('stream', () => ({ flush: 'stream' }))] });
         const out = await collectStream(ssr.renderStream((Sync as any)({})) as ReadableStream<string>);
         expect(out).toContain('<div class="sync">ok</div>');
         expect(out).not.toContain('data-async-placeholder');
@@ -183,10 +184,10 @@ describe('flush axis × async setup work — the truth table', () => {
 
     it('flush:"stream" streams an async component with a boundary fallback in place of the initial pass', async () => {
         const Async = makeAsyncComponent('stream-fallback');
-        const ssr = createSSR().use(boundaryPlugin('stream', () => ({
+        const ssr = createSSR({ plugins: [boundaryPlugin('stream', () => ({
             flush: 'stream',
             fallback: () => <p class="wait">waiting</p>
-        })));
+        }))] });
         const out = await collectStream(ssr.renderStream((Async as any)({})) as ReadableStream<string>);
         // Fallback inside the placeholder, not the component's pre-data render
         expect(out).toContain('style="display:contents;"><p class="wait">waiting</p></div>');
@@ -214,7 +215,7 @@ describe('flush axis × async setup work — the truth table', () => {
             });
             return () => <div class="state">{data.state}</div>;
         }, { name: 'Failing' });
-        const ssr = createSSR().use(boundaryPlugin('inline', () => ({ flush: 'inline' })));
+        const ssr = createSSR({ plugins: [boundaryPlugin('inline', () => ({ flush: 'inline' }))] });
         const out = await collectStream(ssr.renderStream((Failing as any)({})) as ReadableStream<string>);
         // Value-first async: the rejection is a value (match's error arm),
         // rendered inline because the boundary blocked — no streamed replacement.

@@ -11,12 +11,12 @@
  * and the component chunk itself loads only when a handler writes state
  * (upgrade-on-write).
  *
- * @example server
+ * @example server (the entry-server's per-request app factory)
  * ```ts
- * import { createSSR } from '@sigx/server-renderer';
+ * import { defineApp } from 'sigx';
  * import { resumePlugin } from '@sigx/resume';
  *
- * const ssr = createSSR().use(resumePlugin({ manifest }));
+ * const app = defineApp(<App />).use(resumePlugin({ manifest }));
  * ```
  *
  * The client entry is `@sigx/resume/client` (lazy-loaded on first

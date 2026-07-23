@@ -1,4 +1,6 @@
 import { defineApp } from 'sigx';
+import { resumePlugin } from '@sigx/resume';
+import { resumeManifest } from 'virtual:sigx-manifests';
 import { App } from './App';
 import { Poll } from './resume/Poll';
 import { requestSummary } from './api.server';
@@ -14,11 +16,16 @@ export const refreshComponents = { Poll };
 /**
  * Per-request app factory (docs/router-ssr-contract.md §1).
  *
+ * The resume pack installs HERE (#413: `app.use(...)` is the one install
+ * shape) — its manifest comes from `virtual:sigx-manifests` (inlined by the
+ * SSR build; undefined under dev, where resume runs manifest-less).
+ *
  * The `await` is a server function called IN-PROCESS — a direct invocation,
  * no HTTP hop. It reads the live document request through the ambient scope
  * every handler opens around a render (rfc-server §7 v1.1, #309); the same
  * function called from the browser goes over the wire instead.
  */
 export async function createApp(_url: string) {
-    return defineApp(<App ssrRequest={await requestSummary()} />);
+    return defineApp(<App ssrRequest={await requestSummary()} />)
+        .use(resumePlugin({ manifest: resumeManifest }));
 }

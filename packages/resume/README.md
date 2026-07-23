@@ -19,14 +19,25 @@ the component chunk itself loads only when a handler writes state
 
 ## Server
 
-```ts
-import { createSSR } from '@sigx/server-renderer';
-import { resumePlugin } from '@sigx/resume';
-import manifest from './dist/client/.vite/sigx-resume-manifest.json';
+The pack installs on the app — `app.use(...)` is the one install shape
+(#413). The natural home is the entry-server's per-request app factory; the
+manifest comes from `virtual:sigx-manifests` (inlined by the SSR build,
+`undefined` under dev, where resume runs manifest-less):
 
-const ssr = createSSR().use(resumePlugin({ manifest }));
-const html = await ssr.render(<App />);
+```ts
+// src/entry-server.tsx
+import { defineApp } from 'sigx';
+import { resumePlugin } from '@sigx/resume';
+import { resumeManifest } from 'virtual:sigx-manifests';
+
+export function createApp(url: string) {
+    return defineApp(<App />).use(resumePlugin({ manifest: resumeManifest }));
+}
 ```
+
+Any render method that receives the App picks the pack up from there —
+`createSSR().render(app)`, `createRequestHandler({ app })`,
+`createFetchHandler({ app })`.
 
 Components stamped by the transform (`__resumeId`) become boundaries with
 `hydrate: 'never'` — core schedules nothing; the pack's delegation owns all
@@ -49,8 +60,8 @@ update without ever loading its chunk.
 import { createBoundaryRefresh } from '@sigx/resume/server';
 
 const renderBoundaries = createBoundaryRefresh({
-    ssr,                              // the instance with resumePlugin()
-    components: { Tracker, Cart }     // registry key → server component
+    plugins: [resumePlugin({ manifest })], // or omit and let `app` carry them
+    components: { Tracker, Cart }          // registry key → server component
 });
 // handleServerFnRequest(request, { fns, renderBoundaries })  (wire phase of #313)
 ```

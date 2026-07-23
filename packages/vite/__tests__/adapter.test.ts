@@ -147,6 +147,68 @@ describe('virtual:sigx-app in serve mode', () => {
     });
 });
 
+describe('virtual:sigx-manifests (#413)', () => {
+    it('serves undefined manifests in dev — packs run manifest-less there', () => {
+        const plugin = sigxPlugin({ ssr: { entry: ENTRY } }) as any;
+        plugin.configResolved({
+            command: 'serve',
+            root: process.cwd(),
+            base: '/',
+            environments: {},
+            plugins: []
+        });
+        expect(plugin.resolveId('virtual:sigx-manifests')).toBe('\0virtual:sigx-manifests');
+        const code = plugin.load.call({ environment: { name: 'ssr' } }, '\0virtual:sigx-manifests');
+        expect(code).toContain('export const islandsManifest = undefined');
+        expect(code).toContain('export const resumeManifest = undefined');
+    });
+
+    it('inlines the pack manifests from the client outDir at build time', async () => {
+        const { mkdtempSync, writeFileSync, mkdirSync, rmSync } = await import('node:fs');
+        const { tmpdir } = await import('node:os');
+        const { join } = await import('node:path');
+        const dir = mkdtempSync(join(tmpdir(), 'sigx-manifests-'));
+        try {
+            mkdirSync(join(dir, '.vite'), { recursive: true });
+            writeFileSync(
+                join(dir, '.vite', 'sigx-islands-manifest.json'),
+                JSON.stringify({ version: 2, islands: { Counter: { chunkUrl: '/c.js', exportName: 'Counter' } } })
+            );
+            const plugin = sigxPlugin({ ssr: { entry: ENTRY } }) as any;
+            plugin.configResolved({
+                command: 'build',
+                root: dir,
+                base: '/',
+                environments: { client: { build: { outDir: '.' } } },
+                plugins: []
+            });
+            const code = plugin.load.call({ environment: { name: 'ssr' } }, '\0virtual:sigx-manifests');
+            expect(code).toContain('"Counter"');
+            expect(code).toContain('export const resumeManifest = undefined');
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
+    });
+
+    it('warns and serves undefineds for client-environment imports at build time', () => {
+        const plugin = sigxPlugin({ ssr: { entry: ENTRY } }) as any;
+        plugin.configResolved({
+            command: 'build',
+            root: process.cwd(),
+            base: '/',
+            environments: {},
+            plugins: []
+        });
+        const warn = vi.fn();
+        const code = plugin.load.call(
+            { environment: { name: 'client' }, warn },
+            '\0virtual:sigx-manifests'
+        );
+        expect(warn).toHaveBeenCalled();
+        expect(code).toContain('export const islandsManifest = undefined');
+    });
+});
+
 describe('virtual:sigx-app codegen error surfaces', () => {
     it('treats a CORRUPT optional manifest as a loud, named error — not as absent', async () => {
         const { mkdtempSync, writeFileSync, mkdirSync, rmSync } = await import('node:fs');

@@ -4,6 +4,24 @@
 
 ### Added
 
+- **The app-plugin face: `@sigx/server/plugin` (#413, #411).** A new entry
+  (the only one importing the sigx runtime — the dependency-free `./client`
+  stub entry is untouched) exporting `serverPlugin({ transport, types })`
+  for `app.use(...)`:
+  - `transport` installs the stub transport (endpoint/headers/fetch) via
+    `configureServerFn`, with teardown on the app's disposables that clears
+    it only while it is still the active transport (dev warns when
+    overwriting another app's live transport).
+  - `types` is the **one-registration story for custom types (#411)**: a
+    single `TypeHandler[]` stamps BOTH the RPC wire codec
+    (`__SIGX_SERVERFN_CODEC__`, now tag-keyed — same-tag re-registration
+    replaces, so per-request server-app installs are idempotent) and the
+    state/boundary registry (`provideTypeHandlers`: the DI token plus the
+    browser `__SIGX_TYPE_HANDLERS__` mirror).
+  - `registerWireTypeHandlers(handlers)` — the standalone wire-codec
+    registration for app-less contexts (endpoint-only processes, zero-JS
+    loader pages).
+
 - **Single-flight boundary refresh — the wire** (rfc-server §6.3, #313).
   `serverFn({ refreshes })` declares which boundary components a mutation
   may refresh (array, or `(input, result) => keys` on the validated

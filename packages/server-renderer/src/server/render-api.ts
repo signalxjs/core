@@ -6,8 +6,9 @@
  * are simply no-ops, making these equivalent to calling `createSSR()`
  * directly — but with a simpler call signature for the common case.
  *
- * For plugin-driven rendering (islands, streaming async, etc.),
- * use `createSSR().use(plugin).render()` from `@sigx/server-renderer`.
+ * For plugin-driven rendering (islands, resume, etc.), install the pack on
+ * the app — `defineApp(<App />).use(pack())` — and pass the App here or to
+ * `createSSR().render()`; app-carried plugins are merged in per render.
  *
  * Entry points:
  * - `renderToString()` — full render to a single string

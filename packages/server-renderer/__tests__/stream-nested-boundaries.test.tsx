@@ -72,7 +72,7 @@ describe('streamed subtrees full of claimed boundaries', () => {
             );
         }, { name: 'Section' });
 
-        const ssr = createSSR().use(claimStamped);
+        const ssr = createSSR({ plugins: [claimStamped] });
         let html = '';
         for await (const chunk of ssr.renderChunks(<Section />)) html += chunk;
 
@@ -103,7 +103,7 @@ describe('streamed subtrees full of claimed boundaries', () => {
             return () => <i>{(data.value as number | undefined) ?? '…'}</i>;
         }, { name: 'Slow' });
 
-        const ssr = createSSR().use(claimStamped);
+        const ssr = createSSR({ plugins: [claimStamped] });
         let html = '';
         for await (const chunk of ssr.renderChunks(<div><Card id="shell" price={1} /><Slow /></div>)) html += chunk;
 

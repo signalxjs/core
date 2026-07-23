@@ -1,4 +1,6 @@
 import { defineApp } from 'sigx';
+import { islandsPlugin } from '@sigx/ssr-islands';
+import { islandsManifest } from 'virtual:sigx-manifests';
 import { App } from './App';
 
 /**
@@ -6,10 +8,14 @@ import { App } from './App';
  * request handlers consume. This page has no per-request state, but the
  * factory contract stays: a fresh app per request is what makes concurrent
  * SSR safe once state arrives.
+ *
+ * The islands pack installs HERE (#413: `app.use(...)` is the one install
+ * shape) — its manifest comes from `virtual:sigx-manifests` (inlined by the
+ * SSR build; undefined under dev, where islands runs manifest-less).
  */
 export function createApp(url: string) {
     // `?deferred` — the deferred-only variant page (see App.tsx): no island
     // can fire at load, so no sigx runtime may execute until one does.
     const deferred = url.includes('deferred');
-    return defineApp(<App deferred={deferred} />);
+    return defineApp(<App deferred={deferred} />).use(islandsPlugin({ manifest: islandsManifest }));
 }

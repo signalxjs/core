@@ -47,7 +47,7 @@ function makeCounter(clicks: number[] = []): any {
 
 /** SSR into the live document and install the boundary table. */
 async function mount(vnode: any): Promise<{ container: HTMLElement; table: Record<string, SSRBoundaryRecord>; id: number }> {
-    const ssr = createSSR().use(resumePlugin());
+    const ssr = createSSR({ plugins: [resumePlugin()] });
     const html = await ssr.render(vnode);
     const table = parseBoundaryTable(html);
     const container = document.createElement('div');

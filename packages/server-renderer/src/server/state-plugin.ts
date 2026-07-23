@@ -6,8 +6,8 @@
  * composables consume the blob on first use, so fetchers don't re-run after
  * hydration — no duplicate requests, no flicker.
  *
- * Opt-in: `createSSR().use(stateSerializationPlugin())`. The `renderDocument`
- * API enables it by default.
+ * Opt-in: `createSSR({ plugins: [stateSerializationPlugin()] })`. The
+ * `renderDocument` API enables it by default.
  *
  * Emission points:
  * - `getInjectedHTML`: everything resolved by shell time (blocked-inline

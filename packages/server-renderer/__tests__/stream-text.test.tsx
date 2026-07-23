@@ -114,7 +114,7 @@ describe('useStream — streaming mode', () => {
 
     it('captures the final text for state serialization (preScript before replace)', async () => {
         const Answer = makeAnswerComponent(['final ', 'text']);
-        const ssr = createSSR().use(stateSerializationPlugin());
+        const ssr = createSSR({ plugins: [stateSerializationPlugin()] });
         const html = await collectStream(ssr.renderStream((Answer as any)({})));
 
         const stateIdx = html.indexOf('"answer":"final text"');

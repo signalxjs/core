@@ -49,7 +49,7 @@ afterEach(() => {
 });
 
 async function mount(vnode: any): Promise<number> {
-    const html = await createSSR().use(claimAll).render(vnode);
+    const html = await createSSR({ plugins: [claimAll] }).render(vnode);
     const match = html.match(/window\.__SIGX_BOUNDARIES__=Object\.assign\(Object\.create\(null\),window\.__SIGX_BOUNDARIES__,([\s\S]*?)\);<\/script>/)!;
     const table = JSON.parse(match[1]);
     container.innerHTML = html.replace(/<script>[\s\S]*?<\/script>/g, '');
