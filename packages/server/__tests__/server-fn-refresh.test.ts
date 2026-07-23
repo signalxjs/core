@@ -440,3 +440,33 @@ describe('endpoint — non-pattern invalidates values (#452 review)', () => {
         warn.mockRestore();
     });
 });
+
+describe('endpoint — invalidates pattern hardening (#461 review)', () => {
+    it('drops a tuple with a non-JSON-safe element instead of failing the mutation', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const vote = serverFn({
+            handler: async () => 'ok',
+            invalidates: () => [['big', 1n], ['k'], ['nan', NaN]] as never
+        });
+        const res = await post(vote, { args: [{}] });
+        expect(res.status).toBe(200);
+        await expect(res.json()).resolves.toEqual({
+            data: 'ok',
+            $cache: { invalidates: [['k']] }
+        });
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining('non-JSON-safe'));
+        warn.mockRestore();
+    });
+
+    it('caps the pattern count at 64', async () => {
+        vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const vote = serverFn({
+            handler: async () => 'ok',
+            invalidates: () => Array.from({ length: 200 }, (_, i) => `k-${i}`)
+        });
+        const res = await post(vote, { args: [{}] });
+        const payload = (await res.json()) as { $cache?: { invalidates?: unknown[] } };
+        expect(payload.$cache?.invalidates).toHaveLength(64);
+        expect(payload.$cache?.invalidates?.[63]).toBe('k-63');
+    });
+});

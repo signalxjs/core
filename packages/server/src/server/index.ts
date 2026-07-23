@@ -162,14 +162,21 @@ function readBoundarySidecar(
     return descriptors.length > 0 ? { base, refresh: descriptors } : null;
 }
 
+/** Upper bound on `invalidates` patterns per call — a pathological output
+ *  must not balloon the envelope or the §6.3 gate's intersection work. */
+const MAX_INVALIDATE_PATTERNS = 64;
+
 /**
  * Resolve `invalidates` patterns to plain wire form (rfc-server §6.2): a
  * bare server-fn reference becomes its stable-key TUPLE (`[__sigxKey]` —
  * `useData(fn)`'s identity, and a prefix of every `[fn, ...args]` key);
  * fn references INSIDE a tuple resolve to their key string in place;
- * strings and plain tuples pass through. A reference without a
- * build-stamped key can never match anything — its pattern is dropped
- * with a dev warning naming the remedy.
+ * strings and JSON-primitive tuples pass through. Everything else is
+ * dropped with a dev warning: a reference without a build-stamped key can
+ * never match anything, and a non-JSON-safe tuple element (a `bigint`,
+ * say) would make `JSON.stringify(envelope)` throw and fail the whole
+ * MUTATION response — the same "JSON primitives + finite numbers"
+ * contract `useData` keys live under.
  */
 function resolveInvalidatePatterns(
     raw: unknown,
@@ -177,39 +184,50 @@ function resolveInvalidatePatterns(
 ): Array<string | readonly unknown[]> {
     if (!Array.isArray(raw)) return [];
     const out: Array<string | readonly unknown[]> = [];
-    const warnUnstamped = (): void => {
+    const warnDropped = (reason: string): void => {
         if (__DEV__) {
             console.warn(
-                `[sigx server] "${fnName}" \`invalidates\` contains a server-fn reference ` +
-                `with no build-stamped key (__sigxKey) — pattern dropped. The Vite ` +
-                `transform stamps keys onto \`*.server.ts\` wrappers; outside it, use a ` +
-                `string/tuple pattern instead.`
+                `[sigx server] "${fnName}" \`invalidates\` ${reason} — pattern dropped. ` +
+                `Patterns are canonical strings, JSON-primitive tuples, or build-stamped ` +
+                `server-fn references.`
             );
         }
     };
-    for (const pattern of raw) {
+    if (__DEV__ && raw.length > MAX_INVALIDATE_PATTERNS) {
+        console.warn(
+            `[sigx server] "${fnName}" \`invalidates\` returned ${raw.length} patterns — ` +
+            `capped at ${MAX_INVALIDATE_PATTERNS}.`
+        );
+    }
+    for (const pattern of raw.slice(0, MAX_INVALIDATE_PATTERNS)) {
         if (typeof pattern === 'function') {
             const key = (pattern as { __sigxKey?: unknown }).__sigxKey;
             if (typeof key === 'string' && key !== '') out.push([key]);
-            else warnUnstamped();
+            else warnDropped('contains a server-fn reference with no build-stamped key (__sigxKey)');
             continue;
         }
         if (Array.isArray(pattern)) {
             let mapped: unknown[] | undefined;
-            let dropped = false;
+            let dropped: string | undefined;
             for (let i = 0; i < pattern.length; i++) {
                 const el = pattern[i] as unknown;
-                if (typeof el !== 'function') continue;
-                const key = (el as { __sigxKey?: unknown }).__sigxKey;
-                if (typeof key === 'string' && key !== '') {
-                    (mapped ??= pattern.slice())[i] = key;
-                } else {
-                    dropped = true;
+                if (typeof el === 'function') {
+                    const key = (el as { __sigxKey?: unknown }).__sigxKey;
+                    if (typeof key === 'string' && key !== '') {
+                        (mapped ??= pattern.slice())[i] = key;
+                        continue;
+                    }
+                    dropped = 'contains a server-fn reference with no build-stamped key (__sigxKey)';
                     break;
                 }
+                const t = typeof el;
+                if (el === null || t === 'string' || t === 'boolean') continue;
+                if (t === 'number' && Number.isFinite(el as number)) continue;
+                dropped = `contains a non-JSON-safe tuple element (${t})`;
+                break;
             }
-            if (dropped) {
-                warnUnstamped();
+            if (dropped !== undefined) {
+                warnDropped(dropped);
                 continue;
             }
             out.push((mapped ?? pattern) as readonly unknown[]);
@@ -221,13 +239,7 @@ function resolveInvalidatePatterns(
         }
         // Typed away, but `invalidates` output is runtime data — junk must
         // never reach the wire contract (string | tuple only).
-        if (__DEV__) {
-            console.warn(
-                `[sigx server] "${fnName}" \`invalidates\` returned a non-pattern value ` +
-                `(${typeof pattern}) — dropped. Patterns are canonical strings, tuples, ` +
-                `or server-fn references.`
-            );
-        }
+        warnDropped(`returned a non-pattern value (${typeof pattern})`);
     }
     return out;
 }
