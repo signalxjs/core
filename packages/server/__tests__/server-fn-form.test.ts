@@ -29,6 +29,18 @@ const MessageSchema: StandardSchemaV1<{ message: string }> = {
     }
 };
 
+/**
+ * #412's escape hatch: form targets REQUIRE `input` (definition-time error);
+ * a deliberate raw-field-map target declares a pass-through schema.
+ */
+const PassThrough: StandardSchemaV1<Record<string, unknown>> = {
+    '~standard': {
+        version: 1,
+        vendor: 'test',
+        validate: (value: unknown) => ({ value: value as Record<string, unknown> })
+    }
+};
+
 const submit = serverFn({
     form: true,
     input: MessageSchema,
@@ -37,6 +49,7 @@ const submit = serverFn({
 const jsonOnly = serverFn(async (_rq, a: number) => a);
 const withRedirect = serverFn({
     form: true,
+    input: PassThrough,
     handler: async (rq) => {
         rq.responseHeaders.set('location', '/thanks');
         return null;
@@ -44,6 +57,7 @@ const withRedirect = serverFn({
 });
 const ownStatus = serverFn({
     form: true,
+    input: PassThrough,
     handler: async (rq) => {
         rq.status(200);
         return 'owned';
@@ -51,6 +65,7 @@ const ownStatus = serverFn({
 });
 const mutating = serverFn({
     form: true,
+    input: PassThrough,
     invalidates: () => [['cart']],
     handler: async () => 'done'
 });
@@ -140,6 +155,7 @@ describe('form-mode success — 303 PRG (§6.4)', () => {
         let seen: Record<string, unknown> | undefined;
         const catcher = serverFn({
             form: true,
+            input: PassThrough,
             handler: async (_rq, input: Record<string, unknown>) => {
                 seen = input;
                 return null;
@@ -157,6 +173,7 @@ describe('form-mode success — 303 PRG (§6.4)', () => {
         let seen: Record<string, unknown> | undefined;
         const catcher = serverFn({
             form: true,
+            input: PassThrough,
             handler: async (_rq, input: Record<string, unknown>) => {
                 seen = input;
                 return null;
@@ -171,6 +188,7 @@ describe('form-mode success — 303 PRG (§6.4)', () => {
         const keys = vi.fn(() => [['cart']]);
         const fn = serverFn({
             form: true,
+            input: PassThrough,
             invalidates: keys,
             handler: async () => 'done'
         });
@@ -283,6 +301,7 @@ describe('errors fork on request content-type, never on the fn (§6.4)', () => {
     it('a thrown ServerFnError renders as HTML on the form path', async () => {
         const thrower = serverFn({
             form: true,
+            input: PassThrough,
             handler: async () => {
                 throw new ServerFnError(409, 'already submitted');
             }
@@ -320,6 +339,7 @@ describe('errors fork on request content-type, never on the fn (§6.4)', () => {
     it('a timeout on the form path is a 504 HTML page', async () => {
         const hung = serverFn({
             form: true,
+            input: PassThrough,
             handler: () => new Promise<never>(() => {})
         });
         const onError = vi.fn();
@@ -344,11 +364,12 @@ describe('errors fork on request content-type, never on the fn (§6.4)', () => {
     });
 });
 
-describe('__DEV__ definition warnings (§6.4)', () => {
+describe('definition-time checks (§6.4, #412)', () => {
     it('form + cache warns (a form target is a mutation)', () => {
         const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
         serverFn({
             form: true,
+            input: PassThrough,
             cache: { maxAge: 60 },
             handler: async function conflicted() {
                 return 1;
@@ -357,18 +378,34 @@ describe('__DEV__ definition warnings (§6.4)', () => {
         expect(warn).toHaveBeenCalledWith(expect.stringContaining('a form target is a mutation'));
     });
 
-    it('form without input warns (validator is load-bearing)', () => {
-        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-        serverFn({
-            form: true,
-            handler: async function bare() {
-                return 1;
-            }
-        });
-        expect(warn).toHaveBeenCalledWith(expect.stringContaining('Declare a validator'));
+    it('form without input throws at definition (validator is load-bearing)', () => {
+        expect(() =>
+            serverFn({
+                form: true,
+                handler: async function bare() {
+                    return 1;
+                }
+            })
+        ).toThrow(/`input`/);
     });
 
-    it('form with input does not warn', () => {
+    it('form without input throws in production too — not __DEV__-gated', () => {
+        vi.stubEnv('NODE_ENV', 'production');
+        try {
+            expect(() =>
+                serverFn({
+                    form: true,
+                    handler: async function bare() {
+                        return 1;
+                    }
+                })
+            ).toThrow(/`input`/);
+        } finally {
+            vi.unstubAllEnvs();
+        }
+    });
+
+    it('form with input does not warn or throw', () => {
         const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
         serverFn({
             form: true,
@@ -376,5 +413,20 @@ describe('__DEV__ definition warnings (§6.4)', () => {
             handler: async (_rq, input) => input
         });
         expect(warn).not.toHaveBeenCalled();
+    });
+
+    it('a pass-through schema is the deliberate raw-field-map opt-out', async () => {
+        let seen: Record<string, unknown> | undefined;
+        const raw = serverFn({
+            form: true,
+            input: PassThrough,
+            handler: async (_rq, input) => {
+                seen = input;
+                return null;
+            }
+        });
+        const res = await formPost('raw', new URLSearchParams({ any: 'thing' }), {}, { resolve: () => raw });
+        expect(res.status).toBe(303);
+        expect(seen).toEqual({ any: 'thing' });
     });
 });

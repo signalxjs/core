@@ -23,6 +23,7 @@ const collect = async <T,>(iterable: AsyncIterable<T>): Promise<T[]> => {
 };
 
 afterEach(() => {
+    vi.restoreAllMocks();
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
     configureServerFn(null);
@@ -81,6 +82,9 @@ const lines = async (res: Response): Promise<unknown[]> =>
 
 describe('serverStream — endpoint NDJSON', () => {
     it('streams {"chunk"} lines then {"done":1} as application/x-ndjson', async () => {
+        // Silence the #412 unvalidated-wire-args warning — wire args on a
+        // stream are exactly what it fires on.
+        vi.spyOn(console, 'warn').mockImplementation(() => {});
         const s = serverStream(async function* (_rq, upTo: number) {
             for (let i = 1; i <= upTo; i++) yield `part-${i}`;
         });
@@ -444,9 +448,52 @@ describe('__serverStreamStub', () => {
 
 describe('serverStream — composition sanity', () => {
     it('a regular serverFn is unaffected by the stream branch', async () => {
+        vi.spyOn(console, 'warn').mockImplementation(() => {});
         const add = serverFn(async (_rq, a: number, b: number) => a + b);
         const res = await post(add, '{"args":[2,3]}');
         expect(res.headers.get('content-type')).toBe('application/json');
         await expect(res.json()).resolves.toEqual({ data: 5 });
+    });
+});
+
+/* ------------------------------------------------------------------ */
+/* unvalidated wire args (#412)                                       */
+/* ------------------------------------------------------------------ */
+
+describe('serverStream — unvalidated wire args (#412)', () => {
+    it('warns once on a wire call with args, pointing at in-body validation', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const s = serverStream(async function* (_rq, upTo: number) {
+            for (let i = 1; i <= upTo; i++) yield i;
+        });
+        await post(s, '{"args":[2]}');
+        expect(warn).toHaveBeenCalledOnce();
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining('serverStream'));
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining('top of the generator'));
+        await post(s, '{"args":[3]}');
+        expect(warn).toHaveBeenCalledOnce();
+    });
+
+    it('does not warn for zero-arg wire calls or in-process iteration', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const zero = serverStream(async function* () {
+            yield 'x';
+        });
+        await post(zero);
+        const inProc = serverStream(async function* (_rq, upTo: number) {
+            for (let i = 1; i <= upTo; i++) yield i;
+        });
+        await expect(collect(inProc(2))).resolves.toEqual([1, 2]);
+        expect(warn).not.toHaveBeenCalled();
+    });
+
+    it('is silent in production', async () => {
+        vi.stubEnv('NODE_ENV', 'production');
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const s = serverStream(async function* (_rq, upTo: number) {
+            yield upTo;
+        });
+        await post(s, '{"args":[2]}');
+        expect(warn).not.toHaveBeenCalled();
     });
 });
