@@ -167,7 +167,7 @@ describe('serverFn — options form', () => {
             ],
             handler: async () => 'never'
         });
-        const error = await fn(undefined as never).catch((e: unknown) => e);
+        const error = await fn().catch((e: unknown) => e);
         expect(isServerFnError(error)).toBe(true);
         expect((error as ServerFnError).status).toBe(401);
     });
@@ -266,5 +266,46 @@ describe('serverFn — .with({ signal }) per-call options (#353)', () => {
         );
         expect(ignored).toHaveLength(2);
         warn.mockRestore();
+    });
+});
+
+describe('serverFn — options form with an input-less handler (#451)', () => {
+    it('is callable with zero arguments', async () => {
+        let hits = 0;
+        const bump = serverFn({
+            handler: async () => {
+                hits += 1;
+                return hits;
+            }
+        });
+        // The compile-level point of #451: no argument required. Before the
+        // `S = void` default, an input-less handler inferred S = `unknown`
+        // and this call was "Expected 1 arguments, but got 0".
+        await expect(bump()).resolves.toBe(1);
+        // @ts-expect-error — zero-arg fn takes no input
+        await expect(bump(1)).resolves.toBe(2);
+    });
+
+    it('still infers the input type when a schema is declared', async () => {
+        const fn = serverFn({
+            input: schema,
+            handler: async (_rq, input) => input.id.toUpperCase()
+        });
+        await expect(fn({ id: 'ab' })).resolves.toBe('AB');
+        // @ts-expect-error — schema-typed input, not zero-arg
+        const bad: () => Promise<string> = fn;
+        void bad;
+    });
+
+    it('a two-param handler without a schema still resolves to the one-arg form', () => {
+        const fn = serverFn({
+            handler: async (_rq, n: number) => n * 2
+        });
+        // Not the zero-arg overload: the declared input survives.
+        const checked: (n: number) => Promise<number> = fn;
+        void checked;
+        // @ts-expect-error — input is required
+        const bad: () => Promise<number> = fn;
+        void bad;
     });
 });

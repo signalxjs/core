@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **Options-form `serverFn` with an input-less handler is now a zero-argument
+  callable (#451).** `serverFn({ handler: async () => … })` used to infer its
+  input as `unknown`, so calling the wrapped fn as `fn()` was a compile
+  error ("Expected 1 arguments, but got 0"). The options overload's input
+  type parameter now defaults to `void` when nothing infers it — no schema
+  and a `handler(rq)` / `handler()` signature — and the callable takes zero
+  arguments. Handlers that declare an input (via `input` schema or a typed
+  second parameter) are unaffected. Type-level only; no runtime change.
+
 ### Changed
 
 - **BREAKING (pre-1.0)**: `serverFn({ form: true })` without `input` is now

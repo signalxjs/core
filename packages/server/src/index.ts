@@ -164,7 +164,16 @@ export interface ServerFnOptions<S, R> {
 export function serverFn<A extends unknown[], R>(
     impl: (rq: ServerFnContext, ...args: A) => R | Promise<R>
 ): ServerFnCallable<A, Awaited<R>>;
-export function serverFn<S, R>(options: ServerFnOptions<S, R>): ServerFnCallable<[S], Awaited<R>>;
+// S defaults to `void` — an input-less handler (`handler(rq)` / `handler()`)
+// gives S no inference source, so it falls to the default and the callable
+// takes ZERO arguments: `vote()`, not `vote(undefined)` (#451). A separate
+// no-input overload can't do this: overload resolution with a
+// context-sensitive handler drops `(rq)` to implicit `any` at two-param
+// call sites (TS quirk), while a lone signature contextually types every
+// form correctly.
+export function serverFn<S = void, R = unknown>(
+    options: ServerFnOptions<S, R>
+): ServerFnCallable<[S] extends [void] ? [] : [S], Awaited<R>>;
 export function serverFn(
     arg: ((rq: ServerFnContext, ...args: unknown[]) => unknown) | ServerFnOptions<unknown, unknown>
 ): ServerFnCallable<unknown[], unknown> {
