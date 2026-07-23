@@ -3,7 +3,10 @@
  * scenarios measured with mitata's measure() under a reduced sample budget
  * (mitata's default is ~642ms of measured CPU time per bench; we cut that
  * down), plus one streaming measurement (renderToNodeStream of
- * large-table-1k, TTFB + total over a handful of iterations).
+ * large-table-1k, TTFB + total over a handful of iterations), plus the
+ * reduced request-path subset from `src/micro/` (server functions, the
+ * boundary codec, the §6.3 gate, the SSR packs) and the packs' deterministic
+ * payload sizes.
  *
  * Writes results/quick-latest.json. Pass --baseline to also merge the data
  * into results/baseline.json under the `quick` key, so check-regression.ts
@@ -13,6 +16,8 @@
 import { measure } from 'mitata';
 import { loadSigx } from './load-adapters.ts';
 import type { ScenarioName } from './adapters/types.ts';
+import { SUITES } from './micro/index.ts';
+import type { ByteMetric } from './micro/types.ts';
 import { resultsMeta, writeResults, mergeBaseline, type ResultsMeta } from './results.ts';
 
 const STRING_SCENARIOS: ScenarioName[] = ['escape-heavy', 'escape-clean', 'small-page', 'large-table-1k'];
@@ -43,10 +48,21 @@ export interface QuickStreamResult {
     }>;
 }
 
+/** One request-path bench from the reduced micro subset (`quick: true`). */
+export interface QuickMicroResult {
+    suite: string;
+    name: string;
+    stats: { avgNs: number; p50Ns: number; samples: number };
+}
+
 export interface QuickPayload {
     meta: ResultsMeta;
     string: QuickStringResult[];
     stream: QuickStreamResult;
+    /** Request-path timings (`src/micro/`) — gated like the string benches. */
+    micro?: QuickMicroResult[];
+    /** Deterministic payload sizes — gated tighter, never fingerprint-skipped. */
+    bytes?: ByteMetric[];
 }
 
 function medianNs(samples: bigint[]): bigint {
@@ -100,8 +116,36 @@ async function main(): Promise<void> {
     };
     console.log(`  ${`${STREAM_SCENARIO} (stream)`.padEnd(16)} ttfb p50 ${stream.results[0].ttfbMs.p50} ms, total p50 ${stream.results[0].totalMs.p50} ms  (${STREAM_ITERATIONS} iterations)`);
 
+    // The request-path subset (server functions, codec, the §6.3 gate, the
+    // packs) — the same bench definitions the full micro run uses, filtered
+    // to the ones marked `quick`, under the same reduced budget as above.
+    const micro: QuickMicroResult[] = [];
+    const byteMetrics: ByteMetric[] = [];
+    for (const suite of SUITES) {
+        for (const bench of (await suite.benches()).filter((b) => b.quick)) {
+            try {
+                await bench.check();
+            } catch (error) {
+                console.error(`\n[quick] ${bench.suite}/${bench.name} FAILED its correctness guard:`);
+                console.error(`  ${error instanceof Error ? error.message : String(error)}`);
+                process.exit(1);
+            }
+            const stats = await measure(() => bench.run(), MEASURE_OPTS);
+            micro.push({
+                suite: bench.suite,
+                name: bench.name,
+                stats: { avgNs: stats.avg, p50Ns: stats.p50, samples: stats.samples.length }
+            });
+            console.log(`  ${`${bench.suite}/${bench.name}`.padEnd(40)} p50 ${toMs(stats.p50).toFixed(4).padStart(9)} ms`);
+        }
+        if (suite.bytes) byteMetrics.push(...(await suite.bytes()));
+    }
+    for (const metric of byteMetrics) {
+        console.log(`  ${`${metric.suite}/${metric.name} (bytes)`.padEnd(40)} ${String(metric.bytes).padStart(9)}`);
+    }
+
     const meta = resultsMeta();
-    const payload: QuickPayload = { meta, string: stringResults, stream };
+    const payload: QuickPayload = { meta, string: stringResults, stream, micro, bytes: byteMetrics };
     const file = writeResults('quick-latest.json', payload);
     console.log(`\nwrote ${file} (suite took ${((Date.now() - started) / 1000).toFixed(1)}s)`);
 

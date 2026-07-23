@@ -3,17 +3,25 @@
     "version": "0.0.0",
     "private": true,
     "type": "module",
-    "description": "Comparative SSR benchmarks: sigx vs Vue vs React vs Preact",
+    "description": "Comparative SSR benchmarks (sigx vs Vue vs React vs Preact) plus sigx request-path micro benches",
     "scripts": {
         "bench": "node --conditions production src/verify-equivalence.ts && node --conditions production src/run-all.ts",
         "bench:stream": "node --conditions production src/run-stream.ts",
+        "bench:micro": "node --conditions production src/run-micro.ts",
+        "bench:micro:baseline": "node --conditions production src/run-micro.ts --baseline",
         "bench:quick": "node --conditions production src/quick.ts && node --conditions production src/check-regression.ts",
         "bench:quick:enforce": "node --conditions production src/quick.ts && node --conditions production src/check-regression.ts --enforce",
-        "bench:baseline": "node --conditions production src/run-all.ts --baseline && node --conditions production src/run-stream.ts --baseline && node --conditions production src/quick.ts --baseline",
-        "verify": "node --conditions production src/verify-equivalence.ts"
+        "bench:baseline": "node --conditions production src/run-all.ts --baseline && node --conditions production src/run-stream.ts --baseline && node --conditions production src/run-micro.ts --baseline && node --conditions production src/quick.ts --baseline",
+        "verify": "node --conditions production src/verify-equivalence.ts",
+        "typecheck": "tsc -p . --noEmit"
     },
     "devDependencies": {
+        "@sigx/cache": "workspace:*",
+        "@sigx/resume": "workspace:*",
+        "@sigx/serialize": "workspace:*",
+        "@sigx/server": "workspace:*",
         "@sigx/server-renderer": "workspace:*",
+        "@sigx/ssr-islands": "workspace:*",
         "@types/node": "^26.1.1",
         "@vue/server-renderer": "^3.5.39",
         "mitata": "^1.0.0",
