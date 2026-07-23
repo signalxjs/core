@@ -102,6 +102,12 @@ All 14 must read the new version. Only then does tier 1 begin.
 Identical for every repo. `X.Y` is the new core minor (e.g. `0.13`).
 
 ```sh
+# 0. SYNC THE LOCAL CHECKOUT FIRST. Not a formality — see the warning below.
+cd <repo>/main
+git fetch origin main
+git rev-list --count HEAD..origin/main    # MUST print 0 before you continue
+git pull --ff-only origin main
+
 # 1. Branch. NEVER work on main. --from main matters: `pnpm wt new` branches from
 #    the current HEAD, so running it inside another worktree drags that branch along.
 pnpm wt new <N>-align-core-X.Y --from main
@@ -117,6 +123,26 @@ pnpm build
 pnpm typecheck
 pnpm test
 ```
+
+> **Step 0 is where the first live rollout went wrong.** These local checkouts drift
+> — nothing routinely pulls them — and on the 0.13.0 run four of them were 2–10
+> commits behind, predating the catalog rollout entirely. Four agents independently
+> reported that `router`, `store`, `terminal` and `monaco-editor` had **no**
+> `sync:core`, **no** `verify:catalog` and **no** `catalog:` block, with core pinned
+> inline as far back as `^0.4.3`. Every one of those repos had carried the machinery
+> on its default branch for days.
+>
+> A stale checkout and a repo that never had the feature look **identical** from
+> inside the working copy, and the reports are confident and detailed either way.
+> The tell is the version: if a repo appears to be pinned several minors back, doubt
+> the checkout before you doubt the repo.
+>
+> If your working copy disagrees with what this runbook says should be there, re-sync
+> it. Confirm against the remote rather than the disk:
+>
+> ```sh
+> gh api repos/signalxjs/<repo>/contents/.github/workflows/core-sync.yml --jq .name
+> ```
 
 Then **verify the way the repo can be verified** (§5), open the PR with Copilot as
 reviewer, resolve every inline thread, and merge through the queue — the standard
@@ -164,15 +190,49 @@ only be superseded, never withdrawn. Two paths.
   manual step (`terminal`'s TUI showcase, `lynx`'s native build) where that is what it has
 - the PR merged with no Copilot feedback requiring a code change
 
-Then finish the job:
+Then finish the job. **The version bump goes through a PR — every `main` in this org is
+ruleset-guarded, so a direct push is rejected.** Do the bump on a branch, merge it, and
+only then tag the merged commit:
 
 ```sh
+# 1. Bump on a branch, never on main.
+pnpm wt new <N>-release-vX.Y.Z --from main
+cd <repo>/branches/<N>-release-vX.Y.Z
 node scripts/bump-version.js minor      # or patch — match what actually changed
-# update CHANGELOG.md, refresh the lockfile, commit, then:
-git tag -a vX.Y.Z -m "vX.Y.Z" && git push --follow-tags
+# update CHANGELOG.md, then refresh the lockfile so CI's --frozen-lockfile passes:
+pnpm install --lockfile-only
+git commit -am "chore: release vX.Y.Z"
+git push -u origin <N>-release-vX.Y.Z
+
+# 2. PR it, let CI run, merge it.
+gh pr create --base main --title "chore: release vX.Y.Z" --body "…"
+#    …Copilot review, resolve threads, merge…
+
+# 3. ONLY NOW tag — and tag the merged commit on main, not your branch.
+cd ../main && git pull --ff-only origin main
+git tag -a vX.Y.Z -m "vX.Y.Z" && git push origin vX.Y.Z
+
 gh run watch -R signalxjs/<repo>        # release.yml
 npm view <each published package> version   # confirm — partial tag runs are silent
 ```
+
+> **Why not `git push --follow-tags`.** On the 0.13.0 rollout an agent ran it against
+> `use`. The branch push was correctly rejected by the ruleset — but `--follow-tags`
+> had already pushed the **tag**, which fired `release.yml` against a commit that was
+> never on `main`. Tag present, release attempted, source absent: the worst of both.
+>
+> `gh api repos/OWNER/REPO/branches/main/protection` reports these mains as
+> **unprotected**, because they are guarded by *rulesets*, which that endpoint does
+> not see. Do not use it to decide whether a direct push is safe — assume it is not.
+> Check rulesets instead:
+>
+> ```sh
+> gh api repos/signalxjs/<repo>/rules/branches/main --jq '[.[].type]'
+> ```
+>
+> If a tag did fire against a commit that never landed, delete it before anything
+> else — `git push origin :refs/tags/vX.Y.Z` — and check npm, because a partially
+> succeeded publish cannot be undone and forces a version bump.
 
 ### Amber — stop after the merge and hand back
 

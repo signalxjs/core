@@ -46,6 +46,12 @@ jobs:
       - name: Verify ecosystem manifest
         run: pnpm verify:ecosystem
 
+      # The rollout orchestrator cannot be unit-tested (workflow scripts run with no
+      # filesystem or module access), so its tier barrier is pinned at source level —
+      # see #465, where the barrier silently could not fire.
+      - name: Verify rollout orchestrator
+        run: pnpm verify:orchestrator
+
       - name: Typecheck
         run: pnpm typecheck
 
