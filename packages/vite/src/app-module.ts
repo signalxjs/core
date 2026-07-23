@@ -28,6 +28,10 @@ export const APP_FILE = 'sigx-app.js';
 export const MANIFESTS_VIRTUAL_ID = 'virtual:sigx-manifests';
 export const MANIFESTS_RESOLVED_ID = '\0' + MANIFESTS_VIRTUAL_ID;
 
+// virtual:sigx-ssr-node lives in ./dev-runner.ts — an INTERNAL module, since
+// unlike these two it is wiring between the dev handler and the plugin rather
+// than something an app imports.
+
 /** Serve mode / client builds: no manifests, and none are needed. */
 export function generateManifestsServeCode(): string {
     return 'export const islandsManifest = undefined;\nexport const resumeManifest = undefined;\n';

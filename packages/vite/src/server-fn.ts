@@ -51,6 +51,7 @@ import { extractInlineServerFns, type InlineServerFnExtraction } from './server-
 import { computeStableId, type PackageProbe } from './server-extract.js';
 import { offsetToLoc } from './resume-extract.js';
 import { walkFiles } from './islands.js';
+import { isModuleResolutionError } from './dev-runner.js';
 
 export interface SigxServerOptions {
     /** Which modules are server modules. Default: `**` + `/*.server.{ts,tsx}`. */
@@ -524,13 +525,8 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
                 // failure — a broken install, a throw inside the entry —
                 // would otherwise leave SSR-time `rq.request` throwing with
                 // no clue why, so it gets logged.
+                if (isModuleResolutionError(err)) return;
                 const message = err instanceof Error ? err.message : String(err);
-                const notInstalled =
-                    (err as { code?: string } | null)?.code === 'ERR_MODULE_NOT_FOUND' ||
-                    /Failed to (resolve|load) (import|url)|Cannot find (module|package)/.test(
-                        message
-                    );
-                if (notInstalled) return;
                 server.config.logger.warn(
                     `[sigx:server] could not load @sigx/server/node — server functions ` +
                     `called during SSR will not see the request: ${message}`

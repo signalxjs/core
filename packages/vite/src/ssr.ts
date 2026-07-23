@@ -22,6 +22,7 @@
 import { readFile } from 'node:fs/promises';
 import { resolve as resolvePath } from 'node:path';
 import type { ViteDevServer } from 'vite';
+import { SSR_NODE_VIRTUAL_ID, isModuleResolutionError } from './dev-runner.js';
 
 /** Structural view of the pieces of the prod handler options we forward. */
 interface ForwardedHandlerOptions {
@@ -334,16 +335,30 @@ export async function createDevRequestHandler(
     const templatePath = resolvePath(vite.config.root, options.template ?? 'index.html');
     const entryExport = options.entryExport ?? 'createApp';
 
-    // The renderer must live in the SAME module graph as the app: the entry
-    // loads through Vite's SSR module runner (where the plugin's
-    // ssr.noExternal keeps the whole @sigx family), so the handler's
-    // renderer has to come through the runner too — a Node-resolved copy
-    // would carry its own DI token identities and never see the app's
-    // provides. When the family IS externalized, the runner resolves to
-    // Node's instances anyway, so this is consistent in both setups.
+    // The renderer must live in the SAME module graph as the app, or the DI
+    // tokens differ and every app-carried provide (`app.use(pack())`) is
+    // invisible to it. The load goes through `virtual:sigx-ssr-node`, a shim
+    // whose whole body is `export * from '@sigx/server-renderer/node'`, so
+    // the package sits behind an IMPORT: naming it as the root of an
+    // `ssrLoadModule` call would force the runner to inline it whatever the
+    // project's `ssr.external` says, while the app's own `@sigx/*` imports
+    // externalized — the two-graph split of #425. Behind an import the same
+    // decision applies to both. The direct specifier is the fallback for a
+    // dev server running this handler WITHOUT the `sigx()` plugin, where
+    // nothing resolves the virtual (and nothing sets noExternal either, so
+    // one graph is not at stake) — hence ONLY on a resolution failure. An
+    // error thrown from inside the renderer must surface as itself: retrying
+    // it as a root request would both bury the real cause and re-inline the
+    // module the shim exists to keep in the app's graph.
     async function loadHandlerFactory(): Promise<typeof import('@sigx/server-renderer/node')> {
-        return (await vite.ssrLoadModule('@sigx/server-renderer/node')) as unknown as
-            typeof import('@sigx/server-renderer/node');
+        try {
+            return (await vite.ssrLoadModule(SSR_NODE_VIRTUAL_ID)) as unknown as
+                typeof import('@sigx/server-renderer/node');
+        } catch (err) {
+            if (!isModuleResolutionError(err)) throw err;
+            return (await vite.ssrLoadModule('@sigx/server-renderer/node')) as unknown as
+                typeof import('@sigx/server-renderer/node');
+        }
     }
     // Fail fast at startup if the peer is missing.
     await loadHandlerFactory();

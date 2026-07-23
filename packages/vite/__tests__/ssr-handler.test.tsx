@@ -15,6 +15,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { ViteDevServer } from 'vite';
 import { component, defineApp } from 'sigx';
 import { createDevRequestHandler } from '../src/ssr';
+import { SSR_NODE_VIRTUAL_ID } from '../src/dev-runner';
 
 const TEMPLATE = `<!doctype html><html><head></head><body><div id="app"><!--ssr-outlet--></div></body></html>`;
 
@@ -62,9 +63,10 @@ function mockVite(entryModule: Record<string, unknown>): ViteDevServer {
             html.replace('<head>', '<head><script type="module" src="/@vite/client"></script>')),
         // The handler loads BOTH the renderer and the entry through the
         // module runner (one module graph); the mock serves the real node
-        // entry for the former.
+        // entry for the former, which the handler asks for through the
+        // `virtual:sigx-ssr-node` shim the `sigx()` plugin resolves (#425).
         ssrLoadModule: vi.fn(async (id: string) =>
-            id === '@sigx/server-renderer/node'
+            id === SSR_NODE_VIRTUAL_ID || id === '@sigx/server-renderer/node'
                 ? import('@sigx/server-renderer/node')
                 : entryModule),
         ssrFixStacktrace: vi.fn()
@@ -143,8 +145,56 @@ describe('createDevRequestHandler', () => {
         // and never see the app's provides ("useRouter() called without a
         // Router provided" in real dev servers).
         const rendererLoads = (vite.ssrLoadModule as any).mock.calls
-            .filter((c: string[]) => c[0] === '@sigx/server-renderer/node').length;
+            .filter((c: string[]) => c[0] === SSR_NODE_VIRTUAL_ID).length;
         expect(rendererLoads).toBeGreaterThan(0);
+    });
+
+    it('asks for the renderer through the virtual shim, never the bare package (#425)', async () => {
+        const vite = mockVite({ createApp: () => defineApp((Home as any)({})) });
+        const handler = await createDevRequestHandler(vite, { entry: '/src/entry-server.tsx' });
+        await run(handler, '/');
+        // Naming the package as the ROOT of an ssrLoadModule call forces the
+        // runner to inline it whatever `ssr.external` says, while the app's
+        // own @sigx imports externalize — two module graphs, two sets of DI
+        // tokens, and app-carried SSR plugins silently dropped. Behind the
+        // shim's `export *` the same external/noExternal decision reaches
+        // both.
+        const ids = (vite.ssrLoadModule as any).mock.calls.map((c: string[]) => c[0]);
+        expect(ids).toContain(SSR_NODE_VIRTUAL_ID);
+        expect(ids).not.toContain('@sigx/server-renderer/node');
+    });
+
+    it('falls back to the bare package when the shim does not resolve (no sigx() plugin)', async () => {
+        const vite = mockVite({ createApp: () => defineApp((Home as any)({})) });
+        // A dev server without the sigx() plugin has nobody to resolve the
+        // virtual — and no ssr.noExternal either, so one graph is not at
+        // stake and the direct specifier is correct.
+        (vite.ssrLoadModule as any).mockImplementation(async (id: string) => {
+            if (id === SSR_NODE_VIRTUAL_ID) throw new Error(`Failed to resolve import "${id}"`);
+            if (id === '@sigx/server-renderer/node') return import('@sigx/server-renderer/node');
+            return { createApp: () => defineApp((Home as any)({})) };
+        });
+        const handler = await createDevRequestHandler(vite, { entry: '/src/entry-server.tsx' });
+        const res = await run(handler, '/');
+        expect(res.status).toBe(200);
+        expect(res.body).toContain('<main class="dev">dev page</main>');
+    });
+
+    it('does NOT fall back when the renderer itself throws', async () => {
+        const vite = mockVite({ createApp: () => defineApp((Home as any)({})) });
+        // Retrying a module that resolved but threw would bury the real cause
+        // AND re-inline it as a root request — exactly the split the shim
+        // exists to close. Only "does not resolve" earns the fallback.
+        (vite.ssrLoadModule as any).mockImplementation(async (id: string) => {
+            if (id === SSR_NODE_VIRTUAL_ID) throw new Error('boom inside the renderer');
+            if (id === '@sigx/server-renderer/node') return import('@sigx/server-renderer/node');
+            return { createApp: () => defineApp((Home as any)({})) };
+        });
+        await expect(
+            createDevRequestHandler(vite, { entry: '/src/entry-server.tsx' })
+        ).rejects.toThrow('boom inside the renderer');
+        const ids = (vite.ssrLoadModule as any).mock.calls.map((c: string[]) => c[0]);
+        expect(ids).not.toContain('@sigx/server-renderer/node');
     });
 
     it('supports a custom entry export name', async () => {
