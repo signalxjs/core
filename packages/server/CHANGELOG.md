@@ -15,6 +15,18 @@
 
 ### Added
 
+- **Stable data keys + fn-ref `invalidates` (#452).** Wrapped fns and
+  client stubs carry the build-stamped `__sigxKey` (`<stableId>#<name>`;
+  the stub takes it as a new 4th positional, shifting the GET/refreshes
+  flags to 5th/6th). `invalidates` patterns may now be server-fn
+  references — bare (`() => [getVotes]`) or embedded in tuples — and the
+  endpoint resolves them to plain stable-key tuple patterns before
+  attaching `$cache.invalidates`, so the wire format (and `@sigx/cache`)
+  is unchanged. A reference with no stamped key can match nothing: its
+  pattern is dropped with a `__DEV__` warning. New exported types:
+  `ServerFnKeyRef`, `InvalidatePattern`; `ServerFnCallable` declares
+  `__sigxKey` (build-stamped) for `useData(fn)` keying DX.
+
 - **Unvalidated-wire-args dev warning (#412).** A direct-form `serverFn`
   (and `serverStream`) that receives wire arguments — over any transport,
   not in-process — now logs a once-per-function `__DEV__` warning: wire

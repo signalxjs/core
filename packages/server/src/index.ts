@@ -30,6 +30,7 @@
 import { resolveInProcessContext, type ServerFnContext } from './context';
 import { ServerFnError } from './errors';
 import type {
+    InvalidatePattern,
     ServerFnCallOptions,
     ServerFnCallable,
     ServerFnGuard,
@@ -41,11 +42,13 @@ import type {
 export { ServerFnError, isServerFnError, type ServerFnErrorShape } from './errors';
 export type { ServerFnContext } from './context';
 export type {
+    InvalidatePattern,
     ServerFnCallOptions,
     ServerFnCallable,
     ServerFnGuard,
     ServerFnInfo,
     ServerFnInvoke,
+    ServerFnKeyRef,
     StandardSchemaV1,
     WrappedServerFn
 } from './types';
@@ -102,7 +105,10 @@ export interface ServerFnOptions<S, R> {
      * the endpoint attaches the keys to the response envelope as
      * `$cache.invalidates`, and `@sigx/cache` feeds them to `invalidate()`
      * on arrival. Patterns follow `invalidate()`'s contract: a canonical
-     * string, or a tuple prefix (`['cart']` matches every cart key).
+     * string, a tuple prefix (`['cart']` matches every cart key), or a
+     * server-fn REFERENCE — `[getVotes]` or bare `getVotes` — which the
+     * endpoint resolves to the fn's stable-key tuple (`useData(getVotes)`'s
+     * identity), so the declaration stays same-module and rename-safe.
      * Wire-only — in-process calls skip it (there is no envelope).
      * TypeScript note: write it AFTER `handler` in the options literal —
      * context-sensitive members infer in textual order, so `result` falls
@@ -111,9 +117,7 @@ export interface ServerFnOptions<S, R> {
     invalidates?(
         input: S,
         result: Awaited<R>
-    ):
-        | ReadonlyArray<string | readonly unknown[]>
-        | Promise<ReadonlyArray<string | readonly unknown[]>>;
+    ): ReadonlyArray<InvalidatePattern> | Promise<ReadonlyArray<InvalidatePattern>>;
     /**
      * Single-flight boundary refresh (rfc-server §6.3): the component
      * registry keys (the resume transform's `__resumeId`) whose boundaries
@@ -289,6 +293,9 @@ export function serverFn(
             `(rfc-server §6.4). The function stays callable, but pick one.`
         );
     }
+    // The cast covers `__sigxKey` (declared required on the callable for
+    // `useData(fn)` DX): it is BUILD-stamped — the Vite transform appends
+    // the assignment to the SSR module — never minted here.
     return Object.assign(wrapper, {
         with: callWith,
         __sigxFn: invoke,
@@ -297,7 +304,7 @@ export function serverFn(
         ...(refreshes ? { __sigxRefreshes: refreshes } : {}),
         ...(cache ? { __sigxGet: true, __sigxCacheControl: cacheControlValue(cache) } : {}),
         ...(form ? { __sigxForm: true } : {})
-    });
+    }) as ServerFnCallable<unknown[], unknown>;
 }
 
 /** rfc-server §4.1's header-emission table, as one precomputed string. */

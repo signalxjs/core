@@ -25,9 +25,12 @@ import { hookOutsideSetupError } from './errors.js';
 import {
     resolveKeyResult,
     assertKeyArgShape,
+    isServerFnDataRef,
     type Falsy,
+    type KeyTuple,
     type KeyValue,
     type KeyWarnFlags,
+    type ServerFnDataRef,
 } from './async/key.js';
 import { INERT_IDLE_CELL } from './async/cell.js';
 import { ASYNC_ENGINE_TOKEN, defaultAsyncEngine } from './async/engine.js';
@@ -39,7 +42,7 @@ import {
     type Fetcher,
 } from './async/shared.js';
 
-export type { Falsy, KeyTuple, KeyValue } from './async/key.js';
+export type { Falsy, KeyTuple, KeyValue, ServerFnDataRef } from './async/key.js';
 export type { AsyncFetcherContext, Fetcher, MatchArms, AsyncState } from './async/shared.js';
 
 /**
@@ -61,6 +64,33 @@ export interface AsyncOptions {
 /** Option keys the default engine itself reads. */
 const handledReadOptionKeys: ReadonlySet<string> = new Set(['server']);
 
+/**
+ * Default fetcher for server-fn keys (#452): a fn-headed tuple
+ * `[fn, ...args]` calls `fn(...args)` — the RPC stub on the client, the
+ * real wrapper in-process during SSR. Any other key shape without an
+ * explicit fetcher is an authoring error (type-blocked; this throw is the
+ * runtime backstop).
+ */
+const refTupleFetcher = (raw: KeyValue, _ctx: AsyncFetcherContext): Promise<unknown> => {
+    if (Array.isArray(raw) && isServerFnDataRef(raw[0])) {
+        const args = raw.slice(1) as unknown as KeyTuple;
+        return Promise.resolve((raw[0] as unknown as ServerFnDataRef)(...args));
+    }
+    throw new TypeError(
+        '[useData] no fetcher given and the key is not a server-fn reference — only ' +
+        'useData(fn) / useData(() => [fn, ...args]) have a default fetcher.'
+    );
+};
+
+/** Server-fn key (#452): data identity IS the fn — canonical key
+ *  `'["<stableId>#<name>"]'`, default fetcher `() => fn()`. */
+export function useData<R>(fn: ServerFnDataRef<[], R>, opts?: AsyncOptions): AsyncState<Awaited<R>>;
+/** Reactive server-fn tuple key: `() => [fn, ...args]`; falsy ⇒ idle.
+ *  Default fetcher `fn(...args)`; args are the fn's own parameters. */
+export function useData<A extends KeyTuple, R>(
+    key: () => readonly [ServerFnDataRef<A, R>, ...A] | Falsy,
+    opts?: AsyncOptions
+): AsyncState<Awaited<R>>;
 /** Static key: runs on the server, serialized under `key`, restored on hydration. */
 export function useData<T>(key: string, fetcher: Fetcher<T, string>, opts?: AsyncOptions): AsyncState<T>;
 /** Reactive key: string or tuple; a falsy result skips the fetch (state 'idle'). */
@@ -70,11 +100,44 @@ export function useData<T, const K extends KeyValue>(
     opts?: AsyncOptions
 ): AsyncState<T>;
 export function useData<T>(
-    keyArg: string | (() => KeyValue | Falsy),
-    fetcher: Fetcher<T, any>,
-    options?: AsyncOptions
+    keyArg: string | (() => KeyValue | Falsy) | ServerFnDataRef<[], unknown>,
+    fetcherOrOptions?: Fetcher<T, any> | AsyncOptions,
+    optionsArg?: AsyncOptions
 ): AsyncState<T> {
-    const shape = assertKeyArgShape(keyArg);
+    let fetcher =
+        typeof fetcherOrOptions === 'function' ? (fetcherOrOptions as Fetcher<T, any>) : undefined;
+    const options =
+        typeof fetcherOrOptions === 'function'
+            ? optionsArg
+            : (fetcherOrOptions as AsyncOptions | undefined);
+
+    // Server-fn key sugar (#452) — brand check FIRST: assertKeyArgShape
+    // would classify the ref as a key GETTER, and useData would invoke the
+    // RPC to compute a key. The key becomes the fn-headed tuple `[ref]`
+    // (static by construction — fn identity never changes); resolveKeyResult
+    // canonicalizes the ref to its stable-key string, and the raw tuple
+    // stays the (default) fetcher's argument.
+    let shape: 'static' | 'getter';
+    if (isServerFnDataRef(keyArg)) {
+        keyArg = [keyArg] as unknown as string;
+        shape = 'static';
+    } else {
+        if (
+            __DEV__ &&
+            typeof keyArg === 'function' &&
+            ('__sigxFn' in keyArg || '__sigxKey' in keyArg)
+        ) {
+            // A server fn/stub reached here WITHOUT a usable stamped key —
+            // treating it as a key getter would fire the RPC to name a key.
+            throw new TypeError(
+                '[useData] this server fn has no build-stamped key (__sigxKey) — the Vite ' +
+                'transform stamps it. In tests, set fn.__sigxKey manually or use a ' +
+                'string/tuple key with an explicit fetcher.'
+            );
+        }
+        shape = assertKeyArgShape(keyArg);
+    }
+    fetcher ??= refTupleFetcher as unknown as Fetcher<T, any>;
 
     const instance = getCurrentInstance();
     if (!instance) {
@@ -116,7 +179,7 @@ export function useData<T>(
     );
 
     if (shape === 'static') {
-        handle.setKey(resolveKeyResult(keyArg as string, warns), keyArg);
+        handle.setKey(resolveKeyResult(keyArg as KeyValue, warns), keyArg);
         instance.onUnmounted(() => handle.dispose());
     } else {
         const getter = keyArg as () => KeyValue | Falsy;

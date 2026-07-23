@@ -533,11 +533,13 @@ export function extractInlineServerFns(
             fns.push({ ...minted, mangled });
             const wireSymbol = options.stubSymbols === 'stable' ? minted.stableSymbol : minted.symbol;
             const factory = stream ? '__serverStreamStub' : '__serverFnStub';
-            // Positional flags: 4th = GET read (§4.1), 5th = refreshes (§6.3).
+            // 4th positional: the stable data key (fn stubs only). Flags
+            // after it: 5th = GET read (§4.1), 6th = refreshes (§6.3).
+            const keyArg = stream ? '' : `, ${JSON.stringify(minted.stableSymbol)}`;
             clientSplices.push({
                 start: call.start,
                 end: call.end,
-                text: `${factory}(${JSON.stringify(wireSymbol)}, ${JSON.stringify(name)}, ${JSON.stringify(options.endpoint)}${stubFlags(minted)})`
+                text: `${factory}(${JSON.stringify(wireSymbol)}, ${JSON.stringify(name)}, ${JSON.stringify(options.endpoint)}${keyArg}${stubFlags(minted)})`
             });
         }
     }
@@ -589,11 +591,18 @@ export function extractInlineServerFns(
         applySplices(code, clientSplices);
     const clientModule = stripUnusedImports(swapped, clean);
 
-    // -- ssr module: body in place + mangled exports --
+    // -- ssr module: body in place + mangled exports + `__sigxKey` stamps
+    // (the wrapper carries the same stable key the stub does, so
+    // `useData(fn)` / fn-ref `invalidates` key identically on both sides) --
     const ssrModule =
         code +
         '\n' +
         fns.map((fn) => `export const ${fn.mangled} = ${fn.name};`).join('\n') +
+        '\n' +
+        fns
+            .filter((fn) => !fn.stream)
+            .map((fn) => `${fn.name}.__sigxKey = ${JSON.stringify(fn.stableSymbol)};`)
+            .join('\n') +
         '\n';
 
     return { fns, errors, warnings, clientModule, ssrModule };

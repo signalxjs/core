@@ -56,6 +56,13 @@ function isNode(value: unknown): value is Node {
 export interface ExtractedServerFn {
     /** Export name — what the stub re-exports and callers import. */
     name: string;
+    /**
+     * The module-local binding name behind the export (differs from `name`
+     * under `export { local as exported }`) — the assignment target for the
+     * SSR-side `__sigxKey` stamp. Absent for inline extractions, which
+     * emit their own SSR module.
+     */
+    local?: string;
     /** Content-hashed transport symbol: `<name>_fn_<hash8>`. */
     symbol: string;
     /** Hash-free stable symbol: `<stableId>#<name>` (decoded form). */
@@ -246,14 +253,41 @@ export function mintSymbols(
 }
 
 /**
- * The positional flags a fn stub call carries after the endpoint argument
- * (4th: GET read §4.1; 5th: refreshes-declaring mutation §6.3). Unflagged
+ * The positional flags a fn stub call carries after the stable-key argument
+ * (5th: GET read §4.1; 6th: refreshes-declaring mutation §6.3). Unflagged
  * output stays byte-identical to before either feature existed.
  */
 export function stubFlags(fn: { stream: boolean; get: boolean; refreshes: boolean }): string {
     if (fn.stream) return '';
     if (fn.refreshes) return fn.get ? ', 1, 1' : ', 0, 1';
     return fn.get ? ', 1' : '';
+}
+
+/**
+ * Marker comment guarding the SSR-side key-stamp block against re-append
+ * when a transform re-runs over already-stamped output.
+ */
+export const KEY_STAMP_MARKER = '/*! sigx:server-fn-keys */';
+
+/**
+ * The SSR-side `__sigxKey` stamp block for a file-form extraction — one
+ * assignment per extracted fn onto its LOCAL binding, so the server
+ * wrapper carries the same stable key the client stub does and
+ * `useData(fn)` / fn-ref `invalidates` key identically on both sides.
+ * Streams are skipped (not `useData` targets). One local exported under
+ * two names mints two symbols — the FIRST export's key wins here, matching
+ * the stub whose key a client actually calls through first.
+ */
+export function serverFnKeyStamps(fns: ExtractedServerFn[]): string {
+    const seen = new Set<string>();
+    const lines: string[] = [];
+    for (const fn of fns) {
+        if (fn.stream || !fn.local || seen.has(fn.local)) continue;
+        seen.add(fn.local);
+        lines.push(`${fn.local}.__sigxKey = ${JSON.stringify(fn.stableSymbol)};`);
+    }
+    if (lines.length === 0) return '';
+    return `\n${KEY_STAMP_MARKER}\n${lines.join('\n')}\n`;
 }
 
 /**
@@ -374,8 +408,8 @@ export function extractServerFns(
     const addExport = (exportedName: string, localName: string): void => {
         const record = localFnSources.get(localName);
         if (record !== undefined) {
-            fns.push(
-                mintSymbols(
+            fns.push({
+                ...mintSymbols(
                     exportedName,
                     record.source,
                     record.explicitId,
@@ -384,8 +418,9 @@ export function extractServerFns(
                     record.get,
                     record.refreshes,
                     record.form
-                )
-            );
+                ),
+                local: localName
+            });
         } else {
             serverOnly.push(exportedName);
         }
@@ -471,11 +506,13 @@ export function extractServerFns(
     for (const fn of fns) {
         const wireSymbol = options.stubSymbols === 'stable' ? fn.stableSymbol : fn.symbol;
         const factory = fn.stream ? '__serverStreamStub' : '__serverFnStub';
-        // Positional flags (§4.1 GET, §6.3 refreshes) — absent flags keep
-        // unmarked output byte-identical to before.
+        // 4th positional: the stable data key (`useData(fn)` identity, fn
+        // stubs only). Positional flags after it (§4.1 GET, §6.3 refreshes)
+        // — absent flags keep unmarked output byte-identical to before.
+        const keyArg = fn.stream ? '' : `, ${JSON.stringify(fn.stableSymbol)}`;
         lines.push(
             `export const ${fn.name} = ${factory}(${JSON.stringify(wireSymbol)}, ` +
-            `${JSON.stringify(fn.name)}, ${JSON.stringify(options.endpoint)}${stubFlags(fn)});`
+            `${JSON.stringify(fn.name)}, ${JSON.stringify(options.endpoint)}${keyArg}${stubFlags(fn)});`
         );
     }
     for (const name of serverOnly) {
