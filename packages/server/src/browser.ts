@@ -21,7 +21,7 @@ export type {
     StandardSchemaV1,
     WrappedServerFn
 } from './types';
-export type { ServerFnOptions } from './index';
+export type { ServerFnOptions, ServerFnReadCache } from './index';
 
 export function serverFn(): never {
     throw new Error(

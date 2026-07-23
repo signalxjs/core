@@ -25,10 +25,15 @@
  * ```
  */
 
-import type { App } from 'sigx';
+import type { App, Plugin } from 'sigx';
 import { provideTypeHandlers } from 'sigx/internals';
 import type { TypeHandler } from '@sigx/serialize';
 import { configureServerFn, type ServerFnTransport } from './client/index.js';
+
+// The transport type belongs with the option that takes it — authoring a
+// `serverPlugin({ transport })` must not require importing from the stubs
+// entry (#437).
+export type { ServerFnTransport } from './client/index.js';
 
 /**
  * Stamp handlers onto the RPC wire codec global (`__SIGX_SERVERFN_CODEC__`,
@@ -89,10 +94,7 @@ let installedTransport: ServerFnTransport | null = null;
  * The @sigx/server pack as an app plugin — client/transport-side
  * configuration. Install with `app.use(serverPlugin({ ... }))`.
  */
-export function serverPlugin(options: ServerPluginOptions = {}): {
-    name: 'sigx:server';
-    install(app: App): void;
-} {
+export function serverPlugin(options: ServerPluginOptions = {}): Plugin {
     return {
         name: 'sigx:server',
 
