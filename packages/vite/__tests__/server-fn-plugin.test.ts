@@ -2,8 +2,8 @@
  * @vitest-environment node
  *
  * sigxServer() (rfc-server §3, #305): environment-split transform (client →
- * stubs, SSR → untouched), the virtual registry module, extraction warnings,
- * and the dev lint for unextracted serverFn.
+ * stubs, SSR → body + `__sigxKey` stamps), the virtual registry module,
+ * extraction warnings, and the dev lint for unextracted serverFn.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -52,18 +52,29 @@ describe('sigxServer — transform', () => {
             join(root, 'src/cart.server.ts')
         );
         expect(result.code).toContain(`from '@sigx/server/client'`);
-        expect(result.code).toMatch(/__serverFnStub\("addToCart_fn_[0-9a-f]{8}", "addToCart", "\/_sigx\/fn"\)/);
+        expect(result.code).toMatch(
+            /__serverFnStub\("addToCart_fn_[0-9a-f]{8}", "addToCart", "\/_sigx\/fn", "src\/cart\.server\.ts#addToCart"\)/
+        );
         expect(result.code).toContain('__serverOnly("auditLog"');
         expect(result.code).not.toContain('db.cart.add');
     });
 
-    it('leaves the module untouched in the SSR environment', () => {
+    it('keeps the module body in the SSR environment, appending __sigxKey stamps (#452)', () => {
         const result = plugin.transform.call(
             { environment: { name: 'ssr' }, warn: () => {} },
             CART,
             join(root, 'src/cart.server.ts')
         );
-        expect(result).toBeNull();
+        // Body kept verbatim; the wrapper gains the stub's stable key.
+        expect(result.code.startsWith(CART)).toBe(true);
+        expect(result.code).toContain('addToCart.__sigxKey = "src/cart.server.ts#addToCart";');
+        // Re-running over stamped output must not double-stamp.
+        const again = plugin.transform.call(
+            { environment: { name: 'ssr' }, warn: () => {} },
+            result.code,
+            join(root, 'src/cart.server.ts')
+        );
+        expect(again).toBeNull();
     });
 
     it('surfaces extraction warnings through this.warn', () => {
@@ -333,7 +344,7 @@ describe('sigxServer — rev 2: role, endpoint, stable symbols, scan (#320)', ()
                 );
                 expect(result.code).toContain(
                     `__serverFnStub("@test/app/src/cart.server.ts#addToCart", "addToCart", ` +
-                    `"https://api.example.com/_sigx/fn")`
+                    `"https://api.example.com/_sigx/fn", "@test/app/src/cart.server.ts#addToCart")`
                 );
                 expect(result.code).not.toContain('db.cart.add');
             }
@@ -456,7 +467,7 @@ describe('sigxServer — rev 2: role, endpoint, stable symbols, scan (#320)', ()
                 join(root, 'src/cart.server.ts')
             );
             expect(result.code).toMatch(
-                /__serverFnStub\("addToCart_fn_[0-9a-f]{8}", "addToCart", "https:\/\/api\.example\.com\/_sigx\/fn"\)/
+                /__serverFnStub\("addToCart_fn_[0-9a-f]{8}", "addToCart", "https:\/\/api\.example\.com\/_sigx\/fn", "@test\/app\/src\/cart\.server\.ts#addToCart"\)/
             );
         } finally {
             rmSync(root, { recursive: true, force: true });

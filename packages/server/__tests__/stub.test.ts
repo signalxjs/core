@@ -86,7 +86,7 @@ describe('__serverFnStub', () => {
 
     it('a GET-marked stub (4th flag) issues GET with args in the query string', async () => {
         const mock = stubFetch(200, { data: { id: 'p1' } });
-        const read = __serverFnStub('read_fn_00000010', 'read', '/_sigx/fn', 1);
+        const read = __serverFnStub('read_fn_00000010', 'read', '/_sigx/fn', undefined, 1);
         await expect(read({ id: 'p1' })).resolves.toEqual({ id: 'p1' });
 
         const expectedQuery = encodeURIComponent(JSON.stringify([{ id: 'p1' }]));
@@ -98,7 +98,7 @@ describe('__serverFnStub', () => {
 
     it('a GET stub percent-encodes codec tags into the query value', async () => {
         const mock = stubFetch(200, {});
-        const read = __serverFnStub('read_fn_00000011', 'read', '/_sigx/fn', 1);
+        const read = __serverFnStub('read_fn_00000011', 'read', '/_sigx/fn', undefined, 1);
         await read(new Date('2026-07-21T12:00:00.000Z'), 42n);
 
         const url = mock.mock.calls[0][0] as string;
@@ -115,7 +115,7 @@ describe('__serverFnStub', () => {
     it('a GET stub sends no content-type but keeps transport extra headers', async () => {
         const mock = stubFetch(200, {});
         configureServerFn({ headers: { authorization: 'Bearer t', 'Content-Type': 'nope' } });
-        const read = __serverFnStub('read_fn_00000012', 'read', '/_sigx/fn', 1);
+        const read = __serverFnStub('read_fn_00000012', 'read', '/_sigx/fn', undefined, 1);
         await read();
 
         const init = mock.mock.calls[0][1] as RequestInit;
@@ -126,7 +126,7 @@ describe('__serverFnStub', () => {
 
     it('GET stubs share the envelope path: errors, skew hint, and .with({signal})', async () => {
         stubFetch(404, '');
-        const read = __serverFnStub('read_fn_00000013', 'read', '/_sigx/fn', 1);
+        const read = __serverFnStub('read_fn_00000013', 'read', '/_sigx/fn', undefined, 1);
         const error = await read().catch((e: unknown) => e);
         expect(isServerFnError(error)).toBe(true);
         expect((error as Error).message).toContain('stale build');
@@ -180,7 +180,7 @@ describe('per-call options — .with({ headers }) / .with({ fresh }) (#315)', ()
 
     it('fresh: true puts cache: no-cache on a GET read fetch', async () => {
         const mock = stubFetch(200, { data: 1 });
-        const read = __serverFnStub('r_fn_00000022', 'read', '/_sigx/fn', 1);
+        const read = __serverFnStub('r_fn_00000022', 'read', '/_sigx/fn', undefined, 1);
         await read.with({ fresh: true })({ id: 'p1' });
         const init = mock.mock.calls[0][1] as RequestInit;
         expect(init.method).toBe('GET');
@@ -189,7 +189,7 @@ describe('per-call options — .with({ headers }) / .with({ fresh }) (#315)', ()
 
     it('a GET read WITHOUT fresh sets no cache mode (the declared max-age governs)', async () => {
         const mock = stubFetch(200, { data: 1 });
-        const read = __serverFnStub('r_fn_00000023', 'read', '/_sigx/fn', 1);
+        const read = __serverFnStub('r_fn_00000023', 'read', '/_sigx/fn', undefined, 1);
         await read({ id: 'p1' });
         expect('cache' in (mock.mock.calls[0][1] as RequestInit)).toBe(false);
     });
@@ -207,7 +207,7 @@ describe('per-call options — .with({ headers }) / .with({ fresh }) (#315)', ()
 
     it('headers and fresh compose with a GET read', async () => {
         const mock = stubFetch(200, { data: 1 });
-        const read = __serverFnStub('r_fn_00000025', 'read', '/_sigx/fn', 1);
+        const read = __serverFnStub('r_fn_00000025', 'read', '/_sigx/fn', undefined, 1);
         await read.with({ fresh: true, headers: { 'x-trace-id': 't1' } })({ id: 'p1' });
         const init = mock.mock.calls[0][1] as RequestInit;
         expect(init.method).toBe('GET');
@@ -420,5 +420,17 @@ describe('__serverFnStub — codec robustness on payloads it did not produce', (
         // from it; unwrapping blindly would yield {} via Object.keys(1).
         stubFetch(200, { data: { $esc: 1 } });
         expect(await stub()()).toEqual({ $esc: 1 });
+    });
+});
+
+describe('__serverFnStub — stable data key (#452)', () => {
+    it('stamps __sigxKey from the 4th positional', () => {
+        const fn = __serverFnStub('add_fn_00000001', 'add', '/_sigx/fn', 'src/cart.server.ts#add');
+        expect(fn.__sigxKey).toBe('src/cart.server.ts#add');
+    });
+
+    it('leaves __sigxKey undefined when the build emitted no key', () => {
+        const fn = __serverFnStub('add_fn_00000001', 'add', '/_sigx/fn');
+        expect(fn.__sigxKey).toBeUndefined();
     });
 });

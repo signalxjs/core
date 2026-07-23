@@ -16,6 +16,27 @@ export type Falsy = null | undefined | false | '';
 export type KeyTuple = readonly (string | number | boolean | null)[];
 export type KeyValue = string | KeyTuple;
 
+/**
+ * A server-fn reference usable AS a key (rfc-server §6.2, #452): any
+ * callable carrying the build-stamped stable key (`<stableId>#<name>`).
+ * Structural — runtime-core never imports `@sigx/server`; the brand is the
+ * stamped property. As a key it canonicalizes to the key STRING in place
+ * (`useData(getVotes)` → `'["<stableId>#getVotes"]'`), so a mutation's
+ * fn-ref `invalidates` pattern matches by tuple prefix.
+ */
+export interface ServerFnDataRef<A extends KeyTuple = KeyTuple, R = unknown> {
+    (...args: A): R | Promise<R>;
+    /** Build-stamped stable key (`<stableId>#<name>`). */
+    __sigxKey: string;
+}
+
+/** Brand check — a function whose `__sigxKey` is a non-empty string. */
+export function isServerFnDataRef(value: unknown): value is ServerFnDataRef {
+    if (typeof value !== 'function') return false;
+    const key = (value as { __sigxKey?: unknown }).__sigxKey;
+    return typeof key === 'string' && key !== '';
+}
+
 /** Per-cell dedup flags for the soft key warnings (warn once per cell). */
 export interface KeyWarnFlags {
     emptyString?: boolean;
@@ -60,9 +81,25 @@ export function resolveKeyResult(raw: KeyValue | Falsy, warns?: KeyWarnFlags): s
             }
             return null;
         }
-        if (__DEV__) {
-            for (const el of raw) {
+        // Server-fn references canonicalize to their stable-key string in
+        // place (#452) — runs in prod too; the raw tuple (fn included) is
+        // untouched, it stays the fetcher's argument.
+        let mapped: unknown[] | undefined;
+        for (let i = 0; i < raw.length; i++) {
+            const el: unknown = raw[i];
+            if (isServerFnDataRef(el)) {
+                (mapped ??= raw.slice())[i] = el.__sigxKey;
+                continue;
+            }
+            if (__DEV__) {
                 const t = typeof el;
+                if (t === 'function') {
+                    throw new TypeError(
+                        '[useData] tuple key contains a function with no build-stamped key ' +
+                        '(__sigxKey) — only a server-fn reference can key a tuple. In tests, ' +
+                        'stamp the fn manually or use a string/tuple key.'
+                    );
+                }
                 if (el !== null && t !== 'string' && t !== 'number' && t !== 'boolean') {
                     throw new TypeError(
                         `[useData] tuple key elements must be JSON primitives (string | number | boolean | null); got ${t}.`
@@ -81,7 +118,7 @@ export function resolveKeyResult(raw: KeyValue | Falsy, warns?: KeyWarnFlags): s
                 }
             }
         }
-        return JSON.stringify(raw);
+        return JSON.stringify(mapped ?? raw);
     }
 
     // Not representable as a key — a type error at the call site.

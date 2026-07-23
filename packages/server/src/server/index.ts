@@ -138,6 +138,76 @@ function readBoundarySidecar(
     return descriptors.length > 0 ? { base, refresh: descriptors } : null;
 }
 
+/**
+ * Resolve `invalidates` patterns to plain wire form (rfc-server §6.2): a
+ * bare server-fn reference becomes its stable-key TUPLE (`[__sigxKey]` —
+ * `useData(fn)`'s identity, and a prefix of every `[fn, ...args]` key);
+ * fn references INSIDE a tuple resolve to their key string in place;
+ * strings and plain tuples pass through. A reference without a
+ * build-stamped key can never match anything — its pattern is dropped
+ * with a dev warning naming the remedy.
+ */
+function resolveInvalidatePatterns(
+    raw: unknown,
+    fnName: string
+): Array<string | readonly unknown[]> {
+    if (!Array.isArray(raw)) return [];
+    const out: Array<string | readonly unknown[]> = [];
+    const warnUnstamped = (): void => {
+        if (__DEV__) {
+            console.warn(
+                `[sigx server] "${fnName}" \`invalidates\` contains a server-fn reference ` +
+                `with no build-stamped key (__sigxKey) — pattern dropped. The Vite ` +
+                `transform stamps keys onto \`*.server.ts\` wrappers; outside it, use a ` +
+                `string/tuple pattern instead.`
+            );
+        }
+    };
+    for (const pattern of raw) {
+        if (typeof pattern === 'function') {
+            const key = (pattern as { __sigxKey?: unknown }).__sigxKey;
+            if (typeof key === 'string' && key !== '') out.push([key]);
+            else warnUnstamped();
+            continue;
+        }
+        if (Array.isArray(pattern)) {
+            let mapped: unknown[] | undefined;
+            let dropped = false;
+            for (let i = 0; i < pattern.length; i++) {
+                const el = pattern[i] as unknown;
+                if (typeof el !== 'function') continue;
+                const key = (el as { __sigxKey?: unknown }).__sigxKey;
+                if (typeof key === 'string' && key !== '') {
+                    (mapped ??= pattern.slice())[i] = key;
+                } else {
+                    dropped = true;
+                    break;
+                }
+            }
+            if (dropped) {
+                warnUnstamped();
+                continue;
+            }
+            out.push((mapped ?? pattern) as readonly unknown[]);
+            continue;
+        }
+        if (typeof pattern === 'string') {
+            out.push(pattern);
+            continue;
+        }
+        // Typed away, but `invalidates` output is runtime data — junk must
+        // never reach the wire contract (string | tuple only).
+        if (__DEV__) {
+            console.warn(
+                `[sigx server] "${fnName}" \`invalidates\` returned a non-pattern value ` +
+                `(${typeof pattern}) — dropped. Patterns are canonical strings, tuples, ` +
+                `or server-fn references.`
+            );
+        }
+    }
+    return out;
+}
+
 /** Same three keys as the boundary serializer's DANGEROUS_KEYS. */
 const DANGEROUS_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
@@ -591,8 +661,11 @@ export async function handleServerFnRequest(
         // stashed; a throw here is a fn error (masked per §5). Skipped on
         // GET: `cache` and `invalidates` are mutually exclusive (§4.1).
         if (!isGet && fn.__sigxInvalidates) {
-            const invalidates = await fn.__sigxInvalidates(ctx._input, result);
-            if (Array.isArray(invalidates) && invalidates.length > 0) {
+            const invalidates = resolveInvalidatePatterns(
+                await fn.__sigxInvalidates(ctx._input, result),
+                info.name || symbol
+            );
+            if (invalidates.length > 0) {
                 envelope.$cache = { invalidates };
             }
         }

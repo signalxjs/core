@@ -206,18 +206,22 @@ function refreshSeam(): BoundaryRefreshSeam | undefined {
 }
 
 /** Create the typed client stub for one extracted server function. The 4th
- *  positional flag marks a cache-marked read (rfc-server §4.1): the stub
- *  issues GET so browser/edge caches can serve it; absent means POST. The
- *  5th marks a `refreshes`-declaring mutation (§6.3): the stub sends the
- *  boundary inventory up and applies the envelope's fresh entries. */
+ *  positional is the fn's STABLE data key (`<stableId>#<name>`), stamped as
+ *  `__sigxKey` for `useData(fn)` keying. The 5th flag marks a cache-marked
+ *  read (rfc-server §4.1): the stub issues GET so browser/edge caches can
+ *  serve it; absent means POST. The 6th marks a `refreshes`-declaring
+ *  mutation (§6.3): the stub sends the boundary inventory up and applies
+ *  the envelope's fresh entries. */
 export function __serverFnStub(
     symbol: string,
     name: string,
     endpoint: string,
+    key?: string,
     get?: 0 | 1,
     refreshes?: 0 | 1
 ): ((...args: unknown[]) => Promise<unknown>) & {
     with(options?: ServerFnCallOptions): (...args: unknown[]) => Promise<unknown>;
+    __sigxKey: string | undefined;
 } {
     const call = async (args: unknown[], options?: ServerFnCallOptions): Promise<unknown> => {
         // §6.3 sidecar — only refresh-declaring mutations pay the inventory,
@@ -274,6 +278,7 @@ export function __serverFnStub(
     // v2 per-call bullet pulled forward): explicit, so the wire args stay
     // exactly the user's args (no trailing-argument sniffing).
     return Object.assign((...args: unknown[]) => call(args), {
+        __sigxKey: key,
         with:
             (options?: ServerFnCallOptions) =>
             (...args: unknown[]) => {

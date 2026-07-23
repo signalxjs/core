@@ -44,6 +44,8 @@ import * as path from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import {
     extractServerFns,
+    serverFnKeyStamps,
+    KEY_STAMP_MARKER,
     type ServerFnExtraction,
     type ServerFnExtractOptions
 } from './server-fn-extract.js';
@@ -483,6 +485,15 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
                         )});`,
                     map: null
                 };
+            }
+            // SSR/server environments keep the REAL module — plus appended
+            // `__sigxKey` stamps, so the wrapper carries the same stable key
+            // the client stub does (`useData(fn)` / fn-ref `invalidates`
+            // key identically on both sides). Marker-guarded: rolldown may
+            // re-run the transform over its own stamped output.
+            if (extraction && !code.includes(KEY_STAMP_MARKER)) {
+                const stamps = serverFnKeyStamps(extraction.fns);
+                if (stamps) return { code: code + stamps, map: null };
             }
             return null;
         },

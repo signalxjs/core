@@ -7,7 +7,12 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { extractServerFns, type ServerFnExtractOptions } from '../src/server-fn-extract';
+import {
+    extractServerFns,
+    serverFnKeyStamps,
+    KEY_STAMP_MARKER,
+    type ServerFnExtractOptions
+} from '../src/server-fn-extract';
 
 const BASE = '/_sigx/fn';
 const opts = (stableId: string, extra?: Partial<ServerFnExtractOptions>): ServerFnExtractOptions => ({
@@ -42,7 +47,7 @@ describe('extractServerFns — basics', () => {
             `import { __serverFnStub, __serverOnly } from '@sigx/server/client';`
         );
         expect(result.stubModule).toContain(
-            `export const addToCart = __serverFnStub("${fn.symbol}", "addToCart", "${BASE}");`
+            `export const addToCart = __serverFnStub("${fn.symbol}", "addToCart", "${BASE}", "${fn.stableSymbol}");`
         );
         expect(result.stubModule).toContain(
             `export const auditLog = __serverOnly("auditLog", "src/cart.server.ts");`
@@ -160,10 +165,10 @@ export const addToCart = serverFn(async (rq, id) => id);
         expect(byName.getProduct.get).toBe(true);
         expect(byName.addToCart.get).toBe(false);
         expect(result.stubModule).toContain(
-            `export const getProduct = __serverFnStub("${byName.getProduct.symbol}", "getProduct", "${BASE}", 1);`
+            `export const getProduct = __serverFnStub("${byName.getProduct.symbol}", "getProduct", "${BASE}", "${byName.getProduct.stableSymbol}", 1);`
         );
         expect(result.stubModule).toContain(
-            `export const addToCart = __serverFnStub("${byName.addToCart.symbol}", "addToCart", "${BASE}");`
+            `export const addToCart = __serverFnStub("${byName.addToCart.symbol}", "addToCart", "${BASE}", "${byName.addToCart.stableSymbol}");`
         );
     });
 
@@ -217,10 +222,10 @@ export const plain = serverFn(async (rq, id) => id);
         expect(byName.track.refreshes).toBe(true);
         expect(byName.plain.refreshes).toBe(false);
         expect(result.stubModule).toContain(
-            `export const track = __serverFnStub("${byName.track.symbol}", "track", "${BASE}", 0, 1);`
+            `export const track = __serverFnStub("${byName.track.symbol}", "track", "${BASE}", "${byName.track.stableSymbol}", 0, 1);`
         );
         expect(result.stubModule).toContain(
-            `export const plain = __serverFnStub("${byName.plain.symbol}", "plain", "${BASE}");`
+            `export const plain = __serverFnStub("${byName.plain.symbol}", "plain", "${BASE}", "${byName.plain.stableSymbol}");`
         );
     });
 
@@ -377,7 +382,8 @@ export const add = serverFn({ id: routeId, handler: async (rq, input) => input }
         }));
         expect(result.stubModule).toContain(
             `export const addToCart = __serverFnStub("@acme/api/src/cart.server.ts#addToCart", ` +
-            `"addToCart", "https://api.example.com/_sigx/fn");`
+            `"addToCart", "https://api.example.com/_sigx/fn", ` +
+            `"@acme/api/src/cart.server.ts#addToCart");`
         );
         // Hashed mode (the default) keeps the hashed symbol in stubs.
         const hashed = extractServerFns(CART, '/x.ts', opts('@acme/api/src/cart.server.ts'));
@@ -402,7 +408,7 @@ export const addToCart = serverFn(async (rq, id) => id);
         expect(byName.addToCart.form).toBe(false);
         // The form bit is build/runtime-side only — stubs are plain RPC.
         expect(result.stubModule).toContain(
-            `export const submitFeedback = __serverFnStub("${byName.submitFeedback.symbol}", "submitFeedback", "${BASE}");`
+            `export const submitFeedback = __serverFnStub("${byName.submitFeedback.symbol}", "submitFeedback", "${BASE}", "${byName.submitFeedback.stableSymbol}");`
         );
     });
 
@@ -426,5 +432,45 @@ export { submit };
 `;
         const result = extractServerFns(code, '/src/api.server.ts', opts('src/api.server.ts'));
         expect(result.fns[0].form).toBe(true);
+    });
+});
+
+describe('serverFnKeyStamps — SSR-side __sigxKey stamps (#452)', () => {
+    it('stamps each extracted fn LOCAL with its stable symbol, marker-guarded', () => {
+        const result = extractServerFns(CART, '/src/cart.server.ts', opts('src/cart.server.ts'));
+        const stamps = serverFnKeyStamps(result.fns);
+        expect(stamps).toContain(KEY_STAMP_MARKER);
+        expect(stamps).toContain('addToCart.__sigxKey = "src/cart.server.ts#addToCart";');
+    });
+
+    it('aliased exports stamp the LOCAL binding; first export wins per local', () => {
+        const code = `
+import { serverFn } from '@sigx/server';
+const impl = serverFn(async (rq) => 1);
+export { impl as ping, impl as alias };
+`;
+        const result = extractServerFns(code, '/src/x.server.ts', opts('src/x.server.ts'));
+        const stamps = serverFnKeyStamps(result.fns);
+        expect(stamps).toContain('impl.__sigxKey = "src/x.server.ts#ping";');
+        expect(stamps).not.toContain('#alias');
+    });
+
+    it('an explicit id flows into the stamp, matching the stub key', () => {
+        const code = `
+import { serverFn } from '@sigx/server';
+export const add = serverFn({ id: 'cart/add', handler: async (rq, input) => input });
+`;
+        const result = extractServerFns(code, '/src/cart.server.ts', opts('src/cart.server.ts'));
+        expect(serverFnKeyStamps(result.fns)).toContain('add.__sigxKey = "cart/add#add";');
+        expect(result.stubModule).toContain('"cart/add#add"');
+    });
+
+    it('streams are skipped — no stamp block for a stream-only module', () => {
+        const code = `
+import { serverStream } from '@sigx/server';
+export const ticks = serverStream(async function* (rq) { yield 1; });
+`;
+        const result = extractServerFns(code, '/src/t.server.ts', opts('src/t.server.ts'));
+        expect(serverFnKeyStamps(result.fns)).toBe('');
     });
 });

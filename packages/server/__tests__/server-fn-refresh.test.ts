@@ -207,7 +207,7 @@ describe('stub — collect/apply through __SIGX_SERVERFN_BOUNDARIES__', () => {
         });
         vi.stubGlobal('fetch', fetchMock);
 
-        const stub = __serverFnStub('t_fn_00000001', 't', '/_sigx/fn', 0, 1);
+        const stub = __serverFnStub('t_fn_00000001', 't', '/_sigx/fn', undefined, 0, 1);
         await expect(stub('a')).resolves.toBe(1);
         await expect(stub('b')).resolves.toBe(1);
         vi.unstubAllGlobals();
@@ -240,11 +240,11 @@ describe('stub — collect/apply through __SIGX_SERVERFN_BOUNDARIES__', () => {
         // Flagged stub with an empty inventory: no sidecar on the wire.
         (globalThis as { __SIGX_SERVERFN_BOUNDARIES__?: BoundaryRefreshSeam })
             .__SIGX_SERVERFN_BOUNDARIES__ = { collect: () => ({ base: BASE, refresh: [] }), apply: () => {} };
-        await __serverFnStub('b_fn_00000001', 'b', '/_sigx/fn', 0, 1)('x');
+        await __serverFnStub('b_fn_00000001', 'b', '/_sigx/fn', undefined, 0, 1)('x');
 
         // Flagged stub, seam absent.
         delete (globalThis as { __SIGX_SERVERFN_BOUNDARIES__?: unknown }).__SIGX_SERVERFN_BOUNDARIES__;
-        await __serverFnStub('c_fn_00000001', 'c', '/_sigx/fn', 0, 1)('x');
+        await __serverFnStub('c_fn_00000001', 'c', '/_sigx/fn', undefined, 0, 1)('x');
         vi.unstubAllGlobals();
 
         expect(bodies).toEqual([{ args: ['x'] }, { args: ['x'] }, { args: ['x'] }]);
@@ -265,9 +265,77 @@ describe('stub — collect/apply through __SIGX_SERVERFN_BOUNDARIES__', () => {
             'fetch',
             vi.fn(async () => okResponse({ data: 'fine', $boundaries: [{ for: 3 }] }))
         );
-        const stub = __serverFnStub('t_fn_00000001', 't', '/_sigx/fn', 0, 1);
+        const stub = __serverFnStub('t_fn_00000001', 't', '/_sigx/fn', undefined, 0, 1);
         await expect(stub()).resolves.toBe('fine');
         vi.unstubAllGlobals();
         vi.restoreAllMocks();
+    });
+});
+
+describe('endpoint — fn-ref invalidates patterns (#452)', () => {
+    it('resolves bare refs and tuple-embedded refs to stable-key patterns on the wire', async () => {
+        const getVotes = Object.assign(serverFn(async () => 3), {
+            __sigxKey: 'src/api.server.ts#getVotes'
+        });
+        const vote = serverFn({
+            handler: async () => 'ok',
+            invalidates: () => [getVotes, [getVotes, 7], ['custom', 1], 'plain']
+        });
+        const res = await post(vote, { args: [{}] });
+        await expect(res.json()).resolves.toEqual({
+            data: 'ok',
+            $cache: {
+                invalidates: [
+                    ['src/api.server.ts#getVotes'],
+                    ['src/api.server.ts#getVotes', 7],
+                    ['custom', 1],
+                    'plain'
+                ]
+            }
+        });
+    });
+
+    it('drops a pattern containing an unstamped fn ref, with a dev warning', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const bare = serverFn(async () => 1);
+        const vote = serverFn({
+            handler: async () => 'ok',
+            invalidates: () => [bare, ['k']]
+        });
+        const res = await post(vote, { args: [{}] });
+        await expect(res.json()).resolves.toEqual({
+            data: 'ok',
+            $cache: { invalidates: [['k']] }
+        });
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining('__sigxKey'));
+        warn.mockRestore();
+    });
+
+    it('all patterns dropped ⇒ no $cache on the envelope', async () => {
+        vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const bare = serverFn(async () => 1);
+        const vote = serverFn({
+            handler: async () => 'ok',
+            invalidates: () => [bare]
+        });
+        const res = await post(vote, { args: [{}] });
+        await expect(res.json()).resolves.toEqual({ data: 'ok' });
+    });
+});
+
+describe('endpoint — non-pattern invalidates values (#452 review)', () => {
+    it('drops numbers/objects instead of forwarding them onto the wire', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const vote = serverFn({
+            handler: async () => 'ok',
+            invalidates: () => [42, { nope: true }, 'plain'] as never
+        });
+        const res = await post(vote, { args: [{}] });
+        await expect(res.json()).resolves.toEqual({
+            data: 'ok',
+            $cache: { invalidates: ['plain'] }
+        });
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining('non-pattern'));
+        warn.mockRestore();
     });
 });

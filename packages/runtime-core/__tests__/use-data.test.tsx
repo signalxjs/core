@@ -796,4 +796,116 @@ describe('useData', () => {
         await settle();
         expect(container.textContent).toBe('AB');
     });
+
+    // ========================================================================
+    // Server-fn keys (#452): useData(fn) / useData(() => [fn, ...args])
+    // ========================================================================
+
+    /** Mimic the build stamp: any impl + a stable key. */
+    function stamped<A extends unknown[], R>(key: string, impl: (...args: A) => Promise<R>) {
+        return Object.assign(impl, { __sigxKey: key });
+    }
+
+    it('useData(fn): default fetcher calls the fn; value lands', async () => {
+        const getVotes = stamped('src/api.server.ts#getVotes', async () => 3);
+        let cell!: AsyncState<number>;
+        const App = component(() => {
+            cell = useData(getVotes);
+            return () => <div>{String(cell.value ?? '')}</div>;
+        });
+        const container = mount(jsx(App, {}));
+        await settle();
+        expect(cell.value).toBe(3);
+        expect(container.textContent).toBe('3');
+    });
+
+    it('useData(fn) keys as the stable-key TUPLE — restores from __SIGX_ASYNC__ without fetching', async () => {
+        (globalThis as any).__SIGX_ASYNC__ = { '["src/api.server.ts#getVotes"]': 42 };
+        const impl = vi.fn(async () => 3);
+        const getVotes = stamped('src/api.server.ts#getVotes', impl);
+        let cell!: AsyncState<number>;
+        const App = component(() => {
+            cell = useData(getVotes);
+            return () => <div>{String(cell.value ?? '')}</div>;
+        });
+        mount(jsx(App, {}));
+        await settle();
+        expect(cell.value).toBe(42);
+        expect(impl).not.toHaveBeenCalled();
+    });
+
+    it('useData(() => [fn, ...args]): args key the read and feed the default fetcher', async () => {
+        const getItem = stamped('src/api.server.ts#getItem', async (id: number) => `item-${id}`);
+        const id = signal(7);
+        let cell!: AsyncState<string>;
+        const App = component(() => {
+            cell = useData(() => [getItem, id.value] as const);
+            return () => <div>{cell.value}</div>;
+        });
+        mount(jsx(App, {}));
+        await settle();
+        expect(cell.value).toBe('item-7');
+
+        id.value = 9;
+        await settle();
+        expect(cell.value).toBe('item-9');
+    });
+
+    it('fn-headed tuple restores under the canonical `["<key>",...args]` identity', async () => {
+        (globalThis as any).__SIGX_ASYNC__ = { '["src/api.server.ts#getItem",7]': 'ssr-item' };
+        const impl = vi.fn(async (id: number) => `item-${id}`);
+        const getItem = stamped('src/api.server.ts#getItem', impl);
+        let cell!: AsyncState<string>;
+        const App = component(() => {
+            cell = useData(() => [getItem, 7] as const);
+            return () => <div>{cell.value}</div>;
+        });
+        mount(jsx(App, {}));
+        await settle();
+        expect(cell.value).toBe('ssr-item');
+        expect(impl).not.toHaveBeenCalled();
+    });
+
+    it('an explicit fetcher overrides the default for a fn-headed tuple key', async () => {
+        const getItem = stamped('src/api.server.ts#getItem', async (id: number) => `rpc-${id}`);
+        let cell!: AsyncState<string>;
+        const App = component(() => {
+            cell = (useData as any)(
+                () => [getItem, 7] as const,
+                async (raw: readonly [unknown, number]) => `custom-${raw[1]}`
+            );
+            return () => <div>{cell.value}</div>;
+        });
+        mount(jsx(App, {}));
+        await settle();
+        expect(cell.value).toBe('custom-7');
+    });
+
+    it('a server fn WITHOUT a build-stamped key dev-throws instead of firing the RPC as a key getter', () => {
+        const rpc = vi.fn(async () => 1);
+        const bare = Object.assign(rpc, { __sigxFn: () => {} });
+        const App = component(() => {
+            expect(() => (useData as any)(bare)).toThrow(/__sigxKey/);
+            return () => null;
+        });
+        mount(jsx(App, {}));
+        expect(rpc).not.toHaveBeenCalled();
+    });
+
+    it('a falsy getter result still idles with a fn-headed tuple form', async () => {
+        const getItem = stamped('src/api.server.ts#getItem', async (id: number) => `item-${id}`);
+        const on = signal(false);
+        let cell!: AsyncState<string>;
+        const App = component(() => {
+            cell = useData(() => on.value && ([getItem, 1] as const));
+            return () => <div>{cell.value}</div>;
+        });
+        mount(jsx(App, {}));
+        await settle();
+        expect(cell.state).toBe('idle');
+
+        on.value = true;
+        await settle();
+        expect(cell.value).toBe('item-1');
+    });
 });

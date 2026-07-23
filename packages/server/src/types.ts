@@ -83,6 +83,24 @@ export interface ServerFnCallOptions {
 }
 
 /**
+ * A server-fn reference used as a DATA-KEY pattern (rfc-server §6.2) — any
+ * callable carrying the build-stamped stable key. The parameter type is
+ * `never[]` so every function shape matches structurally.
+ */
+export interface ServerFnKeyRef {
+    (...args: never[]): unknown;
+    __sigxKey?: string;
+}
+
+/**
+ * A pattern accepted by `invalidates` (§6.2): a canonical key string, a
+ * tuple prefix (which may embed server-fn references as elements), or a
+ * bare server-fn reference — the endpoint resolves references to their
+ * stable-key tuples before anything reaches the wire.
+ */
+export type InvalidatePattern = string | readonly unknown[] | ServerFnKeyRef;
+
+/**
  * The public callable shape of a wrapped server function — identical on the
  * server wrapper, the generated client stub, and the browser entry (the
  * build transform swaps values, never types).
@@ -90,6 +108,16 @@ export interface ServerFnCallOptions {
 export type ServerFnCallable<A extends unknown[], R> = ((...args: A) => Promise<R>) & {
     /** Bind per-call options; returns the same callable signature. */
     with(options?: ServerFnCallOptions): (...args: A) => Promise<R>;
+    /**
+     * The stable data key (`<stableId>#<name>`) behind `useData(fn)` and
+     * fn-ref `invalidates` patterns. Declared REQUIRED for keying DX — the
+     * property is what lets `useData(getVotes)` type-check while a plain
+     * function does not. At runtime it is BUILD-stamped (the Vite transform
+     * appends it to both the client stub and the SSR module); outside the
+     * transform (unit tests, hand-wired non-Vite builds) it is absent and
+     * `useData(fn)` dev-throws with the remedy.
+     */
+    __sigxKey: string;
 } & WrappedServerFn;
 
 /** A wrapped server function, as transports and registries see it. */
@@ -126,17 +154,22 @@ export interface WrappedServerFn {
      */
     __sigxForm?: boolean;
     /**
+     * The build-stamped stable data key (`<stableId>#<name>`) — see
+     * `ServerFnCallable.__sigxKey`. Optional here because it exists only
+     * under the Vite transform; registries and transports never require it.
+     */
+    __sigxKey?: string;
+    /**
      * Present when the options form declared `invalidates` (rfc-server
      * §6.2): VALIDATED input (stashed on the request context by the
-     * pipeline) + settled result → cache keys the endpoint attaches to the
-     * envelope as `$cache.invalidates`.
+     * pipeline) + settled result → patterns the endpoint RESOLVES (fn refs
+     * → stable-key tuples) and attaches to the envelope as
+     * `$cache.invalidates`.
      */
     __sigxInvalidates?(
         input: unknown,
         result: unknown
-    ):
-        | ReadonlyArray<string | readonly unknown[]>
-        | Promise<ReadonlyArray<string | readonly unknown[]>>;
+    ): ReadonlyArray<InvalidatePattern> | Promise<ReadonlyArray<InvalidatePattern>>;
     /**
      * Present when the options form declared `refreshes` (rfc-server §6.3):
      * the component registry keys whose boundaries this mutation may
