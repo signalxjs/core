@@ -280,10 +280,14 @@ export function serverFn<S, A extends unknown[], R>(options: {
     handler: (rq: ServerFnContext, input: S) => R | Promise<R>;
 }): (input: S) => Promise<Awaited<R>>;
 
-/** Streaming form (§6.1): async generator → client AsyncIterable. */
+/** Streaming form (§6.1): async generator → client AsyncIterable.
+ *  Carries the same `.with(options)` per-call channel as serverFn (#448),
+ *  minus `fresh` — a stream is always POST and never HTTP-cached. */
 export function serverStream<A extends unknown[], T>(
     impl: (rq: ServerFnContext, ...args: A) => AsyncGenerator<T>
-): (...args: A) => AsyncIterable<T>;
+): ((...args: A) => AsyncIterable<T>) & {
+    with(options?: ServerStreamCallOptions): (...args: A) => AsyncIterable<T>;
+};
 
 /** Guard/middleware: veto by throwing; hand results downstream via rq.locals. */
 export type ServerFnGuard = (
@@ -1150,6 +1154,12 @@ const text = useStream(`explain:${id}`, () => explain(id));
 
 Client `break`/`return()` aborts the fetch; `rq.abortSignal` fires server-side.
 
+A stream carries the `.with(options)` per-call channel too (#448) — `signal`
+(composed WITH the consumer-break abort, never replacing it), `context` (the
+SSR-time request an in-process generator otherwise has no way to receive),
+and `headers`. `fresh` is excluded from the type for the §4.1 reason below:
+a stream is always POST, so it can never be answered from an HTTP cache.
+
 ### 6.2 Server-declared cache directives
 
 The response envelope reserves `$cache`:
@@ -1552,7 +1562,10 @@ option (revisit only if that proves painful).
   fallback, `formErrorPage`); per-call options (**shipped**, #315 —
   `headers` merged over the transport's under the content-type rule, and
   the `fresh` GET-freshness bypass; the `.with(options)` channel itself
-  shipped in v1.1 with AbortSignal, #353); GET + cache semantics for
+  shipped in v1.1 with AbortSignal, #353; **extended to `serverStream` in
+  #448** — same `signal`/`context`/`headers`, `fresh` excluded from the
+  type since a stream is always POST, closing the SSR-time-context and
+  per-call-header gaps #362 left open); GET + cache semantics for
   idempotent reads (**shipped**, #354 — locked design §4.1 + §5.2a;
   follow-ups deliberately deferred from it: ETag/conditional GET, HEAD,
   canonical key-sorted `args` encoding; its per-call freshness bypass
