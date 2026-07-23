@@ -112,8 +112,8 @@
       "publishes": ["@sigx/i18n"],
       "consumesCore": ["@sigx/reactivity", "@sigx/runtime-core", "@sigx/vite", "sigx"],
       "consumesSiblings": ["@sigx/store"],
-      "catalog": "complete",
-      "catalogTodo": "adopted in signalxjs/i18n#16, still open — that repo requires an approving review, so it is the one consumer not yet carrying the machinery",
+      "catalog": "missing",
+      "catalogTodo": "the ONLY consumer still without the machinery — adopted in signalxjs/i18n#16, which is open pending an approving review. Flip to \"complete\" when that merges.",
       "unpublished": true,
       "verify": { "unit": "pnpm test", "browser": "examples/* — run the example app" }
     },

@@ -108,7 +108,7 @@ authenticates with an **`ECOSYSTEM_DISPATCH_TOKEN`** secret. To activate the loo
 3. Confirm each consumer has `core-sync.yml` on its default branch:
    ```sh
    node -e "for (const c of require('./docs/ecosystem.json').consumers) console.log(c.repo)" \
-     | xargs -I{} sh -c 'printf "%-14s " {}; gh api repos/signalxjs/{}/contents/.github/workflows/core-sync.yml --jq .name 2>/dev/null || echo MISSING'
+     | xargs -I{} sh -c 'printf "%-14s " {}; if gh api repos/signalxjs/{}/contents/.github/workflows/core-sync.yml >/dev/null 2>&1; then echo present; else echo MISSING; fi'
    ```
 
 You can prove the wiring without cutting a release — dispatch the *current* version and
