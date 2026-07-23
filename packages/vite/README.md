@@ -49,7 +49,10 @@ plugin's, never replaced.
 
 ```ts
 sigx({
-  // Enable HMR for component() (default: true)
+  // Enable HMR for component() (default: true). Also drives the dev
+  // full-reload for server-only pages: a zero-JS / resumable route never
+  // loads its components in the browser, so an edit has no client HMR
+  // boundary — the plugin reloads the page instead so the change shows.
   hmr: true,
 
   // Port for Vite's HMR websocket. Only relevant in middleware mode (the
