@@ -8,10 +8,20 @@ dependency order. This file is the procedure; [`ecosystem.json`](ecosystem.json)
 the data it runs on. Neither is optional folklore — `pnpm verify:ecosystem` fails
 CI when the manifest stops matching reality.
 
-> **Prerequisite, one-time:** the `ECOSYSTEM_DISPATCH_TOKEN` secret on this repo.
-> Without it the alignment PRs still arrive, just on `core-sync.yml`'s weekly cron
-> instead of within minutes of the release. See
+> **Prerequisite, one-time — not yet done:** the `ECOSYSTEM_DISPATCH_TOKEN` secret
+> on this repo. Without it the alignment PRs still arrive, just on `core-sync.yml`'s
+> weekly cron instead of within minutes of the release. See
 > [MAINTAINERS.md → Notifying consumer repos](MAINTAINERS.md#notifying-consumer-repos).
+>
+> **Consumer-side machinery: live in 11 of 12 repos.** Every consumer except `i18n`
+> carries `core-sync.yml`, `sync:core`, `verify:catalog` and a single-minor catalog
+> on its default branch. `i18n` is waiting on an approving review
+> ([signalxjs/i18n#16](https://github.com/signalxjs/i18n/pull/16)) — until that
+> merges, align it by hand. Check the current state any time with:
+>
+> ```sh
+> node -e "for (const c of require('./docs/ecosystem.json').consumers) console.log(c.repo)" >   | xargs -I{} sh -c 'printf "%-14s " {}; gh api repos/signalxjs/{}/contents/.github/workflows/core-sync.yml --jq .name 2>/dev/null || echo MISSING'
+> ```
 
 ---
 
