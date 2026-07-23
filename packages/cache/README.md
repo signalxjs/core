@@ -27,7 +27,9 @@ user.mutate(u => ({ ...u, name }));   // optimistic write-through
 const save = useAction(saveUser, {
     cache: {
         invalidates: [['users']],     // tuple PREFIX: hits every ['users', …] read
-        optimistic: { key: 'user', apply: (current, next) => next },
+        // Annotate apply's params to type them — `current` is the TARGET
+        // read's cached state, unknowable to the action's own types.
+        optimistic: { key: 'user', apply: (current: User | undefined, next: User) => next },
     },
 });
 ```

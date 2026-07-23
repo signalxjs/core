@@ -51,7 +51,17 @@ export interface CacheActionOptions {
      */
     optimistic?: {
         key: string | readonly unknown[];
-        apply: (current: any, input: any) => any;
+        /**
+         * Compute the optimistic value from the target read's current cached
+         * state and the action's input. Annotate your lambda's parameters to
+         * type it — `apply: (current: User | undefined, next: Rename) => …`
+         * is accepted (method-syntax member, checked bivariantly); an
+         * unannotated lambda sees `unknown`. `current` cannot be inferred:
+         * `key` points at an arbitrary OTHER read's cached state (see
+         * `CachedAsyncState<T>` for the read-side view), and `ActionOptions`
+         * carries no generics to thread the input through.
+         */
+        apply(current: unknown, input: unknown): unknown;
     };
 }
 
