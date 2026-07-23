@@ -4,397 +4,397 @@
       "scenario": "small-page",
       "framework": "sigx",
       "stats": {
-        "avgNs": 39720.45413803406,
-        "minNs": 13900,
-        "maxNs": 2022300,
-        "p25Ns": 24800,
-        "p50Ns": 29900,
-        "p75Ns": 37500,
-        "p99Ns": 179900,
-        "samples": 16735
+        "avgNs": 19671.625685476738,
+        "minNs": 8800,
+        "maxNs": 2513600,
+        "p25Ns": 10900,
+        "p50Ns": 12700,
+        "p75Ns": 19600,
+        "p99Ns": 82400,
+        "samples": 33918
       }
     },
     {
       "scenario": "small-page",
       "framework": "vue",
       "stats": {
-        "avgNs": 56834.33472731928,
-        "minNs": 17500,
-        "maxNs": 6035300,
-        "p25Ns": 29700,
-        "p50Ns": 39800,
-        "p75Ns": 50700,
-        "p99Ns": 239400,
-        "samples": 11717
+        "avgNs": 31183.37523122895,
+        "minNs": 11400,
+        "maxNs": 9261000,
+        "p25Ns": 13700,
+        "p50Ns": 14700,
+        "p75Ns": 25400,
+        "p99Ns": 131800,
+        "samples": 21083
       }
     },
     {
       "scenario": "small-page",
       "framework": "react",
       "stats": {
-        "avgNs": 27138.45929990854,
-        "minNs": 10900,
-        "maxNs": 1002200,
-        "p25Ns": 18700,
-        "p50Ns": 22600,
-        "p75Ns": 26300,
-        "p99Ns": 133600,
-        "samples": 24054
+        "avgNs": 14434.98747200603,
+        "minNs": 7000,
+        "maxNs": 546700,
+        "p25Ns": 9100,
+        "p50Ns": 10200,
+        "p75Ns": 16500,
+        "p99Ns": 63500,
+        "samples": 45099
       }
     },
     {
       "scenario": "small-page",
       "framework": "preact",
       "stats": {
-        "avgNs": 22507.715973848895,
-        "minNs": 8600,
-        "maxNs": 3108300,
-        "p25Ns": 15600,
-        "p50Ns": 17600,
-        "p75Ns": 20500,
-        "p99Ns": 87200,
-        "samples": 28603
+        "avgNs": 13882.043563334551,
+        "minNs": 5900,
+        "maxNs": 2015300,
+        "p25Ns": 7300,
+        "p50Ns": 12000,
+        "p75Ns": 13600,
+        "p99Ns": 51000,
+        "samples": 46507
       }
     },
     {
       "scenario": "large-table-1k",
       "framework": "sigx",
       "stats": {
-        "avgNs": 10911206.779660985,
-        "minNs": 8146800,
-        "maxNs": 18698700,
-        "p25Ns": 9658600,
-        "p50Ns": 10635200,
-        "p75Ns": 11565200,
-        "p99Ns": 14321200,
-        "samples": 59
-      }
-    },
-    {
-      "scenario": "large-table-1k",
-      "framework": "vue",
-      "stats": {
-        "avgNs": 9385546.37681169,
-        "minNs": 5087500,
-        "maxNs": 13780700,
-        "p25Ns": 8079200,
-        "p50Ns": 9592600,
-        "p75Ns": 10352200.000001907,
-        "p99Ns": 12330200,
-        "samples": 69
-      }
-    },
-    {
-      "scenario": "large-table-1k",
-      "framework": "react",
-      "stats": {
-        "avgNs": 6256183.018867925,
-        "minNs": 4042500,
-        "maxNs": 10605100,
-        "p25Ns": 5472200,
-        "p50Ns": 6094000,
-        "p75Ns": 6957100,
-        "p99Ns": 8497100,
-        "samples": 106
-      }
-    },
-    {
-      "scenario": "large-table-1k",
-      "framework": "preact",
-      "stats": {
-        "avgNs": 5775451.304347826,
-        "minNs": 3645300,
-        "maxNs": 9239900,
-        "p25Ns": 4740000,
-        "p50Ns": 5432200,
-        "p75Ns": 6387000,
-        "p99Ns": 9031700,
-        "samples": 115
-      }
-    },
-    {
-      "scenario": "large-table",
-      "framework": "sigx",
-      "stats": {
-        "avgNs": 111838166.66666667,
-        "minNs": 94757500,
-        "maxNs": 131940900,
-        "p25Ns": 107207400,
-        "p50Ns": 110057700,
-        "p75Ns": 113510100,
-        "p99Ns": 124841600,
-        "samples": 12
-      }
-    },
-    {
-      "scenario": "large-table",
-      "framework": "vue",
-      "stats": {
-        "avgNs": 126611225,
-        "minNs": 109211600,
-        "maxNs": 145953500,
-        "p25Ns": 122069700,
-        "p50Ns": 124490300,
-        "p75Ns": 130814400,
-        "p99Ns": 135348900,
-        "samples": 12
-      }
-    },
-    {
-      "scenario": "large-table",
-      "framework": "react",
-      "stats": {
-        "avgNs": 96472775,
-        "minNs": 70413300,
-        "maxNs": 114185800,
-        "p25Ns": 75760400,
-        "p50Ns": 99590800,
-        "p75Ns": 107187800,
-        "p99Ns": 113103000,
-        "samples": 12
-      }
-    },
-    {
-      "scenario": "large-table",
-      "framework": "preact",
-      "stats": {
-        "avgNs": 108674616.66666667,
-        "minNs": 89023500,
-        "maxNs": 137975100,
-        "p25Ns": 99105000,
-        "p50Ns": 107527900,
-        "p75Ns": 114255500,
-        "p99Ns": 127489400,
-        "samples": 12
-      }
-    },
-    {
-      "scenario": "deep-tree",
-      "framework": "sigx",
-      "stats": {
-        "avgNs": 1041627441.6666666,
-        "minNs": 955922800,
-        "maxNs": 1179407000,
-        "p25Ns": 987314900,
-        "p50Ns": 1042172500,
-        "p75Ns": 1068399000,
-        "p99Ns": 1090397400,
-        "samples": 12
-      }
-    },
-    {
-      "scenario": "deep-tree",
-      "framework": "vue",
-      "stats": {
-        "avgNs": 1728557974.9999998,
-        "minNs": 1440747500,
-        "maxNs": 1986525900,
-        "p25Ns": 1572688299.9999962,
-        "p50Ns": 1777138500,
-        "p75Ns": 1817933500,
-        "p99Ns": 1893171000,
-        "samples": 12
-      }
-    },
-    {
-      "scenario": "deep-tree",
-      "framework": "react",
-      "stats": {
-        "avgNs": 774696591.6666666,
-        "minNs": 700897200,
-        "maxNs": 877870300,
-        "p25Ns": 732161000,
-        "p50Ns": 771237300,
-        "p75Ns": 795100000,
-        "p99Ns": 819077000,
-        "samples": 12
-      }
-    },
-    {
-      "scenario": "deep-tree",
-      "framework": "preact",
-      "stats": {
-        "avgNs": 468969266.66666985,
-        "minNs": 364385000,
-        "maxNs": 583557100.0000076,
-        "p25Ns": 421679000,
-        "p50Ns": 462218300.0000076,
-        "p75Ns": 480915000.0000076,
-        "p99Ns": 552384200,
-        "samples": 12
-      }
-    },
-    {
-      "scenario": "attr-style-heavy",
-      "framework": "sigx",
-      "stats": {
-        "avgNs": 7510700,
-        "minNs": 4897800,
-        "maxNs": 13400400,
-        "p25Ns": 6829000,
-        "p50Ns": 7296400,
-        "p75Ns": 8138100,
-        "p99Ns": 11346600,
-        "samples": 87
-      }
-    },
-    {
-      "scenario": "attr-style-heavy",
-      "framework": "vue",
-      "stats": {
-        "avgNs": 8568253.246753247,
-        "minNs": 6165800,
-        "maxNs": 12210700,
-        "p25Ns": 7356500,
-        "p50Ns": 8138000,
-        "p75Ns": 10078500,
-        "p99Ns": 11598000,
-        "samples": 77
-      }
-    },
-    {
-      "scenario": "attr-style-heavy",
-      "framework": "react",
-      "stats": {
-        "avgNs": 7139477.419354838,
-        "minNs": 4621600,
-        "maxNs": 12369800,
-        "p25Ns": 5882300,
-        "p50Ns": 6421700,
-        "p75Ns": 8707000,
-        "p99Ns": 11688600,
-        "samples": 93
-      }
-    },
-    {
-      "scenario": "attr-style-heavy",
-      "framework": "preact",
-      "stats": {
-        "avgNs": 6552571,
-        "minNs": 4353300,
-        "maxNs": 10428000,
-        "p25Ns": 5801600,
-        "p50Ns": 6379600,
-        "p75Ns": 7177600,
-        "p99Ns": 10082500,
+        "avgNs": 6655763.999999981,
+        "minNs": 3745400,
+        "maxNs": 12828200,
+        "p25Ns": 5159800,
+        "p50Ns": 6359800,
+        "p75Ns": 7774800,
+        "p99Ns": 11975600,
         "samples": 100
       }
     },
     {
+      "scenario": "large-table-1k",
+      "framework": "vue",
+      "stats": {
+        "avgNs": 7501524.719101199,
+        "minNs": 3413300,
+        "maxNs": 12150200,
+        "p25Ns": 5669600,
+        "p50Ns": 7390400,
+        "p75Ns": 9701100,
+        "p99Ns": 11832000,
+        "samples": 89
+      }
+    },
+    {
+      "scenario": "large-table-1k",
+      "framework": "react",
+      "stats": {
+        "avgNs": 4230220,
+        "minNs": 2318700,
+        "maxNs": 7205800,
+        "p25Ns": 3450100,
+        "p50Ns": 4178800,
+        "p75Ns": 4963100,
+        "p99Ns": 6714900,
+        "samples": 160
+      }
+    },
+    {
+      "scenario": "large-table-1k",
+      "framework": "preact",
+      "stats": {
+        "avgNs": 4025290.9638554216,
+        "minNs": 1899100,
+        "maxNs": 10196700,
+        "p25Ns": 2801400,
+        "p50Ns": 4008500,
+        "p75Ns": 4735500,
+        "p99Ns": 9041500,
+        "samples": 166
+      }
+    },
+    {
+      "scenario": "large-table",
+      "framework": "sigx",
+      "stats": {
+        "avgNs": 86115550,
+        "minNs": 71339300,
+        "maxNs": 102648100,
+        "p25Ns": 76450000,
+        "p50Ns": 86628300,
+        "p75Ns": 91978900,
+        "p99Ns": 102421300,
+        "samples": 12
+      }
+    },
+    {
+      "scenario": "large-table",
+      "framework": "vue",
+      "stats": {
+        "avgNs": 80781266.66666667,
+        "minNs": 59144300,
+        "maxNs": 93506300,
+        "p25Ns": 70136300,
+        "p50Ns": 84476300,
+        "p75Ns": 86262800,
+        "p99Ns": 92819300,
+        "samples": 12
+      }
+    },
+    {
+      "scenario": "large-table",
+      "framework": "react",
+      "stats": {
+        "avgNs": 57800544.44444445,
+        "minNs": 50453500,
+        "maxNs": 69078400,
+        "p25Ns": 53901100,
+        "p50Ns": 56655200,
+        "p75Ns": 60659100,
+        "p99Ns": 64547500,
+        "samples": 9
+      }
+    },
+    {
+      "scenario": "large-table",
+      "framework": "preact",
+      "stats": {
+        "avgNs": 53472788.88888889,
+        "minNs": 45733100,
+        "maxNs": 66770900,
+        "p25Ns": 48350400,
+        "p50Ns": 52589800,
+        "p75Ns": 54378800,
+        "p99Ns": 61296300,
+        "samples": 9
+      }
+    },
+    {
+      "scenario": "deep-tree",
+      "framework": "sigx",
+      "stats": {
+        "avgNs": 667512075.0000004,
+        "minNs": 521909700.0000019,
+        "maxNs": 753309100,
+        "p25Ns": 615412500,
+        "p50Ns": 666252800,
+        "p75Ns": 695884000,
+        "p99Ns": 736347700,
+        "samples": 12
+      }
+    },
+    {
+      "scenario": "deep-tree",
+      "framework": "vue",
+      "stats": {
+        "avgNs": 1047839833.3333336,
+        "minNs": 839035600,
+        "maxNs": 1479911800,
+        "p25Ns": 913004300,
+        "p50Ns": 952927800,
+        "p75Ns": 1048730100,
+        "p99Ns": 1433978700,
+        "samples": 12
+      }
+    },
+    {
+      "scenario": "deep-tree",
+      "framework": "react",
+      "stats": {
+        "avgNs": 488306275,
+        "minNs": 369598900,
+        "maxNs": 602294500,
+        "p25Ns": 415172200,
+        "p50Ns": 473101400,
+        "p75Ns": 544699300,
+        "p99Ns": 595874000,
+        "samples": 12
+      }
+    },
+    {
+      "scenario": "deep-tree",
+      "framework": "preact",
+      "stats": {
+        "avgNs": 265467858.33333334,
+        "minNs": 237692500,
+        "maxNs": 319517800,
+        "p25Ns": 244047000,
+        "p50Ns": 257614700,
+        "p75Ns": 273151200,
+        "p99Ns": 301945400,
+        "samples": 12
+      }
+    },
+    {
+      "scenario": "attr-style-heavy",
+      "framework": "sigx",
+      "stats": {
+        "avgNs": 3792587.2928176797,
+        "minNs": 2455200,
+        "maxNs": 7124300,
+        "p25Ns": 2917100,
+        "p50Ns": 3665900,
+        "p75Ns": 4369900,
+        "p99Ns": 6207700,
+        "samples": 181
+      }
+    },
+    {
+      "scenario": "attr-style-heavy",
+      "framework": "vue",
+      "stats": {
+        "avgNs": 4276856.603773585,
+        "minNs": 2891500,
+        "maxNs": 7499500,
+        "p25Ns": 3455100,
+        "p50Ns": 4087500,
+        "p75Ns": 4829800,
+        "p99Ns": 6753100,
+        "samples": 159
+      }
+    },
+    {
+      "scenario": "attr-style-heavy",
+      "framework": "react",
+      "stats": {
+        "avgNs": 3873390.2298850575,
+        "minNs": 2277200,
+        "maxNs": 9057200,
+        "p25Ns": 2685500,
+        "p50Ns": 3792400,
+        "p75Ns": 4443400,
+        "p99Ns": 7626100,
+        "samples": 174
+      }
+    },
+    {
+      "scenario": "attr-style-heavy",
+      "framework": "preact",
+      "stats": {
+        "avgNs": 3608370.744680851,
+        "minNs": 2371700,
+        "maxNs": 6596900,
+        "p25Ns": 2657800,
+        "p50Ns": 3428900,
+        "p75Ns": 4372900,
+        "p99Ns": 5835800,
+        "samples": 188
+      }
+    },
+    {
       "scenario": "escape-heavy",
       "framework": "sigx",
       "stats": {
-        "avgNs": 1318901.7408123792,
-        "minNs": 687400,
-        "maxNs": 5392100,
-        "p25Ns": 1023200,
-        "p50Ns": 1144800,
-        "p75Ns": 1268700,
-        "p99Ns": 4652300,
-        "samples": 517
+        "avgNs": 761418.3516483516,
+        "minNs": 467800,
+        "maxNs": 3232500,
+        "p25Ns": 529900,
+        "p50Ns": 605500,
+        "p75Ns": 865200,
+        "p99Ns": 2492800,
+        "samples": 910
       }
     },
     {
       "scenario": "escape-heavy",
       "framework": "vue",
       "stats": {
-        "avgNs": 771737.5838926175,
-        "minNs": 414600,
-        "maxNs": 3360700,
-        "p25Ns": 609600,
-        "p50Ns": 741600,
-        "p75Ns": 822000,
-        "p99Ns": 1946500,
-        "samples": 894
+        "avgNs": 493741.8754473873,
+        "minNs": 279800,
+        "maxNs": 3002700,
+        "p25Ns": 327500,
+        "p50Ns": 496700,
+        "p75Ns": 570400,
+        "p99Ns": 1161300,
+        "samples": 1397
       }
     },
     {
       "scenario": "escape-heavy",
       "framework": "react",
       "stats": {
-        "avgNs": 782572.0903954803,
-        "minNs": 413300,
-        "maxNs": 3321500,
-        "p25Ns": 667500,
-        "p50Ns": 748200,
-        "p75Ns": 824600,
-        "p99Ns": 1770600,
-        "samples": 885
+        "avgNs": 462143.8328912467,
+        "minNs": 267000,
+        "maxNs": 1426800,
+        "p25Ns": 329700,
+        "p50Ns": 440900,
+        "p75Ns": 549000,
+        "p99Ns": 1015400,
+        "samples": 1508
       }
     },
     {
       "scenario": "escape-heavy",
       "framework": "preact",
       "stats": {
-        "avgNs": 592698.544520548,
-        "minNs": 333900,
-        "maxNs": 2722100,
-        "p25Ns": 490200,
-        "p50Ns": 565900,
-        "p75Ns": 631200,
-        "p99Ns": 1627300,
-        "samples": 1168
+        "avgNs": 349187.0416875942,
+        "minNs": 220200,
+        "maxNs": 1192100,
+        "p25Ns": 254500,
+        "p50Ns": 278300,
+        "p75Ns": 434200,
+        "p99Ns": 778300,
+        "samples": 1991
       }
     },
     {
       "scenario": "escape-clean",
       "framework": "sigx",
       "stats": {
-        "avgNs": 128582.45187815362,
-        "minNs": 63000,
-        "maxNs": 1453700,
-        "p25Ns": 110400,
-        "p50Ns": 117300,
-        "p75Ns": 136100,
-        "p99Ns": 325800,
-        "samples": 5351
+        "avgNs": 81233.98001175778,
+        "minNs": 42000,
+        "maxNs": 899600,
+        "p25Ns": 50100,
+        "p50Ns": 83200,
+        "p75Ns": 90500,
+        "p99Ns": 233600,
+        "samples": 8505
       }
     },
     {
       "scenario": "escape-clean",
       "framework": "vue",
       "stats": {
-        "avgNs": 124768.96236755572,
-        "minNs": 60500,
-        "maxNs": 3521200,
-        "p25Ns": 98700,
-        "p50Ns": 115700,
-        "p75Ns": 128300,
-        "p99Ns": 277500,
-        "samples": 5474
+        "avgNs": 62900.651041666664,
+        "minNs": 51402.9296875,
+        "maxNs": 81894.140625,
+        "p25Ns": 57096.2158203125,
+        "p50Ns": 59560.25390625,
+        "p75Ns": 62874.70703125,
+        "p99Ns": 79229.4921875,
+        "samples": 12
       }
     },
     {
       "scenario": "escape-clean",
       "framework": "react",
       "stats": {
-        "avgNs": 96544.64586846544,
-        "minNs": 48900,
-        "maxNs": 776700,
-        "p25Ns": 74500,
-        "p50Ns": 96000,
-        "p75Ns": 103600,
-        "p99Ns": 233900,
-        "samples": 7116
+        "avgNs": 50948.931884765625,
+        "minNs": 42578.466796875,
+        "maxNs": 57783.7646484375,
+        "p25Ns": 45990.4052734375,
+        "p50Ns": 50891.5771484375,
+        "p75Ns": 54843.06640625,
+        "p99Ns": 57442.7001953125,
+        "samples": 12
       }
     },
     {
       "scenario": "escape-clean",
       "framework": "preact",
       "stats": {
-        "avgNs": 76610.22460610124,
-        "minNs": 41900,
-        "maxNs": 650600,
-        "p25Ns": 53600,
-        "p50Ns": 78600,
-        "p75Ns": 85200,
-        "p99Ns": 183100,
-        "samples": 8949
+        "avgNs": 52604.43115234375,
+        "minNs": 39695.1904296875,
+        "maxNs": 58395.068359375,
+        "p25Ns": 48261.4501953125,
+        "p50Ns": 54031.5185546875,
+        "p75Ns": 55457.4951171875,
+        "p99Ns": 56479.9072265625,
+        "samples": 12
       }
     }
   ],
   "meta": {
-    "date": "2026-07-23T16:10:57.712Z",
+    "date": "2026-07-23T19:24:45.024Z",
     "node": "v22.22.0",
     "cpu": "12th Gen Intel(R) Core(TM) i9-12900HK"
   },
@@ -407,49 +407,49 @@
         "framework": "sigx",
         "bytes": 1950663,
         "ttfbMs": {
-          "p50": 0.92,
-          "p75": 1.199,
-          "p99": 3.196
+          "p50": 0.74,
+          "p75": 0.881,
+          "p99": 1.609
         },
         "totalMs": {
-          "p50": 51.073,
-          "p75": 54.03,
-          "p99": 65.645
+          "p50": 39.432,
+          "p75": 40.203,
+          "p99": 47.036
         }
       },
       {
         "framework": "vue",
         "bytes": 1811651,
         "ttfbMs": {
-          "p50": 128.873,
-          "p75": 139.448,
-          "p99": 172.009
+          "p50": 58.068,
+          "p75": 71.074,
+          "p99": 122.075
         },
         "totalMs": {
-          "p50": 129.815,
-          "p75": 140.216,
-          "p99": 172.707
+          "p50": 58.672,
+          "p75": 71.441,
+          "p99": 122.374
         }
       },
       {
         "framework": "react",
         "bytes": 1801651,
         "ttfbMs": {
-          "p50": 70.54,
-          "p75": 75.736,
-          "p99": 92.806
+          "p50": 37.44,
+          "p75": 39.544,
+          "p99": 48.644
         },
         "totalMs": {
-          "p50": 104.705,
-          "p75": 111.011,
-          "p99": 124.945
+          "p50": 53.912,
+          "p75": 58.974,
+          "p99": 67.525
         }
       }
     ]
   },
   "quick": {
     "meta": {
-      "date": "2026-07-23T16:10:57.712Z",
+      "date": "2026-07-23T19:24:45.024Z",
       "node": "v22.22.0",
       "cpu": "12th Gen Intel(R) Core(TM) i9-12900HK"
     },
@@ -458,36 +458,36 @@
         "scenario": "escape-heavy",
         "framework": "sigx",
         "stats": {
-          "avgNs": 896393.7500000007,
-          "p50Ns": 746600,
-          "samples": 272
+          "avgNs": 640467.7165354328,
+          "p50Ns": 558800,
+          "samples": 381
         }
       },
       {
         "scenario": "escape-clean",
         "framework": "sigx",
         "stats": {
-          "avgNs": 73950.87087087087,
-          "p50Ns": 63900,
-          "samples": 3330
+          "avgNs": 56289.87019856771,
+          "p50Ns": 56100.927734375,
+          "samples": 12
         }
       },
       {
         "scenario": "small-page",
         "framework": "sigx",
         "stats": {
-          "avgNs": 23658.988380041534,
-          "p50Ns": 16100,
-          "samples": 10241
+          "avgNs": 34272.94067434919,
+          "p50Ns": 24000,
+          "samples": 7029
         }
       },
       {
         "scenario": "large-table-1k",
         "framework": "sigx",
         "stats": {
-          "avgNs": 10120930,
-          "p50Ns": 10166500,
-          "samples": 20
+          "avgNs": 6382408.823529412,
+          "p50Ns": 5611900,
+          "samples": 34
         }
       }
     ],
@@ -500,10 +500,10 @@
           "framework": "sigx",
           "bytes": 191925,
           "ttfbMs": {
-            "p50": 0.491
+            "p50": 0.426
           },
           "totalMs": {
-            "p50": 7.359
+            "p50": 8.202
           }
         }
       ]
@@ -513,54 +513,54 @@
         "suite": "codec",
         "name": "encode+stringify plainList",
         "stats": {
-          "avgNs": 1454964.5962732919,
-          "p50Ns": 1294000,
-          "samples": 161
+          "avgNs": 1140369.6682464455,
+          "p50Ns": 937800,
+          "samples": 211
         }
       },
       {
         "suite": "codec",
         "name": "parse+revive plainList",
         "stats": {
-          "avgNs": 807001.0135135176,
-          "p50Ns": 743500.0000002384,
-          "samples": 296
+          "avgNs": 846574.7368421053,
+          "p50Ns": 923000,
+          "samples": 285
         }
       },
       {
         "suite": "serverfn",
         "name": "POST read 1k rows",
         "stats": {
-          "avgNs": 1612134.0136054421,
-          "p50Ns": 1421600,
-          "samples": 147
+          "avgNs": 1722782.7338129496,
+          "p50Ns": 1826000,
+          "samples": 139
         }
       },
       {
         "suite": "keymatch",
         "name": "gate 8x32 deps, 64 tuple patterns",
         "stats": {
-          "avgNs": 3897270,
-          "p50Ns": 3485300,
-          "samples": 60
+          "avgNs": 651533.780160858,
+          "p50Ns": 602600,
+          "samples": 373
         }
       },
       {
         "suite": "refresh",
         "name": "boundary refresh x8",
         "stats": {
-          "avgNs": 459032.2580645161,
-          "p50Ns": 362200,
-          "samples": 527
+          "avgNs": 357486.2170087976,
+          "p50Ns": 265000,
+          "samples": 682
         }
       },
       {
         "suite": "packs",
         "name": "small-page resume",
         "stats": {
-          "avgNs": 238399.3103448276,
-          "p50Ns": 217000,
-          "samples": 1015
+          "avgNs": 124771.58859470468,
+          "p50Ns": 75200,
+          "samples": 1964
         }
       }
     ],
@@ -599,7 +599,7 @@
   },
   "micro": {
     "meta": {
-      "date": "2026-07-23T16:10:46.901Z",
+      "date": "2026-07-23T19:24:38.364Z",
       "node": "v22.22.0",
       "cpu": "12th Gen Intel(R) Core(TM) i9-12900HK"
     },
@@ -607,246 +607,246 @@
       {
         "suite": "codec",
         "name": "JSON.stringify plainList (floor)",
-        "avgNs": 561862.0264317178,
-        "p50Ns": 522200,
-        "samples": 1135
+        "avgNs": 389311.0975609756,
+        "p50Ns": 378500,
+        "samples": 1640
       },
       {
         "suite": "codec",
         "name": "encode+stringify plainList",
         "floorOf": "JSON.stringify plainList (floor)",
-        "avgNs": 1391104.6153846136,
-        "p50Ns": 1259300,
-        "samples": 455,
-        "ratioToFloor": 2.412
+        "avgNs": 910812.9496402872,
+        "p50Ns": 868900,
+        "samples": 695,
+        "ratioToFloor": 2.296
       },
       {
         "suite": "codec",
         "name": "encode plainList (walk only)",
-        "avgNs": 793398.6163521962,
-        "p50Ns": 698600,
-        "samples": 795
+        "avgNs": 558627.6014109375,
+        "p50Ns": 518300,
+        "samples": 1134
       },
       {
         "suite": "codec",
         "name": "encode+stringify plainList +handler",
         "floorOf": "JSON.stringify plainList (floor)",
-        "avgNs": 1486129.8823529412,
-        "p50Ns": 1351900,
-        "samples": 425,
-        "ratioToFloor": 2.589
+        "avgNs": 1014870.766773163,
+        "p50Ns": 971200,
+        "samples": 626,
+        "ratioToFloor": 2.566
       },
       {
         "suite": "codec",
         "name": "JSON.parse plainList (floor)",
-        "avgNs": 759190.7784431138,
-        "p50Ns": 755100,
-        "samples": 835
+        "avgNs": 483646.01971190295,
+        "p50Ns": 403200,
+        "samples": 1319
       },
       {
         "suite": "codec",
         "name": "parse+revive plainList",
         "floorOf": "JSON.parse plainList (floor)",
-        "avgNs": 1105795.096322235,
-        "p50Ns": 1135900,
-        "samples": 571,
-        "ratioToFloor": 1.504
+        "avgNs": 855885.8681022893,
+        "p50Ns": 904400,
+        "samples": 743,
+        "ratioToFloor": 2.243
       },
       {
         "suite": "codec",
         "name": "encode+stringify richPayload",
-        "avgNs": 514989.46515397157,
-        "p50Ns": 521900,
-        "samples": 1234
+        "avgNs": 315600.49431537837,
+        "p50Ns": 244100,
+        "samples": 2023
       },
       {
         "suite": "codec",
         "name": "parse+revive richPayload",
-        "avgNs": 404282.51748251746,
-        "p50Ns": 392500,
-        "samples": 1573
+        "avgNs": 243830.1757066463,
+        "p50Ns": 179800,
+        "samples": 2618
       },
       {
         "suite": "codec",
         "name": "JSON.stringify deepPayload (floor)",
-        "avgNs": 15745.587158203125,
-        "p50Ns": 15403.90625,
+        "avgNs": 10359.112548828125,
+        "p50Ns": 10385.0830078125,
         "samples": 12
       },
       {
         "suite": "codec",
         "name": "encode+stringify deepPayload",
         "floorOf": "JSON.stringify deepPayload (floor)",
-        "avgNs": 32212.160387839613,
-        "p50Ns": 30100,
-        "samples": 19802,
-        "ratioToFloor": 1.954
+        "avgNs": 21074.522985664855,
+        "p50Ns": 16600,
+        "samples": 30345,
+        "ratioToFloor": 1.598
       },
       {
         "suite": "serverfn",
         "name": "POST read 1k rows (floor)",
-        "avgNs": 928008.2352941176,
-        "p50Ns": 918200,
-        "samples": 680
+        "avgNs": 546335.769561479,
+        "p50Ns": 506200,
+        "samples": 1163
       },
       {
         "suite": "serverfn",
         "name": "POST read 1k rows",
         "floorOf": "POST read 1k rows (floor)",
-        "avgNs": 2100227.946127956,
-        "p50Ns": 2169700,
-        "samples": 297,
-        "ratioToFloor": 2.363
+        "avgNs": 1082315.9519725558,
+        "p50Ns": 963400,
+        "samples": 583,
+        "ratioToFloor": 1.903
       },
       {
         "suite": "serverfn",
         "name": "POST read rich payload",
-        "avgNs": 513032.9821717905,
-        "p50Ns": 418700,
-        "samples": 1234
+        "avgNs": 316285.2882703441,
+        "p50Ns": 257499.99999904633,
+        "samples": 2012
       },
       {
         "suite": "serverfn",
         "name": "POST mutation, tiny args (floor)",
-        "avgNs": 32023.600260416668,
-        "p50Ns": 31356.8603515625,
+        "avgNs": 18532.792154947918,
+        "p50Ns": 18525.146484375,
         "samples": 12
       },
       {
         "suite": "serverfn",
         "name": "POST mutation, tiny args",
         "floorOf": "POST mutation, tiny args (floor)",
-        "avgNs": 44753.63250883392,
-        "p50Ns": 24200,
-        "samples": 14150,
-        "ratioToFloor": 0.772
+        "avgNs": 38447.65926640927,
+        "p50Ns": 21300,
+        "samples": 16576,
+        "ratioToFloor": 1.15
       },
       {
         "suite": "serverfn",
         "name": "GET idempotent read",
-        "avgNs": 136457.08779443256,
-        "p50Ns": 137900,
-        "samples": 4670
+        "avgNs": 98259.61805020792,
+        "p50Ns": 91700,
+        "samples": 6493
       },
       {
         "suite": "serverfn",
         "name": "POST error path (ServerFnError)",
-        "avgNs": 78912.06467661691,
-        "p50Ns": 45500,
-        "samples": 8040
+        "avgNs": 61755.25397440868,
+        "p50Ns": 45300,
+        "samples": 10316
       },
       {
         "suite": "serverfn",
         "name": "NDJSON stream, 1000 chunks",
-        "avgNs": 4867438.095238095,
-        "p50Ns": 3953300,
-        "samples": 126
+        "avgNs": 4237841.095890411,
+        "p50Ns": 3443100,
+        "samples": 146
       },
       {
         "suite": "keymatch",
         "name": "gate 1x8 deps, 64 tuple patterns",
-        "avgNs": 318303.31658291456,
-        "p50Ns": 313000,
-        "samples": 1990
+        "avgNs": 134012.61052631578,
+        "p50Ns": 108700,
+        "samples": 4750
       },
       {
         "suite": "keymatch",
         "name": "gate 8x32 deps, 64 tuple patterns",
-        "avgNs": 4908596.825396826,
-        "p50Ns": 4955000,
-        "samples": 126
+        "avgNs": 679877.4678111587,
+        "p50Ns": 689700,
+        "samples": 932
       },
       {
         "suite": "keymatch",
         "name": "gate 32x32 deps, 64 tuple patterns",
-        "avgNs": 16668780,
-        "p50Ns": 16763900,
-        "samples": 35
+        "avgNs": 2501976.6798418975,
+        "p50Ns": 2713700,
+        "samples": 253
       },
       {
         "suite": "keymatch",
         "name": "gate 8x32 deps, 64 string patterns",
-        "avgNs": 649351.5897435897,
-        "p50Ns": 672600,
-        "samples": 975
+        "avgNs": 483461.78489702515,
+        "p50Ns": 470700,
+        "samples": 1311
       },
       {
         "suite": "keymatch",
         "name": "gate 32x32 deps, 64 string patterns",
-        "avgNs": 1359171.0583154173,
-        "p50Ns": 1203200.0000038147,
-        "samples": 463
+        "avgNs": 1819092.795389049,
+        "p50Ns": 1994300,
+        "samples": 347
       },
       {
         "suite": "refresh",
         "name": "boundary refresh x1",
-        "avgNs": 50848.358232819846,
-        "p50Ns": 38799.99999809265,
-        "samples": 12517
+        "avgNs": 60466.79815278045,
+        "p50Ns": 46300,
+        "samples": 10394
       },
       {
         "suite": "refresh",
         "name": "boundary refresh x8",
-        "avgNs": 337682.3685608072,
-        "p50Ns": 285200,
-        "samples": 1883
+        "avgNs": 403409.7204573315,
+        "p50Ns": 386200.00000190735,
+        "samples": 1574
       },
       {
         "suite": "refresh",
         "name": "boundary refresh x32",
-        "avgNs": 1520670.673076923,
-        "p50Ns": 1334900,
-        "samples": 416
+        "avgNs": 1265216.4328657468,
+        "p50Ns": 954700.0000019073,
+        "samples": 499
       },
       {
         "suite": "packs",
         "name": "small-page plain",
-        "avgNs": 107024.07376078497,
-        "p50Ns": 75400,
-        "samples": 5911
+        "avgNs": 77569.87038395696,
+        "p50Ns": 52600,
+        "samples": 8178
       },
       {
         "suite": "packs",
         "name": "small-page islands",
         "floorOf": "small-page plain",
-        "avgNs": 125756.03089720737,
-        "p50Ns": 95800,
-        "samples": 5049,
-        "ratioToFloor": 1.271
+        "avgNs": 121145.82143537026,
+        "p50Ns": 78400,
+        "samples": 5253,
+        "ratioToFloor": 1.49
       },
       {
         "suite": "packs",
         "name": "small-page resume",
         "floorOf": "small-page plain",
-        "avgNs": 135785.01600853787,
-        "p50Ns": 101900,
-        "samples": 4685,
-        "ratioToFloor": 1.351
+        "avgNs": 102699.83878768337,
+        "p50Ns": 70900,
+        "samples": 6203,
+        "ratioToFloor": 1.348
       },
       {
         "suite": "packs",
         "name": "large-table-1k plain",
-        "avgNs": 7762862.820512821,
-        "p50Ns": 7666400,
-        "samples": 78
+        "avgNs": 6437197.872340426,
+        "p50Ns": 6417100,
+        "samples": 94
       },
       {
         "suite": "packs",
         "name": "large-table-1k islands",
         "floorOf": "large-table-1k plain",
-        "avgNs": 6676068.131868131,
-        "p50Ns": 6521000,
-        "samples": 91,
-        "ratioToFloor": 0.851
+        "avgNs": 7497120.987654321,
+        "p50Ns": 7765200,
+        "samples": 81,
+        "ratioToFloor": 1.21
       },
       {
         "suite": "packs",
         "name": "large-table-1k resume",
         "floorOf": "large-table-1k plain",
-        "avgNs": 6559513.043478261,
-        "p50Ns": 6517100,
-        "samples": 92,
-        "ratioToFloor": 0.85
+        "avgNs": 5949953.398058252,
+        "p50Ns": 5781500,
+        "samples": 103,
+        "ratioToFloor": 0.901
       }
     ],
     "bytes": [

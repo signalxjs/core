@@ -21,7 +21,7 @@ import { runInScope } from '../scope';
 import { isServerFnError } from '../errors';
 import type { ServerFnGuard, ServerFnInfo, WrappedServerFn } from '../types';
 import { encodeWire, reviveWire } from '../wire-codec';
-import { keyMatches } from './key-match';
+import { preparePattern } from './key-match';
 
 export interface ServerFnRequestOptions {
     /**
@@ -719,9 +719,14 @@ export async function handleServerFnRequest(
             try {
                 const sidecar = readBoundarySidecar(boundarySidecar);
                 if (sidecar) {
-                    const resolved = patterns;
+                    // Prepare each pattern ONCE (its tuple canon is computed
+                    // here, not per dep): the gate is descriptors × deps ×
+                    // patterns, up to 32×32×64, and re-stringifying inside
+                    // that made a single mutation pay tens of thousands of
+                    // JSON.stringify calls (#469).
+                    const prepared = patterns.map(preparePattern);
                     const admitted = sidecar.refresh.filter((d) =>
-                        d.deps.some((dep) => resolved.some((p) => keyMatches(dep, p)))
+                        d.deps.some((dep) => prepared.some((p) => p.match(dep)))
                     );
                     if (admitted.length > 0) {
                         const entries = await options.renderBoundaries(

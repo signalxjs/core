@@ -36,6 +36,15 @@ repository-root `CHANGELOG.md`.
   prod dist). Extends the runtime-core prod-error-code pattern (core#230) to this
   pack. (#289)
 
+### Performance
+
+- **`invalidate(tuplePattern)` no longer re-`JSON.stringify`s the pattern per
+  entry (#469).** The canonical form of a tuple pattern is now computed once
+  before the store scan instead of on every entry comparison, so
+  `invalidate()` cost stays flat as the store grows. Same matching semantics;
+  string patterns were already stringify-free. (The identical matcher in
+  `@sigx/server`'s §6.3 gate got the same fix.)
+
 ## [0.10.0] - 2026-07-15
 
 Renderer portability (signalxjs/core#205): the pack now depends on

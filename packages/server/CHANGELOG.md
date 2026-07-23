@@ -13,6 +13,17 @@
   arguments. Handlers that declare an input (via `input` schema or a typed
   second parameter) are unaffected. Type-level only; no runtime change.
 
+### Performance
+
+- **The §6.3 boundary-refresh gate no longer re-`JSON.stringify`s each
+  `invalidates` pattern per dep (#469).** The gate is descriptors × deps ×
+  patterns (up to 32 × 32 × 64), and a tuple pattern's canonical form was
+  re-derived on every comparison — up to ~65k `JSON.stringify` calls per
+  mutation, before any rendering and inside the request's `timeoutMs`. Each
+  pattern is now canonicalized once before the filter; at the worst allowed
+  shape the gate drops from ~16.8 ms to ~2 ms. Same admission semantics. (The
+  identical matcher in `@sigx/cache`'s `invalidate()` got the same fix.)
+
 ### Changed
 
 - **BREAKING (pre-release)**: **`refreshes` is REMOVED — boundary refresh
