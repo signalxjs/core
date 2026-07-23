@@ -8,16 +8,15 @@ dependency order. This file is the procedure; [`ecosystem.json`](ecosystem.json)
 the data it runs on. Neither is optional folklore — `pnpm verify:ecosystem` fails
 CI when the manifest stops matching reality.
 
-> **Prerequisite, one-time — not yet done:** the `ECOSYSTEM_DISPATCH_TOKEN` secret
-> on this repo. Without it the alignment PRs still arrive, just on `core-sync.yml`'s
-> weekly cron instead of within minutes of the release. See
+> **Prerequisite: done.** `ECOSYSTEM_DISPATCH_TOKEN` is set on this repo and
+> verified live — all twelve consumers reachable, dispatch accepted, and
+> `core-sync.yml` confirmed green end to end on `router`, `store` and `i18n`.
+> Setup and troubleshooting:
 > [MAINTAINERS.md → Notifying consumer repos](MAINTAINERS.md#notifying-consumer-repos).
 >
-> **Consumer-side machinery: live in 11 of 12 repos.** Every consumer except `i18n`
-> carries `core-sync.yml`, `sync:core`, `verify:catalog` and a single-minor catalog
-> on its default branch. `i18n` is waiting on an approving review
-> ([signalxjs/i18n#16](https://github.com/signalxjs/i18n/pull/16)) — until that
-> merges, align it by hand.
+> **Consumer-side machinery: live in all 12.** Every consumer carries
+> `core-sync.yml`, `sync:core`, `verify:catalog` and a single-minor catalog on its
+> default branch.
 
 Both of those are point-in-time claims. Re-check them rather than trusting the
 paragraph above — this prints one line per consumer, `MISSING` where the
@@ -28,6 +27,13 @@ node -e "for (const c of require('./docs/ecosystem.json').consumers) console.log
   xargs -I{} sh -c 'printf "%-14s " {}; if gh api repos/signalxjs/{}/contents/.github/workflows/core-sync.yml >/dev/null 2>&1; then echo present; else echo MISSING; fi'
 ```
 
+To rehearse the whole loop without cutting a release, dispatch an
+already-published version and expect a green run that opens no PR:
+
+```sh
+gh api repos/signalxjs/router/dispatches \
+  -f event_type=core-released -F 'client_payload[version]=0.12.0'
+```
 
 ---
 
