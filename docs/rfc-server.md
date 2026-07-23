@@ -289,6 +289,15 @@ export function serverStream<A extends unknown[], T>(
     with(options?: ServerStreamCallOptions): (...args: A) => AsyncIterable<T>;
 };
 
+/** A stream's per-call options — `ServerFnCallOptions` minus `fresh`
+ *  (implemented as exactly that `Omit`). */
+export type ServerStreamCallOptions = {
+    signal?: AbortSignal;              // composes WITH the consumer-break abort
+    context?: ServerFnContextInit;     // Request | Partial<ServerFnContext>;
+                                       // in-process only, ignored on the client
+    headers?: Record<string, string>;  // client only, merged over the transport's
+};
+
 /** Guard/middleware: veto by throwing; hand results downstream via rq.locals. */
 export type ServerFnGuard = (
     rq: ServerFnContext,
