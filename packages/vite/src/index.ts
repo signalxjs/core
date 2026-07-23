@@ -640,7 +640,11 @@ if (import.meta.hot) {
                 return;
             }
             // Server-only source that the render depends on → reload the page.
-            const ssrModules = server.environments.ssr.moduleGraph.getModulesByFile(file);
+            // Guard the whole path: a dev server without an `ssr` environment
+            // (a non-SSR sigx setup, a custom environments config) simply has
+            // no SSR graph to consult, and a throw here would break the file
+            // watcher — the rest of the codebase treats these as optional too.
+            const ssrModules = server.environments?.ssr?.moduleGraph?.getModulesByFile(file);
             if (ssrModules && ssrModules.size > 0) {
                 this.environment.hot.send({ type: 'full-reload' });
             }

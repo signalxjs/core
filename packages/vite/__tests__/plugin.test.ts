@@ -291,6 +291,7 @@ describe('hotUpdate — full-reload for server-only source (#450)', () => {
         file: string;
         clientModules?: unknown[];
         inSsrGraph?: boolean;
+        noSsrEnv?: boolean;
         pluginOptions?: Parameters<typeof sigxPlugin>[0];
     }): { sent: unknown[] } {
         const sent: unknown[] = [];
@@ -303,7 +304,8 @@ describe('hotUpdate — full-reload for server-only source (#450)', () => {
             name: opts.envName ?? 'client',
             hot: { send: (payload: unknown) => sent.push(payload) }
         };
-        const server = { environments: { ssr: { moduleGraph: ssrModuleGraph } } };
+        // noSsrEnv models a dev server with no `ssr` environment.
+        const server = { environments: opts.noSsrEnv ? {} : { ssr: { moduleGraph: ssrModuleGraph } } };
         plugin.hotUpdate.call({ environment }, {
             type: 'update',
             file: opts.file,
@@ -365,6 +367,14 @@ describe('hotUpdate — full-reload for server-only source (#450)', () => {
             clientModules: [],
             inSsrGraph: true
         });
+        expect(sent).toEqual([]);
+    });
+
+    it('no-ops (does not throw) when the dev server has no ssr environment', () => {
+        expect(() =>
+            runHotUpdate({ file: '/proj/src/App.tsx', clientModules: [], noSsrEnv: true })
+        ).not.toThrow();
+        const { sent } = runHotUpdate({ file: '/proj/src/App.tsx', clientModules: [], noSsrEnv: true });
         expect(sent).toEqual([]);
     });
 
