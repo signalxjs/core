@@ -12,18 +12,19 @@
  *
  * @example
  * ```ts
+ * import { defineApp } from 'sigx';
  * import { createSSR } from '@sigx/server-renderer';
  * import { islandsPlugin } from '@sigx/ssr-islands';
  *
- * const ssr = createSSR().use(islandsPlugin());
- * const html = await ssr.render(<App />);
+ * const app = defineApp(<App />).use(islandsPlugin({ manifest }));
+ * const html = await createSSR().render(app);
  * ```
  */
 
 import type { SSRPlugin, ResolvedBoundary } from '@sigx/server-renderer';
 import type { SSRContext } from '@sigx/server-renderer';
 import { serializeBoundaryProps, getTypeHandlers } from '@sigx/server-renderer/server';
-import { registerClientPlugin, provideHydrateDefaults } from '@sigx/server-renderer/client';
+import { registerClientPlugin, provideHydrateDefaults, provideSSRPlugin } from '@sigx/server-renderer/client';
 import type { VNode, ComponentSetupContext, App } from 'sigx';
 import {
     getHydrationDirective,
@@ -79,8 +80,8 @@ export interface IslandsPluginOptions {
      *
      * @example
      * ```ts
-     * import manifest from './dist/.vite/sigx-islands-manifest.json';
-     * const ssr = createSSR().use(islandsPlugin({ manifest }));
+     * import { islandsManifest } from 'virtual:sigx-manifests';
+     * const app = defineApp(<App />).use(islandsPlugin({ manifest: islandsManifest }));
      * ```
      */
     manifest?: IslandsManifestV2 | Record<string, IslandManifestEntry>;
@@ -106,16 +107,16 @@ function normalizeManifest(manifest: IslandsPluginOptions['manifest']): {
 // ─── Plugin Implementation ──────────────────────────────────────
 
 /**
- * Create an islands plugin — dual-shaped:
+ * Create an islands plugin — one install shape (#413): `app.use(islandsPlugin())`.
  *
- * - As an SSRPlugin (server: `createSSR().use(islandsPlugin())`): maps
- *   `client:*` directives onto boundary records via `resolveBoundary`,
- *   tracks signal state, and writes it into the core __SIGX_BOUNDARIES__
- *   table.
- * - As an app plugin (client: `app.use(islandsPlugin())`): declares islands
- *   mode by providing `{ boundaries: 'explicit' }` hydration defaults (only
- *   boundary-table entries hydrate — no root walk) and registers the
- *   signal-state restore hook. `app.hydrate('#app')` then does the rest.
+ * - On the server (the entry-server's per-request app factory): `install(app)`
+ *   registers the SSRPlugin half via `provideSSRPlugin`, so the render maps
+ *   `client:*` directives onto boundary records via `resolveBoundary`, tracks
+ *   signal state, and writes it into the core __SIGX_BOUNDARIES__ table.
+ * - On the client (app-rooted form): declares islands mode by providing
+ *   `{ boundaries: 'explicit' }` hydration defaults (only boundary-table
+ *   entries hydrate — no root walk) and registers the signal-state restore
+ *   hook. `app.hydrate('#app')` then does the rest.
  *
  * The standalone `hydrateIslands()` entry remains for app-less pages; pair
  * it with `registerClientPlugin(islandsPlugin())` for state restoration.
@@ -130,7 +131,14 @@ export function islandsPlugin(options?: IslandsPluginOptions): SSRPlugin & { ins
             // never implied by a package import (rfc-ssr-platform open
             // question 5, resolved as plugin-provided via the DI seam).
             provideHydrateDefaults(app._context, { boundaries: 'explicit' });
-            registerClientPlugin(this as unknown as SSRPlugin);
+            // Hand the server render hooks to the SSR pipeline (#413).
+            provideSSRPlugin(app._context, this as unknown as SSRPlugin);
+            // Client-only: a per-request SERVER app must not touch the
+            // module-level client registry (its first-wins dedup would fire
+            // on every request, and the hooks are never consumed there).
+            if (typeof document !== 'undefined') {
+                registerClientPlugin(this as unknown as SSRPlugin);
+            }
         },
 
         server: {

@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING — one install shape: `app.use(resumePlugin())` (#413).**
+  `install(app)` now also registers the pack's server render hooks (via
+  `@sigx/server-renderer`'s new `provideSSRPlugin` seam), so installing in
+  the entry-server's per-request app factory is the whole install;
+  `createSSR().use(resumePlugin())` is gone (`SSRInstance.use()` was
+  removed upstream). Prod manifests reach the factory via
+  `virtual:sigx-manifests` (`@sigx/vite`).
+- **BREAKING** — `createBoundaryRefresh` no longer takes `ssr:`; pass
+  `plugins: [resumePlugin(...)]` explicitly, or omit it and let the `app`
+  option's app carry the plugin set (`app.use(resumePlugin(...))` in its
+  factory). Dev warns when the resolved set contains no resume plugin.
+
 ### Added
 
 - Single-flight boundary refresh — the client half (rfc-server §6.3, #313,

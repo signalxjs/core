@@ -85,9 +85,13 @@ export const moneyPack = {
 };
 ```
 
-For the server-function wire specifically, stamp
+Apps using server functions should register through
+`serverPlugin({ types })` from `@sigx/server/plugin` instead — ONE
+registration covers both the per-app registry above AND the server-function
+wire (#411). The wire's underlying seam is
 `globalThis.__SIGX_SERVERFN_CODEC__` — the same global-seam pattern `$cache`
-uses, which is what keeps the stub entry dependency-free.
+uses, which is what keeps the stub entry dependency-free; app-less contexts
+can stamp it via `registerWireTypeHandlers` (or directly).
 
 ## Wire format
 

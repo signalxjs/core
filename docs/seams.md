@@ -109,11 +109,18 @@ is never called; a throwing hook never breaks the RPC result.
 
 | | |
 |---|---|
-| **Stamped by** | the app or a pack, for custom classes |
+| **Stamped by** | `serverPlugin({ types })` / `registerWireTypeHandlers` (`@sigx/server/plugin`) — or the app directly |
 | **Read by** | `server/src/wire-codec.ts` |
-| **Contract** | `TypeHandler[]` (see `@sigx/serialize`) — consulted **before** the built-ins |
+| **Contract** | `TypeHandler[]` (see `@sigx/serialize`) — consulted **before** the built-ins. Registration through `registerWireTypeHandlers` is **tag-keyed**: a handler whose `tag` is already present replaces it (idempotent under per-request server-app installs); tag-less handlers append once by identity |
 
 Keeps `@sigx/server/client` able to revive app types without importing them.
+Unlike `__SIGX_TYPE_HANDLERS__`, this IS stamped on the server too: the wire
+codec has no DI read path (stubs and endpoint are dependency-free by
+contract) and the endpoint runs app-less. Tags are already a process-global
+vocabulary on the wire, so the cross-app collision the browser-only rule
+guards against does not apply — same-tag registration converges instead of
+colliding. `serverPlugin({ types })` stamps this AND calls
+`provideTypeHandlers` — one registration covers every boundary (#411).
 
 ### `__SIGX_TYPE_HANDLERS__`
 
@@ -132,6 +139,10 @@ decoder matches its scope. Packs call `provideTypeHandlers` once and get both.
 
 Not stamped on the server: a process-wide list would let two apps' handlers
 collide across requests.
+
+One-stop registration: `serverPlugin({ types })` from `@sigx/server/plugin`
+calls `provideTypeHandlers` AND stamps the RPC wire codec
+(`__SIGX_SERVERFN_CODEC__`) from a single `TypeHandler[]` (#411).
 
 ### `__SIGX_SERVERFN_CONTEXT__`
 

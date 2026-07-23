@@ -50,7 +50,7 @@ function makeCounter(): any {
 describe('resumePlugin — boundary records', () => {
     it('renders QRL + boundary attributes and records hydrate:never with state', async () => {
         const Counter = makeCounter();
-        const ssr = createSSR().use(resumePlugin());
+        const ssr = createSSR({ plugins: [resumePlugin()] });
         const html = await ssr.render(<Counter label="hits" initial={7} />);
 
         // The attribute-smuggling path: plain string props render, on* is dropped.
@@ -75,7 +75,7 @@ describe('resumePlugin — boundary records', () => {
     it('records hydrate:never for __resumeMode:"hydrate" components too (pack-owned waking)', async () => {
         const Counter = makeCounter();
         Counter.__resumeMode = 'hydrate';
-        const ssr = createSSR().use(resumePlugin());
+        const ssr = createSSR({ plugins: [resumePlugin()] });
         const html = await ssr.render(<Counter />);
 
         // Core must never schedule resume boundaries — a resumable page has
@@ -87,12 +87,12 @@ describe('resumePlugin — boundary records', () => {
 
     it('attaches the upgrade chunk from the manifest', async () => {
         const Counter = makeCounter();
-        const ssr = createSSR().use(resumePlugin({
+        const ssr = createSSR({ plugins: [resumePlugin({
             manifest: {
                 components: { Counter: { chunkUrl: '/assets/counter.abc.js', exportName: 'Counter' } },
                 handlers: {}
             }
-        }));
+        })] });
         const html = await ssr.render(<Counter />);
 
         const record = Object.values(parseBoundaryTable(html))[0];
@@ -104,7 +104,7 @@ describe('resumePlugin — boundary records', () => {
             const n = ctx.signal(1);
             return () => <span>{n.value}</span>;
         }, { name: 'Plain' });
-        const ssr = createSSR().use(resumePlugin());
+        const ssr = createSSR({ plugins: [resumePlugin()] });
         const html = await ssr.render(<Plain />);
 
         expect(Object.values(parseBoundaryTable(html))).toHaveLength(0);
@@ -122,7 +122,7 @@ describe('resumePlugin — coexistence with islands', () => {
 
     it('lets islands claim directive-carrying resume components (islands registered first)', async () => {
         const Counter = makeCounter();
-        const ssr = createSSR().use(islandsPlugin()).use(resumePlugin());
+        const ssr = createSSR({ plugins: [islandsPlugin(), resumePlugin()] });
         const html = await ssr.render(<Counter client:visible initial={3} />);
 
         const record = Object.values(parseBoundaryTable(html))[0];
@@ -140,7 +140,7 @@ describe('resumePlugin — coexistence with islands', () => {
         const Counter = makeCounter();
         // Wrong registration order — resume's decline is the safety net that
         // keeps ownership with islands regardless.
-        const ssr = createSSR().use(resumePlugin()).use(islandsPlugin());
+        const ssr = createSSR({ plugins: [resumePlugin(), islandsPlugin()] });
         const html = await ssr.render(<Counter client:visible initial={3} />);
 
         const record = Object.values(parseBoundaryTable(html))[0];
@@ -155,7 +155,7 @@ describe('resumePlugin — coexistence with islands', () => {
             return () => <div>{n.value}</div>;
         }, { name: 'Island' });
 
-        const ssr = createSSR().use(islandsPlugin()).use(resumePlugin());
+        const ssr = createSSR({ plugins: [islandsPlugin(), resumePlugin()] });
         const html = await ssr.render(
             <div>
                 <Counter initial={1} />
@@ -183,7 +183,7 @@ describe('resumePlugin — state capture', () => {
         (Warmup as any).__resumeId = 'Warmup';
         (Warmup as any).__resumeMode = 'resume';
 
-        const ssr = createSSR().use(resumePlugin());
+        const ssr = createSSR({ plugins: [resumePlugin()] });
         const html = await ssr.render(<Warmup />);
 
         const record = Object.values(parseBoundaryTable(html))[0];
@@ -201,7 +201,7 @@ describe('resumePlugin — state capture', () => {
         (Mixed as any).__resumeId = 'Mixed';
         (Mixed as any).__resumeMode = 'resume';
 
-        const ssr = createSSR().use(resumePlugin());
+        const ssr = createSSR({ plugins: [resumePlugin()] });
         const html = await ssr.render(<Mixed />);
 
         const record = Object.values(parseBoundaryTable(html))[0];

@@ -41,6 +41,10 @@ export type { InternalVNode } from './hydrate-context';
 export { HYDRATE_DEFAULTS_TOKEN, provideHydrateDefaults, getHydrateDefaults } from './hydrate-defaults';
 export type { HydrateDefaults } from './hydrate-defaults';
 
+// App-carried SSR plugins — the install(app) seam packs register their
+// server render hooks through (#413: one install shape, app.use)
+export { SSR_PLUGINS_TOKEN, provideSSRPlugin, getSSRPlugins } from './ssr-plugins';
+
 // The boundary scheduler (rfc-ssr-platform §1.2): table access, per-strategy
 // scheduling, streamed-boundary wake-up. Also available standalone as the
 // eager `@sigx/server-renderer/client/scheduler` entry, which is how a page

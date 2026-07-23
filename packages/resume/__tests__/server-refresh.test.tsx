@@ -71,14 +71,15 @@ function makeCalendar(): any {
 describe('createBoundaryRefresh — the admitted path', () => {
     it('re-renders a descriptor into fresh HTML, state, and a table patch above base', async () => {
         const Counter = makeCounter();
-        const ssr = createSSR().use(resumePlugin());
+        const plugins = [resumePlugin()];
+        const ssr = createSSR({ plugins });
 
         // The "page" render — its table entry is what a client would send up.
         const pageHtml = await ssr.render(<Counter label="hits" initial={7} />);
         const [pageId] = Object.keys(parseBoundaryTable(pageHtml));
         const pageRecord = parseBoundaryTable(pageHtml)[pageId];
 
-        const renderBoundaries = createBoundaryRefresh({ ssr, components: { Counter } });
+        const renderBoundaries = createBoundaryRefresh({ plugins, components: { Counter } });
         const entries = await renderBoundaries(
             [{ id: Number(pageId), component: 'Counter', props: pageRecord.props }],
             BASE
@@ -104,7 +105,8 @@ describe('createBoundaryRefresh — the admitted path', () => {
 
     it('revives encoded descriptor props and encodes rich state back', async () => {
         const Calendar = makeCalendar();
-        const ssr = createSSR().use(resumePlugin());
+        const plugins = [resumePlugin()];
+        const ssr = createSSR({ plugins });
         const start = new Date('2026-07-21T12:00:00.000Z');
 
         const pageHtml = await ssr.render(<Calendar start={start} />);
@@ -113,7 +115,7 @@ describe('createBoundaryRefresh — the admitted path', () => {
         // The table ships the Date encoded — exactly what the client resends.
         expect(pageRecord.props).toEqual({ start: { $date: start.getTime() } });
 
-        const renderBoundaries = createBoundaryRefresh({ ssr, components: { Calendar } });
+        const renderBoundaries = createBoundaryRefresh({ plugins, components: { Calendar } });
         const entries = await renderBoundaries(
             [{ id: Number(pageId), component: 'Calendar', props: pageRecord.props }],
             BASE
@@ -128,9 +130,8 @@ describe('createBoundaryRefresh — the admitted path', () => {
 
     it('resolves lazy component loaders (module and factory shapes)', async () => {
         const Counter = makeCounter();
-        const ssr = createSSR().use(resumePlugin());
         const renderBoundaries = createBoundaryRefresh({
-            ssr,
+            plugins: [resumePlugin()],
             components: {
                 Counter: () => Promise.resolve({ Counter }),
                 Solo: async () => makeCounter('Solo')
@@ -149,8 +150,7 @@ describe('createBoundaryRefresh — the admitted path', () => {
 
     it('keeps successive descriptors id-disjoint past the previous render', async () => {
         const Counter = makeCounter();
-        const ssr = createSSR().use(resumePlugin());
-        const renderBoundaries = createBoundaryRefresh({ ssr, components: { Counter } });
+        const renderBoundaries = createBoundaryRefresh({ plugins: [resumePlugin()], components: { Counter } });
 
         const entries = await renderBoundaries(
             [
@@ -183,8 +183,7 @@ describe('createBoundaryRefresh — the admitted path', () => {
         (Parent as any).__resumeId = 'Parent';
         (Parent as any).__resumeMode = 'resume';
 
-        const ssr = createSSR().use(resumePlugin());
-        const renderBoundaries = createBoundaryRefresh({ ssr, components: { Parent } });
+        const renderBoundaries = createBoundaryRefresh({ plugins: [resumePlugin()], components: { Parent } });
         const entries = await renderBoundaries([{ id: 2, component: 'Parent' }], BASE);
 
         expect(entries).toHaveLength(1);
@@ -208,8 +207,7 @@ describe('createBoundaryRefresh — declines (omission, never a throw)', () => {
 
     it('declines inherited object keys — only own registry entries are callable', async () => {
         const Counter = makeCounter();
-        const ssr = createSSR().use(resumePlugin());
-        const renderBoundaries = createBoundaryRefresh({ ssr, components: { Counter } });
+        const renderBoundaries = createBoundaryRefresh({ plugins: [resumePlugin()], components: { Counter } });
 
         // `constructor`/`toString` resolve through the prototype chain of a
         // plain-object registry; the own-property guard must keep them from
@@ -227,8 +225,7 @@ describe('createBoundaryRefresh — declines (omission, never a throw)', () => {
 
     it('declines unknown registry keys, keeps the rest', async () => {
         const Counter = makeCounter();
-        const ssr = createSSR().use(resumePlugin());
-        const renderBoundaries = createBoundaryRefresh({ ssr, components: { Counter } });
+        const renderBoundaries = createBoundaryRefresh({ plugins: [resumePlugin()], components: { Counter } });
 
         const entries = await renderBoundaries(
             [
@@ -248,8 +245,7 @@ describe('createBoundaryRefresh — declines (omission, never a throw)', () => {
         }, { name: 'Bomb' });
         (Bomb as any).__resumeId = 'Bomb';
 
-        const ssr = createSSR().use(resumePlugin());
-        const renderBoundaries = createBoundaryRefresh({ ssr, components: { Counter, Bomb } });
+        const renderBoundaries = createBoundaryRefresh({ plugins: [resumePlugin()], components: { Counter, Bomb } });
 
         const entries = await renderBoundaries(
             [
@@ -263,8 +259,7 @@ describe('createBoundaryRefresh — declines (omission, never a throw)', () => {
 
     it('declines a smuggled children prop — the re-render is lossy', async () => {
         const Counter = makeCounter();
-        const ssr = createSSR().use(resumePlugin());
-        const renderBoundaries = createBoundaryRefresh({ ssr, components: { Counter } });
+        const renderBoundaries = createBoundaryRefresh({ plugins: [resumePlugin()], components: { Counter } });
 
         // Descriptors are client-controlled: a forged `children` value would
         // render markup the snapshot cannot vouch for. The re-rendered record
@@ -278,9 +273,8 @@ describe('createBoundaryRefresh — declines (omission, never a throw)', () => {
 
     it('declines everything when the app factory throws', async () => {
         const Counter = makeCounter();
-        const ssr = createSSR().use(resumePlugin());
         const renderBoundaries = createBoundaryRefresh({
-            ssr,
+            plugins: [resumePlugin()],
             components: { Counter },
             app: () => {
                 throw new Error('no app for you');
@@ -299,7 +293,7 @@ describe('refreshable: false stamping (lossy snapshots)', () => {
         (WithChildren as any).__resumeId = 'WithChildren';
         const Counter = makeCounter();
 
-        const ssr = createSSR().use(resumePlugin());
+        const ssr = createSSR({ plugins: [resumePlugin()] });
         const html = await ssr.render(
             <main>
                 <WithChildren>
@@ -318,7 +312,7 @@ describe('refreshable: false stamping (lossy snapshots)', () => {
 
     it('does not stamp for dropped on* handler props', async () => {
         const Counter = makeCounter();
-        const ssr = createSSR().use(resumePlugin());
+        const ssr = createSSR({ plugins: [resumePlugin()] });
         const html = await ssr.render(<Counter initial={1} {...({ onSelect: () => {} } as any)} />);
         const record = Object.values(parseBoundaryTable(html))[0];
         expect(record.refreshable).toBeUndefined();
@@ -326,9 +320,46 @@ describe('refreshable: false stamping (lossy snapshots)', () => {
 
     it('stamps for a dropped non-handler function prop (render prop)', async () => {
         const Counter = makeCounter();
-        const ssr = createSSR().use(resumePlugin());
+        const ssr = createSSR({ plugins: [resumePlugin()] });
         const html = await ssr.render(<Counter initial={1} {...({ format: (n: number) => `${n}` } as any)} />);
         const record = Object.values(parseBoundaryTable(html))[0];
         expect(record.refreshable).toBe(false);
+    });
+});
+
+describe('createBoundaryRefresh — app-carried plugins (#413)', () => {
+    it('resolves the plugin set from the app option when `plugins` is omitted', async () => {
+        const { defineApp } = await import('sigx');
+        const Counter = makeCounter();
+
+        // The page render AND the refresh both discover resumePlugin from
+        // the app — no plugins threaded anywhere.
+        const makeApp = () => defineApp(<Counter label="hits" initial={4} />).use(resumePlugin());
+        const pageHtml = await createSSR().render(makeApp());
+        const [pageId] = Object.keys(parseBoundaryTable(pageHtml));
+        const pageRecord = parseBoundaryTable(pageHtml)[pageId];
+        expect(pageRecord.hydrate).toBe('never');
+
+        const renderBoundaries = createBoundaryRefresh({
+            app: () => makeApp(),
+            components: { Counter }
+        });
+        const entries = await renderBoundaries(
+            [{ id: Number(pageId), component: 'Counter', props: pageRecord.props }],
+            BASE
+        );
+
+        expect(entries).toHaveLength(1);
+        expect(entries[0].state).toEqual({ count: 4 });
+        expect(entries[0].html).toContain(`<!--$c:${BASE + 1}-->`);
+    });
+
+    it('warns in dev when the resolved plugin set has no resume plugin', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const Counter = makeCounter();
+        const renderBoundaries = createBoundaryRefresh({ components: { Counter } });
+        await renderBoundaries([{ id: 1, component: 'Counter' }], BASE);
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining('no resume plugin'));
+        warn.mockRestore();
     });
 });

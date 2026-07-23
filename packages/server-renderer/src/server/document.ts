@@ -33,6 +33,7 @@ import { SigxError } from 'sigx';
 import { prodError } from 'sigx/internals';
 import type { SSRPlugin } from '../plugin';
 import { createSSRContext, type SSRContext, type SSRContextOptions } from './context';
+import { initPluginContext } from './plugin-setup';
 import { renderToChunks } from './render-core';
 import { emitBoundaryTable, scriptOpen } from './serialize';
 import { renderHeadToString, collectRootAttrs, mergeAttrsIntoTag } from '../head';
@@ -213,10 +214,7 @@ async function prepareDocument(
 
     const ctx = createSSRContext(options);
     ctx._appContext = input.appContext;
-    ctx._plugins = engine.plugins;
-    for (const plugin of engine.plugins) {
-        plugin.server?.setup?.(ctx);
-    }
+    initPluginContext(ctx, engine.plugins);
     ctx._streaming = options.mode !== 'blocking';
 
     // Render the app shell. In streaming mode async components leave

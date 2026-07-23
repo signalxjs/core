@@ -1,12 +1,12 @@
 // The resumability reference server (#241) — same two-mode shape as
-// examples/ssr-islands/server.mjs, with resumePlugin() on the SSR instance.
+// examples/ssr-islands/server.mjs. The resume pack installs in the app
+// factory (src/entry-server.tsx, #413: app.use is the one install shape);
+// this wiring is transport plus the server-fn endpoint.
 // Run production with `--conditions production` for the NODE_ENV-stripped
 // dist builds (works without it too).
 import express from 'express';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
-import { createSSR } from '@sigx/server-renderer';
-import { resumePlugin } from '@sigx/resume';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const isProd = process.env.NODE_ENV === 'production';
@@ -19,11 +19,10 @@ async function createServer() {
     const app = express();
 
     if (!isProd) {
-        // Dev: Vite middleware + ONE handler. The @sigx family is
-        // externalized from the runner (vite.config.ts), so this module's
-        // resumePlugin() import and the handler's renderer are the same
-        // instances — one module graph. No manifest in dev: QRLs and
-        // upgrade chunks resolve through the virtual registry.
+        // Dev: Vite middleware + ONE handler. The app factory carries the
+        // resume pack; no manifest in dev — QRLs and upgrade chunks resolve
+        // through the virtual registry. (Boundary refresh in dev rides
+        // src/dev-refresh.ts through sigxServer()'s middleware.)
         const { createServer: createViteServer } = await import('vite');
         const { createDevRequestHandler } = await import('@sigx/vite/ssr');
 
@@ -35,8 +34,7 @@ async function createServer() {
         app.use(vite.middlewares);
         app.use(await createDevRequestHandler(vite, {
             entry: '/src/entry-server.tsx',
-            isBot,
-            ssr: createSSR().use(resumePlugin())
+            isBot
         }));
     } else {
         // Prod: static assets + the server-function endpoint + ONE document
@@ -49,6 +47,7 @@ async function createServer() {
         const { createRequestHandler } = await import('@sigx/server-renderer/node');
         const { createServerFnHandler } = await import('@sigx/server/node');
         const { createBoundaryRefresh } = await import('@sigx/resume/server');
+        const { resumePlugin } = await import('@sigx/resume');
 
         const { template, assets, resumeManifest } = await import(
             new URL('./dist/server/sigx-app.js', import.meta.url).href
@@ -60,21 +59,21 @@ async function createServer() {
             new URL('./dist/server/sigx-server-fns.js', import.meta.url).href
         );
 
-        // ONE ssr instance for documents AND single-flight boundary
-        // refreshes (rfc-server §6.3) — the refresh re-renders through the
-        // same plugin set the page rendered with.
-        const ssr = createSSR().use(resumePlugin({ manifest: resumeManifest }));
-
         app.use(express.static(resolve(__dirname, 'dist/client'), { index: false }));
+        // Single-flight boundary refreshes (rfc-server §6.3) re-render
+        // through the same plugin set the page rendered with — explicit
+        // here, matching the endpoint's explicit-registry posture.
         app.use(createServerFnHandler({
             functions: serverFns,
-            renderBoundaries: createBoundaryRefresh({ ssr, components: refreshComponents })
+            renderBoundaries: createBoundaryRefresh({
+                plugins: [resumePlugin({ manifest: resumeManifest })],
+                components: refreshComponents
+            })
         }));
         app.use(createRequestHandler({
             template,
             app: (url) => createApp(url),
             isBot,
-            ssr,
             document: { assets }
         }));
     }

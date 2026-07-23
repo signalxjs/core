@@ -69,7 +69,7 @@ function makeAsyncCounter(): any {
 describe('streaming resume boundaries', () => {
     it('streams a placeholder, then a QRL-carrying replacement with table state', async () => {
         const AsyncCounter = makeAsyncCounter();
-        const ssr = createSSR().use(resumePlugin());
+        const ssr = createSSR({ plugins: [resumePlugin()] });
         const chunks = await collectChunks(ssr.renderChunks(<AsyncCounter />));
         const html = chunks.join('');
 
@@ -116,7 +116,7 @@ describe('streaming resume boundaries', () => {
         (Late as any).__resumeId = 'Late';
         (Late as any).__resumeMode = 'resume';
 
-        const ssr = createSSR().use(resumePlugin());
+        const ssr = createSSR({ plugins: [resumePlugin()] });
         const html = (await collectChunks(ssr.renderChunks(<Late />))).join('');
 
         const patches = parseAllBoundaryPatches(html);

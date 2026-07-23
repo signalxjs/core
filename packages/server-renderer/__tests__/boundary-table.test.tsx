@@ -89,7 +89,7 @@ describe('shell emission — wire shape', () => {
                 }
             }
         };
-        const html = await createSSR().use(recorder).render((Plain as any)({}));
+        const html = await createSSR({ plugins: [recorder] }).render((Plain as any)({}));
         expect(html).toContain('window.__SIGX_BOUNDARIES__=Object.assign(Object.create(null),window.__SIGX_BOUNDARIES__,');
         expect(html).toContain('"hydrate":"idle"');
     });
@@ -115,7 +115,7 @@ describe('mid-stream patch', () => {
             }
         };
         const Async = makeAsyncComponent('patch-async');
-        const ssr = createSSR().use(recorder);
+        const ssr = createSSR({ plugins: [recorder] });
         const out = await collectStream(ssr.renderStream((Async as any)({})) as ReadableStream<string>);
 
         // Shell table: recorded at walk time, no state yet

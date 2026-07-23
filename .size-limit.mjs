@@ -54,13 +54,20 @@ export default [
     path: 'packages/server-renderer/dist/index.prod.js',
     // 13 → 13.25 KB when createFetchHandler landed on the root entry
     // (rfc-deploy §2, Phase 1 — the RFC budgets its bytes here).
-    limit: '13.25 KB',
+    // 13.25 → 13.35 KB with #413: the app-carried plugin seam
+    // (provideSSRPlugin/getSSRPlugins + per-render merge) — the one-install-
+    // shape refactor's bytes; sat at 13.28 KB after trims.
+    limit: '13.35 KB',
     ignore: ['sigx', 'sigx/*', '@sigx/*', 'node:stream'],
   },
   {
     name: '@sigx/server-renderer/client (browser entry)',
     path: 'packages/server-renderer/dist/client/index.prod.js',
-    limit: '5.5 KB',
+    // 5.5 → 5.65 KB with #413: the entry gained the app-carried plugin seam
+    // (the token + provide/get pair packs call from install(app)); sat at
+    // 5.57 KB. The eager-page cost lives on the scheduler entry, which is
+    // untouched (2.6 KB).
+    limit: '5.65 KB',
     ignore: ['sigx', 'sigx/*', '@sigx/*'],
   },
   {
@@ -158,5 +165,19 @@ export default [
     name: '@sigx/server/client (fetch stubs)',
     path: 'packages/server/dist/client/index.prod.js',
     limit: '2.1 KB',
+  },
+  {
+    // The app-plugin face (#413): serverPlugin (transport + one-registration
+    // types, #411). Imports the sigx runtime (bare, ignored) and the stub
+    // entry (relative chunk, externalized — it has its own entry above);
+    // this measures only the plugin's own glue.
+    name: '@sigx/server/plugin (app-plugin face)',
+    path: 'packages/server/dist/plugin.prod.js',
+    limit: '1 KB',
+    ignore: ['sigx', 'sigx/*', '@sigx/*'],
+    modifyEsbuildConfig(config) {
+      (config.external ??= []).push('./client/*', './client-*');
+      return config;
+    },
   },
 ];

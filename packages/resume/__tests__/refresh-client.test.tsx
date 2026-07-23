@@ -59,7 +59,7 @@ function makeCounter(name = 'Counter'): any {
     return Counter;
 }
 
-const ssrWith = () => createSSR().use(resumePlugin());
+const ssrWith = () => createSSR({ plugins: [resumePlugin()] });
 
 /** SSR into the live document and install the boundary table. */
 async function mount(vnode: any): Promise<{ container: HTMLElement; id: number }> {
@@ -87,7 +87,7 @@ async function roundTrip(
     expect(sidecar).not.toBeNull();
     const admitted = sidecar!.refresh.filter((d) => keys.includes(d.component));
     if (mutate) admitted.forEach(mutate);
-    const render = createBoundaryRefresh({ ssr: ssrWith(), components });
+    const render = createBoundaryRefresh({ plugins: [resumePlugin()], components });
     const entries = await render(admitted as never, sidecar!.base);
     return { entries, base: sidecar!.base };
 }
@@ -250,7 +250,7 @@ describe('apply() — resumed boundary swap', () => {
 
         const sidecar = seam().collect()!;
         const admitted = sidecar.refresh.filter((d) => d.component === 'Parent');
-        const render = createBoundaryRefresh({ ssr: ssrWith(), components: { Parent } });
+        const render = createBoundaryRefresh({ plugins: [resumePlugin()], components: { Parent } });
         const entries = await render(admitted as never, sidecar.base);
         seam().apply(entries as unknown[], 1);
 

@@ -20,6 +20,18 @@ npm install @sigx/ssr-islands sigx vite
 <Counter client:only />         {/* skip SSR — mount fresh on the client only */}
 ```
 
+```tsx
+// Server — the pack installs on the per-request app (#413: app.use is the
+// one install shape); the manifest arrives via virtual:sigx-manifests.
+import { defineApp } from 'sigx';
+import { islandsPlugin } from '@sigx/ssr-islands';
+import { islandsManifest } from 'virtual:sigx-manifests';
+
+export function createApp(url: string) {
+    return defineApp(<App />).use(islandsPlugin({ manifest: islandsManifest }));
+}
+```
+
 ```ts
 // Client entry (app-less islands page) — one call is the whole bootstrap
 import { hydrateIslands } from '@sigx/ssr-islands/client';

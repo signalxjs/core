@@ -61,7 +61,7 @@ function makeRecorder(): SSRPlugin {
 
 describe('CSP nonce — string render', () => {
     it('puts the nonce on the boundary-table script', async () => {
-        const ssr = createSSR().use(makeRecorder());
+        const ssr = createSSR({ plugins: [makeRecorder()] });
         const html = await ssr.render((Plain as any)({}), { nonce: 'abc123' });
         expect(html).toContain('<script nonce="abc123">window.__SIGX_BOUNDARIES__=');
         expect(html.match(/<script(?! nonce=)/)).toBeNull();
@@ -69,7 +69,7 @@ describe('CSP nonce — string render', () => {
 
     it('puts the nonce on the state blob script', async () => {
         const Async = makeAsyncComponent('nonce-string-state');
-        const ssr = createSSR().use(stateSerializationPlugin());
+        const ssr = createSSR({ plugins: [stateSerializationPlugin()] });
         const html = await ssr.render((Async as any)({}), { nonce: 'abc123' });
         expect(html).toContain('<script nonce="abc123">window.__SIGX_ASYNC__=');
         expect(html.match(/<script(?! nonce=)/)).toBeNull();
@@ -89,7 +89,7 @@ describe('CSP nonce — streaming render', () => {
             );
         }, { name: 'App' });
 
-        const ssr = createSSR().use(makeRecorder()).use(stateSerializationPlugin());
+        const ssr = createSSR({ plugins: [makeRecorder(), stateSerializationPlugin()] });
         const out = await collect(ssr.renderChunks((App as any)({}), { nonce: 'abc123' }));
 
         // Everything the renderer can emit is present in this render…
@@ -122,7 +122,7 @@ describe('CSP nonce — streaming render', () => {
 describe('CSP nonce — absent', () => {
     it('emits plain <script> tags with no nonce attribute anywhere', async () => {
         const Async = makeAsyncComponent('no-nonce-async');
-        const ssr = createSSR().use(makeRecorder()).use(stateSerializationPlugin());
+        const ssr = createSSR({ plugins: [makeRecorder(), stateSerializationPlugin()] });
         const out = await collect(ssr.renderChunks((Async as any)({})));
         expect(out).toContain('<script>');
         expect(out).toContain('$SIGX_REPLACE(');
@@ -133,7 +133,7 @@ describe('CSP nonce — absent', () => {
 
 describe('CSP nonce — escaping', () => {
     it('attribute-escapes a hostile nonce value', async () => {
-        const ssr = createSSR().use(makeRecorder());
+        const ssr = createSSR({ plugins: [makeRecorder()] });
         const html = await ssr.render((Plain as any)({}), { nonce: 'abc"def' });
         expect(html).toContain('<script nonce="abc&quot;def">');
         expect(html).not.toContain('nonce="abc"def"');

@@ -12,6 +12,14 @@ declare module 'virtual:sigx-app' {
     export const resumeManifest: unknown | undefined;
 }
 
+// The pack manifests for the entry-server's app factory (#413) — resolved
+// in every mode; undefined under dev (packs run manifest-less there).
+declare module 'virtual:sigx-manifests' {
+    import type { ResumeManifest } from '@sigx/resume';
+    export const islandsManifest: unknown | undefined;
+    export const resumeManifest: ResumeManifest | undefined;
+}
+
 // The server-fn registry (explicitly passed, never ambient).
 declare module 'virtual:sigx-server-fns' {
     export const serverFns: Record<string, () => Promise<unknown>>;

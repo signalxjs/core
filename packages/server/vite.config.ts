@@ -10,13 +10,16 @@ import { defineLibConfig } from '../vite/src/lib.js';
 // - server/index: handleServerFnRequest, WinterCG-clean (edge-safe)
 // - node: createServerFnHandler, the connect-style adapter (node: imports
 //   live only here, like @sigx/server-renderer/node)
+// - plugin: the app-plugin face (#413) — the only entry importing the sigx
+//   runtime, kept out of the dep-free client entry on purpose
 export default defineLibConfig({
     entry: {
         'index': 'src/index.ts',
         'browser': 'src/browser.ts',
         'client/index': 'src/client/index.ts',
         'server/index': 'src/server/index.ts',
-        'node': 'src/node.ts'
+        'node': 'src/node.ts',
+        'plugin': 'src/plugin.ts'
     },
     external: ['sigx', /@sigx\/.*/, /^node:/],
     platform: 'neutral'

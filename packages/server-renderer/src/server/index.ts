@@ -36,6 +36,11 @@ export {
 } from './serialize';
 export type { TypeHandler } from './serialize';
 export { createTrackingSignal, serializeSignalState } from './state-signals';
+export { mergeSSRPlugins, initPluginContext } from './plugin-setup';
+// The app-carried plugin seam (DOM-free; lives under client/ so install(app)
+// can run in any bundle) — re-exported here so server-side consumers (packs'
+// boundary refresh, custom engines) see one barrel.
+export { SSR_PLUGINS_TOKEN, provideSSRPlugin, getSSRPlugins } from '../client/ssr-plugins';
 export type { StateSignalFn } from './state-signals';
 export type {
     SSRBoundary,

@@ -8,7 +8,7 @@
 // handleServerFnRequest under the same no-builtin hooks.
 //
 // Run via:  pnpm test:edge   (after pnpm build)
-import { jsx, component, useData, useHead } from 'sigx';
+import { jsx, component, defineApp, useData, useHead } from 'sigx';
 import { createSSR, useResponse, createFetchHandler } from '@sigx/server-renderer';
 import { resumePlugin } from '@sigx/resume/server';
 import { serverFn } from '@sigx/server';
@@ -72,7 +72,9 @@ function assert(cond, message) {
 }
 
 // 3) The resume pack's server half is WinterCG-clean too (#241): a stamped
-// component renders its QRL attributes and a hydrate:'never' record.
+// component renders its QRL attributes and a hydrate:'never' record. The
+// pack installs on the APP (#413) — this smoke also covers the app-carried
+// plugin discovery path end to end.
 {
     const Res = component((ctx) => {
         const n = ctx.signal(3, 'n');
@@ -80,8 +82,8 @@ function assert(cond, message) {
     }, { name: 'Res' });
     Res.__resumeId = 'Res';
 
-    const ssr = createSSR().use(resumePlugin());
-    const html = await ssr.render(Res({}));
+    const app = defineApp(Res({})).use(resumePlugin());
+    const html = await createSSR().render(app);
     assert(html.includes('data-sigx-on:click="Res_click_edge0001"'), 'resume QRL attribute rendered');
     assert(/data-sigx-b="\d+"/.test(html), 'resume boundary attribute rendered');
     assert(html.includes('"hydrate":"never"') && html.includes('"n":3'), 'resume record + state in the table');

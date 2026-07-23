@@ -28,17 +28,18 @@
  *
  * @example
  * ```ts
+ * import { defineApp } from 'sigx';
  * import { createSSR } from '@sigx/server-renderer';
  * import { resumePlugin } from '@sigx/resume';
  *
- * const ssr = createSSR().use(resumePlugin({ manifest }));
- * const html = await ssr.render(<App />);
+ * const app = defineApp(<App />).use(resumePlugin({ manifest }));
+ * const html = await createSSR().render(app);
  * ```
  */
 
 import type { SSRPlugin, ResolvedBoundary, SSRContext } from '@sigx/server-renderer';
 import { serializeBoundaryProps, getTypeHandlers } from '@sigx/server-renderer/server';
-import { provideHydrateDefaults } from '@sigx/server-renderer/client';
+import { provideHydrateDefaults, provideSSRPlugin } from '@sigx/server-renderer/client';
 import type { VNode, ComponentSetupContext, App } from 'sigx';
 import { signal } from 'sigx';
 import type { ResumePluginOptions } from './types';
@@ -76,18 +77,19 @@ interface ResumeStamps {
 }
 
 /**
- * Create a resume plugin — dual-shaped like the islands sibling:
+ * Create a resume plugin — one install shape (#413): `app.use(resumePlugin())`.
  *
- * - As an SSRPlugin (server: `createSSR().use(resumePlugin())`): claims
+ * - On the server (the entry-server's per-request app factory): `install(app)`
+ *   registers the SSRPlugin half via `provideSSRPlugin`, so the render claims
  *   components carrying the transform's `__resumeId` stamp — unless the
  *   usage site also carries a `client:*` islands directive, which islands
- *   owns (register `islandsPlugin()` first when combining the packs).
- * - As an app plugin (client, coexist mode: `app.use(resumePlugin())`):
- *   declares explicit-boundaries mode. The upgrade restore hook is NOT
- *   registered here — `client/upgrade.ts` registers it lazily on first
- *   upgrade, so app-less resumable pages (whose whole bootstrap is the
- *   generated loader entry) get it for free and this module stays free of
- *   client-runtime imports.
+ *   owns (`app.use(islandsPlugin()).use(resumePlugin())` when combining).
+ * - On the client (coexist mode: `app.use(resumePlugin())`): declares
+ *   explicit-boundaries mode. The upgrade restore hook is NOT registered
+ *   here — `client/upgrade.ts` registers it lazily on first upgrade, so
+ *   app-less resumable pages (whose whole bootstrap is the generated loader
+ *   entry) get it for free and this module stays free of client-runtime
+ *   imports.
  */
 export function resumePlugin(options?: ResumePluginOptions): SSRPlugin & { install(app: App): void } {
     return {
@@ -95,6 +97,8 @@ export function resumePlugin(options?: ResumePluginOptions): SSRPlugin & { insta
 
         install(app: App) {
             provideHydrateDefaults(app._context, { boundaries: 'explicit' });
+            // Hand the server render hooks to the SSR pipeline (#413).
+            provideSSRPlugin(app._context, this as unknown as SSRPlugin);
         },
 
         server: {
