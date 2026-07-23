@@ -19,9 +19,11 @@ import { hasForeignToken } from 'sigx/internals';
  * app-carried seam (`provideHydrateDefaults`, `provideTypeHandlers`) is
  * broken by the same cause, so one warning covers the app.
  *
- * Dev-only, and it fires ONLY on a positive identification — a provides key
- * carrying our token's description that is not our token. An app that simply
- * installed no packs has no such key and says nothing.
+ * Dev-only, and it fires only on a provides key carrying our token's
+ * description that is not our token — which, given `sigx:ssrPlugins` is
+ * minted in exactly one place, means something other than this copy of the
+ * package wrote it. An app that simply installed no packs has no such key
+ * and says nothing.
  */
 function warnForeignPluginToken(
     appContext: { provides?: Map<symbol, unknown> } | null | undefined

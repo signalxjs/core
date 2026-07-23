@@ -40,8 +40,10 @@ describe('typed DI tokens', () => {
     });
 
     it('hasForeignToken spots a token provided by a SECOND copy of the module', () => {
-        // Exactly what two live copies of a package look like from here: same
-        // description, different symbol. Nothing else can produce it.
+        // What two live copies of a package look like from here: same
+        // description, different symbol. (This test mints the second one
+        // by hand — which is why the helper's claim is scoped to the seam
+        // contract, where each description is minted in exactly one place.)
         const ours = createToken<string>('sigx:duplicated');
         const theirs = createToken<string>('sigx:duplicated');
         const provides = new Map<symbol, unknown>();

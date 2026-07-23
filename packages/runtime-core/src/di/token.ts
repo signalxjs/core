@@ -66,11 +66,19 @@ export const setProvided = <T>(
  * is how #425 shipped a plugin-less SSR render: `getSSRPlugins()` returned
  * `[]` and the renderer simply believed the app had installed no packs.
  *
- * A key carrying this token's description that is NOT this token can only
- * exist if two copies of the defining module are live, so this identifies a
- * duplicated graph outright rather than guessing at one. Call it on the MISS
- * path only, from `__DEV__` blocks — never from `getProvided`, which is the
- * hot injection path and where a miss is ordinarily legitimate.
+ * The signal is a key carrying this token's description that is NOT this
+ * token. That reads as a duplicated graph under the seam contract — token
+ * descriptions are namespaced (`sigx:*`) and minted in exactly one place, so
+ * the only thing that legitimately produces a second one is a second copy of
+ * the defining module. It is not a general JavaScript guarantee: any code
+ * MAY call `Symbol('sigx:ssrPlugins')`, and a token accidentally declared
+ * twice with one description would trip this too — which is itself worth
+ * knowing. Treat a hit as "these provides were written by something that
+ * isn't us", and keep descriptions unique.
+ *
+ * Call it on the MISS path only, from `__DEV__` blocks — never from
+ * `getProvided`, the hot injection path where a miss is ordinarily
+ * legitimate.
  *
  * @internal
  */
