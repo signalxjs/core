@@ -12,9 +12,11 @@
  *
  * The experiment that makes H4/H5 falsifiable: two pattern sets doing the
  * SAME number of `keyMatches` calls, one of plain strings (the matcher's
- * early return, no `JSON.stringify`) and one of tuples (a `JSON.stringify` of
- * the pattern INSIDE the per-entry loop). The delta between them is the
- * hoistable work — if it is flat, the hypothesis is dead.
+ * early return on `===`, no `JSON.stringify` anywhere) and one of tuples (a
+ * `JSON.stringify` of the pattern INSIDE the per-entry loop). The delta
+ * between them is the hoistable work — if it is flat, the hypothesis is dead.
+ * Every pattern in a variant is of that variant's kind, the matching one
+ * included, so the control never strays onto the tuple branch.
  *
  * `renderBoundaries` returns `[]`, so nothing is rendered: only the gate and
  * the envelope are on the clock.
@@ -61,9 +63,12 @@ const TUPLE_PATTERNS = Array.from({ length: DECOYS }, (_, i) => ['posts', `u${i}
 const STRING_PATTERNS = Array.from({ length: DECOYS }, (_, i) => `posts-u${i}`);
 
 // One `invalidates` pattern must MATCH, or nothing is admitted — and it goes
-// LAST so the 64 misses are all tried first (see `deps` above). It matches
-// only the final dep.
+// LAST so the 63 misses are all tried first (see `deps` above). It matches
+// only the final dep. Each variant uses its OWN kind of matching pattern, so
+// the string control never touches the tuple branch: a tuple match by prefix,
+// a string match by equality against the final dep's canonical form.
 const MATCHING_TUPLE = ['hit'] as const;
+const MATCHING_STRING = JSON.stringify(['hit', 'last']);
 
 const tupleMutation = serverFn({
     handler: async () => ({ ok: true }),
@@ -71,7 +76,7 @@ const tupleMutation = serverFn({
 });
 const stringMutation = serverFn({
     handler: async () => ({ ok: true }),
-    invalidates: () => [...STRING_PATTERNS, MATCHING_TUPLE]
+    invalidates: () => [...STRING_PATTERNS, MATCHING_STRING]
 });
 
 const REGISTRY: Record<string, unknown> = {

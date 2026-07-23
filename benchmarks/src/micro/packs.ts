@@ -89,7 +89,7 @@ async function guard(
     config: Config
 ): Promise<void> {
     const html = await render(scenario, config);
-    assert(html.length > 500, `${config} render produced almost nothing (${html.length} bytes)`);
+    assert(html.length > 500, `${config} render produced almost nothing (${html.length} chars)`);
     if (config === 'plain') {
         // The floor must really be a floor: no pack, no boundary table.
         assert(
@@ -142,7 +142,14 @@ export const packsSuite: MicroSuite = {
         for (const scenario of SCENARIOS) {
             for (const config of CONFIGS) {
                 const html = await render(scenario, config);
-                metrics.push({ suite: 'packs', name: `${scenario} ${config}`, bytes: html.length });
+                // UTF-8 bytes, not `html.length` — that counts UTF-16 code
+                // units, and the scenarios are not ASCII (small-page's footer
+                // carries a `©`). The metric has to be what goes on the wire.
+                metrics.push({
+                    suite: 'packs',
+                    name: `${scenario} ${config}`,
+                    bytes: Buffer.byteLength(html, 'utf8')
+                });
             }
         }
         return metrics;
