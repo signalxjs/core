@@ -21,6 +21,7 @@ import { serverFn, ServerFnError } from '@sigx/server';
 import { db } from './db';
 import { sessionFrom } from './auth';
 
+// productId/qty arrive from the wire — see "Validation and the two forms"
 export const addToCart = serverFn(async (rq, productId: string, qty: number) => {
     const user = await sessionFrom(rq.request);
     if (!user) throw new ServerFnError(401, 'sign in first');
@@ -92,6 +93,31 @@ export const quote = serverFn({
 });
 ```
 
+### Validation and the two forms
+
+The two authoring forms trade ceremony against enforcement, and the
+asymmetry is deliberate — know which side of it you're on:
+
+- **Direct form** — `serverFn(async (rq, id: string) => …)` — multi-argument,
+  zero ceremony. The parameter types are **compile-time only**: a hostile
+  client ignores them, wire arguments reach the body unvalidated, and the
+  argument count is unenforced (the declared shape isn't knowable at
+  runtime).
+- **Options form** — `serverFn({ input, handler })` — exactly one input,
+  validated by the Standard Schema on every transport, extra wire arguments
+  rejected with a 400. The arity guard exists here precisely because the
+  shape *is* declared.
+
+My rule of thumb: a function whose body checks everything it uses (loads by
+id and authorizes, like `addToCart` above) is fine in the direct form;
+anything whose arguments shape a query, a write, or a price belongs in the
+options form with an `input` schema. In dev, a direct-form function that
+receives wire arguments logs a once-per-function warning
+(`received N wire argument(s) with no declared input validator`) — migrating
+it to the options form's `input` is what resolves it. `serverStream` has no
+options form, so validate its arguments at the top of the generator (any
+Standard Schema validates standalone).
+
 ### Server-declared invalidation
 
 A mutation declares which cache keys it invalidates **where the data
@@ -156,7 +182,7 @@ real `action="/_sigx/fn/<symbol>" method="post"` onto the form:
 ```ts
 export const submitFeedback = serverFn({
     form: true,
-    input: FeedbackSchema,          // load-bearing: form fields are strings
+    input: FeedbackSchema,          // REQUIRED for form targets — see below
     handler: async (rq, input) => save(input)
 });
 ```
@@ -175,7 +201,11 @@ export const submitFeedback = serverFn({
 - **Security**: the JSON-content-type CSRF layer is deliberately given up
   for declared form targets only; the `Origin` check stays at full
   strength (an Origin-less form POST is 403 under the default policy).
-  Only mark genuinely intended form targets, and always declare `input`.
+  Only mark genuinely intended form targets. `form: true` **requires**
+  `input` — a definition-time error without it, in dev and prod alike,
+  because form fields are attacker-typable strings and the validator is
+  the only thing between them and the handler (a deliberately raw target
+  declares an explicit pass-through schema; the error message shows it).
 - JSON callers of the same fn are untouched — same envelope, same errors.
 
 ### Cacheable reads — GET + `Cache-Control`
@@ -541,6 +571,11 @@ Every server function is a public HTTP endpoint; the defaults assume that:
 - **Prototype-pollution keys dropped** from parsed values on both parse
   sites (a reviver removes `__proto__`/`constructor`/`prototype`; the
   request itself is not rejected).
+- **Argument validation is opt-in** — the options form's `input` is the
+  validation seam; direct-form arguments are not validated at runtime (a
+  `__DEV__` warning fires once per function when one receives wire
+  arguments). The exception is `form: true`, which requires `input` at
+  definition time — the no-JS transport's validator is load-bearing.
 
 ## Entry points
 

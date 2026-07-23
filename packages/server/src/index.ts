@@ -150,10 +150,11 @@ export interface ServerFnOptions<S, R> {
      * the mapping tool) — and answers 303 POST-redirect-GET. The build
      * stamps `action`/`method` onto a resume `<form>` whose submit
      * handler calls this fn, so the native POST works before/without JS.
-     * Write the LITERAL `true` — the build reads it statically. Declare
-     * `input`: form fields are attacker-typable strings and the validator
-     * is what stands between them and the handler (§5.2b). Mutually
-     * exclusive with `cache` — a form target is a mutation.
+     * Write the LITERAL `true` — the build reads it statically. REQUIRES
+     * `input` (definition-time error without it, #412): form fields are
+     * attacker-typable strings and the validator is what stands between
+     * them and the handler (§5.2b). Mutually exclusive with `cache` — a
+     * form target is a mutation.
      */
     form?: boolean;
     handler(rq: ServerFnContext, input: S): R | Promise<R>;
@@ -171,7 +172,25 @@ export function serverFn(
     let name: string;
 
     if (typeof arg === 'function') {
-        invoke = async (rq, _info, args) => arg(rq, ...args);
+        // #412: the direct form has no validation seam — wire args (an
+        // attacker-controlled array) spread straight into the impl. Surface
+        // that trade-off once per fn in dev; `info.symbol` is empty only for
+        // in-process calls, and zero-arg fns carry no attacker input.
+        let warnedWire = false;
+        invoke = async (rq, info, args) => {
+            if (__DEV__ && !warnedWire && info.symbol !== '' && args.length > 0) {
+                warnedWire = true;
+                console.warn(
+                    `[sigx server] serverFn "${info.name || info.symbol}" received ` +
+                    `${args.length} wire argument(s) with no declared input validator — ` +
+                    `wire arguments are attacker-controlled; parameter types are ` +
+                    `compile-time only. Declare validation with the options form: ` +
+                    `serverFn({ input: Schema, handler }) (Standard Schema — ` +
+                    `Zod/Valibot/ArkType; rfc-server §5). Fires once per function.`
+                );
+            }
+            return arg(rq, ...args);
+        };
         name = arg.name || '';
     } else {
         const options = arg;
@@ -247,21 +266,28 @@ export function serverFn(
     // The §6.4 form-target marker: the endpoint's gate for accepting form
     // content-types, and the build's for stamping action/method.
     const form = typeof arg === 'function' ? false : arg.form === true;
-    if (__DEV__ && form) {
-        if (cache) {
-            console.warn(
-                `[sigx server] serverFn ${name ? `"${name}" ` : ''}declares both \`form\` and ` +
-                `\`cache\` — a form target is a mutation; a cacheable read cannot be one ` +
-                `(rfc-server §6.4). The function stays callable, but pick one.`
-            );
-        }
-        if (!(arg as ServerFnOptions<unknown, unknown>).input) {
-            console.warn(
-                `[sigx server] serverFn ${name ? `"${name}" ` : ''}declares \`form\` without ` +
-                `\`input\` — the no-JS transport delivers an attacker-shaped string map ` +
-                `straight to the handler. Declare a validator (rfc-server §5.2b).`
-            );
-        }
+    if (form && !(arg as ServerFnOptions<unknown, unknown>).input) {
+        // #412: NOT __DEV__-gated — the no-JS form transport delivers an
+        // attacker-typed string map straight to the handler, and a dev-only
+        // warning is silent exactly where it matters. A definition-time
+        // throw fails at boot/CI, never per-request (the
+        // `assertNotLiveClient` posture: throws are this package's only
+        // prod-visible channel).
+        throw new Error(
+            `[sigx server] serverFn ${name ? `"${name}" ` : ''}declares \`form\` without ` +
+            `\`input\` — the no-JS form transport delivers an attacker-typed string map ` +
+            `straight to the handler, and the validator is the only thing between them ` +
+            `(rfc-server §5.2b). Declare a Standard Schema \`input\`. To accept the raw ` +
+            `field map deliberately, declare a pass-through schema: { '~standard': ` +
+            `{ version: 1, vendor: 'app', validate: (v) => ({ value: v as Fields }) } }.`
+        );
+    }
+    if (__DEV__ && form && cache) {
+        console.warn(
+            `[sigx server] serverFn ${name ? `"${name}" ` : ''}declares both \`form\` and ` +
+            `\`cache\` — a form target is a mutation; a cacheable read cannot be one ` +
+            `(rfc-server §6.4). The function stays callable, but pick one.`
+        );
     }
     return Object.assign(wrapper, {
         with: callWith,
@@ -317,9 +343,25 @@ export function serverStream<A extends unknown[], T>(
     impl: (rq: ServerFnContext, ...args: A) => AsyncGenerator<T>
 ): ((...args: A) => AsyncIterable<T>) & WrappedServerFn {
     const name = impl.name || '';
+    // #412: same unvalidated-wire-args surface as serverFn's direct form,
+    // same once-per-fn dev signal — but streams have no options form, so the
+    // remedy is validating in the generator body.
+    let warnedWire = false;
     // Async so transports get a settled value to marker-check; the resolved
     // value is the (not-yet-started) generator.
-    const invoke: ServerFnInvoke = async (rq, _info, args) => impl(rq, ...(args as A));
+    const invoke: ServerFnInvoke = async (rq, info, args) => {
+        if (__DEV__ && !warnedWire && info.symbol !== '' && args.length > 0) {
+            warnedWire = true;
+            console.warn(
+                `[sigx server] serverStream "${info.name || info.symbol}" received ` +
+                `${args.length} wire argument(s) — wire arguments are attacker-controlled ` +
+                `and streams have no \`input\` option, so validate them at the top of the ` +
+                `generator before doing work (any Standard Schema validates standalone: ` +
+                `await Schema['~standard'].validate(arg)). Fires once per function.`
+            );
+        }
+        return impl(rq, ...(args as A));
+    };
     const wrapper = (...args: A): AsyncIterable<T> => {
         assertNotLiveClient(name);
         // Ambient context applies here too: serverStream has no .with()

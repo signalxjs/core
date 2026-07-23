@@ -1110,7 +1110,10 @@ the line:
   endpoint never becomes globally form-accepting.
 - **The validator is load-bearing.** Form fields are attacker-typable
   strings; the `input` schema is what stands between them and the
-  handler. `form` without `input` is a `__DEV__` warning for this reason.
+  handler. `form` without `input` was originally a `__DEV__` warning;
+  since #412 it is a definition-time error (dev and prod) — a dev-only
+  warning was silent exactly where it mattered, and a deliberately raw
+  target declares an explicit pass-through schema instead.
 
 The residual, stated plainly: `form: true` **combined with**
 `origin: 'verify-when-present'` or `origin: false` reopens classic CSRF

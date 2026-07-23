@@ -2,7 +2,29 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING (pre-1.0)**: `serverFn({ form: true })` without `input` is now
+  a **definition-time error**, in dev and prod alike (#412). It was a
+  `__DEV__`-only warning — silent exactly where it mattered: the no-JS form
+  transport delivers an attacker-typed string map straight to the handler,
+  and the validator is the only thing between them (rfc-server §5.2b). The
+  throw fails at module load (boot/CI), never per-request. A deliberately
+  raw form target declares an explicit pass-through Standard Schema; the
+  error message shows the exact shape.
+
 ### Added
+
+- **Unvalidated-wire-args dev warning (#412).** A direct-form `serverFn`
+  (and `serverStream`) that receives wire arguments — over any transport,
+  not in-process — now logs a once-per-function `__DEV__` warning: wire
+  arguments are attacker-controlled and the direct form's parameter types
+  are compile-time only. The remedy it teaches: the options form's `input`
+  (Standard Schema) for `serverFn`; validating at the top of the generator
+  for `serverStream`. Zero-arg functions and in-process (SSR-time) calls
+  never warn; prod is unchanged. The README's new "Validation and the two
+  forms" section documents the direct/options arity asymmetry as the
+  explicit trade-off it is.
 
 - **The app-plugin face: `@sigx/server/plugin` (#413, #411).** A new entry
   (the only one importing the sigx runtime — the dependency-free `./client`

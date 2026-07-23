@@ -613,3 +613,19 @@ describe('handleServerFnRequest — rich wire serialization (rfc-server §4)', (
         expect(res.status).toBe(500);
     });
 });
+
+describe('handleServerFnRequest — direct-form wire-args warning (#412)', () => {
+    it('a direct-form fn behind the endpoint warns once across repeated POSTs', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        try {
+            const fn = serverFn(async (_rq, id: string) => id);
+            await call('direct_fn_00000013', { args: ['a'] }, {}, { resolve: () => fn });
+            await call('direct_fn_00000013', { args: ['b'] }, {}, { resolve: () => fn });
+            expect(warn).toHaveBeenCalledOnce();
+            expect(warn).toHaveBeenCalledWith(expect.stringContaining('"direct"'));
+            expect(warn).toHaveBeenCalledWith(expect.stringContaining('no declared input validator'));
+        } finally {
+            warn.mockRestore();
+        }
+    });
+});
