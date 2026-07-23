@@ -106,17 +106,20 @@ asymmetry is deliberate — know which side of it you're on:
 - **Options form** — `serverFn({ input, handler })` — exactly one input,
   validated by the Standard Schema on every transport, extra wire arguments
   rejected with a 400. The arity guard exists here precisely because the
-  shape *is* declared.
+  shape *is* declared. `input` is also the inference source for the input
+  type: omit it and the type falls back to the handler's parameter
+  annotation — with neither, the client stub degrades to
+  `(input: unknown)`.
 
 My rule of thumb: a function whose body checks everything it uses (loads by
 id and authorizes, like `addToCart` above) is fine in the direct form;
 anything whose arguments shape a query, a write, or a price belongs in the
-options form with an `input` schema. In dev, a direct-form function that
-receives wire arguments logs a once-per-function warning
-(`received N wire argument(s) with no declared input validator`) — migrating
-it to the options form's `input` is what resolves it. `serverStream` has no
-options form, so validate its arguments at the top of the generator (any
-Standard Schema validates standalone).
+options form with an `input` schema. In dev, a function that receives wire
+input it has no validator for logs a once-per-function warning — the
+direct form always (its types are compile-time only), the options form
+when `input` is omitted. Declaring `input` is what resolves both.
+`serverStream` has no options form, so validate its arguments at the top
+of the generator (any Standard Schema validates standalone).
 
 ### Server-declared invalidation
 

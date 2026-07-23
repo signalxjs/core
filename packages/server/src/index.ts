@@ -87,6 +87,10 @@ export interface ServerFnOptions<S, R> {
      * Input validator (Standard Schema — Zod/Valibot/ArkType all qualify).
      * ALWAYS runs server-side before the handler, on every transport;
      * rejection throws a `ServerFnError(400, 'Invalid input', { issues })`.
+     * Also the inference source for `S`: omit it and `S` falls back to the
+     * handler's annotation — with neither, the client stub degrades to
+     * `(input: unknown)` and wire input reaches the handler unvalidated
+     * (dev-warned, #437).
      */
     input?: StandardSchemaV1<S>;
     /**
@@ -150,13 +154,21 @@ export interface ServerFnOptions<S, R> {
      * the mapping tool) — and answers 303 POST-redirect-GET. The build
      * stamps `action`/`method` onto a resume `<form>` whose submit
      * handler calls this fn, so the native POST works before/without JS.
-     * Write the LITERAL `true` — the build reads it statically. REQUIRES
-     * `input` (definition-time error without it, #412): form fields are
-     * attacker-typable strings and the validator is what stands between
-     * them and the handler (§5.2b). Mutually exclusive with `cache` — a
-     * form target is a mutation.
+     * Write the LITERAL `true` — the build reads it statically, and the
+     * type accepts only the literal (`form: someBool` would type-check but
+     * silently fail extraction, #437). REQUIRES `input` (definition-time
+     * error without it, #412): form fields are attacker-typable strings and
+     * the validator is what stands between them and the handler (§5.2b).
+     * Mutually exclusive with `cache` — a form target is a mutation.
      */
-    form?: boolean;
+    form?: true;
+    /**
+     * The implementation. `input` arrives validated when {@link input} is
+     * declared. WITHOUT a schema, annotate this parameter — `S` infers from
+     * the schema or from the annotation, and with neither the client stub's
+     * argument type silently becomes `unknown` (and wire input reaches the
+     * handler unvalidated — dev-warned, #437).
+     */
     handler(rq: ServerFnContext, input: S): R | Promise<R>;
 }
 
@@ -194,7 +206,22 @@ export function serverFn(
         name = arg.name || '';
     } else {
         const options = arg;
+        // #437: the options form's remaining unvalidated gap — no `input`
+        // schema means the (single) wire arg reaches the handler as-is, and
+        // if the handler param is unannotated the stub's argument type is
+        // `unknown` too. Same once-per-fn dev signal as the direct form.
+        let warnedWire = false;
         invoke = async (rq, info, args) => {
+            if (__DEV__ && !warnedWire && !options.input && info.symbol !== '' && args.length > 0) {
+                warnedWire = true;
+                console.warn(
+                    `[sigx server] serverFn "${info.name || info.symbol}" (options form) ` +
+                    `received a wire argument with no \`input\` validator — wire input is ` +
+                    `attacker-controlled; the handler's parameter type is compile-time ` +
+                    `only. Declare \`input\` (Standard Schema — Zod/Valibot/ArkType; ` +
+                    `rfc-server §5). Fires once per function.`
+                );
+            }
             for (const guard of options.use ?? []) {
                 await guard(rq, info);
             }

@@ -430,3 +430,36 @@ describe('definition-time checks (§6.4, #412)', () => {
         expect(seen).toEqual({ any: 'thing' });
     });
 });
+
+describe('form is the literal true (#437) — compile-time contract', () => {
+    it('rejects non-literal form values that would silently fail extraction', () => {
+        // The extractor reads `form: true` statically and the type now
+        // matches: only the literal is accepted.
+        const ok = serverFn({
+            form: true,
+            input: PassThrough,
+            handler: async (_rq, fields) => fields
+        });
+
+        () =>
+            serverFn({
+                // @ts-expect-error form: false type-checks nowhere — the
+                // build reads the literal `true` statically
+                form: false,
+                input: PassThrough,
+                handler: async (_rq, fields: Record<string, unknown>) => fields
+            });
+
+        const dynamic = Math.random() > 2;
+        () =>
+            serverFn({
+                // @ts-expect-error a variable is invisible to the static
+                // extractor — write the literal `true`
+                form: dynamic,
+                input: PassThrough,
+                handler: async (_rq, fields: Record<string, unknown>) => fields
+            });
+
+        expect(typeof ok.__sigxFn).toBe('function');
+    });
+});

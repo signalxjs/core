@@ -83,12 +83,10 @@ describe('serverFn — direct-form unvalidated wire args (#412)', () => {
         expect(warn).not.toHaveBeenCalled();
     });
 
-    it('never fires for the options form — with or without input', async () => {
+    it('never fires for a validated options-form fn', async () => {
         const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
         const validated = serverFn({ input: schema, handler: async (_rq, i) => i.id });
-        const unvalidated = serverFn({ handler: async (_rq, i: string) => i });
         await validated.__sigxFn(wireCtx(), wireInfo, [{ id: 'a' }]);
-        await unvalidated.__sigxFn(wireCtx(), wireInfo, ['a']);
         expect(warn).not.toHaveBeenCalled();
     });
 
@@ -97,6 +95,50 @@ describe('serverFn — direct-form unvalidated wire args (#412)', () => {
         try {
             const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
             const fn = serverFn(async (_rq, id: string) => id);
+            await fn.__sigxFn(wireCtx(), wireInfo, ['a']);
+            expect(warn).not.toHaveBeenCalled();
+        } finally {
+            vi.unstubAllEnvs();
+        }
+    });
+});
+
+describe('serverFn — options-form unvalidated wire input (#437)', () => {
+    const wireCtx = () =>
+        createRequestContext(new Request('http://localhost/_sigx/fn/x', { method: 'POST' }));
+    const wireInfo = { symbol: 'save_fn_12345678', name: 'save' };
+
+    it('warns once when no `input` schema is declared, teaching `input`', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const fn = serverFn({ handler: async (_rq, i: string) => i });
+        await fn.__sigxFn(wireCtx(), wireInfo, ['a']);
+        expect(warn).toHaveBeenCalledOnce();
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining('"save"'));
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining('`input`'));
+        // Once per fn: a second wire call stays silent.
+        await fn.__sigxFn(wireCtx(), wireInfo, ['b']);
+        expect(warn).toHaveBeenCalledOnce();
+    });
+
+    it('does not warn for a zero-arg wire call — no attacker-controlled input', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const fn = serverFn({ handler: async (_rq, _i: undefined) => 'static' });
+        await fn.__sigxFn(wireCtx(), wireInfo, []);
+        expect(warn).not.toHaveBeenCalled();
+    });
+
+    it('does not warn for in-process calls (empty symbol) — authored code, not the wire', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const fn = serverFn({ handler: async (_rq, i: string) => i });
+        await expect(fn('a')).resolves.toBe('a');
+        expect(warn).not.toHaveBeenCalled();
+    });
+
+    it('is silent in production', async () => {
+        vi.stubEnv('NODE_ENV', 'production');
+        try {
+            const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+            const fn = serverFn({ handler: async (_rq, i: string) => i });
             await fn.__sigxFn(wireCtx(), wireInfo, ['a']);
             expect(warn).not.toHaveBeenCalled();
         } finally {

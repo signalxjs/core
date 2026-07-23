@@ -4,6 +4,29 @@
 
 ### Changed
 
+- **`form` is typed as the literal `true` (#437).** The extractor reads
+  `form: true` statically and (since #412) the runtime requires `input` at
+  definition time — but the TYPE still accepted any boolean, so
+  `form: someBool` type-checked while silently failing extraction. The
+  option is now `form?: true`; a non-literal is a compile error pointing at
+  the real contract.
+
+### Added
+
+- **Options-form unvalidated-wire warning (#437).** #412's once-per-function
+  `__DEV__` wire-args warning covered the direct form and `serverStream`;
+  the options form WITHOUT `input` still received wire input silently. It
+  now warns symmetrically (once per function, wire calls only, prod
+  unchanged), teaching `input`. JSDoc on `input`/`handler` documents the
+  inference contract: `S` comes from the schema or the handler annotation —
+  with neither, the client stub's argument type silently becomes `unknown`.
+- **`ServerFnTransport` is exported from `@sigx/server/plugin` (#437)** —
+  the type needed to author `serverPlugin({ transport })` no longer has to
+  be imported from the stubs entry (`./client`). `serverPlugin`'s declared
+  return type is now core's `Plugin` (shape unchanged).
+- **`ServerFnReadCache` joins the `browser` entry's type re-exports
+  (#437)** — the one `.`-entry type that was missing from parity.
+
 - **BREAKING (pre-1.0)**: `serverFn({ form: true })` without `input` is now
   a **definition-time error**, in dev and prod alike (#412). It was a
   `__DEV__`-only warning — silent exactly where it mattered: the no-JS form
