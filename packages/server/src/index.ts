@@ -279,7 +279,7 @@ export function serverFn(
             `straight to the handler, and the validator is the only thing between them ` +
             `(rfc-server §5.2b). Declare a Standard Schema \`input\`. To accept the raw ` +
             `field map deliberately, declare a pass-through schema: { '~standard': ` +
-            `{ version: 1, vendor: 'app', validate: (v) => ({ value: v as Fields }) } }.`
+            `{ version: 1, vendor: 'app', validate: (v) => ({ value: v }) } }.`
         );
     }
     if (__DEV__ && form && cache) {
