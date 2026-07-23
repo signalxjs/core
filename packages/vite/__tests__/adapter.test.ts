@@ -209,6 +209,50 @@ describe('virtual:sigx-manifests (#413)', () => {
     });
 });
 
+describe('virtual:sigx-ssr-node (#425)', () => {
+    /**
+     * The dev handler's renderer sits behind this shim so the project's
+     * external/noExternal decision applies to it exactly as it does to the
+     * app's own `@sigx/*` imports. A ROOT `ssrLoadModule('@sigx/…')` is always
+     * inlined by the runner, which split the graph in two whenever the family
+     * was externalized — and app-carried SSR plugins (`app.use(pack())`) then
+     * reached a renderer holding different `Symbol()` DI tokens.
+     */
+    function serveModePlugin() {
+        const plugin = sigxPlugin({ ssr: { entry: ENTRY } }) as any;
+        plugin.configResolved({
+            command: 'serve',
+            root: process.cwd(),
+            base: '/',
+            environments: {},
+            plugins: []
+        });
+        return plugin;
+    }
+
+    it('resolves to the \\0-prefixed id', () => {
+        expect(serveModePlugin().resolveId('virtual:sigx-ssr-node')).toBe('\0virtual:sigx-ssr-node');
+    });
+
+    it('loads as nothing but a re-export of the renderer', () => {
+        const code = serveModePlugin().load.call(
+            { environment: { name: 'ssr' } },
+            '\0virtual:sigx-ssr-node'
+        );
+        // The whole point is the bare specifier being an IMPORT here: an
+        // `export const` copy, or any local work, would defeat it.
+        expect(code.trim()).toBe(`export * from '@sigx/server-renderer/node';`);
+    });
+
+    it('leaves the un-prefixed id alone in load (nothing else may claim it)', () => {
+        const code = serveModePlugin().load.call(
+            { environment: { name: 'ssr' } },
+            'virtual:sigx-ssr-node'
+        );
+        expect(code).toBeUndefined();
+    });
+});
+
 describe('virtual:sigx-app codegen error surfaces', () => {
     it('treats a CORRUPT optional manifest as a loud, named error — not as absent', async () => {
         const { mkdtempSync, writeFileSync, mkdirSync, rmSync } = await import('node:fs');

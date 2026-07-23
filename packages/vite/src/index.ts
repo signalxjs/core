@@ -16,6 +16,11 @@ import {
     generateManifestsModuleCode,
     generateManifestsServeCode
 } from './app-module.js';
+import {
+    SSR_NODE_VIRTUAL_ID,
+    SSR_NODE_RESOLVED_ID,
+    generateSSRNodeShimCode
+} from './ssr.js';
 
 // ============================================================================
 // Types
@@ -405,6 +410,7 @@ export function sigxPlugin(options: SigxPluginOptions = {}): Plugin {
         },
 
         resolveId(id, importer) {
+            if (id === SSR_NODE_VIRTUAL_ID) return SSR_NODE_RESOLVED_ID;
             if (id === MANIFESTS_VIRTUAL_ID) return MANIFESTS_RESOLVED_ID;
             if (id !== APP_VIRTUAL_ID) return;
             // External builds materialize the module as dist/server/sigx-app.js
@@ -427,6 +433,9 @@ export function sigxPlugin(options: SigxPluginOptions = {}): Plugin {
         },
 
         load(id) {
+            // The dev handler's renderer, behind an import so the project's
+            // external/noExternal decision reaches it (#425 — see app-module).
+            if (id === SSR_NODE_RESOLVED_ID) return generateSSRNodeShimCode();
             if (id === MANIFESTS_RESOLVED_ID) {
                 // Dev packs are manifest-less by design (QRLs/chunks resolve
                 // through the virtual registries) — undefineds are correct.

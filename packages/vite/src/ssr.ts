@@ -23,6 +23,38 @@ import { readFile } from 'node:fs/promises';
 import { resolve as resolvePath } from 'node:path';
 import type { ViteDevServer } from 'vite';
 
+// ============================================================================
+// virtual:sigx-ssr-node — a one-line re-export shim for the dev request
+// handler (#425)
+// ============================================================================
+
+/**
+ * `vite.ssrLoadModule('@sigx/server-renderer/node')` names the package as the
+ * ROOT of the request, and a root request is always INLINED by the module
+ * runner — `ssr.external` only ever governs an *import* made from inside a
+ * module. So a project that externalizes the @sigx family (the
+ * consumer-shaped dev setup) got the renderer inlined while the app's own
+ * `@sigx/*` imports resolved through Node: two live copies of the same file,
+ * two sets of `Symbol()` DI tokens, and every app-carried provide
+ * (`app.use(pack())` → `provideSSRPlugin`, `provideHydrateDefaults`,
+ * `provideTypeHandlers`) invisible to the renderer. The render came out
+ * silently plugin-less — resume and islands pages shipped with no boundary
+ * table at all.
+ *
+ * The shim puts the package behind an *import*, where the project's
+ * external/noExternal decision applies exactly as it does to the app's
+ * imports: externalized ⇒ both reach Node's instance, noExternal (the
+ * `sigx()` default) ⇒ both stay in the runner. One graph either way.
+ * Resolved and loaded by the `sigx()` plugin.
+ */
+export const SSR_NODE_VIRTUAL_ID = 'virtual:sigx-ssr-node';
+export const SSR_NODE_RESOLVED_ID = '\0' + SSR_NODE_VIRTUAL_ID;
+
+/** The shim's body — deliberately nothing but the re-export. */
+export function generateSSRNodeShimCode(): string {
+    return `export * from '@sigx/server-renderer/node';\n`;
+}
+
 /** Structural view of the pieces of the prod handler options we forward. */
 interface ForwardedHandlerOptions {
     document?: unknown;
@@ -334,16 +366,26 @@ export async function createDevRequestHandler(
     const templatePath = resolvePath(vite.config.root, options.template ?? 'index.html');
     const entryExport = options.entryExport ?? 'createApp';
 
-    // The renderer must live in the SAME module graph as the app: the entry
-    // loads through Vite's SSR module runner (where the plugin's
-    // ssr.noExternal keeps the whole @sigx family), so the handler's
-    // renderer has to come through the runner too — a Node-resolved copy
-    // would carry its own DI token identities and never see the app's
-    // provides. When the family IS externalized, the runner resolves to
-    // Node's instances anyway, so this is consistent in both setups.
+    // The renderer must live in the SAME module graph as the app, or the DI
+    // tokens differ and every app-carried provide (`app.use(pack())`) is
+    // invisible to it. The load goes through `virtual:sigx-ssr-node`, a shim
+    // whose whole body is `export * from '@sigx/server-renderer/node'`, so
+    // the package sits behind an IMPORT: naming it as the root of an
+    // `ssrLoadModule` call would force the runner to inline it whatever the
+    // project's `ssr.external` says, while the app's own `@sigx/*` imports
+    // externalized — the two-graph split of #425. Behind an import the same
+    // decision applies to both. The direct specifier is the fallback for a
+    // dev server running this handler WITHOUT the `sigx()` plugin, where
+    // nothing resolves the virtual (and nothing sets noExternal either, so
+    // one graph is not at stake).
     async function loadHandlerFactory(): Promise<typeof import('@sigx/server-renderer/node')> {
-        return (await vite.ssrLoadModule('@sigx/server-renderer/node')) as unknown as
-            typeof import('@sigx/server-renderer/node');
+        try {
+            return (await vite.ssrLoadModule(SSR_NODE_VIRTUAL_ID)) as unknown as
+                typeof import('@sigx/server-renderer/node');
+        } catch {
+            return (await vite.ssrLoadModule('@sigx/server-renderer/node')) as unknown as
+                typeof import('@sigx/server-renderer/node');
+        }
     }
     // Fail fast at startup if the peer is missing.
     await loadHandlerFactory();
