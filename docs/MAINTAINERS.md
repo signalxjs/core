@@ -67,9 +67,17 @@ GH release while every npm PUT failed).
 
 ## Notifying consumer repos
 
-The ecosystem repos (`router`, `store`, `use`, `lynx`, `ssg`, `pulse`) pin core
-packages to a single minor through the `catalog:` block of their
-`pnpm-workspace.yaml`, and each ships a `core-sync.yml` workflow that — on a
+**The consumer list lives in [`docs/ecosystem.json`](ecosystem.json)** — the ecosystem
+manifest. It records, per repo, which core packages it pins, which *sibling* packages
+it consumes, and the release **tier** those dependencies imply. `release.yml` reads it
+for the fan-out, [`docs/ecosystem-release.md`](ecosystem-release.md) reads it for the
+release order, and `scripts/check-ecosystem.mjs` (`pnpm verify:ecosystem`, a CI step)
+gates it on every run: a new core package, a mis-ordered tier or an unresolvable
+sibling fails the build. **Never hardcode a consumer list anywhere** — the literal loop
+this replaced had drifted to six of the twelve live consumers.
+
+Each consumer pins core packages to a single minor through the `catalog:` block of its
+`pnpm-workspace.yaml` and ships a `core-sync.yml` workflow that — on a
 `core-released` `repository_dispatch` — opens a "chore: align with core X.Y" PR
 (bumping the catalog, then building/testing before it proposes the bump). That
 consumer-side machinery lives in
@@ -81,21 +89,39 @@ out to each consumer, so alignment PRs appear within minutes. It is additive by
 design — `needs: publish-npm`, tag-only, and it swallows per-repo dispatch
 failures — so it can never affect the npm publish or the GitHub release.
 
+An alignment PR is only the *first* step, and only ever per-repo: it does not release
+the sibling packages, and it cannot know that `ssg` must wait for `router` and `cli`.
+Driving the full rollout in dependency order is what
+[`docs/ecosystem-release.md`](ecosystem-release.md) is for.
+
 The default `GITHUB_TOKEN` **cannot** dispatch to other repos, so the job
 authenticates with an **`ECOSYSTEM_DISPATCH_TOKEN`** secret. To activate the loop:
 
 1. Create a **fine-grained PAT** (or a GitHub App installation token) with
-   **`repository_dispatch: write`** (Actions → Repository dispatch) on each
-   consumer repo — `router`, `store`, `use`, `lynx`, `ssg`, `pulse`. No other
-   scopes are needed.
+   **`repository_dispatch: write`** (Actions → Repository dispatch) on every repo in
+   `docs/ecosystem.json`. No other scopes are needed. List them with:
+   ```sh
+   node -e "for (const c of require('./docs/ecosystem.json').consumers) console.log(c.repo)"
+   ```
 2. Store it as the `ECOSYSTEM_DISPATCH_TOKEN` Actions secret **in this (core)
    repo**: `gh secret set ECOSYSTEM_DISPATCH_TOKEN -R signalxjs/core`.
-3. Confirm each consumer has `core-sync.yml` on its default branch (shipped by the
-   template) and appears in the job's fan-out loop in `release.yml`.
+3. Confirm each consumer has `core-sync.yml` on its default branch:
+   ```sh
+   node -e "for (const c of require('./docs/ecosystem.json').consumers) console.log(c.repo)" \
+     | xargs -I{} sh -c 'printf "%-14s " {}; gh api repos/signalxjs/{}/contents/.github/workflows/core-sync.yml --jq .name 2>/dev/null || echo MISSING'
+   ```
+
+You can prove the wiring without cutting a release — dispatch the *current* version and
+expect "already aligned, no PR":
+
+```sh
+gh api repos/signalxjs/router/dispatches \
+  -f event_type=core-released -F 'client_payload[version]=0.12.0'
+gh run list -R signalxjs/router --workflow core-sync.yml --limit 1
+```
 
 If the secret is absent, `notify-consumers` logs that it's skipping and exits 0 —
-consumers still pick up the release on `core-sync.yml`'s weekly cron. Remember to
-extend the fan-out loop when a new consumer repo joins the ecosystem.
+consumers still pick up the release on `core-sync.yml`'s weekly cron.
 
 ## Branch protection (`main`)
 
@@ -136,7 +162,16 @@ Settings → Rules → Rulesets → New branch ruleset:
 7. `release.yml` takes over — see the two-job structure above. End state:
    every package lives at `X.Y.Z` on npm with provenance (npm versions carry no
    leading `v` — that is the git-tag convention), and the `vX.Y.Z` GitHub
-   Release is marked latest.
+   Release is marked latest. Confirm it, package by package — a tag run can fail
+   partially and silently:
+   ```sh
+   node -e "for (const p of require('./docs/ecosystem.json').corePackages) console.log(p)" \
+     | xargs -I{} sh -c 'printf "%-24s %s\n" {} "$(npm view {} version)"'
+   ```
+8. **The release is not finished here.** Twelve other repos pin these packages, several
+   pin each other, and they only work if they are aligned and released in dependency
+   order. Continue with **[`docs/ecosystem-release.md`](ecosystem-release.md)** — the
+   runbook you point an agent at; it drives the whole rollout tier by tier.
 
 ### If something fails mid-release
 

@@ -40,6 +40,12 @@ jobs:
       - name: Lint
         run: pnpm lint
 
+      # docs/ecosystem.json drives the consumer fan-out in release.yml and the
+      # release ORDER in docs/ecosystem-release.md. A package added here that
+      # never reaches the manifest silently never reaches a consumer's catalog.
+      - name: Verify ecosystem manifest
+        run: pnpm verify:ecosystem
+
       - name: Typecheck
         run: pnpm typecheck
 

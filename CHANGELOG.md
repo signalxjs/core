@@ -6,6 +6,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking** — **`app.use(pack())` is the ONE pack-install shape** (#413, #418). The second plugin bus is gone: `SSRInstance.use()` is **removed** from `@sigx/server-renderer`, and `createSSR().use(islandsPlugin())` / `createSSR().use(resumePlugin())` no longer exist. A pack's `install(app)` now registers its *server* render hooks too, through the new app-carried seam `provideSSRPlugin` / `getSSRPlugins` / `SSR_PLUGINS_TOKEN`, so installing the pack in the entry-server's per-request app factory is the whole install. Every render path that receives the App merges app-carried plugins after instance plugins, deduped by `name` (first wins, dev-warned), in `app.use()` order — islands-before-resume stays an app decision. Instance-level plugins move to `createSSR({ plugins })`, an advanced/engine channel (the default state plugin, tests, custom engines). Migration:
+
+  ```diff
+  - // entry-server.tsx
+  - const ssr = createSSR().use(islandsPlugin({ manifest }))
+  + // entry-server.tsx — in the per-request app factory
+  + const app = createApp(App)
+  + app.use(islandsPlugin({ manifest }))
+  + app.use(resumePlugin({ manifest: resumeManifest }))
+  + const ssr = createSSR()
+  ```
+
+  Two related fallouts: `plugin.server.setup(ctx)` now always runs *after* `ctx._appContext` is assigned (setup hooks can resolve app-level provides on every render path — previously only the document path got this right), and the document engine's default `stateSerializationPlugin` yields to an app-carried plugin named `sigx:state`. `mergeSSRPlugins` / `initPluginContext` are exported from `/server` for packs that build their own render contexts.
+
+- **Breaking** (`@sigx/resume`): `createBoundaryRefresh` no longer takes `ssr:`. Pass `plugins: [resumePlugin(...)]` explicitly, or omit it and let the `app` option's app carry the plugin set (`app.use(resumePlugin(...))` in its factory). Dev warns when the resolved set contains no resume plugin.
+
+- **Breaking** (`@sigx/runtime-core`): the per-app type-handler registry is renamed — `provideSSRSerializerHandlers` → **`provideTypeHandlers`**, `SSR_SERIALIZER_TOKEN` → **`TYPE_HANDLER_TOKEN`**, and the `SSRTypeHandler` type → **`TypeHandler`**, now sourced from `@sigx/serialize` and re-exported (#364). The `SSR` prefix was already wrong: a client-side server-function call revives a `Date` with no SSR involved. Custom types now register **once** for both the RPC wire and the state/boundary registry via `app.use(serverPlugin({ types }))` (#411).
+
+- **Breaking for dev-only platform consumers** (`@sigx/vite`): `platform` moves from the second argument of the dev entry factory to the third (#304) — see the `@sigx/vite` entry under **Fixed** below. A factory declaring just `(url)` is unaffected.
+
 ### Fixed
 
 - **`@sigx/server-renderer`**: the `__SIGX_ASYNC__` blob's admission check is codec-aware (#420). Admission was a plain `JSON.stringify` test, blind to the boundary codec — a top-level `bigint` was dropped with a dev warning, and a handler-owned value nested in a snapshot (a `bigint` inside a `toJSON` result, a `Map` in a plain object) rejected the whole key, even though the emitter tags all of those and the client revives them. The blob now goes through `admitPayloadEntry` — the same admission boundary props and state signals use — whose fallback round trip runs `stringifyWithHandlers` (registered handlers AND built-ins, at every depth) instead of plain JSON; the nested-value fix reaches boundary props and state signals too. This matters more since #407 gave packs a public writer: a registered custom type in a `registerSerializedState` snapshot previously vanished from the blob while the identical value survived as a boundary prop. Functions, circular structures, and dangerous keys are still rejected with the same warnings; one inherited edge: an explicit `undefined` useAsync value is now admitted (`$undef`) instead of warned-and-refetched.
@@ -21,6 +43,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **`@sigx/vite`**: dev SSR no longer paints the whole document unstyled (#359). `createDevRequestHandler` built its template from `transformIndexHtml` alone, which in dev injects only `/@vite/client` — CSS reached through a JS import is served as a module that calls `updateStyle()` at runtime, so the server-rendered head contained **no styles at all** and the browser painted the complete document unstyled until the client entry executed (measured CLS 0.96 on a real app). The handler now walks the SSR module graph and inlines the reachable CSS into `<head>` as `<style data-vite-dev-id="…">` — the shape Vite's client adopts into its sheet map on boot and rewrites in place on HMR, so no rules duplicate and CSS HMR keeps working (a `<link>` would be registered but `updateStyle()` bails early for links, silently killing it). Import order and the cascade are preserved, `?url`/`?raw` imports are skipped, and a failing transform degrades to an unstyled-but-served page rather than a 500. Opt out with `devStyles: false`. Production was never affected. This never surfaced in core's own examples because every one of them inlines a `<style>` block directly in `index.html`. The entry is also loaded exactly **once** per request now, shared by the template and app callbacks.
 
 ### Added
+
+- **`@sigx/server`**: the app-plugin face — **`@sigx/server/plugin`** (#411, #413). `app.use(serverPlugin({ transport, types }))`: `transport` installs the stub transport (endpoint/headers/fetch) via `configureServerFn` with dispose-only-if-current teardown (dev warns when overwriting another app's live transport; a per-request SERVER app's install skips the process-global seam, so one plugin in a shared `createApp` is safe on both sides), and `types` is the one-registration story for custom types — a single `TypeHandler[]` stamps both the RPC wire codec (`__SIGX_SERVERFN_CODEC__`, now tag-keyed so same-tag re-registration replaces) and the state/boundary registry (`provideTypeHandlers`), closing the forked registry #411 named. `registerWireTypeHandlers(handlers)` covers app-less contexts (endpoint-only processes, zero-JS loader pages). The dependency-free `./client` stub entry is untouched; the new entry is budgeted at 1 kB and sits at 428 B.
+
+- **`@sigx/vite`**: **`virtual:sigx-manifests`** — `islandsManifest` / `resumeManifest` inlined in SSR builds, `undefined` under dev — so the per-request app factory can construct its packs (#413). Every `server.mjs` and platform entry loses its manifest plumbing and `ssr:` options.
 
 - **`@sigx/server-renderer`**: a public write path into the `__SIGX_ASYNC__` hydration blob (#407). `SSRContext.registerSerializedState(key, value)` is the supported way for packs that own request-scoped state — `@sigx/store`'s `ssrState` is the canonical case — to enter the blob, replacing duck-typed writes to the private `_asyncResults` map. A `{ toJSON }` value is encoded at EMIT time, so state mutated during the request serializes with its final values; keys share the useAsync/useStream namespace (prefix yours: `store:cart`); re-registering an already-emitted key ships a patch (the client merge is last-write-wins); overwriting a not-yet-flushed value dev-warns. `SSRHelper._ctx` is now typed — the per-request access point packs were already duck-typing (`useResponse`/`useHead` read through it). And a new `onStreamEnd?(ctx)` server plugin hook fires exactly once after the streaming race loop drains, before the completion script — the request's last emission point, which the state plugin uses as its final drain. A step toward the typed pack-extension contract (#416).
 
