@@ -256,8 +256,6 @@ describe('document default state plugin vs app-carried plugins', () => {
  * is how #425 rendered pages with no boundary table and said nothing.
  */
 describe('app-carried plugins — a duplicated module graph is not silent', () => {
-    afterEach(() => vi.restoreAllMocks());
-
     /** What a second copy of @sigx/server-renderer's token looks like. */
     const foreignToken = Symbol('sigx:ssrPlugins');
 
