@@ -83,6 +83,17 @@ export interface ServerFnCallOptions {
 }
 
 /**
+ * Per-call options for a `serverStream` (#448) — the same channel as
+ * `serverFn`'s, minus `fresh`. A stream is always POST and is therefore
+ * never answered from an HTTP cache (rfc-server §4.1: "`serverStream` never
+ * qualifies"), so `fresh` could only ever be a no-op; leaving it out makes
+ * that a compile error instead of a dev warning. `signal`, `context` and
+ * `headers` carry their `serverFn` meanings exactly — including the
+ * mirrored ignores (`context` on the client, `headers` in-process).
+ */
+export type ServerStreamCallOptions = Omit<ServerFnCallOptions, 'fresh'>;
+
+/**
  * A server-fn reference used as a DATA-KEY pattern (rfc-server §6.2) — any
  * callable carrying the build-stamped stable key. The parameter type is
  * `never[]` so every function shape matches structurally.
@@ -118,6 +129,17 @@ export type ServerFnCallable<A extends unknown[], R> = ((...args: A) => Promise<
      * `useData(fn)` dev-throws with the remedy.
      */
     __sigxKey: string;
+} & WrappedServerFn;
+
+/**
+ * The public callable shape of a wrapped `serverStream` — identical on the
+ * server wrapper and the generated client stub (the build transform swaps
+ * values, never types). No `__sigxKey`: a stream is not a `useData` target,
+ * and the extractor stamps no key for one.
+ */
+export type ServerStreamCallable<A extends unknown[], T> = ((...args: A) => AsyncIterable<T>) & {
+    /** Bind per-call options; returns the same callable signature. */
+    with(options?: ServerStreamCallOptions): (...args: A) => AsyncIterable<T>;
 } & WrappedServerFn;
 
 /** A wrapped server function, as transports and registries see it. */

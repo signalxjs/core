@@ -18,6 +18,8 @@ export type {
     ServerFnGuard,
     ServerFnInfo,
     ServerFnInvoke,
+    ServerStreamCallOptions,
+    ServerStreamCallable,
     StandardSchemaV1,
     WrappedServerFn
 } from './types';

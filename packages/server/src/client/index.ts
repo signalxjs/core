@@ -12,7 +12,7 @@
  */
 
 // Type-only — erased at build, so the entry stays dependency-free.
-import type { ServerFnCallOptions } from '../types';
+import type { ServerFnCallOptions, ServerStreamCallOptions } from '../types';
 // In-package module (no external dependency): the rfc-server §4 wire codec,
 // shared with the `/server` entry. size-limit's esbuild pass follows the
 // import, so its bytes still count against this entry's ceiling.
@@ -304,17 +304,29 @@ export function __serverFnStub(
  * throws the branded wire error. The request starts lazily on first
  * iteration, and consumer `break`/`return()` aborts the fetch (the server
  * generator's `finally` runs).
+ *
+ * `.with(options)` is the same per-call channel as a fn stub's (#448), minus
+ * `fresh` — a stream is always POST and never HTTP-cached.
  */
 export function __serverStreamStub(
     symbol: string,
     name: string,
     endpoint: string
-): (...args: unknown[]) => AsyncIterable<unknown> {
-    return (...args: unknown[]) => {
+): ((...args: unknown[]) => AsyncIterable<unknown>) & {
+    with(options?: ServerStreamCallOptions): (...args: unknown[]) => AsyncIterable<unknown>;
+} {
+    const call = (args: unknown[], options?: ServerStreamCallOptions): AsyncIterable<unknown> => {
         const controller = new AbortController();
+        // A caller's signal is ADDITIVE: the internal controller still aborts
+        // on consumer break/return/error, and `AbortSignal.any` is only
+        // reached when someone opted into `.with({ signal })` — the
+        // zero-config path stays exactly the call it always was.
+        const signal = options?.signal
+            ? AbortSignal.any([options.signal, controller.signal])
+            : controller.signal;
         async function* stream(): AsyncGenerator<unknown> {
             try {
-                const res = await send(endpoint, symbol, args, false, { signal: controller.signal });
+                const res = await send(endpoint, symbol, args, false, { ...options, signal });
                 if (!res.ok || !res.body) {
                     let wire: WireError | undefined;
                     try {
@@ -382,6 +394,22 @@ export function __serverStreamStub(
         }
         return stream();
     };
+    return Object.assign((...args: unknown[]) => call(args), {
+        with:
+            (options?: ServerStreamCallOptions) =>
+            (...args: unknown[]) => {
+                if (__DEV__ && options && 'context' in options) {
+                    // Stripped from the prod dist, so this costs the
+                    // size-limited stub entry nothing.
+                    console.warn(
+                        `[sigx server] .with({ context }) is ignored on the client — a stub's ` +
+                        `context is the HTTP request it makes. It only applies to in-process ` +
+                        `(SSR-time) calls; passing it here does not send anything.`
+                    );
+                }
+                return call(args, options);
+            }
+    });
 }
 
 /** Throwing stand-in for a non-`serverFn` value export of a server module. */

@@ -38,6 +38,28 @@
 
 ### Added
 
+- **`serverStream` gains the `.with()` per-call channel (#448).** #362 gave
+  `serverFn` a per-call options bag and left streams out on the strength of
+  the `signal` argument alone (a consumer's `break`/`return()` already
+  aborts the fetch). That said nothing about the other two options, and both
+  gaps were real: an in-process (SSR-time) stream had no way to be handed a
+  request, so a generator reading `rq.request`/`rq.url` threw unless a
+  `runWithServerFnContext` scope happened to be on the stack — the exact
+  failure `.with({ context })` (#352) exists to fix on runtimes without ALS
+  — and `__serverStreamStub` took no options at all, so per-call `headers`
+  (#315) never reached a stream. `serverStream` callables and their
+  generated stubs now carry `.with(options)` with the same semantics and the
+  same mirrored ignores (`context` dev-warns on the client, `headers`
+  dev-warns in-process). `fresh` is deliberately **not** in the type
+  (`ServerStreamCallOptions = Omit<ServerFnCallOptions, 'fresh'>`): a stream
+  is always POST and is never answered from an HTTP cache, so it is a
+  compile error instead of a silent no-op. A caller's `signal` composes with
+  (never replaces) the stub's internal abort, so consumer `break`/`return()`
+  behaves exactly as before, and `AbortSignal.any` is only reached when
+  someone opts in — the zero-config path is byte-for-byte the call it was.
+  New exported types: `ServerStreamCallOptions`, `ServerStreamCallable`. No
+  build/transform change — emitted stub modules are identical.
+
 - **Options-form unvalidated-wire warning (#437).** #412's once-per-function
   `__DEV__` wire-args warning covered the direct form and `serverStream`;
   the options form WITHOUT `input` still received wire input silently. It

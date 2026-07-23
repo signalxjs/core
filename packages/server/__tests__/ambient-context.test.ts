@@ -113,7 +113,7 @@ describe('ambient context — runWithServerFnContext (#309)', () => {
         expect(await Promise.all([one, two])).toEqual(['session=one', 'session=two']);
     });
 
-    it('reaches serverStream too, which has no .with() channel', async () => {
+    it('reaches serverStream too', async () => {
         const tail = serverStream(async function* (rq) {
             yield rq.url.pathname;
         });
@@ -123,6 +123,20 @@ describe('ambient context — runWithServerFnContext (#309)', () => {
             return chunks;
         });
         expect(out).toEqual(['/feed']);
+    });
+
+    it("a stream's .with({ context }) still beats the ambient scope (#448)", async () => {
+        const tail = serverStream(async function* (rq) {
+            yield rq.url.pathname;
+        });
+        const out = await runWithServerFnContext(REQ('https://example.com/feed'), async () => {
+            const chunks: unknown[] = [];
+            for await (const c of tail.with({ context: REQ('https://example.com/explicit') })()) {
+                chunks.push(c);
+            }
+            return chunks;
+        });
+        expect(out).toEqual(['/explicit']);
     });
 });
 

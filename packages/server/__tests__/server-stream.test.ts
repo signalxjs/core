@@ -57,6 +57,101 @@ describe('serverStream — wrapper', () => {
         });
         (globalThis as { __SIGX_LIVE_CLIENT__?: unknown }).__SIGX_LIVE_CLIENT__ = true;
         expect(() => s()).toThrow(/"leakedStream" reached a live client unextracted/);
+        // The .with() path goes through the same guard — a bound-options call
+        // is not a way around it (#448).
+        expect(() => s.with({ signal: new AbortController().signal })()).toThrow(
+            /"leakedStream" reached a live client unextracted/
+        );
+    });
+});
+
+/* ------------------------------------------------------------------ */
+/* per-call options — .with() (#448)                                   */
+/* ------------------------------------------------------------------ */
+
+describe('serverStream — .with() in-process (#448)', () => {
+    it('.with({ context }) supplies the request an SSR-time stream needs', async () => {
+        const tail = serverStream(async function* (rq) {
+            yield rq.url.pathname;
+            yield rq.request.headers.get('cookie');
+        });
+        const request = new Request('https://example.com/feed', {
+            headers: { cookie: 'session=alice' }
+        });
+        await expect(collect(tail.with({ context: request })())).resolves.toEqual([
+            '/feed',
+            'session=alice'
+        ]);
+    });
+
+    it('accepts a partial context, not just a Request', async () => {
+        const readsLocals = serverStream(async function* (rq) {
+            yield rq.locals.user;
+        });
+        await expect(
+            collect(readsLocals.with({ context: { locals: { user: 'bob' } } })())
+        ).resolves.toEqual(['bob']);
+    });
+
+    it('.with({ signal }) becomes rq.abortSignal', async () => {
+        const controller = new AbortController();
+        const watches = serverStream(async function* (rq) {
+            yield rq.abortSignal.aborted;
+            controller.abort();
+            yield rq.abortSignal.aborted;
+        });
+        await expect(collect(watches.with({ signal: controller.signal })())).resolves.toEqual([
+            false,
+            true
+        ]);
+    });
+
+    it('a per-call signal still wins over the supplied context request signal', async () => {
+        const outer = new AbortController();
+        const requestAbort = new AbortController();
+        const reads = serverStream(async function* (rq) {
+            yield rq.abortSignal;
+        });
+        const [signal] = await collect(
+            reads.with({
+                signal: outer.signal,
+                context: new Request('https://example.com/feed', { signal: requestAbort.signal })
+            })()
+        );
+        expect(signal).toBe(outer.signal);
+    });
+
+    it('.with({ headers }) dev-warns — there is no HTTP request in-process', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const s = serverStream(async function* () {
+            yield 1;
+        });
+        await collect(s.with({ headers: { 'x-trace-id': 't1' } })());
+        expect(warn).toHaveBeenCalledTimes(1);
+        expect(warn.mock.calls[0][0]).toContain('.with({ headers }) is ignored on an in-process');
+    });
+
+    it('is silent in production', async () => {
+        vi.stubEnv('NODE_ENV', 'production');
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const s = serverStream(async function* () {
+            yield 1;
+        });
+        await collect(s.with({ headers: { 'x-trace-id': 't1' } })());
+        expect(warn).not.toHaveBeenCalled();
+    });
+
+    it('a bare .with() call behaves exactly like a plain one', async () => {
+        const count = serverStream(async function* (_rq, upTo: number) {
+            for (let i = 1; i <= upTo; i++) yield i;
+        });
+        await expect(collect(count.with()(2))).resolves.toEqual([1, 2]);
+        // …and still throws the detached-context error when nothing supplies
+        // a request, exactly as the plain call does.
+        const leaky = serverStream(async function* (rq) {
+            yield rq.request.url;
+        });
+        await expect(collect(leaky.with({})())).rejects.toThrow(/in-process server-function call/);
     });
 });
 
@@ -431,6 +526,84 @@ describe('__serverStreamStub', () => {
         expect(url).toBe('https://api.example.com/_sigx/fn/s_fn_00000001');
         expect(init.headers.authorization).toBe('Bearer abc');
         expect(init.headers['content-type']).toBe('application/json');
+    });
+
+    it('.with({ headers }) merges over the transport headers (#448)', async () => {
+        const mock = vi.fn(async () => ndjsonResponse('{"done":1}\n'));
+        vi.stubGlobal('fetch', mock);
+        configureServerFn({ headers: { authorization: 'Bearer abc', 'x-app': 'transport' } });
+        const stub = __serverStreamStub('s_fn_00000001', 'explain', '/_sigx/fn');
+        await collect(
+            stub.with({
+                headers: { 'x-app': 'per-call', 'x-trace-id': 't1', 'Content-Type': 'text/plain' }
+            })()
+        );
+        const [, init] = mock.mock.calls[0] as unknown as [
+            string,
+            RequestInit & { headers: Record<string, string> }
+        ];
+        expect(init.headers.authorization).toBe('Bearer abc'); // transport survives
+        expect(init.headers['x-app']).toBe('per-call'); // per-call wins
+        expect(init.headers['x-trace-id']).toBe('t1');
+        // content-type is never overridable, same rule as the fn stub's.
+        expect(init.headers['content-type']).toBe('application/json');
+        expect(init.headers['Content-Type']).toBeUndefined();
+    });
+
+    it("the caller's signal composes into the fetch signal (#448)", async () => {
+        const outer = new AbortController();
+        let observed: AbortSignal | undefined;
+        vi.stubGlobal('fetch', vi.fn(async (_url: string, init: RequestInit) => {
+            observed = init.signal as AbortSignal;
+            const encoder = new TextEncoder();
+            const body = new ReadableStream<Uint8Array>({
+                pull(controller) {
+                    controller.enqueue(encoder.encode('{"chunk":1}\n'));
+                }
+            });
+            return new Response(body, { status: 200 });
+        }));
+        const stub = __serverStreamStub('s_fn_00000001', 'endless', '/_sigx/fn');
+        for await (const chunk of stub.with({ signal: outer.signal })()) {
+            expect(chunk).toBe(1);
+            expect(observed?.aborted).toBe(false);
+            // Mid-stream: nothing the stub does has aborted yet, so this
+            // proves the CALLER's signal reached the fetch.
+            outer.abort();
+            expect(observed?.aborted).toBe(true);
+            break;
+        }
+    });
+
+    it('consumer break still aborts when an outer signal was supplied', async () => {
+        const outer = new AbortController();
+        let observed: AbortSignal | undefined;
+        vi.stubGlobal('fetch', vi.fn(async (_url: string, init: RequestInit) => {
+            observed = init.signal as AbortSignal;
+            const encoder = new TextEncoder();
+            const body = new ReadableStream<Uint8Array>({
+                pull(controller) {
+                    controller.enqueue(encoder.encode('{"chunk":1}\n'));
+                }
+            });
+            return new Response(body, { status: 200 });
+        }));
+        const stub = __serverStreamStub('s_fn_00000001', 'endless', '/_sigx/fn');
+        for await (const chunk of stub.with({ signal: outer.signal })()) {
+            expect(chunk).toBe(1);
+            break;
+        }
+        expect(observed?.aborted).toBe(true);
+        expect(outer.signal.aborted).toBe(false); // the caller's signal is untouched
+    });
+
+    it('.with({ context }) dev-warns on the client — a stub sends nothing', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        vi.stubGlobal('fetch', vi.fn(async () => ndjsonResponse('{"done":1}\n')));
+        const stub = __serverStreamStub('s_fn_00000001', 'explain', '/_sigx/fn');
+        await collect(stub.with({ context: new Request('https://example.com/feed') })());
+        expect(warn).toHaveBeenCalledTimes(1);
+        expect(warn.mock.calls[0][0]).toContain('.with({ context }) is ignored on the client');
     });
 
     it('drops dangerous keys from streamed chunks', async () => {
