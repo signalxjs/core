@@ -40,6 +40,7 @@
         "publish:beta": "node scripts/publish.js --tag beta",
         "verify:pack": "node scripts/verify-pack.js",
         "verify:ecosystem": "node scripts/check-ecosystem.mjs",
+        "verify:orchestrator": "node scripts/check-orchestrator.mjs",
         "version:set": "node scripts/bump-version.js",
         "version:patch": "node scripts/bump-version.js patch",
         "version:minor": "node scripts/bump-version.js minor",
