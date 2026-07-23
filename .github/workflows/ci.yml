@@ -304,11 +304,16 @@ jobs:
     # import broke in #202 and nobody noticed until #214. This job is a
     # correctness gate, not a timing gate — `verify` proves every framework
     # adapter still builds an equivalent tree, and the quick suite proves the
-    # adapters load and render. bench:ssr:quick does NOT pass --enforce, so
-    # check-regression only prints its delta table (expect "worse than +25%"
-    # notes: a CI runner is slower than whatever machine recorded the
-    # baseline). Timing enforcement stays local — and even under --enforce,
-    # check-regression skips it on a machine-fingerprint mismatch.
+    # adapters load and render. The quick suite also runs the request-path
+    # subset (src/micro/), whose per-bench correctness guards fail the job if
+    # the endpoint starts rejecting, a pack stops claiming, or the §6.3 gate
+    # admits nothing — those would otherwise show up as suspiciously good
+    # numbers. bench:ssr:quick does NOT pass --enforce, so check-regression
+    # only prints its delta table (expect "worse than +25%" notes: a CI runner
+    # is slower than whatever machine recorded the baseline). Timing
+    # enforcement stays local — and even under --enforce, check-regression
+    # skips timings on a machine-fingerprint mismatch (payload-byte benches
+    # still gate there, being machine-independent).
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -325,6 +330,13 @@ jobs:
 
       - name: Build
         run: pnpm build
+
+      # The workspace has its own stricter tsconfig (erasableSyntaxOnly —
+      # these files run through node's strip-only type stripping, which
+      # rejects syntax the root program allows). Not covered by the root
+      # `pnpm typecheck`, whose program is packages/ only.
+      - name: Typecheck benchmarks
+        run: pnpm --filter @sigx/benchmarks typecheck
 
       - name: Verify cross-framework output equivalence
         run: pnpm --filter @sigx/benchmarks verify

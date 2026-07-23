@@ -1,8 +1,10 @@
 name: Bench
 
-# Informational only: quick SSR benchmark numbers from shared runners are too
-# noisy to gate on, so this never runs with --enforce and never fails on
-# regressions. Trigger it manually and inspect the uploaded artifact.
+# Informational only: benchmark numbers from shared runners are too noisy to
+# gate on, so this never runs with --enforce and never fails on regressions.
+# Trigger it manually and inspect the uploaded artifacts. (The micro suite's
+# per-bench correctness guards DO fail hard — a bench that cannot prove it is
+# doing its work must not report a number.)
 on:
   workflow_dispatch:
 
@@ -29,8 +31,13 @@ jobs:
       - name: Quick SSR bench (informational)
         run: pnpm bench:ssr:quick
 
-      - name: Upload quick results
+      - name: Request-path micro bench (informational)
+        run: pnpm bench:micro
+
+      - name: Upload results
         uses: actions/upload-artifact@v7
         with:
-          name: quick-latest
-          path: benchmarks/results/quick-latest.json
+          name: bench-results
+          path: |
+            benchmarks/results/quick-latest.json
+            benchmarks/results/micro-latest.json

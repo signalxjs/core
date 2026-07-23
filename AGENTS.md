@@ -177,12 +177,27 @@ pnpm smoke:hydration   # did the prod build actually HYDRATE, or silently re-ren
                        # so this is the ONLY hydration signal a prod dist has (#377). Needs a browser:
                        # `pnpm exec playwright install chromium` once. CI job: hydration-smoke.
 pnpm bench:ssr:quick   # sigx-only quick SSR bench + regression table vs the committed baseline (after pnpm build)
+pnpm bench:micro       # request-path benches (after pnpm build): the server-fn endpoint, the
+                       # @sigx/serialize boundary codec, the §6.3 boundary-refresh gate,
+                       # createBoundaryRefresh, and the islands/resume SSR pack overhead.
+                       # sigx-only — nothing to compare against, so each bench reports a RATIO to a
+                       # floor (raw JSON, a bare fetch handler, a plain render). Every bench has a
+                       # correctness guard that fails the run: a bench silently measuring a 403 or an
+                       # empty render would look like a huge win. The packs suite also reports payload
+                       # BYTES, which are deterministic and therefore gated at +2% (vs +25% for
+                       # timings) and enforced even across machines. A reduced subset rides
+                       # `bench:ssr:quick`, so these are regression-gated with the SSR numbers.
 pnpm bench:ssr         # full comparative SSR bench: equivalence check, then sigx vs Vue/React/Preact
-                       # CI runs `verify` + the quick suite (bench-smoke job) as a CORRECTNESS gate: it catches
-                       # adapter rot and output divergence, never timing (CI logs the delta table without
-                       # --enforce, so its slower-hardware numbers are informational). Enforce locally with
+                       # CI runs `typecheck` + `verify` + the quick suite (bench-smoke job) as a CORRECTNESS
+                       # gate: it catches adapter rot, output divergence and micro-bench guard failures, never
+                       # timing (CI logs the delta table without --enforce, so its slower-hardware numbers are
+                       # informational). The benchmarks workspace has its OWN stricter tsconfig
+                       # (`erasableSyntaxOnly` — these files run under node's strip-only type stripping) that the
+                       # root `pnpm typecheck` does not cover; `pnpm --filter @sigx/benchmarks typecheck` does.
+                       # Enforce timings locally with
                        # `pnpm --filter @sigx/benchmarks bench:quick:enforce`, and re-baseline on YOUR machine
-                       # with `pnpm bench:ssr:baseline` (check-regression refuses to enforce across machines).
+                       # with `pnpm bench:ssr:baseline` (check-regression refuses to enforce TIMINGS across
+                       # machines; payload-byte benches gate everywhere).
                        # Every bench script runs node --conditions production: sigx picks its dev/prod dist at
                        # module resolution, so a bare `node` measures the dev build (see benchmarks/README.md).
 pnpm dev:sigx    # watch-build the sigx package

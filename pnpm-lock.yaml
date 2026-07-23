@@ -41,9 +41,24 @@ importers:
 
   benchmarks:
     devDependencies:
+      '@sigx/cache':
+        specifier: workspace:*
+        version: link:../packages/cache
+      '@sigx/resume':
+        specifier: workspace:*
+        version: link:../packages/resume
+      '@sigx/serialize':
+        specifier: workspace:*
+        version: link:../packages/serialize
+      '@sigx/server':
+        specifier: workspace:*
+        version: link:../packages/server
       '@sigx/server-renderer':
         specifier: workspace:*
         version: link:../packages/server-renderer
+      '@sigx/ssr-islands':
+        specifier: workspace:*
+        version: link:../packages/ssr-islands
       '@types/node':
         specifier: ^26.1.1
         version: 26.1.1
