@@ -313,6 +313,27 @@ describe('registerSerializedState — public registration (#407)', () => {
         expect(html.slice(scriptStart, idx)).toContain('nonce="abc123"');
     });
 
+    it('drains generator registrations in blocking string mode too', async () => {
+        // render() has no streaming race loop, but its plugin generators run
+        // AFTER getInjectedHTML — only the final drain can carry this key.
+        const late: SSRPlugin = {
+            name: 'test:late-registrar-string',
+            server: {
+                getStreamingChunks(ctx) {
+                    return (async function* () {
+                        ctx.registerSerializedState('plugin:late-string', { v: 1 });
+                    })();
+                }
+            }
+        };
+        const Page = component(() => () => <div>page</div>, { name: 'Page' });
+
+        const ssr = createSSR().use(stateSerializationPlugin()).use(late);
+        const html = await ssr.render((Page as any)({}));
+
+        expect(html).toContain('"plugin:late-string":{"v":1}');
+    });
+
     it('re-registering an emitted key ships a patch (client merge is last-write-wins)', async () => {
         const Child = component((ctx) => {
             ctx.ssr?._ctx?.registerSerializedState('store:patched', { phase: 'stream' });
