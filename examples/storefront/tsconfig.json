@@ -12,6 +12,15 @@
         "src/**/*.ts",
         "src/**/*.tsx",
         "src/**/*.d.ts",
-        "vite.config.ts"
+        "vite.config.ts",
+        "../env.d.ts"
+    ],
+    // The root config excludes `examples` (its own program is the packages);
+    // inheriting that here would exclude this example's OWN sources and the
+    // program would resolve to nothing — `tsc -p` then exits on TS18003
+    // "No inputs were found", which reads as passing. Override it.
+    "exclude": [
+        "node_modules",
+        "**/dist"
     ]
 }

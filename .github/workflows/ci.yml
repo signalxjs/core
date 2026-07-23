@@ -49,6 +49,13 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
+      # `pnpm typecheck`'s program is the packages — tsconfig.json excludes
+      # `examples`. The examples are the copy-paste surface, so a type error
+      # there is a user-facing DX bug; this checks each against its own
+      # config (#456).
+      - name: Typecheck examples
+        run: pnpm typecheck:examples
+
       - name: Build
         run: pnpm build
 
