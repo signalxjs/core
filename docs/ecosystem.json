@@ -1,0 +1,174 @@
+{
+  "$comment": [
+    "The sigx ecosystem manifest — the single source of truth for WHICH repos consume core",
+    "and in WHAT ORDER they must be aligned and released after a core release.",
+    "",
+    "Read by: .github/workflows/release.yml (the notify-consumers fan-out),",
+    "docs/ecosystem-release.md (the runbook), .github/workflows-ai/ecosystem-release.mjs",
+    "(the orchestrator), and scripts/check-ecosystem.mjs (the CI guard that keeps it honest).",
+    "",
+    "`tier` is the release wave. A repo's tier must be strictly greater than the tier of every",
+    "repo publishing a package it lists in `consumesSiblings` — check-ecosystem.mjs enforces",
+    "exactly that, so the ordering can never rot the way the hardcoded fan-out list did.",
+    "Everything in one tier can be aligned and released in parallel; the next tier may not",
+    "start until every package in the previous one is live on npm.",
+    "",
+    "Deliberately absent: signalxjs/devtools (pins core ^0.5.0, v0.0.1, never published — a",
+    "rewrite, not a bump) and signalxjs/signalxjs.github.io (the docs agent's queue; file an",
+    "issue there per AGENTS.md, never a PR from a source repo)."
+  ],
+
+  "corePackages": [
+    "sigx",
+    "@sigx/serialize",
+    "@sigx/reactivity",
+    "@sigx/runtime-core",
+    "@sigx/runtime-dom",
+    "@sigx/server-renderer",
+    "@sigx/ssr-islands",
+    "@sigx/resume",
+    "@sigx/cache",
+    "@sigx/server",
+    "@sigx/vite",
+    "@sigx/cloudflare",
+    "@sigx/vercel",
+    "@sigx/netlify"
+  ],
+
+  "consumers": [
+    {
+      "repo": "router",
+      "tier": 1,
+      "publishes": ["@sigx/router"],
+      "consumesCore": ["@sigx/reactivity", "@sigx/runtime-core", "@sigx/runtime-dom", "@sigx/vite", "sigx"],
+      "consumesSiblings": [],
+      "catalog": "complete",
+      "verify": { "unit": "pnpm test", "browser": null }
+    },
+    {
+      "repo": "store",
+      "tier": 1,
+      "publishes": ["@sigx/store"],
+      "consumesCore": ["@sigx/reactivity", "@sigx/runtime-core", "@sigx/server-renderer", "@sigx/vite", "sigx"],
+      "consumesSiblings": [],
+      "catalog": "complete",
+      "verify": { "unit": "pnpm test", "browser": null }
+    },
+    {
+      "repo": "use",
+      "tier": 1,
+      "publishes": ["@sigx/use", "@sigx/use-web"],
+      "consumesCore": ["@sigx/reactivity", "@sigx/runtime-core", "@sigx/runtime-dom", "sigx"],
+      "consumesSiblings": [],
+      "catalog": "complete",
+      "verify": { "unit": "pnpm test", "browser": null }
+    },
+    {
+      "repo": "terminal",
+      "tier": 1,
+      "publishes": [
+        "@sigx/args",
+        "@sigx/runtime-terminal",
+        "@sigx/terminal",
+        "@sigx/terminal-dev",
+        "@sigx/terminal-ui",
+        "@sigx/terminal-zero"
+      ],
+      "consumesCore": ["@sigx/reactivity", "@sigx/runtime-core", "@sigx/vite"],
+      "consumesSiblings": [],
+      "catalog": "partial",
+      "catalogTodo": "@sigx/vite is pinned inline (^0.12.0) in 5 packages — move it into the catalog block",
+      "verify": { "unit": "pnpm test", "browser": null, "manual": "pnpm showcase — a TUI, not a browser surface" }
+    },
+    {
+      "repo": "daisyui",
+      "tier": 1,
+      "publishes": ["@sigx/daisyui"],
+      "consumesCore": ["sigx", "@sigx/reactivity", "@sigx/runtime-core", "@sigx/runtime-dom", "@sigx/vite"],
+      "consumesSiblings": [],
+      "catalog": "complete",
+      "verify": { "unit": "pnpm test", "browser": null }
+    },
+    {
+      "repo": "monaco-editor",
+      "tier": 1,
+      "publishes": ["@sigx/monaco-editor"],
+      "consumesCore": ["sigx", "@sigx/vite"],
+      "consumesSiblings": [],
+      "catalog": "missing",
+      "catalogTodo": "no catalog block at all — core deps are inline ^0.12.0",
+      "verify": { "unit": "pnpm test", "browser": "pnpm dev:basic" }
+    },
+    {
+      "repo": "cli",
+      "tier": 2,
+      "publishes": ["@sigx/cli", "@sigx/create"],
+      "consumesCore": ["@sigx/vite"],
+      "consumesSiblings": ["@sigx/args", "@sigx/terminal"],
+      "catalog": "missing",
+      "catalogTodo": "no catalog block at all — @sigx/vite is inline ^0.12.0",
+      "verify": { "unit": "pnpm test", "browser": null }
+    },
+    {
+      "repo": "i18n",
+      "tier": 2,
+      "publishes": ["@sigx/i18n"],
+      "consumesCore": ["@sigx/reactivity", "@sigx/runtime-core", "@sigx/vite", "sigx"],
+      "consumesSiblings": ["@sigx/store"],
+      "catalog": "missing",
+      "catalogTodo": "no catalog block at all — core deps are inline ^0.12.0",
+      "unpublished": true,
+      "verify": { "unit": "pnpm test", "browser": "examples/* — run the example app" }
+    },
+    {
+      "repo": "live-code",
+      "tier": 2,
+      "publishes": ["@sigx/live-code"],
+      "consumesCore": ["sigx", "@sigx/vite"],
+      "consumesSiblings": ["@sigx/daisyui", "@sigx/monaco-editor", "@sigx/router", "@sigx/store"],
+      "catalog": "missing",
+      "catalogTodo": "no catalog block at all — core deps are inline ^0.12.0",
+      "verify": { "unit": "pnpm test", "browser": null }
+    },
+    {
+      "repo": "pulse",
+      "tier": 2,
+      "publishes": [],
+      "private": true,
+      "consumesCore": [
+        "sigx",
+        "@sigx/reactivity",
+        "@sigx/runtime-core",
+        "@sigx/runtime-dom",
+        "@sigx/server-renderer",
+        "@sigx/cache",
+        "@sigx/vite"
+      ],
+      "consumesSiblings": ["@sigx/router", "@sigx/store", "@sigx/daisyui"],
+      "catalog": "missing",
+      "catalogTodo": "no catalog block; also pins @sigx/daisyui to an exact stale 0.8.0 (current is 0.9.0)",
+      "verify": { "unit": "pnpm test", "browser": "pnpm smoke (playwright) — the only repo with a real e2e suite" }
+    },
+    {
+      "repo": "ssg",
+      "tier": 3,
+      "publishes": ["@sigx/ssg", "@sigx/ssg-theme-daisyui"],
+      "consumesCore": ["@sigx/server-renderer", "@sigx/vite", "sigx"],
+      "consumesSiblings": ["@sigx/router", "@sigx/cli", "@sigx/args"],
+      "catalog": "partial",
+      "catalogTodo": "sibling pins are stale: @sigx/cli ^0.4.2 (current 0.6.0), @sigx/args ^0.6.1 (current 0.8.0)",
+      "verify": { "unit": "pnpm test", "browser": "examples/* — build and serve a generated site" }
+    },
+    {
+      "repo": "lynx",
+      "tier": 3,
+      "publishes": ["@sigx/lynx", "@sigx/lynx-core", "@sigx/lynx-runtime", "@sigx/lynx-cli"],
+      "publishesNote": "60+ @sigx/lynx-* packages ship from this repo, all lockstep-versioned; only the roots are listed. check-ecosystem.mjs treats `publishes` as a subset check for this repo.",
+      "publishesIsSubset": true,
+      "consumesCore": ["@sigx/reactivity", "@sigx/runtime-core"],
+      "consumesSiblings": ["@sigx/cli", "@sigx/terminal"],
+      "catalog": "complete",
+      "verify": { "unit": "pnpm test", "browser": null, "manual": "native (iOS/Android) — no browser surface" }
+    }
+  ]
+}

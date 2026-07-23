@@ -2,12 +2,17 @@
 
 ## Supported versions
 
-SignalX is in early public release. Security fixes are applied to the latest `0.4.x` line.
+SignalX is pre-1.0. Security fixes are applied to the latest published release
+only — there are no backports to earlier lines, so upgrading is the fix. The
+current release is on the
+[releases page](https://github.com/signalxjs/core/releases) and on
+[npm](https://www.npmjs.com/package/sigx); `sigx` and every framework package
+under `packages/` publish together at that same version.
 
-| Version | Supported |
-|---------|-----------|
-| `0.4.x` | ✅        |
-| `< 0.4` | ❌        |
+| Version        | Supported |
+|----------------|-----------|
+| Latest release | ✅        |
+| Anything older | ❌        |
 
 ## Reporting a vulnerability
 

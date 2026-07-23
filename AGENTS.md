@@ -286,7 +286,8 @@ surfaces, two rules:
 
 | When you… | Update… |
 |---|---|
-| add / rename / remove a package | `AGENTS.md` "Packages" and the README package table — plus, **whichever of these the repo has**: `CONTRIBUTING.md` layout, the issue-template package dropdowns, `.size-limit.mjs`, and the `tsconfig` / `vitest` path aliases |
+| add / rename / remove a package | `AGENTS.md` "Packages" and the README package table — plus, **whichever of these the repo has**: `CONTRIBUTING.md` layout, the issue-template package dropdowns, `.size-limit.mjs`, and the `tsconfig` / `vitest` path aliases. Also `docs/ecosystem.json` → `corePackages` (`pnpm verify:ecosystem` fails until you do), and `CORE_PACKAGES` in [`repo-template`](https://github.com/signalxjs/repo-template)'s `scripts/sync-core.mjs` + `scripts/check-catalog.mjs` — a core package missing from those never reaches a consumer's catalog |
+| add / remove an ecosystem repo, or change which sibling packages one consumes | `docs/ecosystem.json` — the manifest driving `release.yml`'s consumer fan-out and the release **order** in `docs/ecosystem-release.md`. A sibling dependency can change a repo's tier; `pnpm verify:ecosystem` checks that tiers stay a valid topological order. Never hardcode a consumer list anywhere |
 | change a build / test / lint script | `AGENTS.md` "Build, Test, Lint", `CONTRIBUTING.md` "Common tasks", `package.json` |
 | change or add public API / behaviour | the package's own `README.md` and `CHANGELOG.md` under `[Unreleased]` |
 | add / change a `globalThis.__SIGX_*` seam | `docs/seams.md` — the registry of every cross-package global: name, direction, writer, reader, contract. A global with no entry there is a bug; the map used to exist only by grepping, and a read site got missed because of it |

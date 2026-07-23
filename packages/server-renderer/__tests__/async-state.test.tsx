@@ -358,6 +358,59 @@ describe('registerSerializedState — public registration (#407)', () => {
     });
 });
 
+describe('codec-owned values reach the blob (#420)', () => {
+    it('admits a top-level bigint from useData (tagged $bigint) with no warning', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const Big = component(() => {
+            const data = useData('big-key', async () => 123n as any);
+            return () => <div>{data.loading ? 'loading' : 'done'}</div>;
+        }, { name: 'Big' });
+
+        const ssr = createSSR({ plugins: [stateSerializationPlugin()] });
+        const html = await ssr.render((Big as any)({}));
+
+        expect(html).toContain('"big-key":{"$bigint":"123"}');
+        expect(warn).not.toHaveBeenCalled();
+        warn.mockRestore();
+    });
+
+    it('admits handler-owned values nested in a registered snapshot', async () => {
+        // The #407 registration shape: a store snapshot whose fields carry
+        // codec vocabulary. Plain-JSON admission threw on the bigint and
+        // dropped the whole key; the codec-aware check admits it and the
+        // emitter tags each nested value.
+        const Page = component((ctx) => {
+            ctx.ssr?._ctx?.registerSerializedState('store:snap', {
+                toJSON: () => ({ total: 42n, when: new Date(1735689600000) })
+            });
+            return () => <div>page</div>;
+        }, { name: 'Page' });
+
+        const ssr = createSSR({ plugins: [stateSerializationPlugin()] });
+        const html = await ssr.render((Page as any)({}));
+
+        expect(html).toContain('"total":{"$bigint":"42"}');
+        expect(html).toContain('"when":{"$date":1735689600000}');
+    });
+
+    it('still rejects a circular registration with a dev warning', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const circular: any = { name: 'loop' };
+        circular.self = circular;
+        const Page = component((ctx) => {
+            ctx.ssr?._ctx?.registerSerializedState('store:circular', circular);
+            return () => <div>page</div>;
+        }, { name: 'Page' });
+
+        const ssr = createSSR({ plugins: [stateSerializationPlugin()] });
+        const html = await ssr.render((Page as any)({}));
+
+        expect(html).not.toContain('store:circular');
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining('"store:circular"'));
+        warn.mockRestore();
+    });
+});
+
 describe('server → client round trip', () => {
     let container: HTMLDivElement;
 

@@ -17,7 +17,7 @@ publishes via npm trusted publishing (OIDC), so no `NPM_TOKEN` is required.
 
 ## npm trusted publishing
 
-Each of the six packages on npmjs.com is configured to trust this repo's
+Every published package on npmjs.com is configured to trust this repo's
 `release.yml` workflow. Configuration: package page → Settings → Trusted
 Publishers → GitHub Actions, with:
 
@@ -63,13 +63,21 @@ GH release while every npm PUT failed).
 | `404 Not Found - PUT https://registry.npmjs.org/<pkg>` | OIDC claim was rejected. Either npm is too old (< 11.5.1, see above), the trusted-publisher config on npmjs.com doesn't match (workflow filename, owner, repo, environment), or no trusted publisher is registered for that package. The 404 is npm's deliberate ambiguity — it does NOT mean the package is missing. |
 | `Provenance statement published to transparency log` followed by 404 | Same as above. Provenance signing succeeds via sigstore (different code path that accepts the raw OIDC token), so a successful provenance line doesn't mean the publish itself succeeded. |
 | Job step shows ✅ but `npm view <pkg> version` is unchanged | `scripts/publish.js` previously had a bug where partial failures didn't propagate as a non-zero exit code. Fixed in 14dc29e. If you ever see this again, check the bottom of the publish script for the `process.exitCode = 1` guard. |
-| Trusted-publisher card on npmjs.com looks correct but still 404 | Verify all six packages — the publish script stops at the first failure, so a misconfigured later-in-the-list package wouldn't surface until the earlier ones are fixed. Order: `@sigx/reactivity`, `@sigx/runtime-core`, `@sigx/runtime-dom`, `sigx`, `@sigx/server-renderer`, `@sigx/vite`. |
+| Trusted-publisher card on npmjs.com looks correct but still 404 | Verify **every** package — the publish script stops at the first failure, so a misconfigured later-in-the-list package wouldn't surface until the earlier ones are fixed. The authoritative list and order is the `PACKAGES` array in `scripts/publish.js` (dependency order, `@sigx/serialize` first). |
 
 ## Notifying consumer repos
 
-The ecosystem repos (`router`, `store`, `use`, `lynx`, `ssg`, `pulse`) pin core
-packages to a single minor through the `catalog:` block of their
-`pnpm-workspace.yaml`, and each ships a `core-sync.yml` workflow that — on a
+**The consumer list lives in [`docs/ecosystem.json`](ecosystem.json)** — the ecosystem
+manifest. It records, per repo, which core packages it pins, which *sibling* packages
+it consumes, and the release **tier** those dependencies imply. `release.yml` reads it
+for the fan-out, [`docs/ecosystem-release.md`](ecosystem-release.md) reads it for the
+release order, and `scripts/check-ecosystem.mjs` (`pnpm verify:ecosystem`, a CI step)
+gates it on every run: a new core package, a mis-ordered tier or an unresolvable
+sibling fails the build. **Never hardcode a consumer list anywhere** — the literal loop
+this replaced had drifted to six of the twelve live consumers.
+
+Each consumer pins core packages to a single minor through the `catalog:` block of its
+`pnpm-workspace.yaml` and ships a `core-sync.yml` workflow that — on a
 `core-released` `repository_dispatch` — opens a "chore: align with core X.Y" PR
 (bumping the catalog, then building/testing before it proposes the bump). That
 consumer-side machinery lives in
@@ -81,21 +89,39 @@ out to each consumer, so alignment PRs appear within minutes. It is additive by
 design — `needs: publish-npm`, tag-only, and it swallows per-repo dispatch
 failures — so it can never affect the npm publish or the GitHub release.
 
+An alignment PR is only the *first* step, and only ever per-repo: it does not release
+the sibling packages, and it cannot know that `ssg` must wait for `router` and `cli`.
+Driving the full rollout in dependency order is what
+[`docs/ecosystem-release.md`](ecosystem-release.md) is for.
+
 The default `GITHUB_TOKEN` **cannot** dispatch to other repos, so the job
 authenticates with an **`ECOSYSTEM_DISPATCH_TOKEN`** secret. To activate the loop:
 
 1. Create a **fine-grained PAT** (or a GitHub App installation token) with
-   **`repository_dispatch: write`** (Actions → Repository dispatch) on each
-   consumer repo — `router`, `store`, `use`, `lynx`, `ssg`, `pulse`. No other
-   scopes are needed.
+   **`repository_dispatch: write`** (Actions → Repository dispatch) on every repo in
+   `docs/ecosystem.json`. No other scopes are needed. List them with:
+   ```sh
+   node -e "for (const c of require('./docs/ecosystem.json').consumers) console.log(c.repo)"
+   ```
 2. Store it as the `ECOSYSTEM_DISPATCH_TOKEN` Actions secret **in this (core)
    repo**: `gh secret set ECOSYSTEM_DISPATCH_TOKEN -R signalxjs/core`.
-3. Confirm each consumer has `core-sync.yml` on its default branch (shipped by the
-   template) and appears in the job's fan-out loop in `release.yml`.
+3. Confirm each consumer has `core-sync.yml` on its default branch:
+   ```sh
+   node -e "for (const c of require('./docs/ecosystem.json').consumers) console.log(c.repo)" \
+     | xargs -I{} sh -c 'printf "%-14s " {}; gh api repos/signalxjs/{}/contents/.github/workflows/core-sync.yml --jq .name 2>/dev/null || echo MISSING'
+   ```
+
+You can prove the wiring without cutting a release — dispatch the *current* version and
+expect "already aligned, no PR":
+
+```sh
+gh api repos/signalxjs/router/dispatches \
+  -f event_type=core-released -F 'client_payload[version]=0.12.0'
+gh run list -R signalxjs/router --workflow core-sync.yml --limit 1
+```
 
 If the secret is absent, `notify-consumers` logs that it's skipping and exits 0 —
-consumers still pick up the release on `core-sync.yml`'s weekly cron. Remember to
-extend the fan-out loop when a new consumer repo joins the ecosystem.
+consumers still pick up the release on `core-sync.yml`'s weekly cron.
 
 ## Branch protection (`main`)
 
@@ -120,7 +146,7 @@ Settings → Rules → Rulesets → New branch ruleset:
 ## Releasing
 
 1. Bump versions: `node scripts/bump-version.js patch` (or `minor` / `major`,
-   or an exact version like `0.5.0`). Skip `pnpm version:patch` — pnpm v11's
+   or an exact version like `1.2.3`). Skip `pnpm version:patch` — pnpm v11's
    pre-run deps-status check fails interactively here.
 2. Update `CHANGELOG.md` — move `Unreleased` content under a new heading
    `## [X.Y.Z] — YYYY-MM-DD`, add the `[X.Y.Z]: …/releases/tag/vX.Y.Z` link,
@@ -134,8 +160,18 @@ Settings → Rules → Rulesets → New branch ruleset:
 5. Commit: `git commit -am "chore: release vX.Y.Z"`.
 6. Tag and push: `git tag -a vX.Y.Z -m "vX.Y.Z" && git push --follow-tags`.
 7. `release.yml` takes over — see the two-job structure above. End state:
-   all six packages live at `vX.Y.Z` on npm with provenance, GitHub Release
-   marked latest.
+   every package lives at `X.Y.Z` on npm with provenance (npm versions carry no
+   leading `v` — that is the git-tag convention), and the `vX.Y.Z` GitHub
+   Release is marked latest. Confirm it, package by package — a tag run can fail
+   partially and silently:
+   ```sh
+   node -e "for (const p of require('./docs/ecosystem.json').corePackages) console.log(p)" \
+     | xargs -I{} sh -c 'printf "%-24s %s\n" {} "$(npm view {} version)"'
+   ```
+8. **The release is not finished here.** Twelve other repos pin these packages, several
+   pin each other, and they only work if they are aligned and released in dependency
+   order. Continue with **[`docs/ecosystem-release.md`](ecosystem-release.md)** — the
+   runbook you point an agent at; it drives the whole rollout tier by tier.
 
 ### If something fails mid-release
 
@@ -145,13 +181,13 @@ Settings → Rules → Rulesets → New branch ruleset:
   release if one was created (`gh release delete vX.Y.Z`), fix the issue,
   re-tag.
 - **Some packages published, others didn't**: do NOT delete the tag.
-  npm versions are immutable. Bump to the next patch (e.g. 0.4.2) so the
+  npm versions are immutable. Bump to the next patch (`1.2.3` → `1.2.4`) so the
   failed packages can publish at the new version while the succeeded
   packages move forward too.
 
 ### Prereleases
 
-Use a prerelease version (e.g. `0.5.0-rc.0`) and push the matching tag.
+Use a prerelease version (e.g. `1.2.3-rc.0`) and push the matching tag.
 The publish script does not pass `--tag` automatically; add `--tag beta`
 (or similar) to `release.yml`'s publish step if a non-`latest` dist-tag is
 needed.
