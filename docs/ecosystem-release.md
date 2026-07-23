@@ -138,7 +138,8 @@ only be superseded, never withdrawn. Two paths.
 - `pnpm sync:core` changed **only** `pnpm-workspace.yaml` and `pnpm-lock.yaml`
 - no source file was edited to make anything pass
 - `verify:catalog`, `build`, `typecheck` and `test` all passed on the **first** run
-- the repo's verification (§5) passed, browser included where it has one
+- the repo's verification (§5) passed in full — the browser surface where it has one, the
+  manual step (`terminal`'s TUI showcase, `lynx`'s native build) where that is what it has
 - the PR merged with no Copilot feedback requiring a code change
 
 Then finish the job:
@@ -157,7 +158,8 @@ npm view <each published package> version   # confirm — partial tag runs are s
 
 - a source file had to change (a breaking-change migration, a type error, a test)
 - a check needed a retry, or passed only after a fix
-- the repo has a browser surface (§5) that could not be verified
+- a verification the repo HAS (§5 — browser or manual) could not actually be run; the unit
+  suite does not substitute for it
 - Copilot raised something that changed the code
 - a sibling pin had to move by more than the expected minor
 

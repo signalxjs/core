@@ -56,6 +56,11 @@ const MANIFEST_SCHEMA = {
                     catalogTodo: { type: 'string' },
                     verifyUnit: { type: 'string' },
                     verifyBrowser: { type: 'string', description: 'empty when the repo has no browser surface' },
+                    verifyManual: {
+                        type: 'string',
+                        description:
+                            'a non-browser verification the repo still has (a TUI showcase, a native build); empty when there is none',
+                    },
                 },
             },
         },
@@ -105,8 +110,10 @@ const plan = await agent(
    any that do not in \`unpublishedCorePackages\`. Do not guess — actually run the command.
    This matters: core tag runs have failed partially and silently before, and npm versions are
    immutable, so a half-published core must be fixed before any consumer moves.
-4. Return every consumer from the manifest, flattening \`verify.unit\` to \`verifyUnit\` and
-   \`verify.browser\` to \`verifyBrowser\` (empty string when it is null).
+4. Return every consumer from the manifest, flattening \`verify.unit\` to \`verifyUnit\`,
+   \`verify.browser\` to \`verifyBrowser\` and \`verify.manual\` to \`verifyManual\` (empty
+   string when a field is null or absent). Do not drop \`verify.manual\` — it is how a repo
+   with no browser surface still says how it can be exercised.
 
 Return data only.`,
     { schema: MANIFEST_SCHEMA, label: 'read manifest + verify core on npm', phase: 'Plan' },
@@ -152,7 +159,7 @@ Repo facts from the ecosystem manifest:
 - consumes siblings: ${siblings}
 - catalog state: ${c.catalog ?? 'unknown'}${c.catalogTodo ? ` — ${c.catalogTodo}` : ''}
 - unit verification: ${c.verifyUnit || 'pnpm test'}
-- beyond unit: ${c.verifyBrowser || 'none — unit tests ARE the verification for this repo'}
+- beyond unit: ${c.verifyBrowser || c.verifyManual || 'none — unit tests ARE the verification for this repo'}
 
 Steps:
 1. Clone/locate the repo in the standard layout and create a worktree from main:
@@ -167,7 +174,9 @@ Steps:
 5. Verification per §5. ${
         c.verifyBrowser
             ? `This repo HAS a browser surface — run \`${c.verifyBrowser}\` and drive it with the claude-in-chrome tools: load the page, read the console for errors, exercise the main interaction, screenshot it, attach the screenshot to the PR. On Windows verify the dev server PID actually changed after any restart.`
-            : 'This repo has no browser surface; the unit suite is the verification.'
+            : c.verifyManual
+              ? `This repo has no BROWSER surface, but it is not unit-tests-only either: ${c.verifyManual}. Exercise it as far as the environment allows and say in \`verification\` exactly what you ran and what you could not. If it could not be exercised at all, that is an AMBER reason — do not treat the unit suite as sufficient.`
+              : 'This repo has no browser surface and no manual verification; the unit suite IS the verification.'
     }
 6. Open the PR (reference the issue so it auto-closes), request Copilot review via the
    requested_reviewers API, address every actionable comment, RESOLVE every inline thread
@@ -185,8 +194,8 @@ required no code change.${dryRun ? '\n  >>> DRY RUN IS ON: even on green, STOP a
   publishedPackages.`}
 
 AMBER — stop after the merge, do NOT tag. Any of: a source file had to change; any check needed
-a retry; a browser surface could not be verified; Copilot's feedback changed the code; a sibling
-pin had to move more than the expected minor. Report status "amber", list sourceFilesChanged, and
+a retry; a verification this repo HAS (browser or manual) could not actually be run; Copilot's
+feedback changed the code; a sibling pin had to move more than the expected minor. Report status "amber", list sourceFilesChanged, and
 say in amberReason exactly what a human needs to decide. npm versions are immutable — when in
 doubt, amber.
 

@@ -107,9 +107,12 @@ jobs:
     # to broadcast (github.ref_name would be a branch name like `main`).
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
-    # Authenticates with a PAT (ECOSYSTEM_DISPATCH_TOKEN), never GITHUB_TOKEN —
-    # which cannot dispatch to other repos anyway — so needs no repo permissions.
-    permissions: {}
+    # The DISPATCH authenticates with a PAT (ECOSYSTEM_DISPATCH_TOKEN), never
+    # GITHUB_TOKEN — which cannot dispatch to other repos anyway. `contents: read`
+    # is here solely so the checkout below can read docs/ecosystem.json; the
+    # GITHUB_TOKEN carries nothing else.
+    permissions:
+      contents: read
     steps:
       # The consumer list comes from docs/ecosystem.json, never a literal here — the
       # hardcoded list this replaced had drifted to six of the twelve live consumers.
