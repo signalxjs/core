@@ -108,8 +108,9 @@ asymmetry is deliberate — know which side of it you're on:
   rejected with a 400. The arity guard exists here precisely because the
   shape *is* declared. `input` is also the inference source for the input
   type: omit it and the type falls back to the handler's parameter
-  annotation — with neither, the client stub degrades to
-  `(input: unknown)`.
+  annotation — with neither, the input is undeclared and the callable takes
+  an OPTIONAL `unknown` argument, so an input-less
+  `handler: async (rq) => …` is callable as `fn()`.
 
 My rule of thumb: a function whose body checks everything it uses (loads by
 id and authorizes, like `addToCart` above) is fine in the direct form;

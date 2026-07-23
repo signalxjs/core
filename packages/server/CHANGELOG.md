@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **An options-form `serverFn` with an undeclared input is callable with
+  zero arguments (#451).** The options callable was always `(input: S) =>
+  …`, so an input-less handler (`handler: async (rq) => …`) — which infers
+  `S = unknown` — made `fn()` a compile error ("Expected 1 arguments, but
+  got 0"); `examples/resume`'s `vote()` was hitting it, invisible to CI
+  because `tsconfig.json` excludes `examples/`. The argument is now optional
+  exactly when `S` is `unknown` (neither an `input` schema nor an annotated
+  handler parameter). A declared input keeps its required, typed argument —
+  unchanged. Types only, no runtime change.
+
 ### Changed
 
 - **`form` is typed as the literal `true` (#437).** The extractor reads

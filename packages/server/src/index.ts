@@ -172,11 +172,36 @@ export interface ServerFnOptions<S, R> {
     handler(rq: ServerFnContext, input: S): R | Promise<R>;
 }
 
+/**
+ * The options-form callable's argument list.
+ *
+ * `S` lands on `unknown` exactly when the definition declared NEITHER an
+ * `input` schema NOR an annotated handler parameter — i.e. the input is
+ * undeclared, which includes the input-LESS handler (`handler: async (rq) =>
+ * …`). The argument is optional in that case, so an input-less function is
+ * callable as `fn()` (#451) — it used to be a compile error ("Expected 1
+ * arguments, but got 0"). With `S` known the argument stays required and
+ * typed, exactly as before.
+ *
+ * The type system cannot separate "takes no input" from "takes an input
+ * nobody annotated": both infer `S = unknown`. Rather than guess from the
+ * handler's arity — which would need an overload ordered ahead of the
+ * input-taking one, and TypeScript's deferred checking of context-sensitive
+ * arguments then strips the contextual type from every `(rq, input) => …`
+ * handler whose `rq` is unannotated — the undeclared case is typed as what
+ * it honestly is: an optional, unknown argument. Declaring `input` (or
+ * annotating the parameter) is what buys the precise type, and the
+ * unvalidated-wire-input dev warning (#437) already pushes toward it.
+ */
+type ServerFnInputArgs<S> = unknown extends S ? [input?: unknown] : [S];
+
 /** Wrap a server-only function. Client callers get `(...args) => Promise<R>`. */
 export function serverFn<A extends unknown[], R>(
     impl: (rq: ServerFnContext, ...args: A) => R | Promise<R>
 ): ServerFnCallable<A, Awaited<R>>;
-export function serverFn<S, R>(options: ServerFnOptions<S, R>): ServerFnCallable<[S], Awaited<R>>;
+export function serverFn<S, R>(
+    options: ServerFnOptions<S, R>
+): ServerFnCallable<ServerFnInputArgs<S>, Awaited<R>>;
 export function serverFn(
     arg: ((rq: ServerFnContext, ...args: unknown[]) => unknown) | ServerFnOptions<unknown, unknown>
 ): ServerFnCallable<unknown[], unknown> {

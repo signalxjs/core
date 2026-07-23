@@ -8,7 +8,7 @@
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { serverFn, ServerFnError, isServerFnError, type StandardSchemaV1 } from '../src/index';
-import { createRequestContext } from '../src/context';
+import { createRequestContext, type ServerFnContext } from '../src/context';
 
 afterEach(() => {
     vi.restoreAllMocks();
@@ -310,3 +310,62 @@ describe('serverFn — .with({ signal }) per-call options (#353)', () => {
         warn.mockRestore();
     });
 });
+
+describe('serverFn — options form with an undeclared input (#451)', () => {
+    it('an input-less handler is callable with zero arguments', async () => {
+        // The bug: this used to be `Expected 1 arguments, but got 0` — the
+        // options callable was always `(input: S) => …`, and an input-less
+        // handler infers `S = unknown`.
+        const bump = serverFn({
+            handler: async () => 42
+        });
+        await expect(bump()).resolves.toBe(42);
+
+        // Same for a handler that takes only `rq` (the examples/resume
+        // `vote` shape: refreshes-declaring, no input).
+        const withRq = serverFn({
+            refreshes: ['Poll'],
+            handler: async (rq) => {
+                expectTypeIsServerFnContext(rq);
+                return 'voted';
+            }
+        });
+        await expect(withRq()).resolves.toBe('voted');
+    });
+
+    it('a declared input keeps its required, typed argument', async () => {
+        const viaSchema = serverFn({ input: schema, handler: async (_rq, i) => i.id });
+        await expect(viaSchema({ id: 'a' })).resolves.toBe('a');
+
+        const viaAnnotation = serverFn({ handler: async (_rq, i: string) => i.toUpperCase() });
+        await expect(viaAnnotation('b')).resolves.toBe('B');
+
+        // @ts-expect-error a declared input is REQUIRED — this is the
+        // precision that annotating (or declaring `input`) buys
+        void (() => viaSchema());
+        // @ts-expect-error and it is TYPED
+        void (() => viaSchema({ id: 1 }));
+        // @ts-expect-error the annotated form is typed too
+        void (() => viaAnnotation(1));
+    });
+
+    it('an unannotated handler parameter stays contextually typed (no overload poisoning)', async () => {
+        // Regression guard for the approach: discriminating on handler ARITY
+        // needs an overload ordered ahead of the input-taking one, and
+        // TypeScript's deferred checking of context-sensitive arguments then
+        // strips the contextual type off `rq` here — `_rq` would become an
+        // implicit any (and `noImplicitAny` fails the build).
+        const fn = serverFn({
+            handler: async (_rq, i: string) => {
+                expectTypeIsServerFnContext(_rq);
+                return i;
+            }
+        });
+        await expect(fn('ok')).resolves.toBe('ok');
+    });
+});
+
+/** Compile-time assertion helper: the argument must be a ServerFnContext. */
+function expectTypeIsServerFnContext(_rq: ServerFnContext): void {
+    /* types only */
+}
