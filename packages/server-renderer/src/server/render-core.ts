@@ -341,16 +341,6 @@ function createComponentState(
     return { componentName, id, ssrLoads, componentCtx };
 }
 
-/** Append a serialization key to the component's record (for streaming preScripts). */
-function recordComponentKey(ctx: SSRContext, id: number, key: string): void {
-    const keys = ctx._asyncKeysByComponent.get(id);
-    if (keys) {
-        if (!keys.includes(key)) keys.push(key);
-    } else {
-        ctx._asyncKeysByComponent.set(id, [key]);
-    }
-}
-
 /**
  * Shared inert state for { server: false } calls on the server: the pending
  * arm renders into the HTML and the client fetches after hydration.
@@ -391,7 +381,6 @@ function serverUseAsync(
     }
 
     const ctx: SSRContext = this.__ssrCtx;
-    const id: number = this.__ssrId;
     const ssrLoads: Promise<void>[] = this._ssrLoads;
 
     const state = {
@@ -411,7 +400,7 @@ function serverUseAsync(
         state.st = 'ready';
         state.data = value;
         ctx._asyncResults.set(key, value);
-        recordComponentKey(ctx, id, key);
+        ctx._unflushedAsyncKeys.add(key);
     }, e => {
         // Soft failure: the component renders its error arm. Nothing is
         // serialized — the client refetches (fail-safe).
@@ -472,7 +461,7 @@ function serverUseStream(this: any, key: string, source: () => AsyncIterable<str
     const finish = (acc: string) => {
         state.text = acc;
         ctx._asyncResults.set(key, acc);
-        recordComponentKey(ctx, id, key);
+        ctx._unflushedAsyncKeys.add(key);
     };
 
     if (ctx._streaming) {

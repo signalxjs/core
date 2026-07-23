@@ -180,11 +180,13 @@ export interface SSRContext {
     _asyncResults: Map<string, unknown>;
 
     /**
-     * Which keys each component registered (componentId → keys) — lets the
-     * streaming path emit per-component preScripts with exactly the keys
-     * that component resolved.
+     * Keys written to `_asyncResults` but not yet emitted to the client.
+     * Values registered inside a deferred render are NOT in the shell blob —
+     * each stream flush drains this set so they reach `window.__SIGX_ASYNC__`
+     * too (#407). A dirty-set, not a flushed-set: draining is O(flush), never
+     * a rescan of every result per async resolution (the #279 discipline).
      */
-    _asyncKeysByComponent: Map<number, string[]>;
+    _unflushedAsyncKeys: Set<string>;
 
     /**
      * Per-request boundary table (id → record). Populated by core when a
@@ -257,6 +259,25 @@ export interface SSRContext {
      * later mutations ship via the per-id mid-stream patch.
      */
     getBoundary(id: number): SSRBoundaryRecord | undefined;
+
+    /**
+     * Register a request-scoped value for the `__SIGX_ASYNC__` hydration
+     * blob — the public write path for packs that own request state (e.g.
+     * `@sigx/store`'s `ssrState`), alongside the keys useAsync/useStream
+     * record internally (#407).
+     *
+     * Emission is handled by `stateSerializationPlugin` (on by default under
+     * `renderDocument`): with the shell blob when registered during the shell
+     * walk, with the next stream-phase flush otherwise; a final drain before
+     * the completion script guarantees delivery. A `{ toJSON }` value is
+     * encoded at EMIT time, so state mutated after registration serializes
+     * with its final values — `toJSON` may run more than once per flush, keep
+     * it pure and cheap. Keys share the useAsync/useStream namespace: prefix
+     * yours (`store:cart`). Re-registering an already-emitted key ships a
+     * patch (the client-side merge is last-write-wins); non-serializable
+     * values are skipped at emit with a dev warning.
+     */
+    registerSerializedState(key: string, value: unknown): void;
 }
 
 /**
@@ -275,6 +296,8 @@ export function createSSRContext(options: SSRContextOptions = {}): SSRContext {
     const pluginData = new Map<string, any>();
     const boundaries = new Map<number, SSRBoundaryRecord>();
     const unflushedBoundaries = new Set<number>();
+    const asyncResults = new Map<string, unknown>();
+    const unflushedAsyncKeys = new Set<string>();
 
     return {
         _componentId: componentId,
@@ -291,8 +314,8 @@ export function createSSRContext(options: SSRContextOptions = {}): SSRContext {
         _headConfigs: [],
         _pendingStreams: [],
         _asyncCache: new Map(),
-        _asyncResults: new Map(),
-        _asyncKeysByComponent: new Map(),
+        _asyncResults: asyncResults,
+        _unflushedAsyncKeys: unflushedAsyncKeys,
         _boundaries: boundaries,
         _unflushedBoundaries: unflushedBoundaries,
         // Null-prototype headers bag: names can be caller-derived strings,
@@ -334,6 +357,23 @@ export function createSSRContext(options: SSRContextOptions = {}): SSRContext {
 
         getBoundary(id: number): SSRBoundaryRecord | undefined {
             return boundaries.get(id);
+        },
+
+        registerSerializedState(key: string, value: unknown): void {
+            // Overwriting a not-yet-flushed value means the earlier one never
+            // reaches the client — almost always two owners colliding on one
+            // key. (Re-registering an already-EMITTED key is the documented
+            // patch path and stays silent.)
+            if (__DEV__ && unflushedAsyncKeys.has(key)) {
+                console.warn(
+                    `[SSR] registerSerializedState("${key}") overwrote a value ` +
+                    `registered earlier in this request before it was emitted — ` +
+                    `last write wins. Namespace the key if this collision is ` +
+                    `unintended.`
+                );
+            }
+            asyncResults.set(key, value);
+            unflushedAsyncKeys.add(key);
         }
     };
 }

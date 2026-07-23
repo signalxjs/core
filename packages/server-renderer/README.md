@@ -120,6 +120,33 @@ render call; concurrent renders share nothing. AsyncLocalStorage remains
 only a best-effort backstop for user code reading `getCurrentInstance()`
 after an `await` inside setup, which is dev-warned.
 
+## Request-state registration (packs)
+
+`useData`/`useStream` values reach the client automatically through the
+`__SIGX_ASYNC__` blob. A pack that owns request-scoped state of its own —
+`@sigx/store`'s `ssrState` is the canonical case — enters the same blob
+through the public writer on the per-request context (#407):
+
+```ts
+// inside a component setup, during a server render
+const ssrCtx = getCurrentInstance()?.ssr?._ctx;   // typed on SSRHelper
+ssrCtx?.registerSerializedState('store:cart', {
+    toJSON: () => snapshot(state)   // encoded at EMIT time, so state
+});                                 // mutated later serializes final
+```
+
+Emission is handled by `stateSerializationPlugin` (on by default under
+`renderDocument`): shell-walk registrations ship with the shell blob;
+stream-phase registrations (a store first created below a streamed
+boundary) ship with the next flush; the `onStreamEnd` plugin hook — the
+request's last emission point — is a final drain that guarantees delivery.
+Keys share the useAsync/useStream namespace, so prefix them
+(`store:cart`). Re-registering an emitted key ships a patch; the client
+merge is last-write-wins. The client half is `peekRestored` /
+`invalidateRestored` / `reviveFromServer` from
+`@sigx/runtime-core/internals` — the blob's single accessor
+(`docs/seams.md`).
+
 ## The eager scheduler vs the lazy hydration core
 
 Client-side selective hydration is split in two, so deferred pages execute
