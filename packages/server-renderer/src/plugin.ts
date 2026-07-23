@@ -151,6 +151,18 @@ export interface SSRPlugin {
          * Return void if no streaming chunks needed.
          */
         getStreamingChunks?(ctx: SSRContext): AsyncGenerator<string> | void;
+
+        /**
+         * Called exactly once after the streaming race loop drains (all
+         * deferred renders, useStream pumps, and plugin chunk generators
+         * done), before the completion script — the LAST emission point of a
+         * request. Use it for state that no later flush would carry (#407:
+         * `registerSerializedState` calls made from a chunk generator that
+         * finishes last). Also called at the end of blocking (string-mode)
+         * renders after plugin generators drain. Return full HTML; stamp
+         * `ctx._nonce` on any `<script>` you emit.
+         */
+        onStreamEnd?(ctx: SSRContext): string | void;
     };
 
     /** Client-side hooks (run during hydration) */

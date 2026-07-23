@@ -59,6 +59,19 @@ function extractInput(input: JSXElement | App): { element: JSXElement; appContex
  *
  * Both are raced together using a unified promise race loop.
  */
+/**
+ * The request's LAST emission point (#407): invoke every plugin's
+ * `onStreamEnd` once, after all streaming work drains. Carries state
+ * registered too late for any earlier flush (e.g. registerSerializedState
+ * from a plugin chunk generator that finishes last).
+ */
+function* emitStreamEnd(ctx: SSRContext, plugins: SSRPlugin[]): Generator<string> {
+    for (const plugin of plugins) {
+        const tail = plugin.server?.onStreamEnd?.(ctx);
+        if (tail) yield tail;
+    }
+}
+
 async function* streamAllAsyncChunks(
     ctx: SSRContext,
     plugins: SSRPlugin[]
@@ -78,8 +91,11 @@ async function* streamAllAsyncChunks(
         if (chunks) pluginGenerators.push(chunks);
     }
 
-    // Nothing to stream
-    if (ctx._pendingAsync.length === 0 && pluginGenerators.length === 0 && ctx._pendingStreams.length === 0) return;
+    // Nothing to stream — still the hook's one guaranteed call per request
+    if (ctx._pendingAsync.length === 0 && pluginGenerators.length === 0 && ctx._pendingStreams.length === 0) {
+        yield* emitStreamEnd(ctx, plugins);
+        return;
+    }
 
     // Emit the $SIGX_REPLACE bootstrap script (needed by core replacements).
     // If core async only appears mid-stream (deferred renders), the loop
@@ -269,6 +285,8 @@ async function* streamAllAsyncChunks(
             }
         }
     }
+
+    yield* emitStreamEnd(ctx, plugins);
 }
 
 export interface SSRInstance {
@@ -438,6 +456,12 @@ export function createSSR(): SSRInstance {
                         result += chunk;
                     }
                 }
+            }
+
+            // Final drain (#407) — registrations no earlier flush carried
+            // (e.g. from a plugin generator above).
+            for (const tail of emitStreamEnd(ctx, plugins)) {
+                result += tail;
             }
 
             // Collect head elements from useHead() calls during rendering

@@ -9,11 +9,15 @@
  * latest value regardless of whether SSR seeded the key. `refresh()`
  * invalidates the entry, fetches fresh, and repopulates on success.
  *
- * Every function is guarded behind `typeof window` — runtime-core must
- * reference no web global unguarded (embedded/server runtimes). These
- * guards deliberately stay `typeof window` (NOT `isLiveClient()`): the
- * blob is an HTML-page transport, so on windowless live clients (lynx,
- * terminal) pickup correctly misses and writeback correctly no-ops.
+ * Every accessor is gated on `isLiveClient()` (#407): servers stay inert
+ * (no declaration + no window → false), browsers are live via the
+ * `typeof window` fallback, and windowless live clients (lynx, terminal —
+ * they call `declareLiveClient(true)` at import) get blob access too. The
+ * blob's transport is host-provided: an HTML `<script>` on web, an
+ * embedder-installed `globalThis.__SIGX_ASYNC__` elsewhere — which is why
+ * the reads below go through `globalThis`, never `window`. Declaration
+ * wins in both directions: `declareLiveClient(false)` makes the accessors
+ * inert even where a window exists.
  *
  * This module is also THE decode point for the blob: `@sigx/cache` reads
  * through `peekRestored` rather than touching the global, so the boundary
@@ -21,6 +25,7 @@
  */
 
 import { reviveWithHandlers, type TypeHandler } from '@sigx/serialize';
+import { isLiveClient } from './environment.js';
 
 const MISS = { hit: false, value: undefined } as const;
 
@@ -68,7 +73,7 @@ export function reviveFromServer(value: unknown): unknown {
  * (`reviveWithHandlers` returns non-plain objects untouched — #369).
  */
 export function peekRestored(key: string): { hit: boolean; value: unknown } {
-    if (typeof window === 'undefined') return MISS;
+    if (!isLiveClient()) return MISS;
     const blob = (globalThis as any).__SIGX_ASYNC__;
     // Own-property check: `in` would also see inherited keys (and misbehave
     // on keys like "__proto__"/"constructor").
@@ -80,7 +85,7 @@ export function peekRestored(key: string): { hit: boolean; value: unknown } {
 
 /** Invalidate a restored entry — called before fetching fresh data. */
 export function invalidateRestored(key: string): void {
-    if (typeof window === 'undefined') return;
+    if (!isLiveClient()) return;
     const blob = (globalThis as any).__SIGX_ASYNC__;
     if (blob && Object.prototype.hasOwnProperty.call(blob, key)) {
         delete blob[key];
@@ -93,7 +98,7 @@ export function invalidateRestored(key: string): void {
  * the key. (Null-prototype blob — see the server emitter.)
  */
 export function writeBack(key: string, value: unknown): void {
-    if (typeof window === 'undefined') return;
+    if (!isLiveClient()) return;
     const blob = ((globalThis as any).__SIGX_ASYNC__ ??= Object.create(null));
     blob[key] = value;
 }

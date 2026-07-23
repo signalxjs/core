@@ -31,7 +31,7 @@ every island. Both were united in #374.
 
 | | |
 |---|---|
-| **Written by** | `server-renderer/src/server/state.ts` → `assignmentJs` (`server/serialize.ts:148`), from `server/state-plugin.ts` — shell script and mid-stream |
+| **Written by** | `server-renderer/src/server/state.ts` → `assignmentJs` (`server/serialize.ts`), from `server/state-plugin.ts` — shell script, mid-stream preScripts, and the `onStreamEnd` final drain. Server-side, packs feed it through `ctx.registerSerializedState` (#407), **the only public writer** — useAsync/useStream record their keys through the same `_unflushedAsyncKeys` dirty-set internally. |
 | **Read by** | `runtime-core/src/async/restore.ts` — `peekRestored`, **the only accessor**. `@sigx/cache` imports it (plus `writeBack`/`invalidateRestored`) from `@sigx/runtime-core/internals` rather than touching the global. |
 | **Shape** | Null-prototype object, `key → value`. Values are encoded by `@sigx/serialize`. |
 
@@ -41,6 +41,12 @@ exactly one place for this seam.
 The page's data cache for its lifetime: every mount of the same key restores
 from it, including after client-side navigation.
 
+The accessors gate on `isLiveClient()`, not `typeof window` (#407): servers
+stay inert, browsers are live via the fallback, and a windowless client that
+declared itself live (lynx, terminal) may consume an **embedder-installed**
+`globalThis.__SIGX_ASYNC__` — the HTML `<script>` is the web transport, not
+the contract.
+
 > **⚠️ It is a MIXED store.** The server writes *encoded* values; `writeBack`
 > (`restore.ts`) and the cache store write *live* ones back beside them after a
 > client fetch. **Anything that transforms this blob must be idempotent** —
@@ -48,6 +54,12 @@ from it, including after client-side navigation.
 >
 > It is also written **progressively** during streaming SSR, so "decode once at
 > load" is not available. Decode is per-read and must stay cheap.
+>
+> A boundary refresh (`@sigx/resume`'s `createBoundaryRefresh`) carries its
+> state in the response envelope + boundary table and deliberately does **not**
+> touch this blob — entries a refreshed boundary's packs registered earlier
+> stay as-is (#407, decided). Pack seeds that must not outlive their instance
+> should consume-once on pickup (as `@sigx/store` does).
 
 ### `__SIGX_BOUNDARIES__`
 

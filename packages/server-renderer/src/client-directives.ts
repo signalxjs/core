@@ -5,6 +5,8 @@
  * Strategy-specific client hydration directive types are contributed by SSR plugins.
  */
 
+import type { SSRContext } from './server/context';
+
 /**
  * SSR environment flags exposed as `ctx.ssr`.
  * Data loading lives in the useAsync/useStream composables (runtime-core),
@@ -20,6 +22,15 @@ export interface SSRHelper {
      * Whether we're hydrating server-rendered DOM on the client.
      */
     readonly isHydrating: boolean;
+
+    /**
+     * The per-request render context — the supported access point for packs
+     * that need it from inside a component setup (#407): `useResponse` and
+     * `useHead` read through it, and request-state owners reach
+     * `registerSerializedState` this way. Present only during a server
+     * render (`isServer` true); never set on client-side `ssr` objects.
+     */
+    readonly _ctx?: SSRContext;
 }
 
 // Augment types in runtime-core for SSR support

@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+**Added: a public write path into the `__SIGX_ASYNC__` blob (#407).**
+
+- `SSRContext.registerSerializedState(key, value)` — the supported way for
+  packs that own request-scoped state (`@sigx/store`'s `ssrState` is the
+  canonical case) to enter the hydration blob, replacing duck-typed writes to
+  the private `_asyncResults` map. A `{ toJSON }` value is encoded at EMIT
+  time, so state mutated during the request serializes with its final values
+  (`toJSON` may run more than once per flush — keep it pure). Keys share the
+  useAsync/useStream namespace (prefix yours: `store:cart`); re-registering an
+  already-emitted key ships a patch (the client merge is last-write-wins);
+  overwriting a not-yet-flushed value dev-warns.
+- `SSRHelper._ctx` is now typed (`SSRContext`, present only during a server
+  render) — the per-request access point packs were already duck-typing
+  (`useResponse` and `useHead` read through it).
+- `onStreamEnd?(ctx)` server plugin hook — called exactly once after the
+  streaming race loop drains (and at the end of blocking renders after plugin
+  generators), before the completion script: the request's LAST emission
+  point. The state plugin uses it as a final drain, so a registration made
+  from a chunk generator that finishes last still reaches the client.
+
+**Fixed: state registered during the stream phase was silently dropped (#407).**
+
+- The state plugin's streamed emission looked up per-component keys that only
+  useAsync/useStream recorded, so anything else landing in the results map
+  during a deferred render never reached the client — a store first created
+  below a streamed boundary hydrated from defaults with no warning. Also
+  caught by the same early-return: a keyed `useData` inside `<Defer>` under
+  streaming recorded its key under the CHILD's component id while the
+  resolution hook fired with the Defer's, so the key never shipped and the
+  client silently refetched. Emission now drains a request-level dirty-set
+  (`_unflushedAsyncKeys`, the #279 boundary-table discipline —
+  `_asyncKeysByComponent` is removed), so every registration ships with the
+  next flush regardless of which component was resolving.
+
 **Added: the single-flight boundary-refresh mechanism (rfc-server §6.3, #313).**
 
 - `SSRContextOptions.baseComponentId` — seed the component-id counter so a
