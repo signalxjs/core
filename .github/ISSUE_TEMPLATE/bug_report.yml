@@ -13,7 +13,7 @@ body:
     attributes:
       label: SignalX version
       description: The version of `sigx` (or the affected `@sigx/*` package) you're using. Run `npm ls sigx` to find it.
-      placeholder: "0.4.0"
+      placeholder: "e.g. 1.2.3"
     validations:
       required: true
 

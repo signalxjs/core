@@ -17,7 +17,7 @@ publishes via npm trusted publishing (OIDC), so no `NPM_TOKEN` is required.
 
 ## npm trusted publishing
 
-Each of the six packages on npmjs.com is configured to trust this repo's
+Every published package on npmjs.com is configured to trust this repo's
 `release.yml` workflow. Configuration: package page → Settings → Trusted
 Publishers → GitHub Actions, with:
 
@@ -63,7 +63,7 @@ GH release while every npm PUT failed).
 | `404 Not Found - PUT https://registry.npmjs.org/<pkg>` | OIDC claim was rejected. Either npm is too old (< 11.5.1, see above), the trusted-publisher config on npmjs.com doesn't match (workflow filename, owner, repo, environment), or no trusted publisher is registered for that package. The 404 is npm's deliberate ambiguity — it does NOT mean the package is missing. |
 | `Provenance statement published to transparency log` followed by 404 | Same as above. Provenance signing succeeds via sigstore (different code path that accepts the raw OIDC token), so a successful provenance line doesn't mean the publish itself succeeded. |
 | Job step shows ✅ but `npm view <pkg> version` is unchanged | `scripts/publish.js` previously had a bug where partial failures didn't propagate as a non-zero exit code. Fixed in 14dc29e. If you ever see this again, check the bottom of the publish script for the `process.exitCode = 1` guard. |
-| Trusted-publisher card on npmjs.com looks correct but still 404 | Verify all six packages — the publish script stops at the first failure, so a misconfigured later-in-the-list package wouldn't surface until the earlier ones are fixed. Order: `@sigx/reactivity`, `@sigx/runtime-core`, `@sigx/runtime-dom`, `sigx`, `@sigx/server-renderer`, `@sigx/vite`. |
+| Trusted-publisher card on npmjs.com looks correct but still 404 | Verify **every** package — the publish script stops at the first failure, so a misconfigured later-in-the-list package wouldn't surface until the earlier ones are fixed. The authoritative list and order is the `PACKAGES` array in `scripts/publish.js` (dependency order, `@sigx/serialize` first). |
 
 ## Notifying consumer repos
 
@@ -120,7 +120,7 @@ Settings → Rules → Rulesets → New branch ruleset:
 ## Releasing
 
 1. Bump versions: `node scripts/bump-version.js patch` (or `minor` / `major`,
-   or an exact version like `0.5.0`). Skip `pnpm version:patch` — pnpm v11's
+   or an exact version like `X.Y.Z`). Skip `pnpm version:patch` — pnpm v11's
    pre-run deps-status check fails interactively here.
 2. Update `CHANGELOG.md` — move `Unreleased` content under a new heading
    `## [X.Y.Z] — YYYY-MM-DD`, add the `[X.Y.Z]: …/releases/tag/vX.Y.Z` link,
@@ -134,7 +134,7 @@ Settings → Rules → Rulesets → New branch ruleset:
 5. Commit: `git commit -am "chore: release vX.Y.Z"`.
 6. Tag and push: `git tag -a vX.Y.Z -m "vX.Y.Z" && git push --follow-tags`.
 7. `release.yml` takes over — see the two-job structure above. End state:
-   all six packages live at `vX.Y.Z` on npm with provenance, GitHub Release
+   every package lives at `vX.Y.Z` on npm with provenance, GitHub Release
    marked latest.
 
 ### If something fails mid-release
@@ -145,13 +145,13 @@ Settings → Rules → Rulesets → New branch ruleset:
   release if one was created (`gh release delete vX.Y.Z`), fix the issue,
   re-tag.
 - **Some packages published, others didn't**: do NOT delete the tag.
-  npm versions are immutable. Bump to the next patch (e.g. 0.4.2) so the
+  npm versions are immutable. Bump to the next patch (`X.Y.Z+1`) so the
   failed packages can publish at the new version while the succeeded
   packages move forward too.
 
 ### Prereleases
 
-Use a prerelease version (e.g. `0.5.0-rc.0`) and push the matching tag.
+Use a prerelease version (e.g. `X.Y.Z-rc.0`) and push the matching tag.
 The publish script does not pass `--tag` automatically; add `--tag beta`
 (or similar) to `release.yml`'s publish step if a non-`latest` dist-tag is
 needed.

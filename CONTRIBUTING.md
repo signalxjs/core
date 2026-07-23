@@ -20,7 +20,7 @@ The `build` step is optional for tests: `pnpm test` and `pnpm typecheck` resolve
 
 ## Workspace layout
 
-Thirteen packages live under `packages/`. See the table in the root `README.md` for what each one does.
+The framework packages live under `packages/`. See the table in the root `README.md` for what each one does.
 
 ```
 packages/

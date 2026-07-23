@@ -12,7 +12,7 @@
 
 </div>
 
-> 🚧 SignalX is in early public release (`0.4.x`). The API surface is small and stabilising — feedback is very welcome. See [CHANGELOG.md](./CHANGELOG.md) for what's new.
+> 🚧 SignalX is pre-1.0 — the API surface is small and stabilising, and breaking changes ship without compat shims. Feedback is very welcome. The badge above shows the current release; see [CHANGELOG.md](./CHANGELOG.md) for what's new.
 
 ## What is SignalX?
 
