@@ -155,12 +155,20 @@ export interface SSRPlugin {
         /**
          * Called exactly once after the streaming race loop drains (all
          * deferred renders, useStream pumps, and plugin chunk generators
-         * done), before the completion script — the LAST emission point of a
-         * request. Use it for state that no later flush would carry (#407:
-         * `registerSerializedState` calls made from a chunk generator that
-         * finishes last). Also called at the end of blocking (string-mode)
-         * renders after plugin generators drain. Return full HTML; stamp
-         * `ctx._nonce` on any `<script>` you emit.
+         * done) — the LAST emission point of a request. Use it for state
+         * that no later flush would carry (#407: `registerSerializedState`
+         * calls made from a chunk generator that finishes last). Also called
+         * at the end of blocking (string-mode) renders after plugin
+         * generators drain. Return full HTML; stamp `ctx._nonce` on any
+         * `<script>` you emit.
+         *
+         * Ordering vs the completion script: on the chunk-generator drivers
+         * (`renderChunks`/`renderStream`/`renderDocument*`) the drain is
+         * yielded BEFORE the `__SIGX_STREAMING_COMPLETE__` script.
+         * `renderStreamWithCallbacks` ships that script with the shell
+         * (pre-existing shape of that driver), so there the drain arrives
+         * as the final `onAsyncChunk` instead — still the last bytes of the
+         * request.
          */
         onStreamEnd?(ctx: SSRContext): string | void;
     };
