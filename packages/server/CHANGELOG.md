@@ -11,7 +11,10 @@
   - `transport` installs the stub transport (endpoint/headers/fetch) via
     `configureServerFn`, with teardown on the app's disposables that clears
     it only while it is still the active transport (dev warns when
-    overwriting another app's live transport).
+    overwriting another app's live transport). Live clients only (browser,
+    or a `declareLiveClient()` native client) — a per-request SERVER app's
+    install skips the process-global seam, so one plugin in a shared
+    `createApp` is safe on both sides.
   - `types` is the **one-registration story for custom types (#411)**: a
     single `TypeHandler[]` stamps BOTH the RPC wire codec
     (`__SIGX_SERVERFN_CODEC__`, now tag-keyed — same-tag re-registration

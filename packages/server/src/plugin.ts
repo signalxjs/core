@@ -64,6 +64,13 @@ export interface ServerPluginOptions {
      * apps the last installed transport wins; `app.unmount()` clears it only
      * if it is still the active one. Mixing this with direct
      * `configureServerFn` calls is unsupported — pick one.
+     *
+     * Installed on LIVE CLIENTS only (browser, or a native client that has
+     * called `declareLiveClient()`): a per-request SERVER app's install
+     * silently skips it — in-process SSR-time calls never ride the stub
+     * transport, and a per-request write to a process-global seam would
+     * bleed across concurrent requests. One `serverPlugin` in a shared
+     * `createApp` therefore does the right thing on both sides.
      */
     transport?: ServerFnTransport;
     /**
@@ -90,7 +97,15 @@ export function serverPlugin(options: ServerPluginOptions = {}): {
         name: 'sigx:server',
 
         install(app: App) {
-            if (options.transport) {
+            // Live-client detection: the browser, or a native client (lynx,
+            // terminal) that declared itself via the __SIGX_LIVE_CLIENT__
+            // seam. A per-request SERVER app must not touch the
+            // process-global transport (cross-request bleed); in-process
+            // SSR-time calls never use it anyway.
+            const isLiveClient =
+                typeof document !== 'undefined' ||
+                (globalThis as { __SIGX_LIVE_CLIENT__?: boolean }).__SIGX_LIVE_CLIENT__ === true;
+            if (options.transport && isLiveClient) {
                 if (__DEV__ && installedTransport && installedTransport !== options.transport) {
                     console.warn(
                         '[sigx server] serverPlugin: overwriting a live server-fn transport ' +

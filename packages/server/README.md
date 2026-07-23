@@ -446,7 +446,10 @@ the global directly still works).
 
 The plugin also carries the stub transport (`configureServerFn`'s options,
 app-scoped with teardown): `serverPlugin({ transport: { endpoint, headers,
-fetch } })`.
+fetch } })`. Transport installs on live clients only — the browser, or a
+native client that called `declareLiveClient()`; a per-request server app's
+install skips it (in-process calls never use the stub transport, and a
+process-global write would bleed across requests).
 
 Registered handlers are consulted **before** the built-ins, so a pack can own
 a type they also cover. Encoded values take the form

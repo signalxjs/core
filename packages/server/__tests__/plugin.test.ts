@@ -99,6 +99,45 @@ describe('serverPlugin — transport', () => {
         vi.unstubAllGlobals();
     });
 
+    it('a server-side install (no document, no live-client marker) skips the transport', async () => {
+        const { defineApp, jsx, serverPlugin, __serverFnStub } = await load();
+        const serverTransportFetch = okFetch();
+        vi.stubGlobal('document', undefined);
+
+        const app = defineApp(jsx('div', {}));
+        app.use(serverPlugin({
+            transport: { fetch: serverTransportFetch as unknown as typeof fetch }
+        }));
+        expect(app._context.disposables.size).toBe(0);
+        vi.unstubAllGlobals();
+
+        // Stubs keep using the global fetch — the process-global seam was
+        // never written (no cross-request bleed).
+        const globalFetch = okFetch();
+        vi.stubGlobal('fetch', globalFetch);
+        await __serverFnStub('sym_srv', 'fnSrv', '/_sigx/fn')();
+        expect(globalFetch).toHaveBeenCalledTimes(1);
+        expect(serverTransportFetch).not.toHaveBeenCalled();
+        vi.unstubAllGlobals();
+    });
+
+    it('a declared live client (native, no document) DOES install the transport', async () => {
+        const { defineApp, jsx, serverPlugin, __serverFnStub } = await load();
+        const nativeFetch = okFetch();
+        vi.stubGlobal('document', undefined);
+        (globalThis as Record<string, unknown>).__SIGX_LIVE_CLIENT__ = true;
+        try {
+            defineApp(jsx('div', {})).use(serverPlugin({
+                transport: { fetch: nativeFetch as unknown as typeof fetch }
+            }));
+            await __serverFnStub('sym_native', 'fnNative', '/_sigx/fn')();
+            expect(nativeFetch).toHaveBeenCalledTimes(1);
+        } finally {
+            delete (globalThis as Record<string, unknown>).__SIGX_LIVE_CLIENT__;
+            vi.unstubAllGlobals();
+        }
+    });
+
     it('warns in dev when overwriting another app\'s live transport', async () => {
         const { defineApp, jsx, serverPlugin } = await load();
         const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
