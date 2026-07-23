@@ -55,6 +55,13 @@ export interface BoundaryRefreshRequest {
     id: number;
     /** The component registry key (`record.component`, the transform's `__resumeId`). */
     component: string;
+    /**
+     * Canonical `useData` keys the boundary's SSR read (`record.deps`).
+     * The ENDPOINT's admission input (deps ∩ the mutation's `invalidates`,
+     * rfc-server §6.3) — pass-through here; the re-render re-derives deps
+     * from the actual reads it performs.
+     */
+    deps?: string[];
     /** The record's props snapshot, verbatim in encoded (wire) form. */
     props?: Record<string, unknown>;
 }
@@ -142,10 +149,10 @@ async function resolveComponent(value: unknown, key: string): Promise<Function |
  * declines are omitted (never an error — the mutation already succeeded).
  *
  * Trust model: descriptors are client-controlled. The endpoint has already
- * filtered them to the mutation's `refreshes` allowlist; this side re-checks
- * that the registry knows the key and that the re-rendered record itself is
- * refreshable (a smuggled `children` prop, say, turns the re-render lossy
- * and it declines).
+ * admitted only those whose recorded data deps intersect the mutation's
+ * `invalidates` patterns; this side re-checks that the registry knows the
+ * key and that the re-rendered record itself is refreshable (a smuggled
+ * `children` prop, say, turns the re-render lossy and it declines).
  */
 export function createBoundaryRefresh(
     options: BoundaryRefreshOptions

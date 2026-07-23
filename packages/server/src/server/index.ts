@@ -21,6 +21,7 @@ import { runInScope } from '../scope';
 import { isServerFnError } from '../errors';
 import type { ServerFnGuard, ServerFnInfo, WrappedServerFn } from '../types';
 import { encodeWire, reviveWire } from '../wire-codec';
+import { keyMatches } from './key-match';
 
 export interface ServerFnRequestOptions {
     /**
@@ -73,9 +74,10 @@ export interface ServerFnRequestOptions {
     timeoutMs?: number;
     /**
      * Single-flight boundary refresh (rfc-server §6.3): re-render the given
-     * boundary descriptors — already filtered to the mutation's `refreshes`
-     * allowlist — in a context id-seeded at `base`, and return envelope
-     * entries (`{for, id, html, state, records}`). Wired by the app entry;
+     * boundary descriptors — already filtered to those whose `deps`
+     * intersect the mutation's `invalidates` patterns — in a context
+     * id-seeded at `base`, and return envelope entries
+     * (`{for, id, html, state, records}`). Wired by the app entry;
      * `createBoundaryRefresh` from `@sigx/resume/server` builds one (a
      * typed option, not an import — this package never depends on a
      * renderer). Called only for buffered POST mutations whose request
@@ -99,12 +101,22 @@ export interface BoundaryRefreshDescriptor {
     id: number;
     /** The component registry key (`record.component`). */
     component: string;
+    /**
+     * Canonical `useData` keys the boundary's SSR read (`record.deps`) —
+     * the intersection input for the mutation's `invalidates` gate. A
+     * descriptor without deps can never be admitted, so the client omits
+     * such records and the validator here drops them.
+     */
+    deps: string[];
     /** The record's props snapshot, verbatim in encoded (boundary-codec) form. */
     props?: Record<string, unknown>;
 }
 
 /** Upper bound on descriptors per call — each admitted one is a render. */
 const MAX_REFRESH_DESCRIPTORS = 32;
+/** Upper bounds on a descriptor's deps — hostile sidecars, not real pages. */
+const MAX_DEPS_PER_DESCRIPTOR = 32;
+const MAX_DEP_KEY_LENGTH = 1024;
 
 /**
  * Shape-validate the `$boundaries` request sidecar. Null on anything
@@ -124,12 +136,24 @@ function readBoundarySidecar(
     const descriptors: BoundaryRefreshDescriptor[] = [];
     for (const entry of refresh.slice(0, MAX_REFRESH_DESCRIPTORS)) {
         if (entry === null || typeof entry !== 'object') continue;
-        const { id, component, props } = entry as Record<string, unknown>;
+        const { id, component, deps, props } = entry as Record<string, unknown>;
         if (typeof id !== 'number' || !Number.isSafeInteger(id) || id <= 0) continue;
         if (typeof component !== 'string' || component === '') continue;
+        // Deps are the admission input — a descriptor without any valid
+        // key can never be admitted, so it is dropped here. Caps bound
+        // hostile sidecars, not real pages.
+        if (!Array.isArray(deps)) continue;
+        const keys = deps
+            .slice(0, MAX_DEPS_PER_DESCRIPTOR)
+            .filter(
+                (d): d is string =>
+                    typeof d === 'string' && d !== '' && d.length <= MAX_DEP_KEY_LENGTH
+            );
+        if (keys.length === 0) continue;
         descriptors.push({
             id,
             component,
+            deps: keys,
             ...(props !== null && typeof props === 'object' && !Array.isArray(props)
                 ? { props: props as Record<string, unknown> }
                 : {})
@@ -660,33 +684,33 @@ export async function handleServerFnRequest(
         // where the data changed, from the VALIDATED input the pipeline
         // stashed; a throw here is a fn error (masked per §5). Skipped on
         // GET: `cache` and `invalidates` are mutually exclusive (§4.1).
+        let patterns: ReadonlyArray<string | readonly unknown[]> | undefined;
         if (!isGet && fn.__sigxInvalidates) {
-            const invalidates = resolveInvalidatePatterns(
+            patterns = resolveInvalidatePatterns(
                 await fn.__sigxInvalidates(ctx._input, result),
                 info.name || symbol
             );
-            if (invalidates.length > 0) {
-                envelope.$cache = { invalidates };
+            if (patterns.length > 0) {
+                envelope.$cache = { invalidates: patterns };
             }
         }
         // Single-flight boundary refresh (rfc-server §6.3): the request's
-        // descriptors, filtered to the mutation's declared allowlist, are
-        // re-rendered by the app-wired option. Entries are already in
-        // boundary-codec form — attached verbatim, never wire-encoded. Its
-        // OWN try/catch: a refresh failure must never fail the mutation
-        // ($cache above already made the envelope converge without it).
-        if (!isGet && fn.__sigxRefreshes && options.renderBoundaries) {
+        // descriptors, admitted where their recorded data deps intersect
+        // the mutation's `invalidates` patterns — computed ONCE above, the
+        // same value `$cache` shipped, under the same `keyMatches`
+        // semantics `@sigx/cache` applies client-side — are re-rendered by
+        // the app-wired option. Entries are already in boundary-codec form
+        // — attached verbatim, never wire-encoded. Its OWN try/catch: a
+        // refresh failure must never fail the mutation ($cache above
+        // already made the envelope converge without it).
+        if (patterns !== undefined && patterns.length > 0 && options.renderBoundaries) {
             try {
                 const sidecar = readBoundarySidecar(boundarySidecar);
                 if (sidecar) {
-                    const declared = fn.__sigxRefreshes;
-                    const keys =
-                        typeof declared === 'function'
-                            ? await declared(ctx._input, result)
-                            : declared;
-                    const admitted = Array.isArray(keys)
-                        ? sidecar.refresh.filter((d) => keys.includes(d.component))
-                        : [];
+                    const resolved = patterns;
+                    const admitted = sidecar.refresh.filter((d) =>
+                        d.deps.some((dep) => resolved.some((p) => keyMatches(dep, p)))
+                    );
                     if (admitted.length > 0) {
                         const entries = await options.renderBoundaries(
                             admitted,

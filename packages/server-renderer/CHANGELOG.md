@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+**Added: automatic boundary dep capture (`SSRBoundaryRecord.deps`, rfc-server §6.3, #452).**
+
+- `serverUseAsync` records every canonical `useData` key on the NEAREST
+  enclosing boundary record, walking the setup-context parent chain (so
+  attribution stays correct across streamed/deferred subtrees, where the
+  component stack has already popped) and marking the record unflushed so
+  a post-shell read re-ships it mid-stream. Nested boundaries keep their
+  own deps; `server:false` and falsy-key reads are deliberately
+  unrecorded (nothing of them is baked into the HTML). These deps are the
+  single-flight boundary-refresh admission input: the mutation endpoint
+  intersects them with the mutation's `invalidates` patterns.
+
 **BREAKING — `__registerIslandChunk` is now `registerComponentChunk` (#439).**
 
 - The lazy chunk-registration entry (`./client`, `./client/scheduler`) was

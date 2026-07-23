@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { component } from 'sigx';
+import { component, useData } from 'sigx';
 import { registerComponent, clearClientPlugins, getBoundaryRecord } from '@sigx/server-renderer/client';
 import type { SSRBoundaryRecord } from '@sigx/server-renderer';
 import { createSSR } from '../../server-renderer/src/ssr';
@@ -41,6 +41,9 @@ function parseBoundaryTable(html: string): Record<string, SSRBoundaryRecord> {
 /** Transform-shaped resumable counter (what sigxResume() would emit). */
 function makeCounter(name = 'Counter'): any {
     const Counter = component<{ initial?: number }>((ctx) => {
+        // A keyed read — deps are what the §6.3 gate admits on, and
+        // collect() skips dep-less records outright.
+        useData(`data:${name}`, async () => 0);
         const count = ((__sigxInit: number) => (ctx.signal as any)(__sigxInit, 'count'))(ctx.props.initial ?? 0);
         return () => (
             <button
@@ -114,7 +117,9 @@ describe('collect()', () => {
 
         const sidecar = seam().collect()!;
         expect(sidecar.base).toBeGreaterThanOrEqual(1 << 20);
-        expect(sidecar.refresh).toEqual([{ id, component: 'Counter', props: { initial: 7 } }]);
+        expect(sidecar.refresh).toEqual([
+            { id, component: 'Counter', deps: ['data:Counter'], props: { initial: 7 } }
+        ]);
 
         // The base floor advances per collect — concurrent mutations get
         // disjoint id ranges.
@@ -160,6 +165,9 @@ describe('apply() — resumed boundary swap', () => {
         expect(container.innerHTML).not.toContain(`$c:${id}-`);
         expect(getBoundaryRecord(id)).toBeUndefined();
         expect(getBoundaryRecord(fresh)?.component).toBe('Counter');
+        // The re-render re-ran useData, so the FRESH record re-captured its
+        // deps — the next mutation's gate keeps working after a swap.
+        expect(getBoundaryRecord(fresh)?.deps).toEqual(['data:Counter']);
 
         // Delegation against the fresh element resumes from the FRESH state.
         const reads: unknown[] = [];
@@ -208,6 +216,7 @@ describe('apply() — resumed boundary swap', () => {
 
     it('drops the whole entry when a text input inside the boundary has focus', async () => {
         const Field = component<{ initial?: number }>((ctx) => {
+            useData('data:Field', async () => 0);
             const q = ((init: string) => (ctx.signal as any)(init, 'q'))('');
             void q;
             return () => (
@@ -231,6 +240,7 @@ describe('apply() — resumed boundary swap', () => {
         const Child = makeCounter('Child');
         const Parent = component((ctx) => {
             void ctx;
+            useData('data:Parent', async () => 0);
             return () => (
                 <section {...({ 'data-sigx-b': (ctx as any).$sigxB } as any)}>
                     <Child initial={1} />

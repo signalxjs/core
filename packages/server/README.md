@@ -149,32 +149,41 @@ in textual order.)
 ### Single-flight boundary refresh
 
 A mutation can also carry **fresh UI** back in the same response
-(rfc-server §6.3): declare which boundary components it may refresh, wire
-the endpoint's `renderBoundaries` option (built by `createBoundaryRefresh`
-from `@sigx/resume/server`), and the envelope's `$boundaries` entries patch
-never-hydrated resume boundaries **without their component chunk ever
-loading** — upgraded ones get live-signal writes instead:
+(rfc-server §6.3) — driven by the SAME `invalidates` declaration, no
+component names anywhere. During SSR each boundary records which `useData`
+keys it read (`record.deps`); the client sends those up with the call, and
+the endpoint re-renders every boundary whose deps intersect the mutation's
+`invalidates` patterns through its `renderBoundaries` option (built by
+`createBoundaryRefresh` from `@sigx/resume/server`). The envelope's
+`$boundaries` entries patch never-hydrated resume boundaries **without
+their component chunk ever loading** — upgraded ones get live-signal
+writes instead:
 
 ```ts
+export const getTracker = serverFn(async () => db.tracker());
+
 export const track = serverFn({
     input: TrackInput,
     async handler(rq, input) {
         return db.track(input);
     },
-    refreshes: ['Tracker']            // component registry keys; or (input, result) => keys
+    invalidates: () => [getTracker]   // fn refs, strings, or tuple prefixes
 });
+
+// Tracker.tsx — reading the data IS the subscription:
+const tracker = useData(getTracker);
 
 // in the deploy entry:
 handleServerFnRequest(request, { resolve, renderBoundaries });
 ```
 
-The client stub sends the page's matching boundary descriptors up with the
-call; the endpoint filters them to the `refreshes` allowlist and attaches
-the re-rendered `{for, id, html, state, records}` entries. Everything is
-best-effort by design: a boundary that cannot be re-rendered (or a
-renderer failure) is simply omitted and the UI converges through
-`invalidates`/`$cache` — declare both on a mutation for exactly that
-fallback. Wire-only, like `invalidates`; meaningless with `cache`.
+Admission uses the cache pack's `keyMatches` semantics (exact string, or
+canonical tuple prefix — a bare `[getTracker]` pattern matches
+`useData(getTracker)` and every `useData(() => [getTracker, ...args])`
+read). Everything is best-effort by design: a boundary that cannot be
+re-rendered (or a renderer failure) is simply omitted and the UI converges
+through `$cache` invalidation — the same declaration is that fallback.
+Wire-only, like the `$cache` sidecar; meaningless with `cache`.
 
 ### Zero-JS form actions — `form: true`
 

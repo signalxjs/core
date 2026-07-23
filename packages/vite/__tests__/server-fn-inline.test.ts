@@ -409,16 +409,16 @@ export const Product = component((ctx) => {
     });
 });
 
-describe('extractInlineServerFns — refreshes-declaring mutations (rfc-server §6.3, #313)', () => {
-    it('stamps the refreshes flag (5th positional) on an inline declaring fn', () => {
+describe('extractInlineServerFns — invalidates-declaring mutations (rfc-server §6.2/§6.3, #452)', () => {
+    it('stamps the sidecar flag (6th positional) on an inline declaring fn', () => {
         const code = `
 import { component } from 'sigx';
 import { serverFn } from '@sigx/server';
 import { db } from './db';
 
 const track = serverFn({
-    refreshes: ['Tracker'],
-    handler: async (rq, input: { id: string }) => db.track(input.id)
+    handler: async (rq, input: { id: string }) => db.track(input.id),
+    invalidates: () => [['tracker']]
 });
 
 export const Tracker = component((ctx) => {
@@ -427,7 +427,7 @@ export const Tracker = component((ctx) => {
 `;
         const result = extract(code, '/src/Tracker.tsx');
         expect(result.errors).toHaveLength(0);
-        expect(result.fns[0].refreshes).toBe(true);
+        expect(result.fns[0].invalidates).toBe(true);
         expect(result.clientModule).toContain(
             `, "${BASE}", "${result.fns[0].stableSymbol}", 0, 1)`
         );
@@ -515,7 +515,7 @@ export const Widget = () => submit;
         const result = extract(code, '/src/Widget.ts');
         expect(result.errors).toHaveLength(0);
         expect(result.fns[0].form).toBe(true);
-        // No extra stub flag for form (only get/refreshes ride the stub).
+        // No extra stub flag for form (only get/invalidates ride the stub).
         expect(result.clientModule).toContain(`"${BASE}", "${result.fns[0].stableSymbol}")`);
     });
 
