@@ -23,6 +23,7 @@ export const meta = {
         'After core is tagged and all its packages are live on npm. Drives docs/ecosystem-release.md across all 12 consumer repos.',
     phases: [
         { title: 'Plan', detail: 'read docs/ecosystem.json + confirm core is fully published on npm' },
+        { title: 'Preflight', detail: 'confirm the catalog machinery is on every consumer default branch (remote, not local)' },
         { title: 'Tier 1', detail: 'core-only consumers — align, verify, release' },
         { title: 'Tier 2', detail: 'consumers of tier-1 siblings' },
         { title: 'Tier 3', detail: 'consumers of tier-2 siblings' },
@@ -71,7 +72,11 @@ const ALIGN_SCHEMA = {
     type: 'object',
     required: ['repo', 'status', 'summary'],
     properties: {
-        repo: { type: 'string' },
+        repo: {
+            type: 'string',
+            description:
+                'The BARE repo name exactly as it appears in docs/ecosystem.json — "router", NOT "signalxjs/router". The between-tier halt barrier matches on this.',
+        },
         status: {
             type: 'string',
             enum: ['green', 'amber', 'failed'],
@@ -143,6 +148,75 @@ const tiers = [...new Set(consumers.map((c) => c.tier))].sort((a, b) => a - b)
 log(`Core ${plan.coreVersion} confirmed live on npm across every core package.`)
 log(`Rolling out to ${consumers.length} repos across ${tiers.length} tier(s): ${tiers.join(', ')}${dryRun ? ' — DRY RUN, nothing will be tagged' : ''}`)
 
+// ------------------------------------------------------------ Phase: Preflight
+
+phase('Preflight')
+
+// Establish, from the REMOTE default branch, which consumers actually carry the
+// machinery — before any agent looks at a working copy.
+//
+// On the first live 0.13.0 run (#465) four tier-1 agents reported the catalog
+// machinery as entirely absent and the rollout stalled. It was present on every
+// default branch; their LOCAL checkouts were 2-10 commits stale, predating the
+// rollout, and the runbook did not tell them to fetch. Four independent agents
+// produced the same confident, wrong answer, and nothing contradicted them.
+//
+// A single API read settles it up front, so a stale working copy can no longer be
+// mistaken for a missing feature — and if the machinery genuinely is missing, the
+// run stops here naming the repos instead of burning a tier discovering it.
+const preflight = await agent(
+    `Check, for each of these repos, whether the core catalog-sync machinery is present on its DEFAULT BRANCH.
+
+Repos: ${consumers.map((c) => c.repo).join(', ')}
+
+Use the GitHub API — NOT a local clone, and NOT a working copy. Local checkouts of these
+repos are frequently many commits stale, which is exactly the failure this check exists to
+rule out. For each repo run:
+
+    gh api repos/signalxjs/<repo>/contents/.github/workflows/core-sync.yml --jq .name
+    gh api repos/signalxjs/<repo>/contents/scripts/sync-core.mjs --jq .name
+    gh api repos/signalxjs/<repo>/contents/pnpm-workspace.yaml --jq .content   # decode, look for a \`catalog:\` block
+
+Report per repo whether each is present. \`ready\` is true only when all three are.
+
+Return data only.`,
+    {
+        label: 'machinery preflight (remote default branches)',
+        phase: 'Preflight',
+        schema: {
+            type: 'object',
+            required: ['repos'],
+            properties: {
+                repos: {
+                    type: 'array',
+                    items: {
+                        type: 'object',
+                        required: ['repo', 'ready'],
+                        properties: {
+                            repo: { type: 'string', description: 'bare name, e.g. "router"' },
+                            ready: { type: 'boolean' },
+                            missing: { type: 'array', items: { type: 'string' } },
+                        },
+                    },
+                },
+            },
+        },
+    },
+)
+
+const notReady = (preflight?.repos ?? []).filter((r) => !r.ready)
+if (notReady.length) {
+    log(`HALT: ${notReady.length} consumer(s) lack the catalog machinery on their default branch.`)
+    for (const r of notReady) log(`  ${r.repo}: missing ${(r.missing ?? ['?']).join(', ')}`)
+    return {
+        ok: false,
+        halted: 'machinery-missing',
+        repos: notReady,
+        next: 'Land the repo-template catalog migration on those default branches first (docs/ecosystem-release.md §8). This was checked against the REMOTE default branch, so it is not a stale-checkout artifact.',
+    }
+}
+log(`Preflight OK — all ${consumers.length} consumers carry the machinery on their default branch.`)
+
 // ------------------------------------------------------- Phase: tier by tier
 
 /** The per-repo prompt. Deliberately verbatim about the autonomy rule. */
@@ -162,23 +236,41 @@ Repo facts from the ecosystem manifest:
 - beyond unit: ${c.verifyBrowser || c.verifyManual || 'none — unit tests ARE the verification for this repo'}
 
 Steps:
-1. Clone/locate the repo in the standard layout and create a worktree from main:
-   \`pnpm wt new <issue>-align-core-${coreMinor} --from main\`. NEVER work on main.
-   \`pnpm wt new\` branches from the CURRENT HEAD, so \`--from main\` is load-bearing.
-2. \`pnpm sync:core ${coreMinor}\`, then \`pnpm install --no-frozen-lockfile\`.
-   If \`sync:core\` or \`verify:catalog\` is missing from this repo, that is itself the finding —
-   report status "failed" with that as the reason rather than improvising a hand edit.
-3. Bump sibling pins by hand to the versions the previous tier just published (${siblings}).
+1. **SYNC THE LOCAL CHECKOUT FIRST — before anything else.** Local checkouts of these
+   repos go stale by many commits, and reading one is indistinguishable from reading a
+   repo that never had the machinery:
+
+   \`\`\`sh
+   cd <repo>/main
+   git fetch origin main
+   git rev-list --count HEAD..origin/main   # MUST print 0 before you continue
+   git pull --ff-only origin main
+   \`\`\`
+
+   On the first live 0.13.0 rollout this step did not exist, and four agents reported
+   the catalog machinery as entirely missing from repos that had carried it for days —
+   their checkouts were 2-10 commits behind. A preflight has already confirmed via the
+   GitHub API that this repo HAS \`core-sync.yml\`, \`scripts/sync-core.mjs\` and a
+   \`catalog:\` block on its default branch. **If your working copy disagrees, your
+   working copy is stale — re-sync it. Do not report the machinery as missing.**
+
+2. Create the worktree: \`pnpm wt new <issue>-align-core-${coreMinor} --from main\`.
+   NEVER work on main. \`pnpm wt new\` branches from the CURRENT HEAD, so \`--from main\`
+   is load-bearing.
+3. \`pnpm sync:core ${coreMinor}\`, then \`pnpm install --no-frozen-lockfile\`.
+   If \`sync:core\` or \`verify:catalog\` is genuinely absent AFTER a confirmed-fresh
+   checkout, that is the finding — report status "failed" rather than hand-editing.
+4. Bump sibling pins by hand to the versions the previous tier just published (${siblings}).
    \`sync:core\` deliberately does not touch these.
-4. \`pnpm verify:catalog && pnpm build && pnpm typecheck && pnpm test\`.
-5. Verification per §5. ${
+5. \`pnpm verify:catalog && pnpm build && pnpm typecheck && pnpm test\`.
+6. Verification per §5. ${
         c.verifyBrowser
             ? `This repo HAS a browser surface — run \`${c.verifyBrowser}\` and drive it with the claude-in-chrome tools: load the page, read the console for errors, exercise the main interaction, screenshot it, attach the screenshot to the PR. On Windows verify the dev server PID actually changed after any restart.`
             : c.verifyManual
               ? `This repo has no BROWSER surface, but it is not unit-tests-only either: ${c.verifyManual}. Exercise it as far as the environment allows and say in \`verification\` exactly what you ran and what you could not. If it could not be exercised at all, that is an AMBER reason — do not treat the unit suite as sufficient.`
               : 'This repo has no browser surface and no manual verification; the unit suite IS the verification.'
     }
-6. Open the PR (reference the issue so it auto-closes), request Copilot review via the
+7. Open the PR (reference the issue so it auto-closes), request Copilot review via the
    requested_reviewers API, address every actionable comment, RESOLVE every inline thread
    over GraphQL (unresolved threads block the merge), then \`gh pr merge --squash --auto\`.
 
@@ -226,10 +318,24 @@ for (const tier of tiers) {
         group.map((c) => () => agent(alignPrompt(c), { schema: ALIGN_SCHEMA, label: c.repo, phase: title })),
     )
 
-    const settled = results.map((r, i) =>
-        r ?? { repo: group[i].repo, status: 'failed', summary: 'Agent died or was skipped; no result returned.' },
-    )
-    all.push(...settled)
+    // Pin each result to the manifest entry BY POSITION, not by the name the agent
+    // returned. parallel() preserves order, so index i is group[i] — that is a fact
+    // about the runtime, whereas `r.repo` is a free-text field an LLM filled in.
+    //
+    // Trusting the returned name is what silently disabled the halt barrier on the
+    // first live 0.13.0 run (#465): the prompt says "Align and release
+    // `signalxjs/router`", so agents returned the PREFIXED slug while the manifest
+    // holds the bare name. `group.find(g => g.repo === r.repo)` never matched,
+    // `unpublished` was always empty, and tier 2 ran even though tier 1 had
+    // published nothing. A barrier that cannot fire is worse than no barrier — it
+    // reads as "the tier was fine".
+    const settled = results.map((r, i) => ({
+        ...(r ?? { status: 'failed', summary: 'Agent died or was skipped; no result returned.' }),
+        repo: group[i].repo, // authoritative — overwrites whatever the agent reported
+        reportedRepo: r?.repo,
+        _entry: group[i],
+    }))
+    all.push(...settled.map(({ _entry, ...rest }) => rest))
 
     const failed = settled.filter((r) => r.status === 'failed')
     const amber = settled.filter((r) => r.status === 'amber')
@@ -238,10 +344,9 @@ for (const tier of tiers) {
 
     // Anything not published blocks the tiers below: their sibling pins have nothing
     // to point at. Halt rather than half-release the ecosystem.
-    const unpublished = [...failed, ...amber].filter((r) => {
-        const c = group.find((g) => g.repo === r.repo)
-        return c && !c.private && (c.publishes ?? []).length > 0
-    })
+    const unpublished = [...failed, ...amber].filter(
+        (r) => !r._entry.private && (r._entry.publishes ?? []).length > 0,
+    )
     if (unpublished.length && tier !== tiers[tiers.length - 1]) {
         haltedAt = { tier, repos: unpublished.map((r) => r.repo) }
         log(`HALT after tier ${tier}: ${unpublished.map((r) => r.repo).join(', ')} did not publish. Later tiers would resolve two copies of @sigx/reactivity.`)
