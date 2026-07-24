@@ -17,15 +17,16 @@ import { signal } from '@sigx/reactivity';
  * normalises a function's result exactly like the `slots` prop branch does:
  * `null`/`undefined` is dropped, an array is flattened one level.
  *
- * Single pass: element children are copied into a fresh, pre-sized array as
- * they are scanned; only once the first function is found does it truncate to
- * the copied prefix and switch to append-mode for the rest. The common case
- * (no function children — every element-based named slot, and any default slot
- * without a render-prop child) never allocates a second traversal.
+ * Single pass: element children are copied into a fresh array (by sequential
+ * index, which stays dense) as they are scanned; only once the first function
+ * is found does it truncate to the copied prefix and switch to append-mode for
+ * the rest. The common case (no function children — every element-based named
+ * slot, and any default slot without a render-prop child) never allocates a
+ * second traversal.
  */
 export function invokeFunctionChildren(list: any[], scopedProps?: any): any[] {
     const n = list.length;
-    const out: any[] = new Array(n);
+    const out: any[] = [];
     for (let i = 0; i < n; i++) {
         const item = list[i];
         if (typeof item === 'function') {
