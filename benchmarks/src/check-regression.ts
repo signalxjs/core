@@ -40,6 +40,21 @@ const DEFAULT_THRESHOLD_PCT = 25;
  */
 const BYTES_THRESHOLD_PCT = 2;
 
+/**
+ * Benches measured and printed but NOT gated (#474): their p50 sits below the
+ * timer-resolution floor (~0.05ms and under), where run-to-run jitter routinely
+ * exceeds the +25% threshold — `small-page` alone swung +38% between two clean
+ * runs. mitata batch-samples a function this fast into ~12 samples of many
+ * iterations each regardless of the CPU budget, so a bigger budget cannot steady
+ * the median. The renderer stays gated by the ≥0.4ms string benches
+ * (`escape-heavy`), `large-table-1k`, and the stream, so dropping these two from
+ * the GATE loses no real coverage — only false alarms.
+ */
+const INFORMATIONAL_TIMINGS = new Set<string>([
+    'small-page (string)',
+    'escape-clean (string)'
+]);
+
 interface DeltaRow {
     bench: string;
     baselineP50Ms: number;
@@ -47,6 +62,8 @@ interface DeltaRow {
     deltaPct: number;
     /** Byte-count rows are machine-independent — gated tighter, never skipped. */
     kind: 'time' | 'bytes';
+    /** False for informational rows: printed and compared, but never fail. */
+    gated: boolean;
 }
 
 function thresholdFor(row: DeltaRow, timingThreshold: number): number {
@@ -54,7 +71,7 @@ function thresholdFor(row: DeltaRow, timingThreshold: number): number {
 }
 
 function isRegression(row: DeltaRow, timingThreshold: number): boolean {
-    return row.deltaPct > thresholdFor(row, timingThreshold);
+    return row.gated && row.deltaPct > thresholdFor(row, timingThreshold);
 }
 
 function readJson<T>(file: string, what: string): T {
@@ -91,12 +108,14 @@ function compare(baseline: QuickPayload, current: QuickPayload): DeltaRow[] {
             (b) => b.scenario === cur.scenario && b.framework === cur.framework
         );
         if (!base) continue;
+        const bench = `${cur.scenario} (string)`;
         rows.push({
-            bench: `${cur.scenario} (string)`,
+            bench,
             baselineP50Ms: Number((base.stats.p50Ns / 1e6).toFixed(3)),
             currentP50Ms: Number((cur.stats.p50Ns / 1e6).toFixed(3)),
             deltaPct: deltaPct(base.stats.p50Ns, cur.stats.p50Ns),
-            kind: 'time'
+            kind: 'time',
+            gated: !INFORMATIONAL_TIMINGS.has(bench)
         });
     }
     for (const cur of current.stream.results) {
@@ -109,14 +128,16 @@ function compare(baseline: QuickPayload, current: QuickPayload): DeltaRow[] {
             baselineP50Ms: base.ttfbMs.p50,
             currentP50Ms: cur.ttfbMs.p50,
             deltaPct: deltaPct(base.ttfbMs.p50, cur.ttfbMs.p50),
-            kind: 'time'
+            kind: 'time',
+            gated: true
         });
         rows.push({
             bench: `${current.stream.scenario} (stream total)`,
             baselineP50Ms: base.totalMs.p50,
             currentP50Ms: cur.totalMs.p50,
             deltaPct: deltaPct(base.totalMs.p50, cur.totalMs.p50),
-            kind: 'time'
+            kind: 'time',
+            gated: true
         });
     }
     // Request-path timings. A baseline recorded before these existed simply
@@ -131,7 +152,8 @@ function compare(baseline: QuickPayload, current: QuickPayload): DeltaRow[] {
             baselineP50Ms: Number((base.stats.p50Ns / 1e6).toFixed(4)),
             currentP50Ms: Number((cur.stats.p50Ns / 1e6).toFixed(4)),
             deltaPct: deltaPct(base.stats.p50Ns, cur.stats.p50Ns),
-            kind: 'time'
+            kind: 'time',
+            gated: true
         });
     }
     // Payload sizes — the `ms` columns carry BYTES for these rows (the table
@@ -146,7 +168,8 @@ function compare(baseline: QuickPayload, current: QuickPayload): DeltaRow[] {
             baselineP50Ms: base.bytes,
             currentP50Ms: cur.bytes,
             deltaPct: deltaPct(base.bytes, cur.bytes),
-            kind: 'bytes'
+            kind: 'bytes',
+            gated: true
         });
     }
     return rows;
@@ -154,7 +177,7 @@ function compare(baseline: QuickPayload, current: QuickPayload): DeltaRow[] {
 
 function printTable(rows: DeltaRow[]): void {
     console.table(rows.map((r) => ({
-        bench: r.bench,
+        bench: r.gated ? r.bench : `${r.bench} (info)`,
         'baseline (ms|bytes)': r.baselineP50Ms,
         'current (ms|bytes)': r.currentP50Ms,
         'delta %': `${r.deltaPct >= 0 ? '+' : ''}${r.deltaPct.toFixed(1)}%`

@@ -142,6 +142,13 @@ against the `quick` section of `results/baseline.json`.
   (`--threshold=<pct>` overrides the 25% for experiments.)
 - **Payload-byte rows gate differently**: +2%, no noise re-run (a byte count
   cannot be noise), and no fingerprint skip.
+- **Timing picks favour ≥1ms benches (#474).** A p50 on a sub-millisecond
+  bench swings tens of percent between runs — noise, not signal — so the
+  request-path benches marked `quick` are the larger, stable siblings (the
+  `keymatch`/`refresh` worst-case shapes, the `large-table-1k` pack render),
+  and the measure budget is ~400ms of CPU per bench so even the fast SSR
+  string benches collect enough samples for a steady median. Every pack
+  config is still covered by its deterministic byte row.
 - **Fingerprint skip**: if the baseline's CPU model or Node *major* version
   differs from the current machine, enforcement of the **timing** benches is
   skipped with a warning — cross-machine deltas are meaningless. Byte rows

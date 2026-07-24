@@ -25,10 +25,16 @@ const STREAM_SCENARIO: ScenarioName = 'large-table-1k';
 const STREAM_WARMUP = 3;
 const STREAM_ITERATIONS = 10;
 
-// Reduced sample budget: at least 16 samples, stop after ~250ms of measured
-// CPU time per bench (vs mitata's 642ms default). Keeps the suite quick while
-// the median stays stable enough for a 25% regression gate.
-const MEASURE_OPTS = { min_samples: 16, min_cpu_time: 250 * 1e6 };
+// Reduced sample budget: at least 16 samples, stop after ~400ms of measured
+// CPU time per bench (vs mitata's 642ms default). The 400ms (up from 250ms,
+// #474) firms up the median for the ~0.5–2ms benches the gated picks now
+// favour — more CPU, more samples, steadier p50. It does NOT rescue the
+// sub-0.1ms SSR string benches (escape-clean ~0.05ms, small-page ~0.01ms):
+// mitata batches a fast function into ~12 samples of many iterations each
+// regardless of the budget. Those stay jittery — but within the ±25% gate,
+// unlike the sub-millisecond request-path picks that used to blow past it,
+// which is why the gated `quick` micro picks are all ≥1ms siblings now.
+const MEASURE_OPTS = { min_samples: 16, min_cpu_time: 400 * 1e6 };
 
 export interface QuickStringResult {
     scenario: ScenarioName;
@@ -79,6 +85,9 @@ async function main(): Promise<void> {
     const sigx = await loadSigx();
 
     console.log(`quick suite — sigx only, reduced sample budget (min ${MEASURE_OPTS.min_samples} samples / ~${MEASURE_OPTS.min_cpu_time / 1e6}ms CPU per bench)\n`);
+    // The gated picks below deliberately favour benches at or above ~1ms — a
+    // p50 on a sub-millisecond bench swings by tens of percent between runs,
+    // which is noise, not signal (#474).
 
     const stringResults: QuickStringResult[] = [];
     for (const scenario of STRING_SCENARIOS) {
