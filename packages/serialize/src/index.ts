@@ -168,12 +168,14 @@ export const BUILTIN_TYPE_HANDLERS: readonly TypeHandler[] = [
     } satisfies TypeHandler<undefined, number>,
 ];
 
-/** Registered handlers win over built-ins, so a pack can own e.g. `Date`. */
-function chain(handlers: readonly TypeHandler[]): readonly TypeHandler[] {
-    return handlers.length === 0
-        ? BUILTIN_TYPE_HANDLERS
-        : [...handlers, ...BUILTIN_TYPE_HANDLERS];
-}
+/**
+ * Registered (custom) handlers always win over the built-ins — a pack can own
+ * e.g. `Date`. The two walks below take the `custom` and `builtin` lists
+ * SEPARATELY and consult custom first, rather than merging them into one
+ * array per call: that `[...handlers, ...BUILTIN]` merge was an allocation on
+ * every top-level encode/revive, and keeping them apart also lets `encode`
+ * skip the built-in sweep for JSON-native scalars (#470).
+ */
 
 /**
  * Whether an encoded object would be misread as a tagged value on the way
@@ -198,7 +200,7 @@ export function encodeWithHandlers(
     value: unknown,
     handlers: readonly TypeHandler[] = []
 ): unknown {
-    return encode(value, chain(handlers), new Set(), true);
+    return encode(value, handlers, BUILTIN_TYPE_HANDLERS, new Set(), true);
 }
 
 /**
@@ -210,19 +212,48 @@ export function encodeWithHandlers(
  */
 function encode(
     value: unknown,
-    handlers: readonly TypeHandler[],
+    custom: readonly TypeHandler[],
+    builtin: readonly TypeHandler[],
     seen: Set<object>,
     escapeTop: boolean
 ): unknown {
-    for (const h of handlers) {
+    // Registered handlers are opaque — they may own ANY value, scalars
+    // included, and they win over the built-ins, so test them first, always.
+    // The `.length` guard skips the loop (and its iterator) in the common
+    // no-custom-handlers case; nested nodes hit this per node.
+    if (custom.length) {
+        for (const h of custom) {
+            if (h.test(value)) {
+                const payload = encode(h.serialize(value), custom, builtin, seen, !!h.tag);
+                return h.tag ? { [h.tag]: payload } : payload;
+            }
+        }
+    }
+
+    const type = typeof value;
+    // Fast path (#470): no BUILT-IN handler owns a JSON-native scalar — Date/
+    // Map/Set/URL/RegExp are objects, and bigint/undefined are handled by the
+    // sweep below — so a string/number/boolean/null skips it entirely. This is
+    // the per-leaf cost that dominated encoding a plain payload; a registered
+    // handler that claims such a value already returned above.
+    if (value === null || type === 'string' || type === 'number' || type === 'boolean') {
+        return value;
+    }
+
+    // bigint / undefined / object / symbol / function: the built-ins own the
+    // first two and the object types.
+    for (const h of builtin) {
         if (h.test(value)) {
-            const payload = encode(h.serialize(value), handlers, seen, !!h.tag);
+            const payload = encode(h.serialize(value), custom, builtin, seen, !!h.tag);
             return h.tag ? { [h.tag]: payload } : payload;
         }
     }
 
     if (value === null || typeof value !== 'object') {
-        // Functions and symbols are dropped by JSON.stringify; leave that to it.
+        // symbol | function — dropped by JSON.stringify; leave that to it.
+        // (null and the JSON-native scalars already returned above; bigint /
+        // undefined were claimed by the built-in sweep.) The inline check,
+        // rather than `type`, is also what narrows `value` to `object` below.
         return value;
     }
 
@@ -236,14 +267,14 @@ function encode(
     seen.add(value);
     try {
         if (typeof toJSON === 'function') {
-            return encode((toJSON as () => unknown).call(value), handlers, seen, escapeTop);
+            return encode((toJSON as () => unknown).call(value), custom, builtin, seen, escapeTop);
         }
         if (Array.isArray(value)) {
-            return value.map((item) => encode(item, handlers, seen, true));
+            return value.map((item) => encode(item, custom, builtin, seen, true));
         }
         const out: Record<string, unknown> = {};
         for (const key of Object.keys(value)) {
-            out[key] = encode((value as Record<string, unknown>)[key], handlers, seen, true);
+            out[key] = encode((value as Record<string, unknown>)[key], custom, builtin, seen, true);
         }
         return escapeTop && needsEscape(out) ? { [ESCAPE_TAG]: out } : out;
     } finally {
@@ -273,12 +304,16 @@ export function reviveWithHandlers<T = unknown>(
     value: unknown,
     handlers: readonly TypeHandler[] = []
 ): T {
-    return revive(value, chain(handlers)) as T;
+    return revive(value, handlers, BUILTIN_TYPE_HANDLERS) as T;
 }
 
-function revive(value: unknown, handlers: readonly TypeHandler[]): unknown {
+function revive(
+    value: unknown,
+    custom: readonly TypeHandler[],
+    builtin: readonly TypeHandler[]
+): unknown {
     if (value === null || typeof value !== 'object') return value;
-    if (Array.isArray(value)) return value.map((item) => revive(item, handlers));
+    if (Array.isArray(value)) return value.map((item) => revive(item, custom, builtin));
 
     // Only walk what JSON.parse can actually produce. Anything else is
     // already a live value — a Date, Map, Set, or class instance — and
@@ -310,7 +345,7 @@ function revive(value: unknown, handlers: readonly TypeHandler[]): unknown {
             // object with a "$date" property, not a Date.)
             const inner = payload as Record<string, unknown>;
             const unwrapped: Record<string, unknown> = {};
-            for (const k of Object.keys(inner)) unwrapped[k] = revive(inner[k], handlers);
+            for (const k of Object.keys(inner)) unwrapped[k] = revive(inner[k], custom, builtin);
             return unwrapped;
         }
 
@@ -318,10 +353,12 @@ function revive(value: unknown, handlers: readonly TypeHandler[]): unknown {
         // (handled above otherwise) — pass it through silently rather than
         // reporting the codec's own escape marker as an unknown tag.
         if (key.charCodeAt(0) === 36 /* $ */ && key !== ESCAPE_TAG) {
-            for (const h of handlers) {
-                if (h.tag === key && h.revive) {
-                    return h.revive(revive(payload, handlers));
-                }
+            // Custom handlers win over the built-ins on a shared tag.
+            for (const h of custom) {
+                if (h.tag === key && h.revive) return h.revive(revive(payload, custom, builtin));
+            }
+            for (const h of builtin) {
+                if (h.tag === key && h.revive) return h.revive(revive(payload, custom, builtin));
             }
             if (__DEV__) {
                 console.warn(
@@ -336,7 +373,7 @@ function revive(value: unknown, handlers: readonly TypeHandler[]): unknown {
 
     const out: Record<string, unknown> = {};
     for (const key of keys) {
-        out[key] = revive((value as Record<string, unknown>)[key], handlers);
+        out[key] = revive((value as Record<string, unknown>)[key], custom, builtin);
     }
     return out;
 }
