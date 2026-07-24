@@ -41,14 +41,14 @@ const DEFAULT_THRESHOLD_PCT = 25;
 const BYTES_THRESHOLD_PCT = 2;
 
 /**
- * Benches measured and printed but NOT gated (#474): their p50 sits below the
- * timer-resolution floor (~0.05ms and under), where run-to-run jitter routinely
- * exceeds the +25% threshold — `small-page` alone swung +38% between two clean
- * runs. mitata batch-samples a function this fast into ~12 samples of many
- * iterations each regardless of the CPU budget, so a bigger budget cannot steady
- * the median. The renderer stays gated by the ≥0.4ms string benches
- * (`escape-heavy`), `large-table-1k`, and the stream, so dropping these two from
- * the GATE loses no real coverage — only false alarms.
+ * Benches measured and printed but NOT gated (#474): their p50 is so small
+ * (sub-0.1ms) that timer resolution and scheduling quantization dominate the
+ * delta — the median is measuring the clock as much as the code, so run-to-run
+ * jitter routinely exceeds the +25% threshold (`small-page` alone swung +38%
+ * between two clean runs) and no sample budget steadies it. The renderer stays
+ * gated by the larger string benches (`escape-heavy`), `large-table-1k`, and
+ * the stream, so dropping these two from the GATE loses no real coverage —
+ * only false alarms.
  */
 const INFORMATIONAL_TIMINGS = new Set<string>([
     'small-page (string)',

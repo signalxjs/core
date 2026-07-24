@@ -147,13 +147,13 @@ against the `quick` section of `results/baseline.json`.
   signal — so the request-path benches marked `quick` are the larger, stable
   siblings (the `keymatch`/`refresh` worst-case shapes, the `large-table-1k`
   pack render), and the measure budget is ~400ms of CPU per bench to firm up
-  the ~0.5–2ms benches' medians. The two sub-0.1ms SSR string benches
-  (`small-page` ~0.01ms, `escape-clean` ~0.05ms) can't be steadied at all —
-  mitata batch-samples a function that fast into ~12 samples regardless of
-  budget — so `check-regression` marks them **informational**: measured and
-  printed with an `(info)` tag, never gated. The renderer stays gated by
-  `escape-heavy`, `large-table-1k` and the stream; every pack config by its
-  deterministic byte row.
+  the mid-range benches' medians. The two sub-0.1ms SSR string benches
+  (`small-page`, `escape-clean`) can't be steadied at all — at that size timer
+  resolution dominates the p50, not the code, so no sample budget helps — so
+  `check-regression` marks them **informational**: measured and printed with an
+  `(info)` tag, never gated. The renderer stays gated by `escape-heavy`,
+  `large-table-1k` and the stream; every pack config by its deterministic byte
+  row.
 - **Fingerprint skip**: if the baseline's CPU model or Node *major* version
   differs from the current machine, enforcement of the **timing** benches is
   skipped with a warning — cross-machine deltas are meaningless. Byte rows

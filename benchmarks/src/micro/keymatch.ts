@@ -146,8 +146,8 @@ export const keyMatchSuite: MicroSuite = {
             // Sweep the call count: 1/8/32 descriptors × 8/32 deps × 64 patterns.
             gateBench('gate 1x8 deps, 64 tuple patterns', 'tupleMutation_fn_00000001', 1, 8),
             gateBench('gate 8x32 deps, 64 tuple patterns', 'tupleMutation_fn_00000001', 8, 32),
-            // The quick-gated pick: the worst-case shape (also the most stable,
-            // ~2ms), which is exactly the one #469's fix most protects (#474).
+            // The quick-gated pick: the worst-case shape — the most stable p50,
+            // and exactly the one #469's fix most protects (#474).
             gateBench('gate 32x32 deps, 64 tuple patterns', 'tupleMutation_fn_00000001', 32, 32, true),
             // Same call counts, string patterns — the stringify-free control.
             gateBench('gate 8x32 deps, 64 string patterns', 'stringMutation_fn_00000002', 8, 32),

@@ -89,8 +89,8 @@ function refreshBench(count: number, quick = false): MicroBench {
 export const refreshSuite: MicroSuite = {
     name: 'refresh',
     benches(): MicroBench[] {
-        // x32 is the quick-gated pick, not x8: at ~1.3ms it holds a stable
-        // p50, where x8 (~0.3ms) swung run to run (#474).
+        // x32 is the quick-gated pick, not x8: it holds a steadier p50 than
+        // the much faster x8, which swung run to run (#474).
         return [refreshBench(1), refreshBench(8), refreshBench(32, true)];
     }
 };

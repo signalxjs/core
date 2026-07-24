@@ -29,11 +29,11 @@ const STREAM_ITERATIONS = 10;
 // CPU time per bench (vs mitata's 642ms default). The 400ms (up from 250ms,
 // #474) firms up the median for the ~0.5–2ms benches the gated picks now
 // favour — more CPU, more samples, steadier p50. It does NOT rescue the
-// sub-0.1ms SSR string benches (escape-clean ~0.05ms, small-page ~0.01ms):
-// mitata batches a fast function into ~12 samples of many iterations each
-// regardless of the budget, and their p50 can swing past +25% run to run — so
-// check-regression treats those two as INFORMATIONAL (measured and printed,
-// never gated). The gated request-path picks are all larger, stable siblings.
+// sub-0.1ms SSR string benches (escape-clean, small-page): at that size timer
+// resolution dominates the p50, not the code, so it swings past +25% run to
+// run no matter the sample budget — check-regression treats those two as
+// INFORMATIONAL (measured and printed, never gated). The gated request-path
+// picks are all larger, stable siblings.
 const MEASURE_OPTS = { min_samples: 16, min_cpu_time: 400 * 1e6 };
 
 export interface QuickStringResult {
