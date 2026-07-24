@@ -10,7 +10,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { render } from '../src/index';
-import { component, jsx } from '@sigx/runtime-core';
+import { component, jsx, Define } from '@sigx/runtime-core';
 import { signal } from '@sigx/reactivity';
 
 const tick = () => new Promise(resolve => setTimeout(resolve, 0));
@@ -140,5 +140,38 @@ describe('slot reactivity', () => {
         await tick();
         expect(container.querySelector('.hfb')).toBeTruthy();
         expect(container.querySelector('.h')).toBeFalsy();
+    });
+
+    it('invokes a function child (render-prop) with the scoped props from the child', async () => {
+        const Scoped = component<Define.Slot<'default', { greeting: string }>>(({ slots }) =>
+            () => jsx('div', { class: 'scoped', children: slots.default?.({ greeting: 'hi' }) }));
+        // A function child is passed through `children` (typed `any` on a
+        // component, like ComponentFactory's `children?: any`).
+        const Parent = component(() =>
+            () => jsx(Scoped, { children: ((p: any) => jsx('span', { class: 'g', children: p.greeting })) as any }));
+
+        render(jsx(Parent, {}), container);
+        await tick();
+        // The function child was called with the scoped props — not dropped as
+        // an empty comment (which was the #476 bug).
+        expect(container.querySelector('.g')?.textContent).toBe('hi');
+    });
+
+    it('re-renders a function child when a signal it reads changes', async () => {
+        const count = signal({ value: 1 });
+        const Scoped = component(({ slots }) =>
+            () => jsx('div', { class: 'scoped', children: slots.default?.() }));
+        const Parent = component(() =>
+            () => jsx(Scoped, { children: (() => jsx('span', { class: 'n', children: count.value })) as any }));
+
+        render(jsx(Parent, {}), container);
+        await tick();
+        expect(container.querySelector('.n')?.textContent).toBe('1');
+
+        count.value = 2;
+        await tick();
+        // The function is invoked inside the child's reactive render, so the
+        // signal read subscribes the child and it re-renders on change.
+        expect(container.querySelector('.n')?.textContent).toBe('2');
     });
 });
