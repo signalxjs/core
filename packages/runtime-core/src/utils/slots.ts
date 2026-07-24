@@ -15,31 +15,40 @@ import { signal } from '@sigx/reactivity';
  *
  * Returns a fresh array, preserving the accessor's defensive-copy contract, and
  * normalises a function's result exactly like the `slots` prop branch does:
- * `null`/`undefined` is dropped, an array is flattened one level. The common
- * case (no function children) allocates a single copy, same as `.slice()`.
+ * `null`/`undefined` is dropped, an array is flattened one level.
+ *
+ * Single pass: element children are copied into a fresh, pre-sized array as
+ * they are scanned; only once the first function is found does it truncate to
+ * the copied prefix and switch to append-mode for the rest. The common case
+ * (no function children — every element-based named slot, and any default slot
+ * without a render-prop child) never allocates a second traversal.
  */
 export function invokeFunctionChildren(list: any[], scopedProps?: any): any[] {
-    let hasFn = false;
-    for (let i = 0; i < list.length; i++) {
-        if (typeof list[i] === 'function') {
-            hasFn = true;
-            break;
-        }
-    }
-    if (!hasFn) return list.slice();
-    const out: any[] = [];
-    for (const item of list) {
+    const n = list.length;
+    const out: any[] = new Array(n);
+    for (let i = 0; i < n; i++) {
+        const item = list[i];
         if (typeof item === 'function') {
-            const r = item(scopedProps);
-            if (r == null) continue;
-            if (Array.isArray(r)) {
-                for (const x of r) out.push(x);
-            } else {
-                out.push(r);
+            // First function: keep the copied [0, i) prefix, then append the
+            // remaining items — invoking functions with the scoped props.
+            out.length = i;
+            for (let j = i; j < n; j++) {
+                const it = list[j];
+                if (typeof it === 'function') {
+                    const r = it(scopedProps);
+                    if (r == null) continue;
+                    if (Array.isArray(r)) {
+                        for (const x of r) out.push(x);
+                    } else {
+                        out.push(r);
+                    }
+                } else {
+                    out.push(it);
+                }
             }
-        } else {
-            out.push(item);
+            return out;
         }
+        out[i] = item;
     }
     return out;
 }
