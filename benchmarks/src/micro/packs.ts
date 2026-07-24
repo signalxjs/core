@@ -127,10 +127,11 @@ export const packsSuite: MicroSuite = {
                     name: `${scenario} ${config}`,
                     isFloor: config === 'plain',
                     floorOf: config === 'plain' ? undefined : `${scenario} plain`,
-                    // One gated pack-render TIMING pick — on large-table-1k
-                    // (~10ms, rock-stable), not small-page (~0.1ms, all noise;
-                    // #474). Pack *bytes* gate deterministically below and cover
-                    // every config at zero noise, so one timing tripwire is enough.
+                    // One gated pack-render TIMING pick — the largest, most
+                    // stable render (large-table-1k), not small-page, which is
+                    // far too fast to gate on a p50 (#474). Pack *bytes* gate
+                    // deterministically below and cover every config at zero
+                    // noise, so one timing tripwire is enough.
                     quick: scenario === 'large-table-1k' && config === 'resume',
                     check: () => guard(scenario, config),
                     run: () => render(scenario, config)
