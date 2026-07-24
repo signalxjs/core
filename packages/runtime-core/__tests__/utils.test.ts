@@ -318,6 +318,70 @@ describe('createSlots', () => {
         expect(typeof (slots as any).side).toBe('function');
         expect((slots as any).side()).toEqual([b]);
     });
+
+    // ── scoped slots: function children are invoked with the scoped props ──
+
+    it('invokes a function child with the scoped props (default slot)', () => {
+        const fnChild = (p: any) => ({ type: 'span', props: { text: p.greeting }, key: null, children: [], dom: null });
+        const slots = createSlots([fnChild]);
+        const result = slots.default!({ greeting: 'hi' });
+        expect(result).toHaveLength(1);
+        expect(result[0].props.text).toBe('hi');
+    });
+
+    it('calls a function child with undefined when the accessor gets no props', () => {
+        let seen: any = 'untouched';
+        const fnChild = (p: any) => { seen = p; return { type: 'span', props: {}, key: null, children: [], dom: null }; };
+        const slots = createSlots([fnChild]);
+        slots.default!();
+        expect(seen).toBeUndefined();
+    });
+
+    it('invokes function children and passes element children through, preserving order', () => {
+        const before = { type: 'i', props: {}, key: null, children: [], dom: null };
+        const fnChild = (p: any) => ({ type: 'span', props: { text: p.name }, key: null, children: [], dom: null });
+        const after = { type: 'b', props: {}, key: null, children: [], dom: null };
+        const slots = createSlots([before, fnChild, after]);
+        const result = slots.default!({ name: 'Alice' });
+        expect(result.map((r: any) => r.type)).toEqual(['i', 'span', 'b']);
+        expect(result[1].props.text).toBe('Alice');
+    });
+
+    it('flattens an array returned by a function child and drops a null result', () => {
+        const arrayFn = () => [
+            { type: 'li', props: {}, key: null, children: [], dom: null },
+            { type: 'li', props: {}, key: null, children: [], dom: null },
+        ];
+        const nullFn = () => null;
+        const slots = createSlots([arrayFn, nullFn]);
+        const result = slots.default!();
+        expect(result.map((r: any) => r.type)).toEqual(['li', 'li']);
+    });
+
+    it('leaves named element-based slots untouched (no function invocation)', () => {
+        const child = { type: 'div', props: { slot: 'header' }, key: null, children: [], dom: null };
+        const slots = createSlots([child]);
+        expect((slots as any).header()).toEqual([child]);
+    });
+
+    it('reads the default slot as present when the only child is a function', () => {
+        const slots = createSlots([() => ({ type: 'span', props: {}, key: null, children: [], dom: null })]);
+        expect(typeof slots.default).toBe('function');
+    });
+
+    it('re-invokes function children on every accessor call (reactivity) and returns fresh arrays', () => {
+        let calls = 0;
+        const fnChild = () => { calls++; return { type: 'span', props: { n: calls }, key: null, children: [], dom: null }; };
+        const slots = createSlots([fnChild]);
+
+        const first = slots.default!();
+        first.push('corruption');
+        const second = slots.default!();
+        expect(calls).toBe(2);
+        expect(second).toHaveLength(1);
+        expect(second[0].props.n).toBe(2);
+        expect(second).not.toBe(first);
+    });
 });
 
 describe('isPromise (function export)', () => {

@@ -38,6 +38,7 @@ import {
     matchAsyncState,
     ERROR_SCOPE_TOKEN,
     getProvided,
+    invokeFunctionChildren,
 } from 'sigx/internals';
 import type { SSRContext, SSRErrorInfo } from './context';
 import type { ResolvedBoundary, SSRBoundaryRecord } from '../boundary';
@@ -246,7 +247,7 @@ function createComponentState(
     // slot parity).
     const slots: SlotsObject<any> = Object.create(null);
     if (defaultChildren.length > 0) {
-        slots.default = () => defaultChildren.slice();
+        slots.default = (scopedProps?: any) => invokeFunctionChildren(defaultChildren, scopedProps);
     }
     for (const name in elementNamed) {
         // A child with `slot="default"` is a named slot on the client too,
@@ -257,7 +258,7 @@ function createComponentState(
         // solely by the un-slotted children above (and the `slots` prop below).
         if (name === 'default') continue;
         const list = elementNamed[name];
-        slots[name] = () => list.slice();
+        slots[name] = (scopedProps?: any) => invokeFunctionChildren(list, scopedProps);
     }
     // Slots provided via the `slots` prop take precedence over element-based
     // ones of the same name, matching the client extractor.

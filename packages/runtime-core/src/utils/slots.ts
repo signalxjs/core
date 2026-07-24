@@ -6,13 +6,52 @@
 import { signal } from '@sigx/reactivity';
 
 /**
+ * Map a slot's extracted children, invoking any *function* items with the
+ * scoped props (render-prop / scoped-slot semantics) and passing element
+ * children through untouched. A function child — `<Comp>{(p) => …}</Comp>` —
+ * is thereby called with the same `scopedProps` the `slots` prop form receives,
+ * instead of reaching the renderer as a bare function and being dropped as an
+ * empty node.
+ *
+ * Returns a fresh array, preserving the accessor's defensive-copy contract, and
+ * normalises a function's result exactly like the `slots` prop branch does:
+ * `null`/`undefined` is dropped, an array is flattened one level. The common
+ * case (no function children) allocates a single copy, same as `.slice()`.
+ */
+export function invokeFunctionChildren(list: any[], scopedProps?: any): any[] {
+    let hasFn = false;
+    for (let i = 0; i < list.length; i++) {
+        if (typeof list[i] === 'function') {
+            hasFn = true;
+            break;
+        }
+    }
+    if (!hasFn) return list.slice();
+    const out: any[] = [];
+    for (const item of list) {
+        if (typeof item === 'function') {
+            const r = item(scopedProps);
+            if (r == null) continue;
+            if (Array.isArray(r)) {
+                for (const x of r) out.push(x);
+            } else {
+                out.push(r);
+            }
+        } else {
+            out.push(item);
+        }
+    }
+    return out;
+}
+
+/**
  * Internal slots object with tracking properties.
  *
  * A slot accessor is present (a callable) only when content was provided for
  * that slot — including `default`; an unprovided slot reads as `undefined`.
  */
 export interface InternalSlotsObject {
-    default?: () => any[];
+    default?: (scopedProps?: any) => any[];
     _children: any;
     _version: { v: number };
     _slotsFromProps: Record<string, any>;
@@ -132,11 +171,14 @@ export function createSlots(children: any, slotsFromProps?: Record<string, any>)
 
                 // Then fall back to element-based slots: `default` collects
                 // the un-slotted children, named slots collect children with
-                // a matching `slot` prop.
+                // a matching `slot` prop. Function items among them are
+                // invoked with `scopedProps` (render-prop / scoped-slot form)
+                // — the mapping happens on return so the extraction cache keeps
+                // caching the RAW children.
                 extract(slotsObj, version);
-                if (name === 'default') return cachedDefault.slice();
+                if (name === 'default') return invokeFunctionChildren(cachedDefault, scopedProps);
                 const list = cachedNamed[name];
-                return list ? list.slice() : [];
+                return list ? invokeFunctionChildren(list, scopedProps) : [];
             };
             slotFns.set(name, fn);
         }

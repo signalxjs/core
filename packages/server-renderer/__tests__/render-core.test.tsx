@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { component, useData, Comment } from 'sigx';
+import { component, useData, Comment, Define } from 'sigx';
 import { renderToString, createSSR } from '../src/index';
 import { createSSRContext } from '../src/server/context';
 import {
@@ -286,6 +286,25 @@ describe('renderToString — slot presence parity', () => {
         // ...and constructing the slots object did not pollute the prototype.
         expect(({} as any).polluted).toBeUndefined();
         expect(Object.getPrototypeOf({})).toBe(Object.prototype);
+    });
+
+    it('invokes a function child as a scoped slot, identically to the slots-prop form', async () => {
+        const Scoped = component<Define.Slot<'default', { greeting: string }>>((ctx) => {
+            return () => <div class="scoped">{ctx.slots.default?.({ greeting: 'hi' })}</div>;
+        }, { name: 'Scoped' });
+        const S = Scoped as any;
+
+        // Function-as-children form (the #476 case) — previously rendered an
+        // empty comment; now the function is called with the scoped props.
+        const childForm = await renderToString(<S>{(p: any) => <span class="g">{p.greeting}</span>}</S>);
+        expect(childForm).toContain('class="g"');
+        expect(childForm).toContain('>hi<');
+
+        // Equivalent to providing the same function via the `slots` prop.
+        const slotsForm = await renderToString(
+            <S slots={{ default: (p: any) => <span class="g">{p.greeting}</span> }} />
+        );
+        expect(childForm).toBe(slotsForm);
     });
 });
 

@@ -31,7 +31,7 @@ export type { SchedulerJob } from './scheduler.js';
 
 // Renderer utilities
 export { createPropsAccessor } from './utils/props-accessor.js';
-export { createSlots } from './utils/slots.js';
+export { createSlots, invokeFunctionChildren } from './utils/slots.js';
 export type { InternalSlotsObject } from './utils/slots.js';
 export { normalizeSubTree } from './utils/normalize.js';
 
