@@ -20,6 +20,13 @@ npm install @sigx/ssr-islands sigx vite
 <Counter client:only />         {/* skip SSR — mount fresh on the client only */}
 ```
 
+The `client:*` props type-check with no setup import. The augmentation is
+program-wide: importing anything from `@sigx/ssr-islands` (server) or
+`@sigx/ssr-islands/client` (client) — which your entry files already do —
+registers the directives on every JSX component across the whole program, the
+same way core's `use:*` directives light up (see `@sigx/runtime-dom`'s README
+§"The augmentation is program-wide"). There is no `/jsx` import to add.
+
 ```tsx
 // Server — the pack installs on the per-request app (#413: app.use is the
 // one install shape); the manifest arrives via virtual:sigx-manifests.

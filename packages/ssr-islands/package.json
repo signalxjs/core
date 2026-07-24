@@ -23,9 +23,6 @@
             "development": "./dist/client/index.js",
             "production": "./dist/client/index.prod.js",
             "import": "./dist/client/index.js"
-        },
-        "./jsx": {
-            "types": "./src/jsx.d.ts"
         }
     },
     "files": [

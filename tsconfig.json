@@ -45,7 +45,6 @@
       "@sigx/ssr-islands": ["./packages/ssr-islands/src/index.ts"],
       "@sigx/ssr-islands/server": ["./packages/ssr-islands/src/server/index.ts"],
       "@sigx/ssr-islands/client": ["./packages/ssr-islands/src/client/index.ts"],
-      "@sigx/ssr-islands/jsx": ["./packages/ssr-islands/src/jsx.d.ts"],
       "sigx": ["./packages/sigx/src/index.ts"],
       "sigx/internals": ["./packages/sigx/src/internals.ts"],
       "sigx/jsx-runtime": ["./packages/sigx/src/index.ts"],
