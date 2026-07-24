@@ -25,11 +25,12 @@
  * ```
  *
  * ## JSX Types
- * The client:* JSX types load automatically when you import anything from
- * `@sigx/ssr-islands`. For a types-only setup, reference them directly (this is a
- * type-only entry — do not `import` it at runtime):
+ * The client:* props type-check with no setup import. The augmentation is
+ * program-wide: importing anything from `@sigx/ssr-islands` (server) or
+ * `@sigx/ssr-islands/client` (client) — which your entry files already do —
+ * registers `client:load`, `client:visible`, … on every JSX component across
+ * the whole program, exactly like core's `use:*` directives.
  * ```ts
- * /// <reference types="@sigx/ssr-islands/jsx" />
  * <Counter client:visible />
  * <Widget client:idle />
  * ```

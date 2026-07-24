@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+**Removed the `./jsx` type-only entry — `client:*` types are now zero-import (#481).**
+
+- The `import '@sigx/ssr-islands/jsx'` step was redundant: the `client:*`
+  augmentation registers program-wide the moment you import
+  `@sigx/ssr-islands` (server) or `@sigx/ssr-islands/client` (client), which
+  every islands app already does in its entry files — the same way core's
+  `use:*` directives type-check with no import. The `./jsx` subpath is gone
+  (pre-1.0, no alias); delete any `import '@sigx/ssr-islands/jsx'` /
+  `/// <reference types="@sigx/ssr-islands/jsx" />` — nothing replaces it.
+
 **BREAKING — `__registerIslandChunk` is now `registerComponentChunk` (#439).**
 
 - The lazy chunk-registration entry point (re-exported from
