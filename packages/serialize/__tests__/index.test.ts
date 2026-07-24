@@ -188,6 +188,46 @@ describe('registry handlers', () => {
         expect(out).toBeInstanceOf(Date);
         expect(out.getTime()).toBe(9);
     });
+
+    // The encode fast path (#470) skips the BUILT-IN sweep for JSON-native
+    // scalars — but must still consult REGISTERED handlers, which are opaque
+    // and may legitimately own a scalar. A custom handler for a branded string
+    // is the case that would break if the fast path returned too early.
+    it('a registered handler can still own a JSON-native scalar', () => {
+        const shout: TypeHandler = {
+            name: 'shout',
+            tag: '$shout',
+            test: (v) => typeof v === 'string' && v.startsWith('!'),
+            serialize: (v) => (v as string).slice(1),
+            revive: (s) => `!${s as string}`,
+        };
+        // Round-trips through the tag (proving the handler ran on the string)…
+        const encoded = encodeWithHandlers('!hi', [shout]) as Record<string, unknown>;
+        expect(encoded).toEqual({ $shout: 'hi' });
+        expect(roundTrip('!hi', [shout])).toBe('!hi');
+        // …while a string the handler declines takes the fast path, untouched.
+        expect(encodeWithHandlers('plain', [shout])).toBe('plain');
+    });
+
+    it('a plain scalar with no registered handlers is returned as-is', () => {
+        // The common case the fast path exists for — no tag, no wrapping.
+        expect(encodeWithHandlers('hello')).toBe('hello');
+        expect(encodeWithHandlers(42)).toBe(42);
+        expect(encodeWithHandlers(true)).toBe(true);
+        expect(encodeWithHandlers(null)).toBe(null);
+    });
+});
+
+describe('non-JSON primitives (dropped by JSON.stringify)', () => {
+    it('passes a symbol and a function through untouched, for stringify to drop', () => {
+        const sym = Symbol('s');
+        const fn = (): void => {};
+        // encode returns them as-is; JSON.stringify is what omits them, exactly
+        // as it would without the codec.
+        expect(encodeWithHandlers(sym)).toBe(sym);
+        expect(encodeWithHandlers(fn)).toBe(fn);
+        expect(JSON.stringify(encodeWithHandlers({ a: 1, s: sym, f: fn }))).toBe('{"a":1}');
+    });
 });
 
 describe('forward and backward compatibility', () => {

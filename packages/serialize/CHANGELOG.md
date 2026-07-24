@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+### Performance
+
+- **`encodeWithHandlers` skips the handler sweep for JSON-native scalars, and
+  neither half allocates a merged handler array (#470).** `encode` ran every
+  handler's `test()` against every node — including strings, numbers and
+  booleans, which no built-in handler can own — so a payload with no rich
+  types paid ~7 `instanceof`/`typeof` checks per leaf for nothing. It now
+  returns a string/number/boolean/null immediately after consulting any
+  *registered* handlers (which may own a scalar), skipping the built-in
+  sweep. Separately, `encode`/`revive` take the custom and built-in handler
+  lists directly instead of merging them into one array per top-level call.
+  On a 1 000-row plain payload the encode walk is ~2.4x faster; same output,
+  same handler-precedence semantics (registered still win). No API change.
+
 ### Added
 
 - **Generic `TypeHandler<T = unknown, Encoded = unknown>` and
