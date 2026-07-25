@@ -207,7 +207,11 @@ calls `provideTypeHandlers` AND stamps the RPC wire codec
 | **Contract** | `() => Request \| Partial<ServerFnContext> \| undefined` |
 
 The ambient request for in-process (SSR-time) server-function calls
-(rfc-server §7, #309). A global rather than a module variable because `.` and
+(rfc-server §7, #309). Since #494 a scope always resolves to a
+`Partial<ServerFnContext>` carrying `locals` — never a bare `Request` — because
+that object IS the per-request store every call in the flow shares
+(rfc-server-v3 §2.3). The wider contract stands: an app may still stamp a
+resolver returning a bare `Request`. A global rather than a module variable because `.` and
 `./node` are separate dist entries, and in dev the Vite module runner and Node
 can hold two copies of the same module — the same hazard that makes
 `ServerFnError` a brand check rather than `instanceof`.

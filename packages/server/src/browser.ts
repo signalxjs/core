@@ -41,6 +41,19 @@ export function serverStream(): never {
     );
 }
 
+/**
+ * Worth more than it looks: a `session.server.ts` exporting only per-request
+ * values has no `serverFn` to shout, so without this the setup bodies (cookie
+ * secrets, decode logic) could ship on a misconfigured `include`.
+ */
+export function perRequest(): never {
+    throw new Error(
+        '[sigx server] perRequest() reached the browser unextracted — is the @sigx/vite/server ' +
+        'plugin configured, and does this file match its include pattern ' +
+        '(default **/*.server.{ts,tsx})?'
+    );
+}
+
 export function serverFnPreset(): never {
     throw new Error(
         '[sigx server] serverFnPreset() reached the browser unextracted — is the @sigx/vite/server ' +

@@ -10,7 +10,7 @@
 import { describe, it, expect } from 'vitest';
 import { serverFn } from '../src/index';
 import { handleServerFnRequest } from '../src/server/index';
-import { runInScope, toContextInit, type ServerFnScope } from '../src/scope';
+import { runInScope, toContextInit, toScopeInit, type ServerFnScope } from '../src/scope';
 
 const post = (symbol: string, args: unknown[] = []): Request =>
     new Request(`http://localhost/_sigx/fn/${symbol}`, {
@@ -153,5 +153,110 @@ describe('the endpoint scopes its own invocation', () => {
         ]);
         expect(a).toEqual({ data: '?who=a' });
         expect(b).toEqual({ data: '?who=b' });
+    });
+});
+
+/* ------------------------------------------------------------------ */
+/* the per-request store (rfc-server-v3 §2.3, #494)                    */
+/* ------------------------------------------------------------------ */
+
+describe('the per-request store', () => {
+    it('gives every in-process call in one scope the SAME locals bag', async () => {
+        const bags: unknown[] = [];
+        const capture = serverFn(async (rq) => {
+            bags.push(rq.locals);
+            return null;
+        });
+
+        await runInScope(nodeRequest({ host: 'app.test' }), async () => {
+            await capture();
+            await capture();
+        });
+        // Before #494 each call materialized its own `{}` from the bare
+        // Request the scope stored, so a guard could not hand anything to the
+        // next call.
+        expect(bags[0]).toBe(bags[1]);
+    });
+
+    it('lets a guard hand a value to a LATER call in the same render', async () => {
+        const seed = serverFn(async (rq) => {
+            rq.locals.user = 'alice';
+            return null;
+        });
+        const read = serverFn(async (rq) => rq.locals.user);
+
+        await expect(
+            runInScope(nodeRequest({ host: 'app.test' }), async () => {
+                await seed();
+                return read();
+            })
+        ).resolves.toBe('alice');
+    });
+
+    it('keeps two concurrent renders apart', async () => {
+        const seed = serverFn(async (rq, value: string) => {
+            rq.locals.user = value;
+            return null;
+        });
+        const read = serverFn(async (rq) => rq.locals.user);
+
+        const render = async (value: string): Promise<unknown> =>
+            runInScope(nodeRequest({ host: 'app.test' }), async () => {
+                await seed(value);
+                await new Promise((resolve) => setTimeout(resolve, 1));
+                return read();
+            });
+
+        await expect(Promise.all([render('alice'), render('bob')])).resolves.toEqual([
+            'alice',
+            'bob'
+        ]);
+    });
+
+    it('preserves the caller’s own bag by IDENTITY — the documented pre-seed', async () => {
+        const seeded = { user: 'alice' };
+        const read = serverFn(async (rq) => rq.locals);
+
+        const seen = await runInScope({ request: new Request('https://app.test/'), locals: seeded }, () =>
+            read()
+        );
+        expect(seen).toBe(seeded);
+    });
+
+    it('a bare Request still carries its abort signal after the wrap', async () => {
+        const controller = new AbortController();
+        controller.abort();
+        const read = serverFn(async (rq) => rq.abortSignal.aborted);
+
+        await expect(
+            runInScope(new Request('https://app.test/', { signal: controller.signal }), () => read())
+        ).resolves.toBe(true);
+    });
+
+    it('the endpoint’s own context stays the store — guard writes reach the handler', async () => {
+        const whoami = serverFn(async (rq) => rq.locals.user);
+        const res = await handleServerFnRequest(post('who_fn_1'), {
+            resolve: () => whoami,
+            guard: (rq) => {
+                rq.locals.user = 'andy';
+            }
+        });
+        await expect(res.json()).resolves.toEqual({ data: 'andy' });
+    });
+});
+
+describe('toScopeInit', () => {
+    it('adds a locals bag without copying one that already exists', () => {
+        const bare = new Request('https://app.test/');
+        const wrapped = toScopeInit(bare);
+        expect(wrapped.request).toBe(bare);
+        expect(wrapped.locals).toEqual({});
+
+        const own = { request: bare, locals: { user: 'alice' } };
+        expect(toScopeInit(own)).toBe(own);
+
+        const node = toScopeInit(nodeRequest({ host: 'app.test' }));
+        expect(node.request).toBeInstanceOf(Request);
+        expect(node.locals).toEqual({});
     });
 });

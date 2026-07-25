@@ -10,6 +10,7 @@ import {
     serverFn,
     serverStream,
     serverFnPreset,
+    perRequest,
     isServerFnError,
     ServerFnError
 } from '../src/browser';
@@ -27,6 +28,12 @@ describe('@sigx/server browser entry', () => {
 
     it('serverFnPreset throws the same way (#398)', () => {
         expect(() => serverFnPreset()).toThrow(/serverFnPreset\(\) reached the browser unextracted/);
+    });
+
+    it('perRequest throws the same way (#494)', () => {
+        // A `session.server.ts` exporting only per-request values has no
+        // serverFn to shout, so this is the only loud signal it has.
+        expect(() => perRequest()).toThrow(/perRequest\(\) reached the browser unextracted/);
     });
 
     it('the error channel is real in the browser build', () => {

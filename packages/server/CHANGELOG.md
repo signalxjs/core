@@ -4,6 +4,52 @@
 
 ### Added
 
+- **`perRequest` — a value computed once per request, typed without a cast
+  (#494).** Work derived from the request (a decoded session, an authenticated
+  API client, a request id) was recomputed by every call that needed it: a page
+  with five SSR-enabled cells decoded the same session five times.
+
+  ```ts
+  export const session = perRequest(async (rq) =>
+      decodeSession(rq.request.headers.get('cookie')));
+
+  export const github = perRequest(async (rq) => {
+      const s = await session(rq);          // the SAME memoized promise
+      if (!s) throw new ServerFnError(401, 'Sign in');
+      return createGitHubClient(s.token);
+  });
+  ```
+
+  The accessor takes `rq` — no ambient lookup at the call site, the rule `rq`
+  itself follows. Values compose by calling each other, with no composition
+  API. The setup's return is memoized **promise included**, so a guard and a
+  handler racing on first touch share one in-flight decode; a failed setup
+  stays failed for that request; a setup that resolves itself throws "circular
+  request value". Instances live on a non-enumerable
+  `Symbol.for('sigx.serverfn.requestValues')` slot of `rq.locals`, so there is
+  no new global seam and `locals` still spreads, logs and serializes clean.
+  **No disposal in v1**, deliberately: on WinterCG runtimes a render's scope
+  settles at the shell, so "released when the response has flushed" would fire
+  mid-stream — teardown belongs to the app's own handler until the `keepAlive`
+  scope extension lands. `perRequest` throws from the browser entry like its
+  neighbours, which matters more than it looks: a `session.server.ts` exporting
+  only per-request values has no `serverFn` to shout.
+
+### Changed
+
+- **The request scope stores `{ request, locals }`, not a bare `Request`
+  (#494).** `rq.locals` is now genuinely shared by every in-process call in one
+  request/render instead of being a fresh `{}` per call — it is the untyped
+  face of the per-request store (`perRequest` is the typed one, and the
+  recommended hand-off). **Observable, and the point**: a function writing
+  `rq.locals.x` used to write into a bag nobody would ever read; now its
+  siblings in the same render see it, and a guard that decodes a session can
+  hand it to the next call. The wire path already behaved this way — the
+  endpoint has always put its full context in the scope — so this makes the
+  in-process path agree with it rather than inventing a rule, and nothing on
+  the wire changes. A caller's own bag is kept by identity, so the documented
+  `runWithServerFnContext({ request, locals }, …)` pre-seed is the store.
+
 - **`serverFnPreset` — shared per-module middleware (#398).** A `use:` chain
   is the only mechanism that runs on **every** transport (the endpoint's
   `guard` is wire-only, #493), which made app-wide auth a line repeated on
