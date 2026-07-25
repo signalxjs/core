@@ -8,6 +8,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- **`@sigx/server` / `@sigx/vite`: forgetting a guard is now a build error
+  (#489).** `sigxServer({ requireGuards })` — **on by default** — requires
+  every extracted `serverFn` and `serverStream` to be preset-derived, declare
+  `use`, or declare `unguarded: true`. A bare one fails the build naming all
+  three remedies, with file and line; `'warn'` lists them without failing and
+  `false` opts out. This is what turns "a chain that runs on every transport"
+  from a mechanism into a guarantee: runtime cannot check it without a seam
+  whose miss would be fail-open, so the build does. `serverStream` gains an
+  options form (`use`, `unguarded`; no `input`) because it needed somewhere to
+  declare — which also gives streams a first-class `use:` chain. Declaring
+  `unguarded` on a preset-derived function throws at definition time. Honest
+  limits: the check verifies declaration, not correctness, and a module outside
+  `include`/`scan` is never analyzed — so the build marks what it checked and
+  dev warns on an unstamped call, making absence the alarm rather than a false
+  pass. `examples/resume`'s six functions now declare `unguarded: true`.
+
 - **`@sigx/server`: `perRequest` — one value per request, typed without a cast
   (#494).** An in-process call got a fresh `rq.locals` every time, so work
   derived from the request was redone by every function that needed it — a page

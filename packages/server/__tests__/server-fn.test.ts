@@ -505,3 +505,78 @@ describe('serverFnPreset — shared per-module middleware (#398)', () => {
         void stream;
     });
 });
+
+describe('unguarded — the deliberate opt-out (#489)', () => {
+    it('is runtime-inert on a plain function', async () => {
+        const open = serverFn({ unguarded: true, handler: async () => 'ok' });
+        await expect(open()).resolves.toBe('ok');
+    });
+
+    it('contradicting a preset throws at DEFINITION time, not per request', () => {
+        const authed = serverFnPreset({ use: [() => {}] });
+        // Not __DEV__-gated: a security declaration that is false must fail at
+        // boot or in CI, where a dev-only warning would be silent.
+        expect(() => authed({ unguarded: true, handler: async () => 1 })).toThrow(
+            /declares `unguarded: true` but derives from a serverFnPreset/
+        );
+        expect(() =>
+            authed.stream({ unguarded: true, handler: async function* () { yield 1; } })
+        ).toThrow(/declares `unguarded: true` but derives from a serverFnPreset/);
+    });
+
+    it('a preset-derived function without the contradiction is unaffected', async () => {
+        const authed = serverFnPreset({ use: [() => {}] });
+        await expect(authed({ handler: async () => 'ok' })()).resolves.toBe('ok');
+    });
+});
+
+describe('the unchecked-function warning (#489, §1.5)', () => {
+    const CHECKED = '__SIGX_GUARDS_CHECKED__';
+    const setBuildChecked = (value: boolean | undefined): void => {
+        if (value === undefined) delete (globalThis as Record<string, unknown>)[CHECKED];
+        else (globalThis as Record<string, unknown>)[CHECKED] = value;
+    };
+
+    afterEach(() => setBuildChecked(undefined));
+
+    it('fires ONCE per function, not once per call', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        setBuildChecked(true);
+        const fn = serverFn({ unguarded: true, handler: async () => 'ok' });
+
+        await fn();
+        await fn();
+        await fn();
+
+        const notices = warn.mock.calls
+            .map(([m]) => String(m))
+            .filter((m) => m.includes('never analyzed by the guard check'));
+        expect(notices).toHaveLength(1);
+    });
+
+    it('says nothing when the build stamped the function', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        setBuildChecked(true);
+        const fn = serverFn({ unguarded: true, handler: async () => 'ok' });
+        // What the transform appends to the SSR module.
+        (fn as unknown as { __sigxGuardChecked?: boolean }).__sigxGuardChecked = true;
+
+        await fn();
+        expect(
+            warn.mock.calls.filter(([m]) => String(m).includes('never analyzed'))
+        ).toHaveLength(0);
+    });
+
+    it('says nothing when NO build did the checking — absence is the alarm', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        // No marker: a unit test or a hand-wired non-Vite build. Warning here
+        // would mean "you are not using Vite", which is not a defect.
+        setBuildChecked(undefined);
+        const fn = serverFn({ unguarded: true, handler: async () => 'ok' });
+
+        await fn();
+        expect(
+            warn.mock.calls.filter(([m]) => String(m).includes('never analyzed'))
+        ).toHaveLength(0);
+    });
+});

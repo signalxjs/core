@@ -758,3 +758,70 @@ describe('serverStream — the in-process pipeline (F-B)', () => {
         expect(await response.text()).not.toContain('secret');
     });
 });
+
+/* ------------------------------------------------------------------ */
+/* the options form (#489)                                            */
+/* ------------------------------------------------------------------ */
+
+describe('serverStream — options form', () => {
+    it('runs its own use chain before the first yield', async () => {
+        const trace: string[] = [];
+        const feed = serverStream({
+            use: [
+                (): void => {
+                    trace.push('guard');
+                }
+            ],
+            handler: async function* () {
+                trace.push('body');
+                yield 'a';
+            }
+        });
+        await expect(collect(feed())).resolves.toEqual(['a']);
+        expect(trace).toEqual(['guard', 'body']);
+    });
+
+    it('composes a preset chain with its own, preset first', async () => {
+        const trace: string[] = [];
+        const authed = serverFnPreset({
+            use: [
+                (): void => {
+                    trace.push('preset');
+                }
+            ]
+        });
+        const feed = authed.stream({
+            use: [
+                (): void => {
+                    trace.push('own');
+                }
+            ],
+            handler: async function* () {
+                yield 1;
+            }
+        });
+        await collect(feed());
+        expect(trace).toEqual(['preset', 'own']);
+    });
+
+    it('keeps the wrapper contract — brands, .with(), and multi-arg calls', async () => {
+        const range = serverStream({
+            handler: async function* (_rq, from: number, to: number) {
+                for (let i = from; i <= to; i++) yield i;
+            }
+        });
+        expect(range.__sigxStream).toBe(true);
+        expect(typeof range.__sigxFn).toBe('function');
+        await expect(collect(range(1, 3))).resolves.toEqual([1, 2, 3]);
+        await expect(collect(range.with({})(2, 3))).resolves.toEqual([2, 3]);
+    });
+
+    it('gives the handler `this` — a method-shorthand declaration works', async () => {
+        const feed = serverStream({
+            async *handler() {
+                yield 'shorthand';
+            }
+        });
+        await expect(collect(feed())).resolves.toEqual(['shorthand']);
+    });
+});

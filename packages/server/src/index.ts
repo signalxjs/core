@@ -109,6 +109,22 @@ export interface ServerFnOptions<S, R> {
      */
     use?: ServerFnGuard[];
     /**
+     * Declares this function deliberately open (rfc-server-v3 §1.3, #489) —
+     * the mirror of the build's `requireGuards`, which requires every server
+     * function to be preset-derived, declare `use`, or say this.
+     *
+     * Runtime-inert: the build reads the LITERAL `true` statically, the same
+     * discipline `form` has. It is spelled as a word rather than as absence
+     * because "I meant this to be public" and "I forgot the guard" must not
+     * look identical — and because it makes the open surface greppable
+     * (`grep -rn unguarded --include='*.server.ts' src/` prints every
+     * deliberately-open endpoint, a list a security review can read).
+     *
+     * Combining it with a preset is a definition-time error: the preset's
+     * guards still run, so the declaration would be a lie.
+     */
+    unguarded?: true;
+    /**
      * Server-declared cache invalidation (rfc-server §6.2): which cache
      * keys this mutation invalidates, computed WHERE the data changed so
      * it cannot drift from the mutation. Runs after the handler resolves;
@@ -186,6 +202,54 @@ export interface ServerFnOptions<S, R> {
  * cost an iterator that stops immediately.
  */
 const NO_GUARDS: readonly ServerFnGuard[] = [];
+
+/**
+ * `unguarded: true` on a preset-derived function is a lie — the preset's
+ * guards still run — so it fails at module load (#489). NOT `__DEV__`-gated,
+ * the same posture as the `form`-without-`input` throw: a definition-time
+ * throw fails at boot or in CI, never per request, and a dev-only warning is
+ * silent exactly where a security declaration being wrong matters.
+ */
+/**
+ * rfc-server-v3 §1.5's mitigation, runtime half. Under `requireGuards` the
+ * build stamps `__sigxGuardChecked` on every function it analyzed; a
+ * `*.server.ts` outside the plugin's `include`/`scan` is never analyzed, so an
+ * unstamped function reaching a call is the only sign that the gate never saw
+ * it. Absence is the alarm — which is why this warns rather than throws, and
+ * why the check is dev-only: there is no honest prod signal here, and a false
+ * failure would be worse than the gap.
+ *
+ * Silent when nothing is stamped at all (no transform: unit tests, hand-wired
+ * non-Vite builds), so the warning means "some of this build was checked and
+ * this was not", never "you are not using Vite".
+ */
+function warnUnchecked(fn: object, name: string): boolean {
+    if (!__DEV__ || (fn as { __sigxGuardChecked?: boolean }).__sigxGuardChecked === true) {
+        return false;
+    }
+    if (!(globalThis as { __SIGX_GUARDS_CHECKED__?: boolean }).__SIGX_GUARDS_CHECKED__) {
+        return false;
+    }
+    console.warn(
+        `[sigx server] server function ${name ? `"${name}" ` : ''}was never analyzed by the ` +
+        `guard check — this build has \`requireGuards\` on, but its module is outside the ` +
+        `sigxServer() \`include\`/\`scan\` patterns, so nothing verified that it declares a ` +
+        `guard chain. Add its directory to \`scan\` (rfc-server-v3 §1.5). Fires once per function.`
+    );
+    // Latched by the caller: the stamp lands AFTER the wrapper is built, so
+    // this cannot be decided at definition time — but a hot function must not
+    // repeat it per call.
+    return true;
+}
+
+function unguardedContradiction(name: string): Error {
+    return new Error(
+        `[sigx server] ${name ? `"${name}" ` : ''}declares \`unguarded: true\` but derives from ` +
+        `a serverFnPreset, whose guards still run — the declaration would be false. Drop ` +
+        `\`unguarded\` to keep the preset's chain, or define this one with plain serverFn/` +
+        `serverStream if it really is open (rfc-server-v3 §1.3).`
+    );
+}
 
 /** Wrap a server-only function. Client callers get `(...args) => Promise<R>`. */
 export function serverFn<A extends unknown[], R>(
@@ -297,6 +361,7 @@ function createServerFn(
         name = options.handler.name || '';
     }
 
+    let warnedUnchecked = false;
     // In-process (SSR-time) calls run the same pipeline against a detached
     // context — no network hop, and no transport symbol (rfc-server §7 v1).
     // `.with(options)` is the per-call options channel (#353): explicit, so
@@ -314,6 +379,7 @@ function createServerFn(
                     `apply it to. It only affects the client stub's fetch (#315).`
                 );
             }
+            if (__DEV__ && !warnedUnchecked) warnedUnchecked = warnUnchecked(wrapper, name);
             return invoke(resolveInProcessContext(options?.signal, options?.context), { symbol: '', name }, args);
         };
     const wrapper = callWith();
@@ -332,6 +398,9 @@ function createServerFn(
     }
     // The §6.4 form-target marker: the endpoint's gate for accepting form
     // content-types, and the build's for stamping action/method.
+    if (baseUse.length > 0 && typeof arg !== 'function' && arg.unguarded === true) {
+        throw unguardedContradiction(name);
+    }
     const form = typeof arg === 'function' ? false : arg.form === true;
     if (form && !(arg as ServerFnOptions<unknown, unknown>).input) {
         // #412: NOT __DEV__-gated — the no-JS form transport delivers an
@@ -410,19 +479,62 @@ function assertNotLiveClient(name: string): void {
  *
  * Carries the same `.with(options)` per-call channel as `serverFn` (#448),
  * minus `fresh` — a stream is never HTTP-cached.
+ *
+ * Two forms, like `serverFn`: the direct one above, and an options form
+ * carrying `use` and `unguarded` (#489). A stream is a public endpoint too, so
+ * `requireGuards` holds it to the same rule — and the options form is where it
+ * declares. Deliberately NOT given `input`: a stream takes many arguments and
+ * has no single-input shape to validate; validate at the top of the generator
+ * (any Standard Schema validates standalone).
  */
+export interface ServerStreamOptions<A extends unknown[], T> {
+    /**
+     * Definition-level middleware — runs before the generator on EVERY
+     * transport, wire and in-process alike. Veto by throwing; in-process the
+     * veto surfaces on the first pull, where the wire path's pre-first-yield
+     * error surfaces too.
+     */
+    use?: ServerFnGuard[];
+    /**
+     * Declares this stream deliberately open (#489) — the mirror of the build's
+     * `requireGuards`. Runtime-inert; the build reads the LITERAL `true`
+     * statically, the same discipline `form` has. Spelled as a word because an
+     * opt-out spelled as *absence* is indistinguishable from a mistake, and
+     * because it makes the public surface greppable.
+     */
+    unguarded?: true;
+    /** The implementation. */
+    handler(rq: ServerFnContext, ...args: A): AsyncGenerator<T>;
+}
+
 export function serverStream<A extends unknown[], T>(
     impl: (rq: ServerFnContext, ...args: A) => AsyncGenerator<T>
+): ServerStreamCallable<A, T>;
+export function serverStream<A extends unknown[], T>(
+    options: ServerStreamOptions<A, T>
+): ServerStreamCallable<A, T>;
+export function serverStream<A extends unknown[], T>(
+    arg: ((rq: ServerFnContext, ...args: A) => AsyncGenerator<T>) | ServerStreamOptions<A, T>
 ): ServerStreamCallable<A, T> {
-    return createServerStream(impl);
+    return createServerStream(arg);
 }
 
 /** `serverStream`'s body, plus a preset's already-copied guard array. */
 function createServerStream<A extends unknown[], T>(
-    impl: (rq: ServerFnContext, ...args: A) => AsyncGenerator<T>,
+    arg: ((rq: ServerFnContext, ...args: A) => AsyncGenerator<T>) | ServerStreamOptions<A, T>,
     baseUse: readonly ServerFnGuard[] = NO_GUARDS
 ): ServerStreamCallable<A, T> {
-    const name = impl.name || '';
+    const options = typeof arg === 'function' ? undefined : arg;
+    // Kept unbound for its `.name`; `impl` is the callable, bound to the
+    // options object so `this` inside a method-shorthand handler is the
+    // literal — the same thing `serverFn`'s `options.handler(...)` call does.
+    const declared: (rq: ServerFnContext, ...args: A) => AsyncGenerator<T> =
+        typeof arg === 'function' ? arg : arg.handler;
+    const impl = options ? declared.bind(options) : declared;
+    const name = declared.name || '';
+    if (options && baseUse.length > 0 && options.unguarded === true) {
+        throw unguardedContradiction(name);
+    }
     // #412: same unvalidated-wire-args surface as serverFn's direct form,
     // same once-per-fn dev signal — but streams have no options form, so the
     // remedy is validating in the generator body.
@@ -441,6 +553,7 @@ function createServerStream<A extends unknown[], T>(
             );
         }
         for (const guard of baseUse) await guard(rq, info);
+        for (const guard of options?.use ?? []) await guard(rq, info);
         return impl(rq, ...(args as A));
     };
     /**
@@ -453,6 +566,7 @@ function createServerStream<A extends unknown[], T>(
     async function* pump(rq: ServerFnContext, args: A): AsyncGenerator<T> {
         yield* (await invoke(rq, { symbol: '', name }, args)) as AsyncGenerator<T>;
     }
+    let warnedUnchecked = false;
     // `.with(options)` — the same per-call channel as serverFn's, minus
     // `fresh` (#448). #362 left streams out on the strength of the signal
     // argument alone (consumer break/return already aborts), which said
@@ -476,6 +590,7 @@ function createServerStream<A extends unknown[], T>(
             // detached context's `request`/`url` throw descriptively. Resolved
             // HERE, at call time — the ambient scope belongs to whoever
             // called, not to whoever first pulls a chunk.
+            if (__DEV__ && !warnedUnchecked) warnedUnchecked = warnUnchecked(wrapper, name);
             const rq = resolveInProcessContext(options?.signal, options?.context);
             // rfc-server-v3 §1.2 (F-B): an in-process stream runs the SAME
             // pipeline the wire does. It ran NO middleware at all before, so a
@@ -539,13 +654,14 @@ export function serverFnPreset(base: { use: ServerFnGuard[] }): ServerFnPreset {
         arg: ((rq: ServerFnContext, ...args: unknown[]) => unknown) | ServerFnOptions<unknown, unknown>
     ): ServerFnCallable<unknown[], unknown> => createServerFn(arg, use);
     const derivedStream = <A extends unknown[], T>(
-        impl: (rq: ServerFnContext, ...args: A) => AsyncGenerator<T>
-    ): ServerStreamCallable<A, T> => createServerStream(impl, use);
-    // The cast RESTATES the overloads; it does not change the runtime.
-    // `derived` is literally `serverFn`'s implementation signature, and a
-    // single signature is never assignable to both public overloads. It goes
-    // on the TARGET so `Object.assign`'s `T & U` keeps every call signature —
-    // an intersection of call signatures IS an overload set — while `.stream`
-    // is still checked against `typeof serverStream` by the return type.
-    return Object.assign(derived as unknown as typeof serverFn, { stream: derivedStream });
+        arg: ((rq: ServerFnContext, ...args: A) => AsyncGenerator<T>) | ServerStreamOptions<A, T>
+    ): ServerStreamCallable<A, T> => createServerStream(arg, use);
+    // The casts RESTATE the overloads; they do not change the runtime. Each
+    // derived function is literally its wrapper's IMPLEMENTATION signature,
+    // and a single signature is never assignable to a two-overload type. They
+    // go on the TARGET so `Object.assign`'s `T & U` keeps every call signature
+    // — an intersection of call signatures IS an overload set.
+    return Object.assign(derived as unknown as typeof serverFn, {
+        stream: derivedStream as unknown as typeof serverStream
+    });
 }
