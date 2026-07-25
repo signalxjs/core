@@ -458,6 +458,33 @@ describe('config hook — resolve.alias (serve, #487)', () => {
         expect(config.resolve.alias['@sigx/reactivity']).toBeTruthy();
     });
 
+    it('honours the ARRAY alias form, including a RegExp find', async () => {
+        const root = makeProjectRoot();
+        const config = await runConfigHook(
+            { root, resolve: { alias: [{ find: /^@sigx\/reactivity/, replacement: '/pinned/reactivity.js' }] } },
+            'serve'
+        );
+
+        // A stringified RegExp key never equals a specifier, so a naive
+        // comparison would generate entries for a package the project is
+        // deliberately routing elsewhere.
+        expect(config.resolve.alias['@sigx/reactivity']).toBeUndefined();
+        expect(config.resolve.alias['@sigx/reactivity/internals']).toBeUndefined();
+        expect(config.resolve.alias['sigx']).toBeTruthy();
+    });
+
+    it('honours an exact string find in the array form', async () => {
+        const root = makeProjectRoot();
+        const config = await runConfigHook(
+            { root, resolve: { alias: [{ find: 'sigx', replacement: '/pinned/sigx.js' }] } },
+            'serve'
+        );
+
+        expect(config.resolve.alias['sigx']).toBeUndefined();
+        expect(config.resolve.alias['sigx/internals']).toBeUndefined();
+        expect(config.resolve.alias['@sigx/reactivity']).toBeTruthy();
+    });
+
     it('the user entry survives the merge Vite performs', async () => {
         const root = makeProjectRoot();
         const userConfig: any = { root, resolve: { alias: { 'sigx': '/pinned/sigx.js' } } };

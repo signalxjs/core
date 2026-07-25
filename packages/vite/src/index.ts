@@ -349,12 +349,21 @@ export function sigxPlugin(options: SigxPluginOptions = {}): Plugin {
                 // so half-applying our map over a hand-written one would point
                 // the bare specifier and its subpaths at different files —
                 // exactly the two-live-copies failure this exists to prevent.
+                // Vite accepts aliases as an object OR as an array of
+                // `{ find, replacement }` where `find` may be a **RegExp**.
+                // Comparing stringified keys would silently miss the regex
+                // form and generate entries for a package the project is
+                // deliberately routing elsewhere, which is the collision this
+                // check exists to avoid.
                 const userAlias = userConfig.resolve?.alias;
-                const userKeys = new Set(
-                    Array.isArray(userAlias)
-                        ? userAlias.map(a => String(a.find))
-                        : Object.keys(userAlias ?? {})
-                );
+                const userMatchers: Array<(specifier: string) => boolean> = Array.isArray(userAlias)
+                    ? userAlias.map(a =>
+                        a.find instanceof RegExp
+                            ? (s: string) => (a.find as RegExp).test(s)
+                            : (s: string) => s === String(a.find))
+                    : Object.keys(userAlias ?? {}).map(k => (s: string) => s === k);
+                const isUserAliased = (specifier: string) =>
+                    userMatchers.some(m => m(specifier));
 
                 const alias: Record<string, string> = {};
                 for (const name of collectSigxOptimizeDepsExcludes(root)) {
@@ -366,7 +375,7 @@ export function sigxPlugin(options: SigxPluginOptions = {}): Plugin {
                     // user-keys-then-plugin-keys, so a user's bare `sigx`
                     // sitting ahead of our `sigx/internals` would prefix-match
                     // first and rewrite the subpath into `…/index.js/internals`.
-                    if (entries.some(([specifier]) => userKeys.has(specifier))) continue;
+                    if (entries.some(([specifier]) => isUserAliased(specifier))) continue;
                     for (const [specifier, file] of entries) alias[specifier] = file;
                 }
                 const serverOverride = await resolveHmrPortOverride(userConfig, hmrPort);
