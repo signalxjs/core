@@ -67,7 +67,10 @@ export default [
     // trailing anchor (synthesized when the SSR marker is unreachable, as it
     // is inside a streamed placeholder wrapper) and the streamed-boundary
     // flow adopts the walk's live vnode; sat at 13.56 KB after trims.
-    limit: '13.6 KB',
+    // 13.6 → 13.7 KB with #492: the wrapper-ownership test (only the
+    // component the placeholder is named after may descend into it) plus the
+    // streamed-boundary liveness guard; sat at 13.62 KB.
+    limit: '13.7 KB',
     ignore: ['sigx', 'sigx/*', '@sigx/*', 'node:stream'],
   },
   {

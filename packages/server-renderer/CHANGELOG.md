@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+**Fixed: only the component a streamed placeholder belongs to may hydrate inside it (#492).**
+
+- Follow-up to #478 below, found by reproducing that report's shape against
+  **real streamed output** instead of hand-built DOM. The wrapper is the
+  content start of every pass-through ancestor as well (`App → RouterView →
+  lazy() → Page` — what every router app looks like), and the outermost one
+  was descending into it. Two consequences, both live after #478:
+  - Ancestors' own `<!--$c:N-->` markers sit OUTSIDE the wrapper, so their
+    marker scan ran over the streamed subtree's children instead and latched a
+    **descendant's** marker as the component anchor. Not a crash — a component
+    whose DOM reference points into the middle of its own subtree, so unmount
+    and `patch()`'s replace branch derive the wrong range. #478's synthesized
+    anchor never fired here, because a wrong marker is not a missing one.
+  - Anything the ancestor rendered **after** the streamed child was hydrated
+    against the wrapper's contents and **mounted a second copy inside it** —
+    visible duplicated content, and the next route re-parented into a
+    placeholder that survives unmount by design (`display: contents` hides it
+    from layout, not from `#app > div` selectors).
+- Ownership is decidable from what the server already emits: the wrapper is
+  named after the streamed component's own marker id (`data-async-placeholder="N"`
+  ↔ `<!--$c:N-->`). Only the component whose anchor is that id descends; the
+  pass-through ancestors keep their own reachable sibling markers, exactly as
+  they would if nothing had streamed. An unreachable anchor (null) still
+  descends — that is #478's synthesis case, and it stays.
+- A streamed boundary whose region left the document during the streaming
+  window is no longer revived: `hydrateAsyncBoundary` returns when the
+  placeholder is not connected, instead of running setup and creating a render
+  effect for a detached subtree that nothing would ever unmount.
+- Coverage: the #478 regression cases hand-built their DOM with streamed
+  content containing no nested markers, which is what let this through. The
+  new cases go through `createSSR().renderStream()` and replay the stream as a
+  browser would. `examples/spa-ssr` gains a `/router-stream` route with that
+  shape, and `pnpm smoke:hydration` now drives it through a full navigation
+  round trip — three of its assertions fail without this fix while the existing
+  marker-survival oracle stays green, which is precisely the blind spot: a
+  component with a wrong `dom` still produces a perfect first paint.
+
 **Fixed: a streamed `$SIGX_REPLACE` region hydrates with a real trailing anchor, so the next patch can't crash (#478).**
 
 - A hydrated component vnode could be left with **no DOM reference at all**,

@@ -263,6 +263,16 @@ export async function hydrateAsyncBoundary(container: Element, record: SSRBounda
     const pending = carrier.__sigxPendingBoundary;
     delete carrier.__sigxPendingBoundary;
 
+    // The streaming window can outlive the region it belongs to: a client-side
+    // navigation during it patches the parent tree away, taking the wrapper
+    // with it. Reviving the handed-over vnode then would run setup and create
+    // a render effect for a detached subtree that nothing will ever unmount —
+    // a live component rendering into a document fragment nobody can see
+    // (#492). The placeholder having left the document is the signal.
+    if (!container.isConnected) {
+        return;
+    }
+
     // The hydrate axis holds for streamed content too: a boundary
     // explicitly marked 'never' stays static HTML.
     if (record.hydrate === 'never') {
