@@ -6,11 +6,12 @@ signalxjs/core#318 (rev 2).
 Pre-1.0, no-compat (same stance as `rfc-async.md` and `rfc-ssr-platform.md`):
 one way to do it.
 
-> **v3 lives in `rfc-server-v3.md`** (proposed, signalxjs/core#491): guard
-> completeness (#489) and request-scoped context. It **amends §2.1** and
-> **re-opens §2.2** — see the pointers on those sections. It also corrects a
-> claim this document makes in four places: the endpoint `guard` is
-> **wire-only**, not "every transport" (#493).
+> **v3 lives in `rfc-server-v3.md`** (signalxjs/core#491): guard completeness
+> (#489) and request-scoped context. It **amends §2.1**, and it **replaces
+> §2.2** — the `defineServerService` specification was removed rather than
+> implemented (#503); §2.2 is now a pointer, and v3 §2.2 records the rejected
+> design and why it lost. v3 also corrects a claim this document made in four
+> places: the endpoint `guard` is **wire-only**, not "every transport" (#493).
 
 > **rev-2 changes** (native clients — the third role): v1 modeled two roles,
 > a same-origin browser client and a Node SSR renderer. A **lynx or terminal
@@ -249,8 +250,9 @@ is closure capture by another name).
 What module-grouping alone does *not* give is shared per-service
 middleware — "every function in this service requires a signed-in user"
 — and that one gap gets one small API: `serverFnPreset` (§2.1). A
-service, in full, is a module of `serverFn` exports sharing a preset and
-a set of request-scoped services (§2.2). Nothing else.
+service, in full, is a module of `serverFn` exports sharing a preset, plus
+whatever request-derived values it reads (`rfc-server-v3.md` §2). Nothing
+else.
 
 ## §2 Public API — `@sigx/server`
 
@@ -409,244 +411,95 @@ export function serverFnPreset(base: { use: ServerFnGuard[] }): typeof serverFn;
   handler (the tRPC/TanStack shape, or ASP.NET's endpoint filters).
   Post-handler concerns are already structural — `invalidates`
   (§6.2/§6.3), `Cache-Control` (§4.1), `onError` + `timeoutMs`
-  (endpoint options) — and cross-cutting *around* needs (timing, tracing
-  spans) ride a request-scoped service whose `onDispose` fires when the
-  response has fully flushed (see `useTrace` in §2.3, which measures
-  strictly more than a wrapped handler would: the whole request,
-  streaming included). Extending the guard signature stays off the table
-  until a need appears that neither mechanism covers.
+  (endpoint options). Cross-cutting *around* needs (timing, tracing
+  spans) have **no framework answer today**: this bullet used to promise
+  they would ride a request-scoped service's `onDispose`, and that
+  mechanism is not shipping in the form described (`rfc-server-v3.md` §2.2
+  and §2.6 — the disposal contract could not be honored on WinterCG, where
+  the fetch handler settles its scope at the shell). Until request-value
+  disposal lands (v3 phase 5), teardown belongs in the app's own handler,
+  which already owns the request. Extending the guard signature stays off
+  the table either way.
 - Companion guardrail (same milestone): the transform warns when a
   `serverFn({ … })` options literal contains a spread — `id`, `cache`,
   and `invalidates` inside a spread are invisible to the static reads
   today, and `invalidates` silently disabling §6.3's sidecar is the kind
   of bug that deserves a build-time voice.
 
-### 2.2 `defineServerService` — request-scoped services (#399)
+### 2.2 Request-scoped values — specified in `rfc-server-v3.md` §2 (#494)
 
-> **RE-OPENED by `rfc-server-v3.md` §2** (#491) — **do not implement against
-> this section.** Two of its stated guarantees do not hold against the code:
-> disposal "after the response has fully flushed" fires at the SHELL on every
-> WinterCG deploy (`server-renderer/src/server/fetch-handler.ts:163` returns the
-> Response from inside the scope), and `streamResponse` has four terminal paths,
-> not three. The shape itself is being re-derived from the measured problem
-> (#494); v3 §2.2 puts this design head to head with a smaller candidate and
-> picks with the argument written down.
+This section used to specify `defineServerService` (#399): two lifetimes
+(`'request'`/`'process'`), `onDispose`, an ambient-or-explicit accessor,
+`overrideServerService`, a captive-dependency throw, and a
+`__SIGX_SERVERFN_SERVICES__` global. **It is removed, not deferred.** v3 §2
+re-derived the mechanism from the measured problem — an in-process call gets a
+fresh `rq.locals` per call (`context.ts:85-113`), so a signed-in render decodes
+its session once per data cell — and accepted a smaller one. Keeping the old
+specification here would leave two mechanisms in the repo for one job, and the
+one still written down would be the one nobody is building.
 
-Server functions need services — a db pool, a session, repositories —
-with sane lifetimes. App DI (`defineFactory`/`defineInjectable`) is the
-wrong host: it is a UI-tree concept whose entry gate `runWithContext` is
-deliberately sync-only (no ALS in core — browsers have none), whose
-disposal is owned by `app.unmount()`, and whose package sits on the far
-side of a load-bearing firewall (`@sigx/server` never imports
-`runtime-core`; that is what keeps `./client` dependency-free). Request
-DI is a server concept, and its async-safe ambient carrier already
-exists: the request scope (`__SIGX_SERVERFN_SCOPE__`, v1.1). So the
-story completes on the server side, in this package:
+What replaces it, one line each; the argument is in v3 §2:
 
-```ts
-export type ServerServiceLifetime = 'request' | 'process';
+- **Request lifetime** — one shared per-request store. `rq.locals` is its
+  untyped face (shared across every call in one request/render, rather than the
+  per-call scratchpad it is today), and `defineRequestValue(setup)` is its typed
+  face: lazy, memoized including the promise, resolved from the `rq` every
+  server function already receives. No ambient no-argument form — the context
+  stays a parameter, as everywhere else in this RFC.
+- **Process lifetime** — module scope, per §1.5. A module-level `const` in a
+  `*.server.ts` is a process singleton whose dependency list is its import list.
+  On workerd it wants the lazy form — `let _p; export const db = () => (_p ??=
+  createPool(env.DATABASE_URL))` — because bindings do not exist at module
+  evaluation and some construction at global scope is forbidden there (the same
+  constraint that makes the detached `AbortSignal` lazy, `context.ts:121-124`).
+- **Disposal** — not in v1 (v3 §2.6). The contract `defineServerService`
+  promised could not be honored on WinterCG, where `createFetchHandler` settles
+  its scope at the shell; until the `keepAlive` extension lands, teardown
+  belongs to the app's own handler, which already owns the request.
+- **Testing** — no override seam. A request value is reached through the module
+  that defines it, so it is swapped the way any module is, or bypassed entirely
+  by passing an explicit context (`fn.with({ context })`).
+- **Making one visible to SSR components** is still userland and still
+  uncoupled: `app.defineProvide(useX, () => readX(rq))` in the per-request
+  entry.
+- **The rejected design, and why it lost**, is recorded in v3 §2.2(A). That is
+  where this decision lives; this pointer is only so nobody implements from a
+  stale section.
 
-export interface ServerServiceSetupContext {
-    /** Live request context. `'process'` setups get a throwing getter —
-     *  a process-wide instance must not close over one request. */
-    get rq(): ServerFnContext;
-    /** Teardown, LIFO. 'request': after the response has fully flushed
-     *  (streams included). 'process': only via test restore. */
-    onDispose(fn: () => void | Promise<void>): void;
-}
-
-/** Resolve with explicit rq, or bare inside a handled request (ambient). */
-export interface ServerService<T> {
-    (rq?: ServerFnContext): T;
-}
-
-export function defineServerService<T>(
-    setup: (ctx: ServerServiceSetupContext) => T,
-    lifetime?: ServerServiceLifetime          // default 'request'
-): ServerService<T>;
-
-/** Test seam: swap the setup until restore() runs; clears memoized
- *  'process' instances (running their disposers). */
-export function overrideServerService<T>(
-    service: ServerService<T>,
-    setup: (ctx: ServerServiceSetupContext) => T
-): () => void;
-```
-
-```ts
-// db.server.ts
-export const useDb = defineServerService(({ onDispose }) => {
-    const pool = createPool(env.DATABASE_URL);
-    onDispose(() => pool.end());
-    return pool;
-}, 'process');
-
-// session.server.ts — request-scoped, reads rq
-export const useSession = defineServerService(async ({ rq }) =>
-    decodeSession(rq.request.headers.get('cookie')));
-
-const requireUser: ServerFnGuard = async (rq) => {
-    const session = await useSession(rq);        // creates + memoizes
-    if (!session.user) throw new ServerFnError(401, 'Sign in');
-};
-
-export const getOrders = serverFn({
-    use: [requireUser],
-    handler: async (rq) => {
-        const session = await useSession(rq);    // same memoized promise
-        return (await useDb()).orders.byUser(session.user.id);
-    },
-});
-```
-
-**Semantics — locked:**
-
-- **Memoize what setup returned, never a second code path.** An async
-  setup means `T` is a promise, and the *promise* is memoized — a guard
-  and handler racing on first touch share one in-flight connect.
-- **Keying.** Per-request instances key on the request's context
-  *source*, not the derived per-call `rq` object: `contextFrom` stamps
-  its source init on the derived context (internal `CTX_SOURCE` symbol),
-  and resolution keys on that. So all in-process calls within one SSR
-  render share one instance, and `useSession()` vs `useSession(rq)`
-  inside one handler agree. `fn.with({ context })` keys on that explicit
-  init — deliberately its own scope.
-- **No lifetime fallback.** A `'request'` resolution with no request key
-  **throws** a descriptive error (pass `rq` explicitly, or call inside a
-  handled request) — it never silently serves a process instance. A
-  session service leaking across requests is the one bug this design
-  makes impossible.
-- **No captive dependencies — the `ValidateScopes` analog, always-on.**
-  `'process'` instances are created lazily, which means *during some
-  request* — so a process setup that resolved a `'request'` service
-  through the ambient scope would silently freeze one request's state
-  into a process-wide singleton (ASP.NET Core's classic captive-
-  dependency bug; it ships a dev-mode `ValidateScopes` check for exactly
-  this). The throwing `rq` getter blocks the direct capture; this rule
-  closes the indirect path: **while a `'process'` setup runs, resolving
-  any `'request'`-lifetime service throws** — always-on, not dev-only,
-  because the check is one flag on the resolution path and the bug is a
-  cross-tenant data leak.
-
-  ```ts
-  export const useMailer = defineServerService(() => {
-      const session = useSession();  // ✗ throws: 'request' service inside a
-                                     //   'process' setup — would capture one
-                                     //   request's session process-wide
-      return createMailer();
-  }, 'process');
-  ```
-
-  The remedy is always the same shape: take the request-scoped value as
-  an argument at *use* time (`mailer.send(session.user.email, …)`), or
-  make the service `'request'`-scoped if it truly varies per request.
-- **Workerd without `nodejs_compat`** (no ALS): `'process'` services are
-  unaffected; `'request'` services require the explicit `useX(rq)` form,
-  which guards and handlers always have in hand — ctx-first is the sigx
-  idiom. The API degrades to fully explicit, never to split state.
-- **Disposal is owned by whoever knows the response is truly finished.**
-  The scope runner disposes scopes it opens (SSR renders — covering
-  streamed continuations); the RPC endpoint owns its own requests —
-  buffered JSON and form responses on the work promise's settle (so the
-  `timeoutMs` race can never yank a pool from a still-settling handler),
-  streams on `streamResponse`'s three terminal paths (done, error,
-  cancel). Disposer errors are swallowed into the `onError` path (#349)
-  — teardown never turns a 200 into a 500. LIFO order.
-- **Detached-context calls** (in-process, nothing ambient or explicit):
-  instances key per-call and are GC'd with the context; `__DEV__` warns
-  when a disposer is registered there. Automatic detached disposal is a
-  deferred follow-up.
-- **The seam:** one new global, `__SIGX_SERVERFN_SERVICES__` (per-request
-  WeakMap + process Map behind a single accessor), for the same
-  dual-module-copy hazard that made `ServerFnError` a brand check —
-  registered in `docs/seams.md`.
-
-**The line against `rq.locals` — and where the types flow:** locals are
-the guard→handler hand-off for *values* (an auth result has no
-lifecycle); services are for things with **identity and teardown**. Both
-stay. The corollary deserves its own sentence, because it is sigx's
-answer to the strongest card in tRPC's hand — typed middleware-context
-accumulation, where each chained middleware *adds* to `ctx` and
-downstream code sees `ctx.user` statically. sigx does not thread types
-through middleware position; **the typed hand-off is a shared service,
-not a mutated context**:
-
-```ts
-const requireUser: ServerFnGuard = async (rq) => {
-    const { user } = await useSession(rq);   // typed: Session
-    if (!user) throw new ServerFnError(401, 'Sign in');
-};
-
-export const getOrders = serverFn({
-    use: [requireUser],
-    handler: async (rq) => {
-        const { user } = await useSession(rq); // SAME memoized instance the
-        return byUser(user!.id);               // guard saw — and `Session`'s
-    },                                         // type arrives via the import,
-});                                            // not via middleware position
-```
-
-The guard's resolution and the handler's are one memoized instance, so
-the guarantee tRPC encodes in builder-chain types sigx gets from
-instance identity plus the accessor's ordinary import type. What this
-deliberately does NOT give is the *narrowing* (`user!` above: the
-handler cannot statically know the guard already rejected null) — the
-price of no chained builder, paid once per handler as one assertion or a
-`requireUser`-style throwing accessor (`getUser(rq)` returning
-`NonNullable<…>`). `locals: Record<string, unknown>` stays untyped **by
-design**: if a local wants a type, it wants to be a service.
-
-**What this is not:** not tRPC's `createContext` (one eager god-object
-per request, a single choke-point file, no per-service lifetime — a
-pre-seed endpoint option can be added additively later if real demand
-appears), and not an app-DI bridge in any form (no per-request
-`AppContext`, no resolver seam, no ALS in core DI). A user who wants a
-per-request service visible to SSR *components* composes it in userland:
-`app.defineProvide(useX, () => useXService(rq))` in their per-request
-entry — no framework coupling.
+`rq.locals` stays `Record<string, unknown>`. When a value wants a *type* it
+wants to be a request value, whose accessor infers its own return type — there
+is nothing to cast, which is the point (v3 §2.8).
 
 ### 2.3 Putting it together — a worked service
 
-Every piece of §1.5–§2.2 in one place: a services module, a service
+Every piece of §1.5-§2.2 in one place: the request-derived values, a service
 module riding a preset, the client, and a test.
 
 ```ts
-// src/services.server.ts — services live where they're defined,
-// not in a composition root. Any module may define its own.
-import { defineServerService } from '@sigx/server';
+// src/services.server.ts — no composition root, no container. A module-level
+// const IS the process lifetime (§1.5); the lazy form is what workerd needs,
+// where bindings only exist inside `fetch`.
+let _pool: Pool | undefined;
+export const db = (): Pool => (_pool ??= createPool(process.env.DATABASE_URL!));
 
-/** Process lifetime: one pool, closed only by test restore. */
-export const useDb = defineServerService(({ onDispose }) => {
-    const pool = createPool(process.env.DATABASE_URL!);
-    onDispose(() => pool.end());
-    return pool;
-}, 'process');
+// src/request.server.ts — request lifetime: computed at most once per
+// request/render, shared by every guard, handler and nested in-process call.
+import { defineRequestValue } from '@sigx/server';
 
-/** Request lifetime (the default): async setup — the PROMISE is
- *  memoized, so guard and handler share one in-flight decode. */
-export const useSession = defineServerService(async ({ rq }) =>
+export const session = defineRequestValue(async (rq) =>
     decodeSession(rq.request.headers.get('cookie')));
-
-/** The around-middleware substitute: opens with first touch, closes
- *  when the response has fully flushed — streaming included. */
-export const useTrace = defineServerService(({ rq, onDispose }) => {
-    const span = tracer.startSpan(rq.url.pathname);
-    onDispose(() => span.end());
-    return span;
-});
 ```
 
 ```ts
 // src/cart.server.ts — the service IS the module (§1.5)
 import { serverFn, serverFnPreset, ServerFnError } from '@sigx/server';
 import type { ServerFnGuard } from '@sigx/server';
-import { useDb, useSession, useTrace } from './services.server';
+import { db } from './services.server';
+import { session } from './request.server';
 import { AddSchema } from './schemas';         // Standard Schema (zod/valibot/…)
 
 const requireUser: ServerFnGuard = async (rq) => {
-    useTrace(rq);                              // span opens with the request
-    const { user } = await useSession(rq);     // creates + memoizes
-    if (!user) throw new ServerFnError(401, 'Sign in');
+    if (!(await session(rq))?.user) throw new ServerFnError(401, 'Sign in');
 };
 
 const authed = serverFnPreset({ use: [requireUser] });   // same-module (§2.1)
@@ -655,16 +508,16 @@ export const add = authed({
     input: AddSchema,                          // statically-read options stay
     invalidates: () => [['cart']],             // at the call site, never in
     handler: async (rq, item) => {             // the preset
-        const { user } = await useSession(rq); // the instance the guard saw
-        return (await useDb()).cart.add(user!.id, item);
+        const { user } = (await session(rq))!; // the value the guard already
+        return db().cart.add(user.id, item);   // decoded — not a second decode
     },
 });
 
 export const list = authed({
     cache: { maxAge: 30 },                     // GET + Cache-Control (§4.1)
     handler: async (rq) => {
-        const { user } = await useSession(rq);
-        return (await useDb()).cart.list(user!.id);
+        const { user } = (await session(rq))!;
+        return db().cart.list(user.id);
     },
 });
 ```
@@ -679,29 +532,23 @@ const add   = useAction(cart.add);             // server-declared invalidates
 ```
 
 During SSR, `cart.list()` called by `useData` runs in-process inside the
-document handler's ambient scope (v1.1): `useSession` resolves against
-the real incoming request, and every service instance created during the
-render is disposed when the stream finishes — same code, no wiring.
+document handler's ambient scope (§7 v1.1): `session` resolves against the real
+incoming request, and every cell on the page shares **one** decode — the whole
+point of the request store.
 
 ```ts
-// cart.test.ts — override the process service, drive with an explicit context
-import { overrideServerService } from '@sigx/server';
-import { useDb } from './services.server';
+// cart.test.ts — drive it with an explicit context; no HTTP, no container
 import * as cart from './cart.server';
 
-const restore = overrideServerService(useDb, () => fakeDb());
-try {
-    const request = new Request('http://t.test/', { headers: { cookie } });
-    await expect(cart.add.with({ context: request })({ sku: 's1', qty: 2 }))
-        .resolves.toMatchObject({ count: 1 }); // guard ran, session decoded,
-} finally {                                    // fakeDb hit — no HTTP anywhere
-    restore();
-}
+const request = new Request('http://t.test/', { headers: { cookie } });
+await expect(cart.add.with({ context: request })({ sku: 's1', qty: 2 }))
+    .resolves.toMatchObject({ count: 1 });     // guard ran, session decoded once
 ```
 
-The dependency surface of `cart.server.ts` is its import list — no
-container, no registration, no decorators, and nothing here ships a
-byte to the client beyond the per-function stubs.
+The dependency surface of `cart.server.ts` is its import list — no container,
+no registration, no decorators, and nothing here ships a byte to the client
+beyond the per-function stubs.
+
 
 ## §3 The transform — `@sigx/vite/server`
 
@@ -1634,20 +1481,22 @@ option (revisit only if that proves painful).
   plugin `endpoint`/`role`/`scan`; stable-id seeds + stable symbols + dual
   registration + options-form `id`; live-client marker + throw;
   `@sigx/vite/server-extract`. Then the platform-repo adoptions (N.6).
-- **v3 — the services & DI story (#397)** — *superseded by `rfc-server-v3.md`
-  (#491), which keeps `serverFnPreset` (amended), re-opens
-  `defineServerService`, and adds guard completeness (#489). The entry below is
-  the original scoping, kept for the record:*
-  `serverFnPreset` (§2.1, #398 — runtime + extractor recognition +
-  preset-seeded symbols + the spread-hidden-static-keys warning) and
-  `defineServerService` (§2.2, #399 — `service.ts`, `CTX_SOURCE` keying,
-  `__SIGX_SERVERFN_SERVICES__` seam, scope/endpoint/stream disposal
-  ownership, the captive-dependency throw, `overrideServerService`).
-  Deferred from it, deliberately:
-  cross-module presets (plugin-level resolution over the extraction map —
-  excluded from the per-file pure extractors), preset-carried
-  `cache`/`id` defaults, automatic detached-call disposal, a `/testing`
-  entry (`createTestServerFnContext`), and an endpoint pre-seed option.
+- **v3 — request-scoped context & guard completeness (#491)** — specified in
+  `rfc-server-v3.md`; its §5 carries the phase list and the proof-tests each
+  phase owes. In order: `serverFnPreset` (§2.1, #398 — runtime + extractor
+  recognition + preset-seeded symbols + the spread-hidden-static-keys warning,
+  plus the `preset.stream` twin and the direct-form guard seam the original
+  scoping did not know were missing); the shared per-request store and
+  `defineRequestValue` (§2.2, #494); the nested-scope merge (#495);
+  `requireGuards` + `unauthenticated` (#489); and request-value disposal last,
+  behind the `keepAlive` scope extension. **Dropped from the original scoping:**
+  `defineServerService` and everything specific to it — two lifetimes,
+  `CTX_SOURCE` keying, the `__SIGX_SERVERFN_SERVICES__` seam, the
+  captive-dependency throw, `overrideServerService` (v3 §2.2 records why).
+  Still deferred, deliberately: cross-module presets (plugin-level resolution
+  over the extraction map — excluded from the per-file pure extractors),
+  preset-carried `cache`/`id` defaults, a `/testing` entry
+  (`createTestServerFnContext`), and an endpoint pre-seed option.
 - **Research**: bind extraction / write-without-upgrade (6.5), and a
   `serverComputed` sugar on top of it.
 
@@ -1682,10 +1531,18 @@ option (revisit only if that proves painful).
 - **An app-DI bridge.** *(#397)* No per-request `AppContext` smuggled
   into the request scope, no app-resolver seam, no ALS added to
   runtime-core DI. App DI's scope boundary is a component tree and its
-  gate is sync-only by design; request DI lives in `@sigx/server` (§2.2).
-  Likewise no `createContext` endpoint hook — eager centralized
-  construction with no per-service lifetime is the shape sigx keeps
-  declining; a pre-seed option remains an additive future possibility.
+  gate is sync-only by design; request-derived values live in
+  `@sigx/server` (§2.2 → `rfc-server-v3.md` §2). Likewise no
+  `createContext` endpoint hook — eager centralized construction with no
+  per-value lifetime is the shape sigx keeps declining; a pre-seed option
+  remains an additive future possibility.
+- **A request-DI container.** *(#399, v3)* Two lifetimes, a resolution
+  graph, a captive-dependency rule and an override seam were specified
+  once (`defineServerService`) and removed before implementation: the
+  process lifetime restates "services are modules" (§1.5), and one
+  lifetime cannot have the captive-dependency bug the rule existed to
+  prevent. Request-derived values are a memoized read off the request
+  store, not a container.
 - **Wrapper components.** No `<ServerBoundary>`, no RPC-Suspense.
   Everything here is functions and attributes.
 - **RPC machinery in `@sigx/server-renderer` core.** `@sigx/server` is a
