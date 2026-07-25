@@ -10,6 +10,10 @@
             "types": "./dist/index.d.ts",
             "import": "./dist/index.js"
         },
+        "./assets": {
+            "types": "./dist/assets.d.ts",
+            "import": "./dist/assets.js"
+        },
         "./hmr": {
             "types": "./dist/hmr.d.ts",
             "import": "./dist/hmr.js"
