@@ -181,7 +181,7 @@ export interface ServerFnOptions<S, R> {
 
 /**
  * The base chain of a plain `serverFn`/`serverStream` — one shared empty
- * array, so the un-presetted path never allocates and the loops that read it
+ * array, so the non-preset path never allocates and the loops that read it
  * cost an iterator that stops immediately.
  */
 const NO_GUARDS: readonly ServerFnGuard[] = [];
