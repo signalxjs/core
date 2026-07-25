@@ -38,6 +38,14 @@ describe('@sigx/cache', () => {
         return container;
     }
 
+    /** Unmount the app `mountWith` created for `container` (route-leave). */
+    function unmountApp(container: HTMLDivElement): void {
+        const i = containers.indexOf(container);
+        if (i < 0) return;
+        apps.splice(i, 1)[0].unmount();
+        containers.splice(i, 1)[0].remove();
+    }
+
     afterEach(() => {
         for (const app of apps.splice(0)) app.unmount();
         for (const c of containers.splice(0)) c.remove();
@@ -268,6 +276,85 @@ describe('@sigx/cache', () => {
         expect(other).toBe(1); // untouched
         expect(list.value).toBe(2);
         expect(item.value).toBe(2);
+    });
+
+    /**
+     * The same test as above with the `cache` option REMOVED from the reads —
+     * the shape a real app writes when it wants no cache policy, and the one
+     * that silently did nothing (#484). Every invalidation test in this file
+     * passed a `cache` option, which is exactly why CI never saw it: reads
+     * without one are delegated to core's default engine and never enter
+     * `CacheStore.entries`, so `invalidate()` swept a map they were not in.
+     */
+    it('invalidates reaches mounted reads that carry NO cache option', async () => {
+        let listCalls = 0;
+        let itemCalls = 0;
+        let other = 0;
+        let list!: AsyncState<number>, item!: AsyncState<number>, unrelated!: AsyncState<number>;
+        let save!: { run(input: void): Promise<{ ok: boolean }> };
+
+        const Root = component(() => {
+            list = useData(() => ['posts'] as const, async () => ++listCalls);
+            item = useData(() => ['posts', 'p1'] as const, async () => ++itemCalls);
+            unrelated = useData('users', async () => ++other);
+            save = useAction(async () => 'saved', { cache: { invalidates: [['posts']] } } as any);
+            return () => <div />;
+        });
+        mountWith(cachePlugin(), jsx(Root, {}));
+        await settle();
+        expect([listCalls, itemCalls, other]).toEqual([1, 1, 1]);
+
+        await save.run();
+        await settle();
+
+        // Prefix matching is the same contract as for cached reads.
+        expect(listCalls).toBe(2);
+        expect(itemCalls).toBe(2);
+        expect(other).toBe(1); // untouched
+        expect(list.value).toBe(2);
+        expect(item.value).toBe(2);
+        expect(unrelated.value).toBe(1);
+    });
+
+    /**
+     * The second half of the same bug, and the one nobody had noticed: the
+     * `__SIGX_ASYNC__` blob kept the stale value. Every successful fetch is
+     * written back there, and a fresh mount restores from it as 'ready'
+     * WITHOUT fetching — so invalidating a key that nothing is currently
+     * mounted on (the user is on another route) did nothing at all, and
+     * navigating back showed the pre-mutation value until a full page load.
+     */
+    it('invalidates sweeps the blob for keys with nothing mounted', async () => {
+        let calls = 0;
+        let save!: { run(input: void): Promise<{ ok: boolean }> };
+
+        const Read = component(() => {
+            useData('blob-key', async () => ++calls);
+            return () => <div />;
+        });
+        const Mutator = component(() => {
+            save = useAction(async () => 'saved', { cache: { invalidates: ['blob-key'] } } as any);
+            return () => <div />;
+        });
+
+        // Visit the route once, then leave it — the value stays in the blob.
+        const first = mountWith(cachePlugin(), jsx(Read, {}));
+        await settle();
+        expect(calls).toBe(1);
+        unmountApp(first);
+        await settle();
+
+        // Mutate while nothing reads that key.
+        mountWith(cachePlugin(), jsx(Mutator, {}));
+        await settle();
+        await save.run();
+        await settle();
+        expect(calls).toBe(1); // nothing mounted to refetch — correct
+
+        // Navigate back: the read must FETCH, not restore the stale value.
+        mountWith(cachePlugin(), jsx(Read, {}));
+        await settle();
+        expect(calls).toBe(2);
     });
 
     it('optimistic apply renders immediately; a failed run rolls back', async () => {

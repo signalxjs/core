@@ -146,6 +146,14 @@ server-declared form is the better default for server-owned data.
 (Declare it after `handler` in the literal — TypeScript infers `result`
 in textual order.)
 
+A pattern reaches **every** mounted `useData` read whose canonical key
+matches — a `cache` option is not required, and neither is the cache pack
+(#484). It also drops the matching keys from the SSR transfer blob, so
+navigating away and back refetches rather than restoring the pre-mutation
+value. Patterns are exact keys or tuple prefixes: `['cart']` matches
+`useData(() => ['cart', id], …)`, and a bare function reference matches every
+read of that server function.
+
 ### Single-flight boundary refresh
 
 A mutation can also carry **fresh UI** back in the same response

@@ -6,6 +6,35 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- **`invalidates` now reaches every mounted `useData` read, not only the ones
+  carrying a `cache` option (#484).** A mutation's `invalidates` — declaration-level
+  on a `serverFn`, or `useAction`'s `cache.invalidates` — silently refetched
+  nothing for reads without a `cache` option: `@sigx/cache` delegates those to
+  core's default engine, and they never enter `CacheStore.entries`, which is
+  the only map `invalidate()` scanned. The key shape was never the issue
+  (tuple prefixes matched correctly all along); the `cache` option was the
+  discriminator, and `packages/server/README.md`'s own §6.3 example — a
+  `useData(getTracker)` with no cache options — did not work.
+
+  Key-addressable refresh moves to `@sigx/runtime-core`, the only place that
+  can hold a registry of mounted cells: `invalidateKeys(patterns)` on
+  `runtime-core/internals` refreshes matching mounted cells AND drops matching
+  keys from the `__SIGX_ASYNC__` transfer blob. `@sigx/cache` delegates to it
+  and keeps its own entry sweep. Two consequences beyond the fix: `invalidates`
+  works with **no cache pack installed**, and the blob sweep closes a second,
+  unreported staleness — every successful fetch is written back to the blob and
+  a fresh mount restores from it as `ready` without fetching, so invalidating a
+  key the user had navigated away from previously did nothing, and navigating
+  back showed the pre-mutation value until a full page load.
+
+  Behaviour widening: calls that silently did nothing now refetch. A pattern
+  matching nothing dev-warns instead of failing silently. `preparePattern` /
+  `keyMatches` move to runtime-core and are re-exported from `@sigx/cache`
+  unchanged; `@sigx/server`'s §6.3 copy stays (that package takes no
+  runtime-core dependency by design) and the parity test still pins them.
+
 ### Added
 
 - **`@sigx/runtime-core` / `@sigx/server-renderer`**: a **function passed as children** is now invoked as a scoped slot — `<Comp>{(p) => <span>{p.greeting}</span>}</Comp>` calls the function with the slot's scoped props (Vue scoped-slots / Solid render-prop semantics), identical output to the `slots={{ default: (p) => … }}` prop form (#476). Previously a bare function child was dropped as an empty node; only functions provided via the `slots` prop received scoped props. Function items in the extracted default/named children arrays are invoked once per accessor call, so reactivity is preserved — the call happens inside the consumer's render — on both the client (`createSlots`) and SSR (`renderToString`), keeping hydration in agreement. A function returning `null`/`undefined` is dropped and an array is flattened one level, matching the `slots`-prop branch; named element-based slots (`slot="x"` children) are unaffected. Enables the `asChild` render-prop pattern without a userland workaround.

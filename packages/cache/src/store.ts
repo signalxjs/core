@@ -14,7 +14,9 @@ import {
     inertAbortSignal,
     peekRestored,
     invalidateRestored,
-    writeBack
+    writeBack,
+    invalidateKeys,
+    preparePattern
 } from '@sigx/runtime-core/internals';
 import type { CacheDefaults } from './options.js';
 
@@ -73,48 +75,18 @@ function domAttentionTrigger(revalidate: () => void): (() => void) | void {
 }
 
 
-/** A pattern with its canonical form precomputed, ready to test many keys. */
-export interface PatternMatcher {
-    /** True when `entryKey` matches the prepared pattern. */
-    match(entryKey: string): boolean;
-}
-
 /**
- * Prepare a pattern for matching against many keys: exact string equality, or
- * — for a tuple prefix — every entry whose canonical tuple starts with those
- * elements (`['posts']` matches `'["posts","u1",2]'`). The tuple's
- * `JSON.stringify` runs ONCE here, not once per entry — `invalidate()` scans
- * the whole store, so re-stringifying the pattern per entry was pure waste
- * (#469).
+ * Canonical-key pattern matching now lives in runtime-core
+ * (`packages/runtime-core/src/async/key-match.ts`): `invalidates` must mean
+ * the same thing for cached entries, for core's mounted `useData` cells, and
+ * for the SSR blob — one implementation, one meaning (#484). Re-exported here
+ * because this module was its published home.
  *
- * DUPLICATED in `@sigx/server`'s §6.3 gate (packages/server/src/server/
- * key-match.ts) — keep the two in sync (a parity test pins them); one
- * `invalidates` declaration must mean the same thing on both sides.
+ * `@sigx/server`'s §6.3 gate still keeps its own copy
+ * (packages/server/src/server/key-match.ts): that package takes no dependency
+ * on runtime-core by design. A parity test pins the two.
  */
-export function preparePattern(pattern: string | readonly unknown[]): PatternMatcher {
-    if (typeof pattern === 'string') {
-        return { match: (entryKey) => entryKey === pattern };
-    }
-    const canon = JSON.stringify(pattern); // '["posts","u1"]'
-    const prefix = canon.slice(0, -1); // '["posts","u1"'
-    const boundary = prefix.length;
-    return {
-        match: (entryKey) =>
-            entryKey === canon ||
-            (entryKey.startsWith(prefix) &&
-                (entryKey[boundary] === ',' || entryKey[boundary] === ']'))
-    };
-}
-
-/**
- * One-shot match — exact string equality, or a tuple prefix (element-boundary
- * guarded). The parity anchor (packages/server/__tests__/key-match.test.ts);
- * `invalidate()` itself uses {@link preparePattern} so the canonical form is
- * computed once, not once per entry.
- */
-export function keyMatches(entryKey: string, pattern: string | readonly unknown[]): boolean {
-    return preparePattern(pattern).match(entryKey);
-}
+export { preparePattern, keyMatches, type PatternMatcher } from '@sigx/runtime-core/internals';
 
 export class CacheStore {
     private entries = new Map<string, CacheEntry>();
@@ -319,18 +291,40 @@ export class CacheStore {
     /**
      * Mark entries matching the pattern stale and refetch the mounted ones
      * (entries with live subscribers and a known fetcher).
+     *
+     * Two populations, not one (#484). `entries` holds only reads that carry a
+     * `cache` option — everything else is delegated to core's default engine
+     * by `createCacheEngine().read()` and never enters this map, so scanning
+     * `entries` alone made `invalidates` a silent no-op for them. Core's
+     * mounted-cell registry owns that half and sweeps the SSR blob with it.
      */
     invalidate(pattern: string | readonly unknown[]): void {
         // Prepare once: `invalidate` scans every entry, and re-stringifying
         // the pattern inside the loop was the whole cost at scale (#469).
         const matcher = preparePattern(pattern);
+        let touched = 0;
         for (const entry of this.entries.values()) {
             if (!matcher.match(entry.key)) continue;
+            touched++;
             entry.updatedAt = 0; // stale for every future staleTime check
             invalidateRestored(entry.key);
             if (entry.subscribers.size > 0 && entry.fetcher) {
                 void this.fetch(entry.key, entry.fetcher, entry.rawArg, true);
             }
+        }
+        // Cache-less reads (and blob keys nothing is mounted on).
+        touched += invalidateKeys([pattern]);
+
+        if (__DEV__ && touched === 0) {
+            console.warn(
+                `[sigx cache] invalidate(${JSON.stringify(pattern)}) matched nothing — ` +
+                'no cached entry, no mounted useData cell and no transferred state. ' +
+                'A key is the canonical form of what the read passed to useData: ' +
+                "useData(['posts', id], …) has key '[\"posts\",<id>]', and a tuple " +
+                'pattern matches by PREFIX. A bare function reference matches every ' +
+                'read of that server function. Check the pattern against the key the ' +
+                'read actually uses — this call did nothing.'
+            );
         }
     }
 

@@ -26,7 +26,8 @@ import {
     makeAbortController,
     inertAbortSignal,
 } from './shared.js';
-import { peekRestored, invalidateRestored, writeBack } from './restore.js';
+import { peekRestored, invalidateRestored, writeBack, restoredKeys } from './restore.js';
+import { preparePattern } from './key-match.js';
 import { isLiveClient } from './environment.js';
 
 /**
@@ -41,6 +42,79 @@ interface InflightEntry {
     refs: number;
 }
 const inflight = new Map<string, InflightEntry>();
+
+/**
+ * Mounted cells by canonical key — the registry {@link invalidateKeys} sweeps
+ * (#484).
+ *
+ * `inflight` above looks like this but is not: it is an in-flight DEDUPE map,
+ * keyed by a run that is currently happening, and it empties as fetches
+ * settle. Nothing here could address a settled, mounted cell by its key, which
+ * is why a mutation's `invalidates` reached only reads carrying a `cache`
+ * option — those live in `@sigx/cache`'s `CacheStore.entries`, and every other
+ * read is served by the default engine and was invisible to it.
+ *
+ * Refresh is mechanism, not cache POLICY: the mounted-cell registry is
+ * something only core can hold, so it lives here and the cache pack delegates.
+ * That is also what makes `invalidates` work with no cache pack installed.
+ */
+const mountedByKey = new Map<string, Set<() => void>>();
+
+function registerMounted(key: string, refresh: () => void): void {
+    let set = mountedByKey.get(key);
+    if (!set) mountedByKey.set(key, (set = new Set()));
+    set.add(refresh);
+}
+
+function unregisterMounted(key: string, refresh: () => void): void {
+    const set = mountedByKey.get(key);
+    if (!set) return;
+    set.delete(refresh);
+    if (set.size === 0) mountedByKey.delete(key);
+}
+
+/**
+ * Refresh every mounted `useData` cell whose canonical key matches any of
+ * `patterns`, and drop the matching entries from the SSR transfer blob.
+ *
+ * Both halves matter. Refreshing the mounted cells is the visible effect; the
+ * blob sweep is what stops a stale value coming BACK. `startRun` writes every
+ * successful fetch into `__SIGX_ASYNC__`, and `setKey` restores from it as
+ * `ready` without fetching — so an invalidation that skipped the blob would be
+ * undone by the next unmount/remount (a client-side navigation away and back),
+ * with no refetch at all, until a full page load.
+ *
+ * Returns the number of keys touched, so a caller can dev-warn when a pattern
+ * matched nothing (a silent no-op is how #484 stayed invisible for so long).
+ *
+ * @internal
+ */
+export function invalidateKeys(patterns: ReadonlyArray<string | readonly unknown[]>): number {
+    if (patterns.length === 0) return 0;
+    const matchers = patterns.map(preparePattern);
+    let touched = 0;
+
+    // Collect first: a refresh() may settle synchronously and re-register, and
+    // mutating the map mid-iteration is how that turns into a missed cell.
+    const hits: Array<() => void> = [];
+    for (const [key, set] of mountedByKey) {
+        if (!matchers.some(m => m.match(key))) continue;
+        touched++;
+        invalidateRestored(key);
+        for (const refresh of set) hits.push(refresh);
+    }
+    // The blob can hold keys nothing is mounted on (a route the user has left,
+    // or one SSR transferred and the client has not read yet) — those must be
+    // swept too, or remounting restores the stale value.
+    for (const key of restoredKeys()) {
+        if (mountedByKey.has(key)) continue; // already swept above
+        if (!matchers.some(m => m.match(key))) continue;
+        touched++;
+        invalidateRestored(key);
+    }
+    for (const refresh of hits) refresh();
+    return touched;
+}
 
 /** @internal — engine handle returned to `useData` (the `cell` is the public object). */
 export interface DataCellHandle<T> {
@@ -194,11 +268,20 @@ export function createDataCell<T>(
         }
     }
 
+    /**
+     * Stable identity in the mounted registry: `invalidateKeys` holds this,
+     * not the cell, so the Set entry can be removed on key change and dispose
+     * without depending on `refresh`'s closure identity.
+     */
+    const onInvalidate = (): void => { void refresh(); };
+
     function setKey(canon: string | null, raw: unknown): void {
         untrack(() => {
             rawArg = raw;
             if (canon === canonKey) return; // same canonical identity — no-op
+            if (canonKey !== null) unregisterMounted(canonKey, onInvalidate);
             canonKey = canon;
+            if (canon !== null) registerMounted(canon, onInvalidate);
             runId++; // supersede any in-flight observation
             release();
             stale = null;
@@ -279,6 +362,8 @@ export function createDataCell<T>(
         dispose() {
             runId++;
             release();
+            if (canonKey !== null) unregisterMounted(canonKey, onInvalidate);
+            canonKey = null;
         },
     };
 }
