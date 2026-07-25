@@ -416,7 +416,16 @@ describe('config hook — resolve.alias (serve, #487)', () => {
             // only, so a src alias would leave the family referencing an
             // undefined global.
             expect(config.resolve.alias[pkg]).not.toMatch(/[/\\]src[/\\]/);
-            expect(fs.existsSync(config.resolve.alias[pkg])).toBe(true);
+            expect(config.resolve.alias[pkg]).toMatch(/[/\\]dist[/\\]/);
+            // Existence is a claim about the BUILD, not about this config hook,
+            // and it only holds after `pnpm build` — which CI runs before
+            // `pnpm test` (ci.yml), but a fresh clone does not (#512). Asserting
+            // it unconditionally made `pnpm test` fail on any tree that had
+            // never built, which reads as "the alias map is broken" and is not.
+            // Where the dist exists, the check still runs.
+            if (fs.existsSync(path.dirname(config.resolve.alias[pkg]))) {
+                expect(fs.existsSync(config.resolve.alias[pkg])).toBe(true);
+            }
         }
     });
 

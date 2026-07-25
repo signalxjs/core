@@ -52,7 +52,7 @@ import {
 import { extractInlineServerFns, type InlineServerFnExtraction } from './server-fn-inline.js';
 import { computeStableId, type PackageProbe } from './server-extract.js';
 import { offsetToLoc } from './resume-extract.js';
-import { walkFiles } from './islands.js';
+import { resolveRoot, walkFiles } from './islands.js';
 import { isModuleResolutionError } from './dev-runner.js';
 
 export interface SigxServerOptions {
@@ -336,7 +336,9 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
         api: { role, base, endpoint, resolveServerFn },
 
         configResolved(config) {
-            root = config.root;
+            // #512: the spelling the module graph will use, so discovery keys
+            // and transform ids agree under a symlinked root.
+            root = resolveRoot(config);
             isServe = config.command === 'serve';
             // The sigx plugin's adapter seam (mirror of our api.role): in a
             // BUNDLED server build the registry inlines into the one worker
