@@ -151,6 +151,14 @@ export interface ServerFnOptions<S, R> {
      * the mapping tool) — and answers 303 POST-redirect-GET. The build
      * stamps `action`/`method` onto a resume `<form>` whose submit
      * handler calls this fn, so the native POST works before/without JS.
+     *
+     * **The no-JS half needs a RESUME component.** Stamping happens in the
+     * `sigxResume()` extractor, so it reaches only files matching that
+     * plugin's `include` (`*.resume.tsx` / `resume/**` by default), and only
+     * components that extract in `resume` mode — one unextractable capture
+     * demotes the component and the action goes with it. A `<form>` anywhere
+     * else still works as RPC, it just has no native fallback. Both cases
+     * warn at build time since #488; before that they were silent.
      * Write the LITERAL `true` — the build reads it statically, and the
      * type accepts only the literal (`form: someBool` would type-check but
      * silently fail extraction, #437). REQUIRES `input` (definition-time

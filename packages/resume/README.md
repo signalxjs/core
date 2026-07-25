@@ -88,6 +88,52 @@ a refresh — drops converge through cache invalidation. In dev, pass
 exporting the same `createBoundaryRefresh` result (see
 `examples/resume/src/dev-refresh.ts`).
 
+## Client
+
+Two postures, and picking the wrong one is silent — so pick deliberately.
+
+### Coexisting with a hydrated app (the common case)
+
+An app that has a root — a shell, a router, ordinary interactive components —
+and *also* wants some resumable components on the page. Install the plugin on
+the **server** app, and on the client import only the generated loader entry:
+
+```ts
+// entry-client.tsx
+import { defineApp } from 'sigx';
+import 'virtual:sigx-resume/entry';   // the delegation loader — that's it
+import { App } from './App';
+
+const app = defineApp(<App />);
+app.hydrate(document.getElementById('app')!);
+```
+
+Nothing else is needed, and that is the point: `hydrate()` walks the root as
+usual and **skips** resume boundaries on the way past — they are recorded
+`hydrate: 'never'` by the server plugin — while everything around them
+hydrates normally. The loader wakes a boundary on first interaction.
+
+You *may* also `app.use(resumePlugin())` on the client (it is harmless — the
+client half only registers provides), but it is not required.
+
+> **Before #483 this was a trap.** `resumePlugin()`'s install declared
+> `boundaries: 'explicit'` unconditionally, which switches `hydrate()` to the
+> no-root-walk path. Combined with `hydrate: 'never'` records, that meant an
+> app installing the plugin on the client hydrated **nothing at all** — a dead
+> shell, with no error and no warning. The plugin no longer declares a mode
+> unless you ask for one.
+
+### App-less resumable pages
+
+A page whose entire bootstrap is the generated loader entry — no root app, no
+hydration walk, ~1 KB of JS. Nothing to configure; just don't create an app.
+If you *do* have an app and deliberately want no root walk (the islands
+posture), say so explicitly:
+
+```ts
+app.use(resumePlugin({ boundaries: 'explicit' }));
+```
+
 ## Writing resumable components
 
 Ordinary sigx components in resume modules (`*.resume.tsx` or under a

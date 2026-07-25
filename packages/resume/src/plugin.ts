@@ -84,19 +84,28 @@ interface ResumeStamps {
  *   components carrying the transform's `__resumeId` stamp — unless the
  *   usage site also carries a `client:*` islands directive, which islands
  *   owns (`app.use(islandsPlugin()).use(resumePlugin())` when combining).
- * - On the client (coexist mode: `app.use(resumePlugin())`): declares
- *   explicit-boundaries mode. The upgrade restore hook is NOT registered
- *   here — `client/upgrade.ts` registers it lazily on first upgrade, so
- *   app-less resumable pages (whose whole bootstrap is the generated loader
- *   entry) get it for free and this module stays free of client-runtime
- *   imports.
+ * - On the client, installing on an app **coexists** with normal hydration:
+ *   `hydrate()` still walks the root, and resume boundaries are skipped on
+ *   the way past for the loader to wake on interaction. Pass
+ *   `{ boundaries: 'explicit' }` to opt out of the root walk (the app-less /
+ *   islands posture). The upgrade restore hook is NOT registered here —
+ *   `client/upgrade.ts` registers it lazily on first upgrade, so app-less
+ *   resumable pages (whose whole bootstrap is the generated loader entry)
+ *   get it for free and this module stays free of client-runtime imports.
  */
 export function resumePlugin(options?: ResumePluginOptions): SSRPack {
     const pack: SSRPack = {
         name: PLUGIN_NAME,
 
         install(app: App) {
-            provideHydrateDefaults(app._context, { boundaries: 'explicit' });
+            // Only when asked for. Declaring 'explicit' here used to be
+            // unconditional, which took `hydrate()` down the no-root-walk
+            // path: it schedules table boundaries and returns, and every
+            // resume record is `hydrate: 'never'`, so an app that installed
+            // this plugin hydrated NOTHING — a dead shell, no warning (#483).
+            if (options?.boundaries) {
+                provideHydrateDefaults(app._context, { boundaries: options.boundaries });
+            }
             // Hand the server render hooks to the SSR pipeline (#413). The
             // closed-over `pack` is the one object both faces share — plugin
             // identity stays stable for dedupe, and no `this` cast is needed.
