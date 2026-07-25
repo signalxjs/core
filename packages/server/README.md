@@ -392,6 +392,17 @@ its endpoint, as every app with server functions does — has ambient context
 with no wiring at all. Call `runWithServerFnContext` yourself for renders sigx
 does not own, or to supply a request with your own abort wiring.
 
+Nesting **merges** rather than replacing: wrapping a render that opens its own
+scope is the point of form 2, so
+`runWithServerFnContext({ request, locals: { user } }, () => renderHandler(…))`
+is carried through — the inner scope's fields win where supplied, and the
+enclosing `locals` stays the request store. "Same request" means same URL +
+method (protocol excluded, so a TLS-terminating proxy does not split it);
+anything else gets its own store and a once-per-process dev notice naming both.
+Two ways to be deliberate: pre-seed with `{ locals }` and no request — it makes
+no claim about which request it is, so it always merges — or hand a nested
+render its own `locals` to isolate it on purpose.
+
 `runWithServerFnContext` uses `AsyncLocalStorage`, so the request survives
 every `await` in the render without threading a parameter through user code.
 It needs Node, Deno, or workerd with `nodejs_compat`; where it is missing the

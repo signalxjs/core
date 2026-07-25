@@ -7,7 +7,7 @@
  * (they hold no `Request`), and the endpoint scoping its own invocation.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { serverFn } from '../src/index';
 import { handleServerFnRequest } from '../src/server/index';
 import { runInScope, toContextInit, toScopeInit, type ServerFnScope } from '../src/scope';
@@ -258,5 +258,147 @@ describe('toScopeInit', () => {
         const node = toScopeInit(nodeRequest({ host: 'app.test' }));
         expect(node.request).toBeInstanceOf(Request);
         expect(node.locals).toEqual({});
+    });
+});
+
+/* ------------------------------------------------------------------ */
+/* nested scopes (rfc-server-v3 §2.7, F-D, #495)                       */
+/* ------------------------------------------------------------------ */
+
+describe('nested scopes', () => {
+    /** The documented pre-seed recipe, wrapped around a render that opens its
+     *  own scope with the raw node request — which is what the document
+     *  handlers in @sigx/server-renderer do. */
+    const render = async <T,>(fn: () => Promise<T>): Promise<T> =>
+        runInScope(nodeRequest({ host: 'app.test' }, '/board'), fn);
+
+    const preSeed = {
+        request: new Request('http://app.test/board'),
+        locals: { user: 'alice' } as Record<string, unknown>
+    };
+
+    it('the documented pre-seed survives the renderer’s inner scope', async () => {
+        const read = serverFn(async (rq) => rq.locals.user);
+        // Before #495 the inner scope REPLACED the store and this was
+        // undefined — silently, which is what made it the first thing an app
+        // reached for and the first thing that failed.
+        await expect(runInScope(preSeed, () => render(() => read()))).resolves.toBe('alice');
+    });
+
+    it('shares one store — a value written inside reaches the outer bag', async () => {
+        const write = serverFn(async (rq) => {
+            rq.locals.seen = true;
+            return null;
+        });
+        await runInScope(preSeed, () => render(() => write()));
+        expect(preSeed.locals.seen).toBe(true);
+        delete preSeed.locals.seen;
+    });
+
+    it('the inner source’s fields win where supplied', async () => {
+        const read = serverFn(async (rq) => [rq.url.pathname, rq.request.headers.get('cookie')]);
+        const seen = await runInScope(preSeed, () =>
+            runInScope(nodeRequest({ host: 'app.test', cookie: 'sid=1' }, '/board'), () => read())
+        );
+        // The inner request is the one in scope…
+        expect(seen).toEqual(['/board', 'sid=1']);
+    });
+
+    it('a DIFFERENT url opens a fresh store', async () => {
+        const read = serverFn(async (rq) => rq.locals.user);
+        await expect(
+            runInScope(preSeed, () =>
+                runInScope(nodeRequest({ host: 'app.test' }, '/other'), () => read())
+            )
+        ).resolves.toBeUndefined();
+    });
+
+    it('a DIFFERENT method opens a fresh store', async () => {
+        const read = serverFn(async (rq) => rq.locals.user);
+        const inner = { ...nodeRequest({ host: 'app.test' }, '/board'), method: 'POST' };
+        await expect(
+            runInScope(preSeed, () => runInScope(inner, () => read()))
+        ).resolves.toBeUndefined();
+    });
+
+    it('a protocol-only difference does NOT split — the proxy case', async () => {
+        // The outer key is built from a hand-rolled http:// Request; the inner
+        // from a node request behind a TLS-terminating proxy. Same request.
+        const read = serverFn(async (rq) => rq.locals.user);
+        await expect(
+            runInScope(preSeed, () =>
+                runInScope(
+                    nodeRequest({ host: 'app.test', 'x-forwarded-proto': 'https' }, '/board'),
+                    () => read()
+                )
+            )
+        ).resolves.toBe('alice');
+    });
+
+    it('an enclosing init with no request always merges — the {locals}-only pre-seed', async () => {
+        const read = serverFn(async (rq) => rq.locals.user);
+        // Makes no claim about which request it is, so merging is unambiguous.
+        await expect(
+            runInScope({ locals: { user: 'bob' } }, () => render(() => read()))
+        ).resolves.toBe('bob');
+    });
+
+    it('an inner source carrying its OWN locals keeps them — the isolation hatch', async () => {
+        const read = serverFn(async (rq) => rq.locals.user);
+        await expect(
+            runInScope(preSeed, () =>
+                runInScope({ request: new Request('http://app.test/board'), locals: {} }, () =>
+                    read()
+                )
+            )
+        ).resolves.toBeUndefined();
+    });
+
+    it('sibling (non-nested) scopes still isolate', async () => {
+        const seed = serverFn(async (rq, value: string) => {
+            rq.locals.user = value;
+            return null;
+        });
+        const read = serverFn(async (rq) => rq.locals.user);
+        const one = async (value: string): Promise<unknown> =>
+            runInScope(nodeRequest({ host: 'app.test' }, '/board'), async () => {
+                await seed(value);
+                await new Promise((resolve) => setTimeout(resolve, 1));
+                return read();
+            });
+        await expect(Promise.all([one('alice'), one('bob')])).resolves.toEqual(['alice', 'bob']);
+    });
+});
+
+describe('the different-request notice', () => {
+    it('names both keys and fires once per process', async () => {
+        // A fresh module graph, so the once-per-process latch is unset —
+        // asserting it from a shared graph would only ever prove test order.
+        vi.resetModules();
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        try {
+            const scope = await import('../src/scope');
+            const outer = { request: new Request('http://app.test/board'), locals: {} };
+
+            await scope.runInScope(outer, () =>
+                scope.runInScope(nodeRequest({ host: 'app.test' }, '/subrequest'), () => null)
+            );
+            await scope.runInScope(outer, () =>
+                scope.runInScope(nodeRequest({ host: 'app.test' }, '/another'), () => null)
+            );
+
+            const notices = warn.mock.calls
+                .map(([m]) => String(m))
+                .filter((m) => m.includes('names a different request'));
+            expect(notices).toHaveLength(1);
+            // Both keys, so the author can see WHY the merge was declined —
+            // a host rewritten by a proxy is the likely surprise.
+            expect(notices[0]).toContain('GET app.test/board');
+            expect(notices[0]).toContain('GET app.test/subrequest');
+            expect(notices[0]).toContain('its OWN request store');
+        } finally {
+            warn.mockRestore();
+            vi.resetModules();
+        }
     });
 });

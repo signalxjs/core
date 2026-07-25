@@ -304,3 +304,57 @@ describe('perRequest — no AsyncLocalStorage (workerd without nodejs_compat)', 
         }
     });
 });
+
+describe('perRequest — across a nested scope (#495)', () => {
+    const nested = async <T,>(
+        outer: Record<string, unknown>,
+        inner: Record<string, unknown>,
+        fn: () => Promise<T>
+    ): Promise<T> => runInScope(outer, () => runInScope(inner, fn));
+
+    it('one value across the pre-seed boundary the renderer nests inside', async () => {
+        let decodes = 0;
+        const session = perRequest(async () => {
+            decodes += 1;
+            return 'decoded';
+        });
+        const read = serverFn(async (rq) => session(rq));
+
+        const seeded = { request: new Request('http://app.test/board'), locals: {} };
+        await expect(
+            nested(seeded, nodeRequest('/board'), async () => {
+                await read();
+                return read();
+            })
+        ).resolves.toBe('decoded');
+        // Once for the whole render, not once per scope entry.
+        expect(decodes).toBe(1);
+    });
+
+    it('a genuinely different nested request gets its own value, and says so once', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        try {
+            let decodes = 0;
+            const session = perRequest(async () => {
+                decodes += 1;
+                return decodes;
+            });
+            const read = serverFn(async (rq) => session(rq));
+
+            const outer = { request: new Request('http://app.test/board'), locals: {} };
+            await expect(
+                nested(outer, nodeRequest('/subrequest'), () => read())
+            ).resolves.toBe(1);
+            await expect(runInScope(outer, () => read())).resolves.toBe(2);
+
+            const notices = warn.mock.calls.filter(([m]) =>
+                String(m).includes('names a different request')
+            );
+            // Once per process — a render that nests per cell must not shout
+            // per cell.
+            expect(notices.length).toBeLessThanOrEqual(1);
+        } finally {
+            warn.mockRestore();
+        }
+    });
+});

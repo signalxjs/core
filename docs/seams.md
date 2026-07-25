@@ -235,6 +235,13 @@ with no scope registered the handlers call straight through, so
 AsyncLocalStorage stays never-required (rfc-ssr-platform §2.3) and an app
 without `@sigx/server` pays nothing.
 
+A nested `run()` for the SAME request — same URL + method, protocol excluded —
+MERGES into the enclosing scope instead of replacing it (#495): the inner
+source's fields win where supplied and the enclosing `locals` stays the request
+store, so the documented `runWithServerFnContext({ request, locals }, …)`
+pre-seed survives the handler opening its own scope around the render. A
+different request opens a fresh store with a once-per-process `__DEV__` notice.
+
 Re-stamped on every scope entry, not just the first: anything may clobber or
 delete a global, and a store nothing can read is a worse failure than a
 redundant assignment. A throwing resolver is swallowed — the detached

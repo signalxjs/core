@@ -59,6 +59,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- **`@sigx/server`: a nested request scope no longer clobbers the enclosing one
+  (#495).** The README documented
+  `runWithServerFnContext({ request, locals: { user } }, () => renderHandler(…))`
+  as the way to pre-seed a render, and it silently did nothing: the document
+  handlers open their own inner scope with the raw request, and an inner scope
+  replaced the stored value. A nested scope for the **same request** — same URL
+  and method, protocol excluded so a TLS-terminating proxy does not split it —
+  now merges: the inner source's fields win where supplied, the enclosing
+  `locals` stays the request store. A source naming no request always merges,
+  so `runWithServerFnContext({ locals }, …)` is the simplest pre-seed; anything
+  genuinely different gets its own store plus a once-per-process dev notice
+  naming both. Hand a nested render its own `locals` to isolate it deliberately.
+
 - **`@sigx/resume`: `app.use(resumePlugin())` on the CLIENT no longer disables
   full-tree hydration (#483).** Its install declared
   `boundaries: 'explicit'` unconditionally, which takes `hydrate()` down the

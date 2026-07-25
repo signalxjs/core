@@ -37,6 +37,30 @@
 
 ### Changed
 
+- **A nested request scope MERGES into the enclosing one instead of clobbering
+  it (#495).** `runInScope` replaced the stored value outright, and the
+  document handlers always open their own inner scope with the raw request — so
+  the README's own recipe,
+  `runWithServerFnContext({ request, locals: { user } }, () => renderHandler(…))`,
+  silently discarded the pre-seed and every call inside saw `locals: {}`. That
+  is the first thing an app reaches for when it hits the missing per-request
+  slot, so the two failures compounded. A nested scope for the **same request**
+  now keeps the enclosing store: the inner source's fields win where supplied,
+  and the enclosing `locals` stays the store, so one render has one store no
+  matter how many times a scope is opened around it.
+
+  **Same request = same URL + method.** Object identity was the alternative and
+  is too strict to fix the bug it exists for — the Node path builds a fresh
+  `Request` from the `IncomingMessage` on every scope entry, so identity would
+  leave the recipe broken exactly where it is documented. Protocol is excluded
+  from the comparison, since `socket.encrypted` and `x-forwarded-proto` are two
+  legitimate normalizations of one wire request and a TLS-terminating proxy
+  must not split the store. A source that names **no** request makes no claim
+  and always merges — so `runWithServerFnContext({ locals }, …)` is the
+  simplest pre-seed there is. Anything else opens a fresh store and `__DEV__`
+  says so once per process, naming both keys; to isolate a nested render on
+  purpose (a subrequest for a different principal), hand it its own `locals`.
+
 - **The request scope stores `{ request, locals }`, not a bare `Request`
   (#494).** `rq.locals` is now genuinely shared by every in-process call in one
   request/render instead of being a fresh `{}` per call — it is the untyped
