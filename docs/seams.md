@@ -62,7 +62,7 @@ ordinarily fine.
 | | |
 |---|---|
 | **Written by** | `server-renderer/src/server/state.ts` → `assignmentJs` (`server/serialize.ts`), from `server/state-plugin.ts` — shell script, mid-stream preScripts, and the `onStreamEnd` final drain. Server-side, packs feed it through `ctx.registerSerializedState` (#407), **the only public writer** — useAsync/useStream record their keys through the same `_unflushedAsyncKeys` dirty-set internally. |
-| **Read by** | `runtime-core/src/async/restore.ts` — `peekRestored`, **the only accessor**. `@sigx/cache` imports it (plus `writeBack`/`invalidateRestored`) from `@sigx/runtime-core/internals` rather than touching the global. |
+| **Read by** | `runtime-core/src/async/restore.ts` — `peekRestored`, **the only accessor**. `@sigx/cache` imports it (plus `writeBack`/`invalidateRestored`/`restoredKeys`) from `@sigx/runtime-core/internals` rather than touching the global. |
 | **Shape** | Null-prototype object, `key → value`. Values are encoded by `@sigx/serialize`. |
 
 `peekRestored` is therefore also **the** decode point: the codec is applied in
@@ -70,6 +70,18 @@ exactly one place for this seam.
 
 The page's data cache for its lifetime: every mount of the same key restores
 from it, including after client-side navigation.
+
+**Presence is own-key membership, not truthiness** — `peekRestored` returns
+`{ hit, value }` and tests `hasOwnProperty`, so a transferred `null` (or an
+`undefined` carried by the codec's `$undef` handler) is a hit, not a miss.
+Nothing here needs a presence wrapper.
+
+That lifetime is why **invalidation must sweep this blob, not only a pack's
+own store** (#484): a key left here outlives the cell that fetched it, and the
+next mount restores it as `ready` without fetching.
+`invalidateKeys(patterns)` (`runtime-core/internals`) is the one entry point
+that does both halves — refresh the mounted cells, drop the matching keys —
+and `restoredKeys()` exists so a pattern can reach keys nothing is mounted on.
 
 The accessors gate on `isLiveClient()`, not `typeof window` (#407): servers
 stay inert, browsers are live via the fallback, and a windowless client that

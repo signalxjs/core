@@ -254,13 +254,71 @@ await withApp({ filter: '@sigx/spa-ssr-example', dir: 'examples/spa-ssr', port: 
     async (page, origin) => {
         console.log('\n[hydration-smoke] spa-ssr (root walk)');
 
-        for (const route of ['/', '/about', '/counter']) {
+        // `/router-stream` is deliberately NOT in this loop — it gets one
+        // navigation in the dedicated block below, which makes the same two
+        // assertions plus its own.
+        for (const route of ['/', '/about', '/counter', '/data']) {
             await page.goto(origin + route, { waitUntil: 'load', timeout: 20000 });
             await settle(page);
 
             const ev = await assertMarkerSurvival(page, `spa-ssr ${route}`);
             assert(ev.hydratorRan, `spa-ssr ${route}: the hydrator ran (#app._vnode set)`);
         }
+
+        // ---- The streamed router shape (#492) ---------------------------
+        //
+        // `/router-stream` is the one route whose page component's ENTIRE
+        // render is a streamed region, reached through pass-through ancestors
+        // — the shape every real router app has, and the one the marker
+        // oracle above is blind to. A component left with a wrong (or null)
+        // `dom` still renders a perfect first paint; it only fails on the
+        // NEXT patch, so nothing short of navigating away can see it. That is
+        // what #478 shipped as fixed and #492 found still broken.
+        await page.goto(origin + '/router-stream', { waitUntil: 'load', timeout: 20000 });
+        await settle(page);
+
+        const rsEv = await assertMarkerSurvival(page, 'spa-ssr /router-stream');
+        assert(rsEv.hydratorRan, 'spa-ssr /router-stream: the hydrator ran (#app._vnode set)');
+
+        // Content the LAYOUT renders after the routed page is hydrated in
+        // place, once. Pre-#492 the layout descended into the placeholder and
+        // mounted a second copy of it inside the wrapper.
+        assert(
+            (await page.locator('.rs-after').count()) === 1,
+            'spa-ssr /router-stream: layout content after the routed page is not duplicated'
+        );
+        assert(
+            (await page.locator('[data-async-placeholder] .rs-after').count()) === 0,
+            'spa-ssr /router-stream: layout content is not re-parented into the placeholder'
+        );
+        assert(
+            (await page.locator('.rs-tail').count()) === 1,
+            'spa-ssr /router-stream: the streamed region\'s own content is rendered once'
+        );
+
+        // Navigate away and back. Uncaught `parentNode of null` — the reported
+        // #478 crash — is picked up by the page-level `pageerror` handler.
+        await page.locator('nav a', { hasText: 'Counter' }).first().click();
+        await page.waitForTimeout(300);
+        assert(
+            (await page.locator('.rs-tail').count()) === 0,
+            'spa-ssr /router-stream: leaving the route unmounts the streamed region'
+        );
+        // Nothing may be left living inside the dead placeholder: it survives
+        // an unmount by design, and `display: contents` hides it from layout
+        // but NOT from `#app > div`-style selectors, so a route re-parented
+        // into it is a real styling bug.
+        assert(
+            (await page.locator('[data-async-placeholder] *').count()) === 0,
+            'spa-ssr /router-stream: the next route mounts outside the dead placeholder'
+        );
+
+        await page.locator('nav a', { hasText: 'Router stream' }).first().click();
+        await page.waitForTimeout(300);
+        assert(
+            (await page.locator('.rs-tail').count()) === 1,
+            'spa-ssr /router-stream: navigating back re-mounts the region once'
+        );
 
         // Liveness, and the strongest statement of "in place": the node that
         // reacts is the SAME node the server sent, not a client-mounted
