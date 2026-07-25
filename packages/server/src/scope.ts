@@ -143,10 +143,18 @@ export function toScopeInit(
         const merged: Partial<ServerFnContext> = Object.create(enclosing);
         for (const key of Object.keys(incoming) as (keyof ServerFnContext)[]) {
             // Supplied fields win; an explicit `undefined` must not shadow the
-            // enclosing value.
-            if (incoming[key] !== undefined) {
-                (merged as Record<string, unknown>)[key] = incoming[key];
+            // enclosing value. READING is what needs the guard: a context built
+            // by `contextFrom` carries `request`/`url` as ENUMERABLE getters
+            // that throw when nothing supplied a request, so an app forwarding
+            // its own `rq` into a nested scope would otherwise crash the render
+            // on a field it never set. A throwing getter means "not supplied".
+            let value: unknown;
+            try {
+                value = incoming[key];
+            } catch {
+                continue;
             }
+            if (value !== undefined) (merged as Record<string, unknown>)[key] = value;
         }
         // One request, one store — the whole point. An inner source carrying
         // its OWN bag keeps it: that is the deliberate way to isolate a nested
@@ -198,13 +206,22 @@ function sameRequest(outer: Partial<ServerFnContext>, incoming: Partial<ServerFn
     return a === undefined || b === undefined || a === b;
 }
 
-let _warnedNestedRequest = false;
+/**
+ * The latch lives on `globalThis`, not in a module variable, so "once per
+ * process" is true rather than "once per module copy" — in dev the Vite module
+ * runner and Node hold two copies of this module, the same hazard documented
+ * for `__SIGX_SERVERFN_CONTEXT__`. Not a seam: nothing reads it across a
+ * package boundary, it is dev-warning bookkeeping with no contract.
+ */
+const NESTED_NOTICE = Symbol.for('sigx.serverfn.warnedNestedRequest');
+
 function noticeFreshStore(
     outer: Partial<ServerFnContext>,
     incoming: Partial<ServerFnContext>
 ): void {
-    if (_warnedNestedRequest) return;
-    _warnedNestedRequest = true;
+    const latch = globalThis as Record<symbol, unknown>;
+    if (latch[NESTED_NOTICE] === true) return;
+    latch[NESTED_NOTICE] = true;
     console.warn(
         `[sigx server] a nested server-function scope names a different request ` +
         `(${requestKey(outer)} → ${requestKey(incoming)}), so it gets its OWN request store: ` +

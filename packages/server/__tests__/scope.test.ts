@@ -9,6 +9,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { serverFn } from '../src/index';
+import { createDetachedContext } from '../src/context';
 import { handleServerFnRequest } from '../src/server/index';
 import { runInScope, toContextInit, toScopeInit, type ServerFnScope } from '../src/scope';
 
@@ -354,6 +355,24 @@ describe('nested scopes', () => {
         ).resolves.toBeUndefined();
     });
 
+    it('a nested source with THROWING request/url getters does not crash the render', async () => {
+        // `contextFrom`/`createDetachedContext` build `request` and `url` as
+        // ENUMERABLE getters that throw when nothing supplied a request, so an
+        // app forwarding its own `rq` into a nested scope walks straight into
+        // the merge loop. A throwing getter means "not supplied", never a 500.
+        const detached = createDetachedContext();
+        expect(() => detached.request).toThrow();
+
+        const read = serverFn(async (rq) => [rq.locals.user, rq.url.pathname]);
+        // The enclosing request is carried through — proof the throwing getter
+        // was skipped rather than blowing up the merge. `locals` is undefined
+        // because a detached context brings its OWN empty bag, which is the
+        // documented isolation hatch doing exactly what it says.
+        await expect(runInScope(preSeed, () => runInScope(detached, () => read()))).resolves.toEqual(
+            [undefined, '/board']
+        );
+    });
+
     it('sibling (non-nested) scopes still isolate', async () => {
         const seed = serverFn(async (rq, value: string) => {
             rq.locals.user = value;
@@ -372,9 +391,11 @@ describe('nested scopes', () => {
 
 describe('the different-request notice', () => {
     it('names both keys and fires once per process', async () => {
-        // A fresh module graph, so the once-per-process latch is unset —
-        // asserting it from a shared graph would only ever prove test order.
-        vi.resetModules();
+        // The latch is a globalThis symbol precisely so it survives a second
+        // module copy, so clearing it is how a test gets a clean slate —
+        // asserting from a dirty one would only ever prove test order.
+        const latch = Symbol.for('sigx.serverfn.warnedNestedRequest');
+        delete (globalThis as Record<symbol, unknown>)[latch];
         const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
         try {
             const scope = await import('../src/scope');
@@ -396,6 +417,33 @@ describe('the different-request notice', () => {
             expect(notices[0]).toContain('GET app.test/board');
             expect(notices[0]).toContain('GET app.test/subrequest');
             expect(notices[0]).toContain('its OWN request store');
+        } finally {
+            warn.mockRestore();
+        }
+    });
+
+    it('survives a second copy of this module — the latch is global', async () => {
+        const latch = Symbol.for('sigx.serverfn.warnedNestedRequest');
+        delete (globalThis as Record<symbol, unknown>)[latch];
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        try {
+            const outer = { request: new Request('http://app.test/board'), locals: {} };
+            const first = await import('../src/scope');
+            await first.runInScope(outer, () =>
+                first.runInScope(nodeRequest({ host: 'app.test' }, '/a'), () => null)
+            );
+            // A genuinely separate module instance, as dev's dual graph gives.
+            vi.resetModules();
+            const second = await import('../src/scope');
+            expect(second).not.toBe(first);
+            await second.runInScope(outer, () =>
+                second.runInScope(nodeRequest({ host: 'app.test' }, '/b'), () => null)
+            );
+
+            const notices = warn.mock.calls
+                .map(([m]) => String(m))
+                .filter((m) => m.includes('names a different request'));
+            expect(notices).toHaveLength(1);
         } finally {
             warn.mockRestore();
             vi.resetModules();
