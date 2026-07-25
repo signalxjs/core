@@ -146,6 +146,14 @@ server-declared form is the better default for server-owned data.
 (Declare it after `handler` in the literal — TypeScript infers `result`
 in textual order.)
 
+A pattern reaches **every** mounted `useData` read whose canonical key
+matches — a `cache` option is not required, and neither is the cache pack
+(#484). It also drops the matching keys from the SSR transfer blob, so
+navigating away and back refetches rather than restoring the pre-mutation
+value. Patterns are exact keys or tuple prefixes: `['cart']` matches
+`useData(() => ['cart', id], fetchCart)`, and a bare function reference matches every
+read of that server function.
+
 ### Single-flight boundary refresh
 
 A mutation can also carry **fresh UI** back in the same response
@@ -373,6 +381,11 @@ const { serverFns } = await import('./dist/server/sigx-server-fns.js');
 app.use(createServerFnHandler({ functions: serverFns, guard: requireSession }));
 app.use(createRequestHandler({ /* documents, unchanged */ }));
 ```
+
+`guard` covers requests this handler serves. It does **not** run for the
+in-process calls the document handler beside it makes while rendering — put
+auth that must hold on every transport in each function's `use:` chain
+(rfc-server-v3 §1, #493).
 
 On WinterCG runtimes (Cloudflare, Deno, Bun) skip the adapter —
 `handleServerFnRequest(request, options)` from `@sigx/server/server` is
@@ -610,8 +623,12 @@ Every server function is a public HTTP endpoint; the defaults assume that:
   present header and still rejected. Never deploy an Origin-stripping
   proxy in front of a cookie-authenticated app under that policy. An
   allowlist or `origin: false` makes it a deliberate public API.
-- **`guard` hook** runs before every function, for every transport — the
-  app-wide auth seam. Per-function `use` chains compose on top.
+- **`guard` hook** runs before every function reached through the endpoint —
+  the WIRE transports (POST, GET reads, form posts, streams). It is the
+  wire-level backstop, **not** an app-wide seam: an in-process (SSR-time) call
+  never enters the handler, so it runs only that function's own `use` chain.
+  Auth that must hold on every transport belongs in the definition — `use:` on
+  each function (rfc-server-v3 §1, #489/#493).
 - **`maxBodyBytes`** (1 MiB default) enforced while reading.
 - **Error masking**: only `ServerFnError` crosses the wire verbatim; other
   throws become a generic 500 in production.

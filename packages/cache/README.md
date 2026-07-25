@@ -57,7 +57,12 @@ const save = useAction(saveUser, {
 ## Semantics it inherits, not invents
 
 - Reads and actions **without** a `cache` option keep core's default-engine
-  behavior verbatim (the pack delegates).
+  behavior verbatim (the pack delegates). `invalidate()` still reaches them:
+  key-addressable refresh is core's, not the pack's, so a mutation's
+  `invalidates` refetches every mounted `useData` cell matching the pattern
+  whether or not it opted into a cache policy — and drops the matching keys
+  from the SSR transfer blob, so leaving the route and coming back refetches
+  instead of restoring what was just invalidated.
 - Keys are core's canonical identities (strings; tuples as canonical JSON) —
   the store and core's SSR blob speak the same language.
 - **SSR/hydration**: the pack adopts `window.__SIGX_ASYNC__` as its *initial*

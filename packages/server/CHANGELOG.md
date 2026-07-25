@@ -4,6 +4,17 @@
 
 ### Fixed
 
+- **Documentation: the endpoint `guard` is wire-only (#493).** The README, the
+  `ServerFnRequestOptions.guard` JSDoc and `rfc-server.md` described it as
+  running "before every function, for every transport — the app-wide auth
+  seam". It runs inside `handleServerFnRequest`, so it covers the wire
+  transports only: an **in-process (SSR-time) call** never enters the handler
+  and runs just that function's own `use:` chain. An app relying on `guard`
+  alone had guarded RPC calls and unguarded renders. No runtime change — the
+  contract is now stated as it always behaved, and auth that must hold on every
+  transport belongs in each function's definition. See `docs/rfc-server-v3.md`
+  §1 for the mechanism that removes the per-function repetition (#489).
+
 - **Options-form `serverFn` with an input-less handler is now a zero-argument
   callable (#451).** `serverFn({ handler: async () => … })` used to infer its
   input as `unknown`, so calling the wrapped fn as `fn()` was a compile

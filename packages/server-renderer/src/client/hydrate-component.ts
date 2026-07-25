@@ -38,7 +38,7 @@ import {
     isFormattingWhitespace
 } from './hydrate-context';
 import { hydrateNode } from './hydrate-core';
-import { findComponentBoundaries } from './scheduler';
+import { findComponentBoundaries, parseMarkerId } from './scheduler';
 
 /**
  * Minimal type for component factories used in hydration.
@@ -184,6 +184,22 @@ export function hydrateComponent(
     // tree. Hydrate against the wrapper's children — matching the wrapper
     // itself against the component's first element would mismatch and mount
     // a duplicate copy of the content.
+    //
+    // Only the component that OWNS the wrapper may descend into it (#492).
+    // The wrapper is the content start of every pass-through ancestor too
+    // (`App → RouterView → lazy() → Page` — the router shape), and letting
+    // the outermost one adopt it broke both halves of the marker contract:
+    // the ancestors' own `<!--$c:N-->` markers sit OUTSIDE the wrapper, so
+    // their scans ran over the streamed subtree's children instead and
+    // latched a DESCENDANT's marker as the component anchor; and anything
+    // the ancestor rendered AFTER the streamed child was hydrated against
+    // the wrapper's contents, mounting a duplicate copy of it inside the
+    // wrapper. Ownership is decidable: the server names the wrapper after
+    // the streamed component's own marker id (`data-async-placeholder="N"`
+    // is emitted with `<!--$c:N-->`), so the component whose anchor is that
+    // id is the one whose render produced the content. An unreachable
+    // anchor (null) means this component is itself nested inside another
+    // wrapper, where its marker is out of reach — it descends, as before.
     let hydrateDom: Node | null = dom;
     let hydrateParent: Node = parent;
     if (
@@ -191,8 +207,12 @@ export function hydrateComponent(
         dom.nodeType === Node.ELEMENT_NODE &&
         (dom as Element).hasAttribute('data-async-placeholder')
     ) {
-        hydrateParent = dom;
-        hydrateDom = dom.firstChild;
+        const wrapperId = (dom as Element).getAttribute('data-async-placeholder');
+        const anchorId = anchor ? parseMarkerId(anchor) : null;
+        if (anchorId === null || String(anchorId) === wrapperId) {
+            hydrateParent = dom;
+            hydrateDom = dom.firstChild;
+        }
     }
 
     // Track where the component's DOM starts

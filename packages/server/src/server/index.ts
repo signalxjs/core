@@ -12,8 +12,11 @@
  * `maxBodyBytes` during the body read (`maxUrlBytes` for a GET's query
  * string; content-length for a form body), reviver-based DROPPING of
  * prototype-pollution keys (they are removed from the parsed value, not a
- * request error), and prod error masking. The `guard` hook runs
- * before EVERY function — the app-wide auth seam that no transport skips.
+ * request error), and prod error masking. The `guard` hook runs before every
+ * function reached through THIS ENDPOINT — the wire transports (rfc-server-v3
+ * §4, #493). It is not the app-wide seam: an in-process (SSR-time) call never
+ * enters this handler, so a chain that must run on every transport belongs in
+ * the definition (`use:` / `serverFnPreset`).
  */
 
 import { createRequestContext, type ServerFnContext } from '../context';
@@ -30,7 +33,17 @@ export interface ServerFnRequestOptions {
      * a structured 404 the stub surfaces as a version-skew error.
      */
     resolve(symbol: string): unknown | Promise<unknown>;
-    /** Runs unconditionally before EVERY function — THE app-wide auth seam. */
+    /**
+     * Runs before every function reached through THIS ENDPOINT — the wire
+     * transports (POST, GET reads, form posts, streams).
+     *
+     * It does NOT run for in-process (SSR-time) calls: those never enter this
+     * handler (`packages/server/src/index.ts` — the wrapper calls `invoke`
+     * directly), so their only middleware is the function's own `use:` chain.
+     * For a chain that runs on EVERY transport, put it in the definition —
+     * `use:` per function, or one `serverFnPreset({ use })` per server module
+     * (rfc-server-v3 §1, #489/#493). Use this hook as the wire-level backstop.
+     */
     guard?: ServerFnGuard;
     /**
      * Origin policy. Default `'same-origin'`: the `Origin` header must match

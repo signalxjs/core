@@ -6,6 +6,12 @@ signalxjs/core#318 (rev 2).
 Pre-1.0, no-compat (same stance as `rfc-async.md` and `rfc-ssr-platform.md`):
 one way to do it.
 
+> **v3 lives in `rfc-server-v3.md`** (proposed, signalxjs/core#491): guard
+> completeness (#489) and request-scoped context. It **amends §2.1** and
+> **re-opens §2.2** — see the pointers on those sections. It also corrects a
+> claim this document makes in four places: the endpoint `guard` is
+> **wire-only**, not "every transport" (#493).
+
 > **rev-2 changes** (native clients — the third role): v1 modeled two roles,
 > a same-origin browser client and a Node SSR renderer. A **lynx or terminal
 > app calling a remote sigx server** is a third role with no representation —
@@ -327,9 +333,12 @@ Notes:
   both remedies.
 - **`use` guards are part of the function's definition**, so they run for
   every transport — the structural fix for Qwik's "layout middleware does
-  not run for `server$`" auth trap. App-wide auth belongs in the handler's
-  `guard` option (§4), which runs unconditionally before every function;
-  per-fn `use` chains compose on top. `rq.locals` is the hand-off.
+  not run for `server$`" auth trap. **Corrected (rfc-server-v3, #493):** the
+  handler's `guard` option (§4) is the WIRE-level backstop, not the app-wide
+  seam this bullet used to claim — an in-process (SSR-time) call never enters
+  the handler. App-wide auth belongs in the definition: `use:` per function, or
+  one `serverFnPreset({ use })` per server module (§2.1, as amended by v3 §1).
+  `rq.locals` is the hand-off.
 - Subpath layout (mirrors resume's):
   - `@sigx/server` — `serverFn`, `serverStream`, `ServerFnError`, types.
     Isomorphic marker; the browser export condition ships throwing variants
@@ -345,6 +354,13 @@ Notes:
     meta-framework" posture).
 
 ### 2.1 `serverFnPreset` — shared per-service middleware (#398)
+
+> **Amended by `rfc-server-v3.md` §1** (#491): the preset gains a `serverStream`
+> twin (`preset.stream`) and the direct form gains a guard seam it does not have
+> today, plus `unauthenticated: true` and the `requireGuards` build gate. The
+> bullet below claiming post-handler concerns "ride a request-scoped service
+> whose `onDispose` fires when the response has fully flushed" is **withdrawn**
+> until disposal ships — see v3 §2.6.
 
 The tRPC idiom everybody copies is `protectedProcedure` — a derived
 builder carrying the auth middleware. The sigx-shaped version is a
@@ -406,6 +422,15 @@ export function serverFnPreset(base: { use: ServerFnGuard[] }): typeof serverFn;
   of bug that deserves a build-time voice.
 
 ### 2.2 `defineServerService` — request-scoped services (#399)
+
+> **RE-OPENED by `rfc-server-v3.md` §2** (#491) — **do not implement against
+> this section.** Two of its stated guarantees do not hold against the code:
+> disposal "after the response has fully flushed" fires at the SHELL on every
+> WinterCG deploy (`server-renderer/src/server/fetch-handler.ts:163` returns the
+> Response from inside the scope), and `streamResponse` has four terminal paths,
+> not three. The shape itself is being re-derived from the measured problem
+> (#494); v3 §2.2 puts this design head to head with a smaller candidate and
+> picks with the argument written down.
 
 Server functions need services — a db pool, a session, repositories —
 with sane lifetimes. App DI (`defineFactory`/`defineInjectable`) is the
@@ -822,7 +847,9 @@ Handler options (shared by `/server` and `/node`):
 ```ts
 export interface ServerFnRequestOptions {
     resolve(symbol: string): Promise<Function | null | undefined>;
-    /** Runs unconditionally before EVERY function — THE app-wide auth seam. */
+    /** Runs before every function reached through THIS ENDPOINT — the wire
+     *  transports. NOT in-process/SSR-time calls (v3 §4, #493): those never
+     *  enter the handler. All-transport chains live in the definition. */
     guard?(rq: ServerFnContext, fn: { symbol: string; name: string }): void | Promise<void>;
     origin?: 'same-origin' | 'verify-when-present' | string[] | false;   // default 'same-origin'
     maxBodyBytes?: number;                        // default 1_048_576, enforced while reading
@@ -1010,10 +1037,15 @@ The core truth: **every server function is a public HTTP endpoint.** Types,
 client-side checks, and component boundaries constrain your code, not an
 attacker with `curl`. Defaults, in order of the failure they prevent:
 
-1. **Auth bypass** — the `guard` hook lives *inside* the request handler
-   and runs before every function, for every transport; per-fn `use` chains
-   are part of the definition (§2). There is no separate middleware
-   universe to forget (Qwik's trap). Dev and prod enforce the same guard.
+1. **Auth bypass** — per-fn `use` chains are part of the definition (§2), so
+   they run on every transport, in dev and prod alike; that is the defense.
+   The `guard` hook lives inside the request handler and is the **wire-level**
+   backstop beside it — dev and prod enforce the same one, but neither runs for
+   an in-process (SSR-time) call. **Corrected (rfc-server-v3, #493):** this item
+   used to claim `guard` covered every transport, and an app that relied on it
+   alone had a separate middleware universe to forget after all (Qwik's trap).
+   The claim becomes true again only with v3's `requireGuards` build gate, which
+   fails a build whose functions do not declare their auth posture.
 2. **CSRF** — POST-only + required `application/json` content-type (forms
    cannot send it cross-origin without a preflight) + same-origin `Origin`
    check by default. Opting out (`origin: false` or an allowlist) is
@@ -1602,7 +1634,10 @@ option (revisit only if that proves painful).
   plugin `endpoint`/`role`/`scan`; stable-id seeds + stable symbols + dual
   registration + options-form `id`; live-client marker + throw;
   `@sigx/vite/server-extract`. Then the platform-repo adoptions (N.6).
-- **v3 — the services & DI story (#397, design locked)**:
+- **v3 — the services & DI story (#397)** — *superseded by `rfc-server-v3.md`
+  (#491), which keeps `serverFnPreset` (amended), re-opens
+  `defineServerService`, and adds guard completeness (#489). The entry below is
+  the original scoping, kept for the record:*
   `serverFnPreset` (§2.1, #398 — runtime + extractor recognition +
   preset-seeded symbols + the spread-hidden-static-keys warning) and
   `defineServerService` (§2.2, #399 — `service.ts`, `CTX_SOURCE` keying,

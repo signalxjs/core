@@ -5,6 +5,38 @@ repository-root `CHANGELOG.md`.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`invalidates` reaches reads that carry no `cache` option (#484).**
+  `createCacheEngine().read()` delegates any read without a `cache` option to
+  core's default engine, and those cells never enter `CacheStore.entries` —
+  so `invalidate()` scanned a map they were not in and did nothing, silently.
+  Both channels were affected (a serverFn's definition-level `invalidates` and
+  `useAction`'s `cache.invalidates`); the key SHAPE was never the issue.
+  Reported from an app that had to call `cell.refresh()` by hand after every
+  mutation. Key-addressable refresh now lives in runtime-core, which is the
+  only place that can hold a registry of mounted cells, and this store
+  delegates to it — so `invalidates` also works with no cache pack installed.
+  Every invalidation test in this package passed a `cache` option, which is
+  exactly why CI never saw it.
+- **`invalidate()` sweeps the `__SIGX_ASYNC__` blob, not just the entry map
+  (#484).** `invalidateRestored` was called inside the entries loop, so a key
+  with no cached entry kept its transferred value. Since every successful
+  fetch is written back to the blob and a fresh mount restores from it as
+  `ready` *without* fetching, invalidating a key the user had navigated away
+  from did nothing at all — and navigating back showed the pre-mutation value
+  until a full page load.
+- **A pattern that matches nothing now warns in dev.** It was a silent no-op,
+  which is how the above stayed invisible.
+
+### Changed
+
+- `preparePattern` / `keyMatches` / `PatternMatcher` are re-exported from
+  `@sigx/runtime-core/internals` rather than implemented here — one meaning
+  for `invalidates` across cached entries, mounted cells and the blob. The
+  import path and behaviour are unchanged. (`@sigx/server`'s §6.3 gate still
+  keeps its own copy by design; the parity test still pins the two.)
+
 ### Breaking
 
 - **`optimistic.apply` drops `any` (#445).** The member is now
