@@ -437,6 +437,26 @@ describe('boundary hydrator', () => {
             expect(child.dom.data).toBe('$c:2');
         });
 
+        it("a hydrate:'never' boundary keeps no handoff alive on its placeholder", async () => {
+            // The walk skips and hands over; the flow then declines to hydrate.
+            // The wrapper survives an unmount by design, so an unconsumed
+            // handoff would keep the skipped vnode reachable with it.
+            const { Streamed, record, setups } = makeStreamed('NeverStream');
+            const Shell = component(() => () => <main>{<Streamed />}</main>, { name: 'Shell' });
+
+            container = createSSRContainer(
+                `<main>${REPLACED('<div class="s">streamed</div>')}</main><!--$c:1-->`
+            );
+            setBoundaryTable({ '2': { ...record, hydrate: 'never' } });
+
+            hydrate((Shell as any)({}), container, makeAppContext());
+            await nextTick();
+
+            const placeholder = container.querySelector('[data-async-placeholder]')! as any;
+            expect(setups()).toBe(0); // static by contract
+            expect(placeholder.__sigxPendingBoundary).toBeUndefined();
+        });
+
         it('the record-driven path (explicit mode, no walk) hydrates against the wrapper', async () => {
             const name = uniqueName('Explicit');
             let mountedEl: Element | null = null;

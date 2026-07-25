@@ -247,6 +247,22 @@ function reportAsyncHydrateError(err: unknown): void {
  * Hydrate a boundary whose content just streamed in via $SIGX_REPLACE.
  */
 export async function hydrateAsyncBoundary(container: Element, record: SSRBoundaryRecord): Promise<void> {
+    // The root walk hands over the live vnode for a placeholder it skipped
+    // (#478); only the record-driven path — `boundaries: 'explicit'`, where no
+    // walk ever ran — has to rebuild one from the table.
+    //
+    // TAKEN FIRST, ahead of every early return below, and never merely read:
+    // the wrapper is deliberately left in the DOM after an unmount, so an
+    // entry nobody consumes keeps the skipped vnode (and everything it
+    // references) reachable for as long as that empty div sits in the
+    // document. `hydrate: 'never'` never consumes one at all, and a replace
+    // that lands mid-walk marks the placeholder hydrated before the walk gets
+    // there. Discarding is right in both: once the guards below return, this
+    // placeholder is done, either hydrated already or static by contract.
+    const carrier = container as unknown as PendingCarrier;
+    const pending = carrier.__sigxPendingBoundary;
+    delete carrier.__sigxPendingBoundary;
+
     // The hydrate axis holds for streamed content too: a boundary
     // explicitly marked 'never' stays static HTML.
     if (record.hydrate === 'never') {
@@ -257,13 +273,6 @@ export async function hydrateAsyncBoundary(container: Element, record: SSRBounda
         return;
     }
 
-    // The root walk hands over the live vnode for a placeholder it skipped
-    // (#478); only the record-driven path — `boundaries: 'explicit'`, where no
-    // walk ever ran — has to rebuild one from the table. Taken, not read: a
-    // consumed entry must not seed a later hydration of the same placeholder.
-    const carrier = container as unknown as PendingCarrier;
-    const pending = carrier.__sigxPendingBoundary;
-    delete carrier.__sigxPendingBoundary;
     if (!pending && !record.component) {
         if (__DEV__) {
             console.error(`[Hydrate] No component name in boundary record`);
