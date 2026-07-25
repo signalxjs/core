@@ -359,10 +359,12 @@ Notes:
 
 > **Amended by `rfc-server-v3.md` §1** (#491): the preset gains a `serverStream`
 > twin (`preset.stream`) and the direct form gains a guard seam it does not have
-> today, plus `unauthenticated: true` and the `requireGuards` build gate. The
-> bullet below claiming post-handler concerns "ride a request-scoped service
-> whose `onDispose` fires when the response has fully flushed" is **withdrawn**
-> until disposal ships — see v3 §2.6.
+> today, plus `unguarded: true` and the `requireGuards` build gate — which
+> defaults to **on** (#506), so every `serverFn` and `serverStream` must declare
+> a chain, a preset, or `unguarded: true`. The bullet below claiming post-handler
+> concerns "ride a request-scoped service whose `onDispose` fires when the
+> response has fully flushed" is **withdrawn** until disposal ships — see v3
+> §2.6, which also records why no wire-only `onFinish` fills the gap meanwhile.
 
 The tRPC idiom everybody copies is `protectedProcedure` — a derived
 builder carrying the auth middleware. The sigx-shaped version is a
@@ -442,7 +444,7 @@ What replaces it, one line each; the argument is in v3 §2:
 
 - **Request lifetime** — one shared per-request store. `rq.locals` is its
   untyped face (shared across every call in one request/render, rather than the
-  per-call scratchpad it is today), and `defineRequestValue(setup)` is its typed
+  per-call scratchpad it is today), and `perRequest(setup)` is its typed
   face: lazy, memoized including the promise, resolved from the `rq` every
   server function already receives. No ambient no-argument form — the context
   stays a parameter, as everywhere else in this RFC.
@@ -489,9 +491,9 @@ export const db = (): Pool => (_pool ??= createPool(bindings().DATABASE_URL));
 
 // src/request.server.ts — request lifetime: computed at most once per
 // request/render, shared by every guard, handler and nested in-process call.
-import { defineRequestValue } from '@sigx/server';
+import { perRequest } from '@sigx/server';
 
-export const session = defineRequestValue(async (rq) =>
+export const session = perRequest(async (rq) =>
     decodeSession(rq.request.headers.get('cookie')));
 ```
 
@@ -1501,8 +1503,8 @@ option (revisit only if that proves painful).
   recognition + preset-seeded symbols + the spread-hidden-static-keys warning,
   plus the `preset.stream` twin and the direct-form guard seam the original
   scoping did not know were missing); the shared per-request store and
-  `defineRequestValue` (§2.2, #494); the nested-scope merge (#495);
-  `requireGuards` + `unauthenticated` (#489); and request-value disposal last,
+  `perRequest` (§2.2, #494); the nested-scope merge (#495);
+  `requireGuards` + `unguarded` (#489); and request-value disposal last,
   behind the `keepAlive` scope extension. **Dropped from the original scoping:**
   `defineServerService` and everything specific to it — two lifetimes,
   `CTX_SOURCE` keying, the `__SIGX_SERVERFN_SERVICES__` seam, the
