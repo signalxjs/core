@@ -461,6 +461,9 @@ function serverUseAsync(
                 value: state.data,
                 error: state.failure,
                 stale: null,
+                // A server render is one shot — there is no previous good
+                // value to keep, so this is absence, not a null value (#514).
+                hasStale: false,
                 retry: () => { /* no-op on the server */ }
             }, arms);
         },

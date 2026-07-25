@@ -222,7 +222,7 @@ describe('useData', () => {
                 <div class="out">
                     {cell.match({
                         pending: () => 'PENDING',
-                        error: (e, retry, stale) => {
+                        error: (e, { retry, stale }) => {
                             seen = { e, retry, stale };
                             return `ERROR:${e.message}`;
                         },
@@ -258,7 +258,7 @@ describe('useData', () => {
                 <div class="out">
                     {cell.match({
                         pending: () => 'PENDING',
-                        error: (e, _retry, stale) => {
+                        error: (e, { stale }) => {
                             staleSeen = stale;
                             return `ERROR(stale=${stale})`;
                         },
@@ -319,6 +319,68 @@ describe('useData', () => {
      * `'pending'`, `loading` flipped true and `match` rendered the pending arm
      * over live content — the exact thing rev-6 of rfc-async forbids (#485).
      */
+    /**
+     * The `stale` twin of #485 (#514). A last-good value of `null` and "there
+     * was no last-good value" are the same `null` in the error arm, so
+     * "keep content + toast" silently degraded to "show the error alone"
+     * whenever the last good read legitimately resolved null.
+     */
+    it('the error arm can tell a NULL last-good value from no last-good value', async () => {
+        let calls = 0;
+        const fetcher = () => {
+            calls++;
+            return calls === 1 ? Promise.resolve(null) : Promise.reject(new Error('boom'));
+        };
+        let seen: { stale: string | null; hasStale: boolean } | null = null;
+        let cell!: AsyncState<string | null>;
+
+        const App = component(() => {
+            cell = useData('null-stale', fetcher as () => Promise<string | null>);
+            return () => (
+                <div class="out">
+                    {cell.match({
+                        pending: () => 'PENDING',
+                        error: (_e, { stale, hasStale }) => {
+                            seen = { stale, hasStale };
+                            return 'ERROR';
+                        },
+                        ready: (v) => `READY:${String(v)}`,
+                    })}
+                </div>
+            );
+        });
+        mount(jsx(App, {}));
+        await settle();
+        expect(cell.state).toBe('ready');
+
+        await cell.refresh();          // second call rejects
+        await settle();
+        expect(cell.state).toBe('errored');
+        expect(seen!.stale).toBeNull();
+        expect(seen!.hasStale).toBe(true);   // null WAS the last-good value
+    });
+
+    it('the error arm reports no last-good value when there never was one', async () => {
+        let seen: { hasStale: boolean } | null = null;
+        let cell!: AsyncState<string>;
+        const App = component(() => {
+            cell = useData('never-good', () => Promise.reject(new Error('boom')));
+            return () => (
+                <div class="out">
+                    {cell.match({
+                        pending: () => 'PENDING',
+                        error: (_e, { hasStale }) => { seen = { hasStale }; return 'ERROR'; },
+                        ready: () => 'READY',
+                    })}
+                </div>
+            );
+        });
+        mount(jsx(App, {}));
+        await settle();
+        expect(cell.state).toBe('errored');
+        expect(seen!.hasStale).toBe(false);
+    });
+
     it('refresh() on a ready NULL-valued cell refreshes, it does not go pending', async () => {
         let resolvers: Array<(v: string | null) => void> = [];
         let cell!: AsyncState<string | null>;

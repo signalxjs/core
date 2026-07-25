@@ -20,6 +20,7 @@ import {
     type MatchArms,
     CELL,
     STALE,
+    HAS_STALE,
     matchAsyncState,
     normalizeError,
     makeUnhandledReporter,
@@ -165,6 +166,8 @@ export function createDataCell<T>(
 
     /** Last-good value — survives a failed refresh (handed to the error arm as `stale`). */
     let stale: T | null = null;
+    /** …and whether there IS one: a last-good `null` is a value (#514). */
+    let hasStale = false;
     /** Supersede token: bumped by every new run, key change, and dispose. */
     let runId = 0;
     let canonKey: string | null = null;
@@ -271,6 +274,7 @@ export function createDataCell<T>(
             const v = (await entry.p) as T;
             if (id !== runId) return; // superseded — never writes state
             stale = v;
+            hasStale = true;
             batch(() => {
                 state.st = 'ready';
                 state.data = v;
@@ -309,6 +313,7 @@ export function createDataCell<T>(
             runId++; // supersede any in-flight observation
             release();
             stale = null;
+            hasStale = false;
 
             if (canon === null) {
                 batch(() => {
@@ -324,6 +329,7 @@ export function createDataCell<T>(
             if (restored.hit) {
                 const v = restored.value as T;
                 stale = v;
+                hasStale = true;
                 batch(() => {
                     state.st = 'ready';
                     state.data = v;
@@ -375,6 +381,7 @@ export function createDataCell<T>(
                     value: state.data,
                     error: state.err,
                     stale,
+                    hasStale,
                     retry: () => void refresh(),
                     onUnhandledError: reportUnhandled,
                 },
@@ -385,6 +392,7 @@ export function createDataCell<T>(
     };
     Object.defineProperty(cell, CELL, { value: true });
     Object.defineProperty(cell, STALE, { get: () => stale });
+    Object.defineProperty(cell, HAS_STALE, { get: () => hasStale });
 
     return {
         cell,
@@ -419,5 +427,6 @@ export const INERT_IDLE_CELL: AsyncState<never> = (() => {
     };
     Object.defineProperty(cell, CELL, { value: true });
     Object.defineProperty(cell, STALE, { value: null });
+    Object.defineProperty(cell, HAS_STALE, { value: false });
     return Object.freeze(cell);
 })();

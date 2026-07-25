@@ -260,7 +260,11 @@ interface AsyncState<T> {
   match<R>(arms: {
     idle?:    () => R;                              // defaults to the pending arm (rev 6)
     pending?: () => R;                              // omitted ⇒ renders nothing while pending
-    error?:   (e: Error, retry: () => void, stale: T | null) => R;   // stale = last-good (rev 6)
+    error?:   (e: Error, ctx: {                     // rev 9: one object, not
+                retry: () => void;                  //   a growing positional list
+                stale: T | null;                    //   last-good (rev 6)
+                hasStale: boolean;                  //   …and whether there IS one
+              }) => R;
     ready:    (v: T) => R;                          // required: the happy path
   }): R | undefined;
 
@@ -283,7 +287,10 @@ interface AsyncState<T> {
   top-level `value`/`error` stay mutually exclusive (matching shipped
   behavior), but the engine retains the last-good value internally and hands
   it to the error arm as `stale` — so "keep showing data, add a toast" is
-  expressible with zero extra state. (This deliberately revises rev 2's
+  expressible with zero extra state. Branch on the arm's `hasStale`, never on
+  `stale !== null`: once `T` is nullable, a last-good value of `null` and
+  "nothing good yet" are the same `null` (rev 9, the `stale` twin of
+  `hasValue`). (This deliberately revises rev 2's
   "errored + value ⇒ render `ready`" — the *app* decides whether stale
   content survives an error, not the framework.)
 - **`idle` is matchable:** conditional fetch is a headline feature, and

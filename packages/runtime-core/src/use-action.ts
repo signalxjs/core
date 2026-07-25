@@ -94,6 +94,8 @@ export function useAction<T, In = void>(fn: Fetcher<T, In>, opts?: ActionOptions
     let hasRun = false;
     /** Last successful value — handed to the error arm as `stale`. */
     let stale: T | null = null;
+    /** …and whether there IS one — a last-good `null` is a value (#514). */
+    let hasStale = false;
 
     const reportUnhandled = makeUnhandledReporter(instance, 'useAction');
 
@@ -128,6 +130,7 @@ export function useAction<T, In = void>(fn: Fetcher<T, In>, opts?: ActionOptions
             const v = await p;
             if (id !== seq) return superseded(); // never writes state
             stale = v;
+            hasStale = true;
             untrack(() =>
                 batch(() => {
                     state.st = 'ready';
@@ -155,6 +158,7 @@ export function useAction<T, In = void>(fn: Fetcher<T, In>, opts?: ActionOptions
     function reset(): void {
         seq++;
         stale = null;
+        hasStale = false;
         untrack(() =>
             batch(() => {
                 state.st = 'idle';
@@ -190,6 +194,7 @@ export function useAction<T, In = void>(fn: Fetcher<T, In>, opts?: ActionOptions
                     value: state.data,
                     error: state.err,
                     stale,
+                    hasStale,
                     // Write-retry: re-run with the last input. (A zero-arg
                     // closure re-reads current signals by construction.)
                     retry: () => {

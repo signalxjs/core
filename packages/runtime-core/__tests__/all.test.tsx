@@ -206,7 +206,7 @@ describe('all', () => {
                 <div class="out">
                     {combined.match({
                         pending: () => 'PENDING',
-                        error: (e, retry) => {
+                        error: (e, { retry }) => {
                             (globalThis as any).__retryAll = retry;
                             return `ERROR:${e.message}`;
                         },

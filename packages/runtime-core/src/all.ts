@@ -22,6 +22,7 @@ import {
     isCell,
     CELL,
     STALE,
+    HAS_STALE,
     type AsyncState,
     type AsyncStateName,
     type MatchArms,
@@ -100,13 +101,22 @@ export function all(...sources: unknown[]): AllState<unknown, unknown> {
         return members.map((m) => m.error);
     }
 
+    /**
+     * Whether EVERY member has a last-good value — the presence question
+     * `combinedStale()` used to answer with a null test, which sank the whole
+     * combination whenever one member's last-good value was legitimately
+     * `null` (#514).
+     */
+    function combinedHasStale(): boolean {
+        return members.every((m) => (m as unknown as Record<symbol, unknown>)[HAS_STALE] === true);
+    }
+
     /** Combined last-good — only when EVERY member has one. */
     function combinedStale(): unknown {
+        if (!combinedHasStale()) return null;
         const stales: unknown[] = [];
         for (const m of members) {
-            const s = (m as unknown as Record<symbol, unknown>)[STALE];
-            if (s === null || s === undefined) return null;
-            stales.push(s);
+            stales.push((m as unknown as Record<symbol, unknown>)[STALE]);
         }
         if (record) {
             const out: Record<string, unknown> = {};
@@ -152,6 +162,7 @@ export function all(...sources: unknown[]): AllState<unknown, unknown> {
                     value: combinedValue(),
                     error: firstError(),
                     stale: combinedStale(),
+                    hasStale: combinedHasStale(),
                     retry: () => void refresh(),
                     onUnhandledError: reportUnhandled,
                 },
@@ -162,6 +173,7 @@ export function all(...sources: unknown[]): AllState<unknown, unknown> {
     };
     Object.defineProperty(combined, CELL, { value: true });
     Object.defineProperty(combined, STALE, { get: combinedStale });
+    Object.defineProperty(combined, HAS_STALE, { get: combinedHasStale });
 
     return combined;
 }

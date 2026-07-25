@@ -62,7 +62,7 @@ export const ProfileCard = component(() => {
     return () =>
         profile.match({
             pending: () => <p>Loading…</p>,
-            error: (e, retry, stale) => (
+            error: (e, { retry, stale }) => (
                 <div>
                     {/* stale keeps last-good content on a failed background refresh */}
                     {stale && <p class="stale">{stale.name}</p>}
@@ -196,7 +196,7 @@ export const DeleteButton = component(() => {
         <div>
             <button disabled={remove.loading} onClick={() => remove.run('post-1')}>Delete</button>
             {remove.match({
-                error: (e, retry) => <button onClick={retry}>Delete failed — retry</button>,
+                error: (e, { retry }) => <button onClick={retry}>Delete failed — retry</button>,
                 // reset() (rev 8): back to idle — the blessed way to dismiss
                 // a success state and make the action reusable.
                 ready: () => <button onClick={() => remove.reset()}>Deleted — dismiss</button>,
@@ -226,7 +226,7 @@ export const Dashboard = component(() => {
     return () =>
         page.match({
             pending: () => <p>Loading dashboard…</p>,
-            error: (e, retry) => <button onClick={retry}>Failed — retry all</button>,
+            error: (e, { retry }) => <button onClick={retry}>Failed — retry all</button>,
             ready: ({ user: u, posts: p }) => (
                 <div>
                     <h1>{u.name}</h1>

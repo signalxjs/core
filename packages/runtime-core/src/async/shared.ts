@@ -33,11 +33,25 @@ export interface MatchArms<T, R> {
     /** Nothing to show yet. Omitted ⇒ renders nothing while pending. */
     pending?: () => R;
     /**
-     * Fetch failed. `stale` is the last-good value (survives internally even
-     * though top-level `value` is nulled) — "keep content + toast" needs no
-     * extra state. Omitted ⇒ null + bubble to errorScope / app onError.
+     * Fetch failed. The second argument bundles everything the arm might
+     * need, so this signature stops growing a positional parameter per
+     * addition (`retry` and `stale` were each appended once already):
+     *
+     * - `retry` — re-runs the fetch.
+     * - `stale` — the last-good value. It survives internally even though the
+     *   top-level `value` is nulled, so "keep content + toast" needs no extra
+     *   state.
+     * - `hasStale` — whether there IS a last-good value. `stale !== null`
+     *   cannot answer that once `T` is nullable: a last-good value of `null`
+     *   and "nothing good yet" are the same `null` (#514, the `stale` twin of
+     *   #485's `hasValue`).
+     *
+     * Omitted ⇒ null + bubble to errorScope / app onError.
      */
-    error?: (e: Error, retry: () => void, stale: T | null) => R;
+    error?: (
+        e: Error,
+        ctx: { retry: () => void; stale: T | null; hasStale: boolean }
+    ) => R;
     /**
      * The happy path. Reached when the cell HAS a value — which for a nullable
      * `T` includes a legitimately `null` one, so this is "the value is
@@ -74,6 +88,13 @@ export interface AsyncState<T> {
 export const CELL: unique symbol = Symbol('sigx:asyncCell');
 /** Non-enumerable getter exposing a cell's internal last-good value so `all()` can combine stales. @internal */
 export const STALE: unique symbol = Symbol('sigx:asyncStale');
+/**
+ * Companion presence bit for {@link STALE} — `stale !== null` cannot stand in
+ * for it once `T` is nullable, and `all()` combines member stales, so a member
+ * whose last-good value is legitimately `null` would otherwise sink the whole
+ * combination to "no last-good value" (#514). @internal
+ */
+export const HAS_STALE: unique symbol = Symbol('sigx:asyncHasStale');
 
 /** @internal */
 export function isCell(v: unknown): boolean {
@@ -92,6 +113,7 @@ export function matchAsyncState<T, R>(
         value: T | null;
         error: Error | null;
         stale: T | null;
+        hasStale: boolean;
         retry: () => void;
         /** Called when the cell is errored and no `error` arm was given. */
         onUnhandledError?: (e: Error) => void;
@@ -107,7 +129,13 @@ export function matchAsyncState<T, R>(
         case 'refreshing':
             return arms.ready(view.value as T);
         case 'errored':
-            if (arms.error) return arms.error(view.error as Error, view.retry, view.stale);
+            if (arms.error) {
+                return arms.error(view.error as Error, {
+                    retry: view.retry,
+                    stale: view.stale,
+                    hasStale: view.hasStale
+                });
+            }
             view.onUnhandledError?.(view.error as Error);
             return undefined;
     }

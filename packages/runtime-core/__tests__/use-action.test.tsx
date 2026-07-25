@@ -207,7 +207,7 @@ describe('useAction', () => {
                     {action.match({
                         idle: () => 'IDLE',
                         pending: () => 'PENDING',
-                        error: (e, retry, stale) => {
+                        error: (e, { retry, stale }) => {
                             armRetry = retry;
                             armStale = stale;
                             return `ERROR:${e.message}`;

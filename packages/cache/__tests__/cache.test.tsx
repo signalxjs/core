@@ -758,7 +758,7 @@ describe('@sigx/cache', () => {
         let retryFn!: () => void;
         const rendered = cell.match({
             ready: v => `R:${v}`,
-            error: (e, retry, stale) => {
+            error: (e, { retry, stale }) => {
                 seenStale = stale;
                 retryFn = retry;
                 return `E:${e.message}`;

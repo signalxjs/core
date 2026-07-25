@@ -140,6 +140,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- **Breaking — `match`'s `error` arm takes an options object (#514).**
+
+  ```diff
+  - error: (e, retry, stale) => …
+  + error: (e, { retry, stale, hasStale }) => …
+  ```
+
+  Two reasons, one signature change. **Presence**: `stale` had the same
+  conflation `hasValue` just removed from `value` — for a nullable `T`, a
+  last-good value of `null` and "there was no last-good value" are the same
+  `null`, so the "keep content + toast" pattern the parameter exists for
+  silently degraded to "show the error alone" whenever the last good read
+  legitimately resolved null. **Shape**: `retry` and `stale` were each
+  appended positionally once already; a third addition made it clear the list
+  would keep growing, and destructuring keeps the common
+  `error: (e, { retry }) => …` case as short as it was.
+
+  `all()` was affected internally too: it combined member stales with a null
+  test, so one member whose last-good value was `null` sank the whole
+  combination to "no last-good value". It now discriminates on a presence bit
+  (`HAS_STALE`, the companion to the existing `STALE` symbol) and reports
+  `hasStale` only when **every** member has one.
+
+  Migration is mechanical — destructure. Every in-tree call site is updated
+  (tests, `examples/spa-ssr`, `docs/rfc-async.md`).
+
 - **Breaking (pre-release)** — **single-flight boundary refresh is now data-keyed: the `refreshes` option is REMOVED** (#452; the option never shipped in a release). A mutation no longer names UI components; it declares only `invalidates` — what data changed — and that one declaration now drives BOTH `@sigx/cache` invalidation and §6.3 boundary refresh. During SSR every boundary automatically records the canonical `useData` keys it (or any non-boundary descendant) read — `SSRBoundaryRecord.deps`, folded to the nearest enclosing boundary, correct across streamed/deferred subtrees; the client sends those deps up with an `invalidates`-declaring mutation, and the endpoint re-renders exactly the boundaries whose deps intersect the mutation's patterns (the cache pack's `keyMatches` semantics — a bare fn-ref pattern `[getVotes]` matches `useData(getVotes)` and every `[getVotes, ...args]` read). Component names can no longer drift out of sync, and a boundary that stops reading the data correctly stops refreshing. The explicit `createBoundaryRefresh` component registry and all client apply semantics are unchanged. Migration: replace `refreshes: ['Poll']` with `invalidates: () => [getVotes]` (the fn the boundary reads) and read data via `useData(getVotes)`.
 
 - **Breaking** — **`app.use(pack())` is the ONE pack-install shape** (#413, #418). The second plugin bus is gone: `SSRInstance.use()` is **removed** from `@sigx/server-renderer`, and `createSSR().use(islandsPlugin())` / `createSSR().use(resumePlugin())` no longer exist. A pack's `install(app)` now registers its *server* render hooks too, through the new app-carried seam `provideSSRPlugin` / `getSSRPlugins` / `SSR_PLUGINS_TOKEN`, so installing the pack in the entry-server's per-request app factory is the whole install. Every render path that receives the App merges app-carried plugins after instance plugins, deduped by `name` (first wins, dev-warned), in `app.use()` order — islands-before-resume stays an app decision. Instance-level plugins move to `createSSR({ plugins })`, an advanced/engine channel (the default state plugin, tests, custom engines). Migration:

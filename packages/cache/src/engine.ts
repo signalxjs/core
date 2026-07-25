@@ -61,6 +61,8 @@ function createCachedRead<T>(
     let entry: CacheEntry | null = null;
     /** Last-good value handed to the error arm (mirrors core's stale param). */
     let staleVal: T | null = null;
+    /** …and whether there IS one — a cached `null` is a value (#514). */
+    let hasStaleVal = false;
     /** Previous key's value — shown through a key change under keepPreviousData. */
     let previousData: T | null = null;
     /** …and whether there WAS one: `previousData !== null` conflates a cached null (#485). */
@@ -96,13 +98,14 @@ function createCachedRead<T>(
                 state.has = showCached || showPrevious;
                 state.err = null;
             } else if (e.error) {
-                if (e.hasValue) staleVal = e.value as T;
+                if (e.hasValue) { staleVal = e.value as T; hasStaleVal = true; }
                 state.st = 'errored';
                 state.data = null;
                 state.has = false;
                 state.err = e.error;
             } else if (e.hasValue) {
                 staleVal = e.value as T;
+                hasStaleVal = true;
                 state.st = 'ready';
                 state.data = e.value as T;
                 state.has = true;
@@ -135,6 +138,7 @@ function createCachedRead<T>(
             canonKey = canon;
             rawArg = raw;
             staleVal = null;
+            hasStaleVal = false;
 
             if (canon === null || disposed) {
                 entry = null;
@@ -184,6 +188,7 @@ function createCachedRead<T>(
                     value: state.data,
                     error: state.err,
                     stale: staleVal,
+                    hasStale: hasStaleVal,
                     retry: () => void refresh(),
                     onUnhandledError: reportUnhandled,
                 },
