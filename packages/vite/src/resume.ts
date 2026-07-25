@@ -131,12 +131,19 @@ export function sigxResume(options: SigxResumeOptions = {}): Plugin {
         if (targets.length === 0) return;
 
         warnedForms.add(file);
+        // Deliberately hedged: this file is outside `include`, so it is never
+        // parsed for handler sites and we cannot know whether the <form>'s
+        // submit handler actually calls one of these. Naming the condition is
+        // what keeps it from reading as a false assertion.
         this.warn(
-            `${relPath(file)} renders a <form> and imports ${targets.map(t => `\`${t}\``).join(', ')}, ` +
-            `declared \`form: true\` — but this file is not covered by sigxResume()'s \`include\`, ` +
-            `so no native action/method is stamped and the form does NOT work without JS. ` +
-            `Move the component into a \`*.resume.tsx\` file (or widen \`include\`) to get the ` +
-            `no-JS fallback, or drop \`form: true\` if RPC-only is what you want (rfc-server §6.4).`
+            `[sigx:resume] ${relPath(file)} renders a <form> and imports ` +
+            `${targets.map(t => `\`${t}\``).join(', ')}, declared \`form: true\`. ` +
+            `If that form's submit handler calls one of them, it gets NO native ` +
+            `action/method: stamping only runs on files matching sigxResume()'s ` +
+            `\`include\`, and this file does not match — so the form would not work ` +
+            `without JS. Move the component into a \`*.resume.tsx\` file (or widen ` +
+            `\`include\`) to get the no-JS fallback, or drop \`form: true\` if RPC-only ` +
+            `is what you want (rfc-server §6.4).`
         );
     }
 

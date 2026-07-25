@@ -1100,6 +1100,7 @@ export function extractResumeHandlers(
             // pack's delegation can fully hydrate the boundary on first
             // interaction (no core scheduling — resumable pages ship no
             // upfront runtime to install interaction listeners with).
+            let warnedForm = false;
             for (const { site, preventDefault } of allSites) {
                 // §6.4: only resume-mode components stamp a native action, so
                 // ONE unextractable capture silently costs this form its no-JS
@@ -1111,12 +1112,14 @@ export function extractResumeHandlers(
                 // so ask against the MODULE's imports. That is a superset, but
                 // the narrowing that matters is already applied: the site has
                 // to be a `<form>`'s own submit handler.
-                if (formTargetsFor(site, [...moduleScan.imports.values()]).size > 0) {
+                if (!warnedForm && formTargetsFor(site, [...moduleScan.imports.values()]).size > 0) {
+                    warnedForm = true; // once per component, not once per form site
                     warnings.push(
-                        `${comp.exported}: a <form> targets a \`form: true\` server function, but ` +
-                        `this component fell back to HYDRATE mode — no native action is stamped, ` +
-                        `so the form does not work without JS. Make its handlers fully ` +
-                        `extractable to keep the no-JS fallback (rfc-server §6.4).`
+                        `${comp.exported} fell back to HYDRATE mode and renders a <form> while the ` +
+                        `module imports a \`form: true\` server function. If that form's submit ` +
+                        `handler calls it, no native action is stamped (only resume-mode components ` +
+                        `stamp one), so the form does not work without JS. Make the component's ` +
+                        `handlers fully extractable to keep the no-JS fallback (rfc-server §6.4).`
                     );
                 }
                 events.add(site.event);

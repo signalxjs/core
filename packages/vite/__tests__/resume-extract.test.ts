@@ -670,7 +670,7 @@ export const Feedback = component((ctx) => {
 
         expect(result.components[0].mode).toBe('hydrate');
         expect(result.code).not.toContain('action="/_sigx/fn/');
-        expect(result.warnings.join('\n')).toMatch(/HYDRATE mode/);
+        expect(result.warnings.join("\n")).toMatch(/HYDRATE mode/);
         expect(result.warnings.join('\n')).toMatch(/without JS/);
     });
 
