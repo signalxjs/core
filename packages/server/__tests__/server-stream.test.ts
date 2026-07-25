@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { serverStream, serverFn, ServerFnError } from '../src/index';
+import { serverStream, serverFn, serverFnPreset, ServerFnError } from '../src/index';
 import { handleServerFnRequest } from '../src/server/index';
 import { __serverStreamStub, configureServerFn } from '../src/client/index';
 import { isServerFnError } from '../src/errors';
@@ -35,7 +35,7 @@ afterEach(() => {
 /* ------------------------------------------------------------------ */
 
 describe('serverStream — wrapper', () => {
-    it('is marked for transports and in-process calls get the generator directly', async () => {
+    it('is marked for transports and in-process calls run the invoke pipeline', async () => {
         const count = serverStream(async function* count(_rq, upTo: number) {
             for (let i = 1; i <= upTo; i++) yield i;
         });
@@ -668,5 +668,93 @@ describe('serverStream — unvalidated wire args (#412)', () => {
         });
         await post(s, '{"args":[2]}');
         expect(warn).not.toHaveBeenCalled();
+    });
+});
+
+/* ------------------------------------------------------------------ */
+/* preset.stream — the in-process reroute (#398, rfc-server-v3 §1.2)  */
+/* ------------------------------------------------------------------ */
+
+describe('serverStream — the in-process pipeline (F-B)', () => {
+    it('runs preset.stream guards before the first yield, in-process', async () => {
+        const trace: string[] = [];
+        const authed = serverFnPreset({
+            use: [
+                (): void => {
+                    trace.push('guard');
+                }
+            ]
+        });
+        const feed = authed.stream(async function* () {
+            trace.push('body');
+            yield 'a';
+            yield 'b';
+        });
+        // Nothing has run yet: an async generator does not execute until it
+        // is pulled, which is what keeps the call itself synchronous.
+        const iterable = feed();
+        expect(trace).toEqual([]);
+        await expect(collect(iterable)).resolves.toEqual(['a', 'b']);
+        expect(trace).toEqual(['guard', 'body']);
+    });
+
+    it('a vetoing guard rejects on the first pull, not at the call', async () => {
+        const authed = serverFnPreset({
+            use: [
+                (): void => {
+                    throw new ServerFnError(401, 'sign in');
+                }
+            ]
+        });
+        const feed = authed.stream(async function* () {
+            yield 'secret';
+        });
+        // The call does not throw — the wire path's pre-first-yield error
+        // surfaces in the same place.
+        const iterable = feed();
+        const error = await collect(iterable).catch((e: unknown) => e);
+        expect(isServerFnError(error)).toBe(true);
+        expect((error as ServerFnError).status).toBe(401);
+    });
+
+    it('forwards consumer cancellation to the impl generator (yield* delegation)', async () => {
+        let cleaned = false;
+        const feed = serverStream(async function* () {
+            try {
+                yield 1;
+                yield 2;
+            } finally {
+                cleaned = true;
+            }
+        });
+        for await (const value of feed()) {
+            expect(value).toBe(1);
+            break;
+        }
+        expect(cleaned).toBe(true);
+    });
+
+    it('a vetoing guard over the WIRE is a buffered JSON error, not a stream', async () => {
+        const authed = serverFnPreset({
+            use: [
+                (): void => {
+                    throw new ServerFnError(403, 'nope');
+                }
+            ]
+        });
+        const feed = authed.stream(async function* () {
+            yield 'secret';
+        });
+        const response = await handleServerFnRequest(
+            new Request(`${ORIGIN}/_sigx/fn/feed_fn_1`, {
+                method: 'POST',
+                headers: { 'content-type': 'application/json', origin: ORIGIN },
+                body: JSON.stringify({ args: [] })
+            }),
+            { resolve: () => feed }
+        );
+        expect(response.status).toBe(403);
+        expect(response.headers.get('content-type')).toContain('application/json');
+        expect(await response.text()).not.toContain('secret');
     });
 });

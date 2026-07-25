@@ -126,10 +126,19 @@ const REGEX_SPECIALS = /[.*+?^${}()|[\]\\]/g;
 const escapeRe = (name: string): string => name.replace(REGEX_SPECIALS, '\\$&');
 
 /**
- * Call-site patterns for `serverFn`/`serverStream` as value-imported from
- * '@sigx/server' — named (aliased or not) and namespace imports.
- * Best-effort dev lint, not an analysis: re-exports and indirections are
- * out of scope.
+ * Call-site patterns for `serverFn`/`serverStream`/`serverFnPreset` as
+ * value-imported from '@sigx/server' — named (aliased or not) and namespace
+ * imports. Best-effort dev lint, not an analysis: re-exports and indirections
+ * are out of scope.
+ *
+ * `serverFnPreset` is here so a component file that only uses a preset still
+ * reaches the inline extractor, which reports it as an error (#398) — the gate
+ * runs before any parsing, so a miss here is silence, not a fallback. No
+ * pattern is needed for the DERIVED call (`authed(…)`): presets are
+ * same-module, so the file that calls one also declares it.
+ * `\bserverFn\b` cannot match inside `serverFnPreset` (no word boundary
+ * between `n` and `P`), so the two never cross-contaminate; the namespace
+ * alternation lists `FnPreset` first for the same reason.
  */
 function serverFnCallPatterns(code: string): RegExp[] {
     const patterns: RegExp[] = [];
@@ -139,12 +148,12 @@ function serverFnCallPatterns(code: string): RegExp[] {
         if (namespace) {
             patterns.push(
                 new RegExp(
-                    `(?<![\\w$.])${escapeRe(namespace[1])}\\s*\\.\\s*server(?:Fn|Stream)\\s*\\(`
+                    `(?<![\\w$.])${escapeRe(namespace[1])}\\s*\\.\\s*server(?:FnPreset|Fn|Stream)\\s*\\(`
                 )
             );
             continue;
         }
-        for (const wrapper of ['serverFn', 'serverStream']) {
+        for (const wrapper of ['serverFnPreset', 'serverFn', 'serverStream']) {
             if (new RegExp(`\\btype\\s+${wrapper}\\b`).test(clause)) continue; // inline type import
             const spec = new RegExp(`\\b${wrapper}\\b(?:\\s+as\\s+([\\w$]+))?`).exec(clause);
             if (spec) {

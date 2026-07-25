@@ -7,7 +7,14 @@
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { serverFn, ServerFnError, isServerFnError, type StandardSchemaV1 } from '../src/index';
+import {
+    serverFn,
+    serverFnPreset,
+    serverStream,
+    ServerFnError,
+    isServerFnError,
+    type StandardSchemaV1
+} from '../src/index';
 import { createRequestContext } from '../src/context';
 
 afterEach(() => {
@@ -349,5 +356,152 @@ describe('serverFn — options form with an input-less handler (#451)', () => {
         // @ts-expect-error — input is required
         const bad: () => Promise<number> = fn;
         void bad;
+    });
+});
+
+describe('serverFnPreset — shared per-module middleware (#398)', () => {
+    const trace: string[] = [];
+    const record =
+        (label: string) =>
+        (): void => {
+            trace.push(label);
+        };
+
+    afterEach(() => {
+        trace.length = 0;
+    });
+
+    it('runs its guards on the IN-PROCESS path — the seam the direct form never had', async () => {
+        const authed = serverFnPreset({ use: [record('preset')] });
+        const fn = authed(async (_rq, a: number, b: number) => a + b);
+        // No transport, no endpoint: a plain call, which is what `useData`
+        // does during SSR. Before #398 this ran nothing.
+        await expect(fn(2, 3)).resolves.toBe(5);
+        expect(trace).toEqual(['preset']);
+    });
+
+    it('a multi-arg direct-form preset fn survives a WIRE-shaped invoke (F-B)', async () => {
+        // The regression the RFC calls out: routing the direct form through
+        // the options-form pipeline would 400 here on `args.length > 1`.
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const authed = serverFnPreset({ use: [record('preset')] });
+        const fn = authed(async (_rq, sku: string, qty: number) => `${sku}x${qty}`);
+        const ctx = createRequestContext(new Request('https://x.test/_sigx/fn/add_fn_1'));
+        await expect(
+            fn.__sigxFn(ctx, { symbol: 'add_fn_1', name: 'add' }, ['sku', 2])
+        ).resolves.toBe('skux2');
+        expect(trace).toEqual(['preset']);
+        warn.mockRestore();
+    });
+
+    it('runs preset guards BEFORE the function’s own use chain, and both before validation', async () => {
+        const authed = serverFnPreset({ use: [record('preset-a'), record('preset-b')] });
+        const fn = authed({
+            use: [record('own')],
+            input: {
+                '~standard': {
+                    version: 1,
+                    vendor: 'test',
+                    validate(value) {
+                        trace.push('validate');
+                        return { value: value as { id: string } };
+                    }
+                }
+            } satisfies StandardSchemaV1<{ id: string }>,
+            handler: async (_rq, input) => {
+                trace.push('handler');
+                return input.id;
+            }
+        });
+        await expect(fn({ id: 'a' })).resolves.toBe('a');
+        expect(trace).toEqual(['preset-a', 'preset-b', 'own', 'validate', 'handler']);
+    });
+
+    it('a throwing preset guard vetoes both forms', async () => {
+        const authed = serverFnPreset({
+            use: [
+                (): void => {
+                    throw new ServerFnError(401, 'sign in');
+                }
+            ]
+        });
+        const direct = authed(async () => 'never');
+        const options = authed({ handler: async () => 'never' });
+        for (const fn of [direct, options]) {
+            const error = await fn().catch((e: unknown) => e);
+            expect(isServerFnError(error)).toBe(true);
+            expect((error as ServerFnError).status).toBe(401);
+        }
+    });
+
+    it('runs its guards through .with({ context }) and hands them the supplied request', async () => {
+        let seen: string | undefined;
+        const authed = serverFnPreset({
+            use: [
+                (rq): void => {
+                    seen = rq.request.url;
+                }
+            ]
+        });
+        const fn = authed(async (rq) => rq.url.pathname);
+        const request = new Request('https://x.test/board?tab=open');
+        await expect(fn.with({ context: request })()).resolves.toBe('/board');
+        expect(seen).toBe('https://x.test/board?tab=open');
+    });
+
+    it('copies the guard array once — a policy the app can mutate is not a policy', async () => {
+        const guards = [record('initial')];
+        const authed = serverFnPreset({ use: guards });
+        const before = authed(async () => 'ok');
+        guards.push(record('smuggled'));
+        const after = authed(async () => 'ok');
+        await before();
+        await after();
+        expect(trace).toEqual(['initial', 'initial']);
+    });
+
+    it('carries every definition-level mark through the derived options form', async () => {
+        const authed = serverFnPreset({ use: [record('preset')] });
+        const read = authed({ cache: { maxAge: 60 }, handler: async () => 'r' });
+        expect(read.__sigxGet).toBe(true);
+        expect(read.__sigxCacheControl).toBe('private, max-age=60');
+
+        const mutation = authed({ handler: async () => 'm', invalidates: () => ['cart'] });
+        expect(typeof mutation.__sigxInvalidates).toBe('function');
+
+        const action = authed({ form: true, input: schema, handler: async () => 'a' });
+        expect(action.__sigxForm).toBe(true);
+    });
+
+    it('still throws at definition time for `form` without `input` (#412)', () => {
+        const authed = serverFnPreset({ use: [] });
+        expect(() => authed({ form: true, handler: async () => 'x' })).toThrow(
+            /declares `form` without `input`/
+        );
+    });
+
+    it('types the derived callable exactly as serverFn does', () => {
+        const authed = serverFnPreset({ use: [] });
+
+        const two: (sku: string, qty: number) => Promise<string> = authed(
+            async (_rq, sku: string, qty: number) => `${sku}${qty}`
+        );
+        void two;
+
+        const zero: () => Promise<number> = authed({ handler: async () => 1 });
+        void zero;
+
+        const one: (input: { id: string }) => Promise<string> = authed({
+            input: schema,
+            handler: async (_rq, input) => input.id
+        });
+        void one;
+
+        // @ts-expect-error — a declared input is required, exactly as on serverFn
+        const bad: () => Promise<string> = one;
+        void bad;
+
+        const stream: typeof serverStream = authed.stream;
+        void stream;
     });
 });

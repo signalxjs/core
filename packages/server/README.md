@@ -123,6 +123,50 @@ when `input` is omitted. Declaring `input` is what resolves both.
 `serverStream` has no options form, so validate its arguments at the top
 of the generator (any Standard Schema validates standalone).
 
+### Shared middleware — `serverFnPreset`
+
+A `use:` chain runs on **every** transport, which is what makes it the place
+app-wide auth belongs (the endpoint's `guard` is wire-only — see *Security
+defaults*). The cost is repetition: every function in every server module
+repeats the same line. `serverFnPreset` removes it without giving up the
+guarantee.
+
+```ts
+// src/guards.ts — the policy lives in ONE place
+export const appGuards = [requireUser];
+
+// src/board.server.ts — one line per server module
+import { serverFnPreset } from '@sigx/server';
+import { appGuards } from './guards';
+
+const authed = serverFnPreset({ use: appGuards });
+
+export const boardIssues = authed({ input: BoardKey, handler: async (rq, k) => … });
+export const addItem     = authed(async (rq, sku: string, qty: number) => …);
+export const feed        = authed.stream(async function* (rq) { … });
+```
+
+The derived form is `serverFn` exactly — both authoring forms, the same
+options (`id`, `input`, `use`, `invalidates`, `cache`, `form`), the same
+`.with()` channel, the same wire. `preset.stream` is the `serverStream` twin.
+Preset guards run **first**, then the function's own `use:` chain.
+
+- **Not a builder.** `preset.stream` is a second one-shot factory over the
+  same `use` array, never an accumulating chain — a preset carries `use` and
+  nothing else, and cannot derive another preset.
+- **The array is copied at definition.** Pushing to `appGuards` afterwards
+  changes nothing: a policy the app can mutate is not a policy.
+- **Same module only.** The build analyzes one file at a time, so a preset
+  imported from another module is invisible where it is used and the
+  functions derived from it would not extract at all. Exporting one is a
+  build warning; share the guard **array** instead, as above. For the same
+  reason a preset cannot be used in the inline (component-file) form — that
+  is a build error naming the remedy.
+- **Editing the shared chain re-mints the hashed symbols** of every function
+  derived from it (the preset's source is part of their content hash), the
+  way editing a function body already does. Stable symbols (`<id>#<name>`)
+  never move, so installed clients keep their routes.
+
 ### Server-declared invalidation
 
 A mutation declares which cache keys it invalidates **where the data
@@ -384,7 +428,8 @@ app.use(createRequestHandler({ /* documents, unchanged */ }));
 
 `guard` covers requests this handler serves. It does **not** run for the
 in-process calls the document handler beside it makes while rendering — put
-auth that must hold on every transport in each function's `use:` chain
+auth that must hold on every transport in the function's definition — its
+`use:` chain, or a `serverFnPreset` shared across the module
 (rfc-server-v3 §1, #493).
 
 On WinterCG runtimes (Cloudflare, Deno, Bun) skip the adapter —
@@ -628,7 +673,8 @@ Every server function is a public HTTP endpoint; the defaults assume that:
   wire-level backstop, **not** an app-wide seam: an in-process (SSR-time) call
   never enters the handler, so it runs only that function's own `use` chain.
   Auth that must hold on every transport belongs in the definition — `use:` on
-  each function (rfc-server-v3 §1, #489/#493).
+  each function, or one `serverFnPreset({ use })` shared by the module
+  (rfc-server-v3 §1, #489/#493).
 - **`maxBodyBytes`** (1 MiB default) enforced while reading.
 - **Error masking**: only `ServerFnError` crosses the wire verbatim; other
   throws become a generic 500 in production.
@@ -645,7 +691,7 @@ Every server function is a public HTTP endpoint; the defaults assume that:
 
 | Entry | Runs on | What |
 |---|---|---|
-| `@sigx/server` | server (browser condition throws) | `serverFn`, `ServerFnError`, `isServerFnError`, types |
+| `@sigx/server` | server (browser condition throws) | `serverFn`, `serverStream`, `serverFnPreset`, `ServerFnError`, `isServerFnError`, types |
 | `@sigx/server/client` | any client (browser, lynx, terminal) | the generated stubs' runtime + `configureServerFn` (dependency-free) |
 | `@sigx/server/server` | anywhere (WinterCG) | `handleServerFnRequest(request, options)` |
 | `@sigx/server/node` | Node | `createServerFnHandler(options)` — connect-style |

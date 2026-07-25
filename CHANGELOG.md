@@ -8,6 +8,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- **`@sigx/server` / `@sigx/vite`: `serverFnPreset` — shared per-module
+  middleware (#398).** A `use:` chain is the only mechanism that runs on every
+  transport, so app-wide auth was a line repeated on every server function.
+  `serverFnPreset({ use })` returns `serverFn`'s exact overloads bound to that
+  chain, plus `preset.stream` for `serverStream`; the policy lives in one
+  shared guard array and each server module spends one line. Preset guards run
+  first; the array is copied at definition; a preset carries `use` and nothing
+  else. Same-module only — exporting one is a build warning and using one in a
+  component file is a build error, both naming the remedy. Editing the shared
+  chain re-mints the hashed symbols derived from it (stable symbols never
+  move); a plain function's symbol is byte-identical to before, pinned by a
+  literal in the tests. Two live bugs fixed alongside it: an SSR-time
+  `serverStream` ran **no** middleware, and the direct form had no middleware
+  seam at all. New build warning: a spread in a `serverFn({...})` options
+  literal hides `id`/`cache`/`invalidates`/`form` from the static readers,
+  which silently disables single-flight boundary refresh.
+
 - **`AsyncState.hasValue` — presence, separate from the value (#485).** Every
   `useData` cell, the `@sigx/cache` cell, `all()` and the SSR-side state now
   expose `readonly hasValue: boolean`. Additive for readers.

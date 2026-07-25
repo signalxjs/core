@@ -234,6 +234,27 @@ describe('sigxServer — inline extraction (non-matching files)', () => {
         ).toThrow(/module-scope binding "T"/);
     });
 
+    it('a preset in a component file is a hard error — the gate reaches it (#398)', () => {
+        // The whole point of widening `callsServerFn`: a file whose only
+        // `@sigx/server` call is a preset used to be skipped before parsing,
+        // so the error never fired and the module went through untouched.
+        const bad =
+            `import { serverFnPreset } from '@sigx/server';\n` +
+            `const authed = serverFnPreset({ use: [] });\n` +
+            `export const load = authed(async (rq) => 1);`;
+        expect(() =>
+            plugin.transform.call(ctx('client'), bad, join(root, 'src/Preset.tsx'))
+        ).toThrow(/serverFnPreset\(\) is only supported in a \*\.server\.ts module/);
+
+        const namespaced =
+            `import * as srv from '@sigx/server';\n` +
+            `const authed = srv.serverFnPreset({ use: [] });\n` +
+            `export const load = authed(async (rq) => 1);`;
+        expect(() =>
+            plugin.transform.call(ctx('client'), namespaced, join(root, 'src/PresetNs.tsx'))
+        ).toThrow(/serverFnPreset\(\)/);
+    });
+
     it('serverFn inside a component is a hard error with a location', () => {
         const bad =
             `import { serverFn } from '@sigx/server';\n` +
