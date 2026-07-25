@@ -1,6 +1,6 @@
 // Vite plugin for sigx with HMR support
 import type { DevEnvironment, HotUpdateOptions, Plugin, ResolvedConfig, UserConfig, ViteBuilder } from 'vite';
-import { createRequire } from 'module';
+import { fileURLToPath } from 'url';
 import * as fs from 'fs';
 import * as net from 'net';
 import path from 'path';
@@ -81,15 +81,93 @@ interface SigxPluginOptions {
 // Resolve package source paths for aliasing
 // ============================================================================
 
-function resolvePackageSrc(packageName: string, entry = 'index.ts'): string | null {
+/**
+ * Every `@sigx/*` dev alias the project needs, generated from what is actually
+ * installed (#487).
+ *
+ * This used to be a hand-written list built on `createRequire(...).resolve(
+ * '<pkg>/package.json')`. It could never have worked, for two independent
+ * reasons: no `@sigx` package exports `./package.json`, AND `createRequire`
+ * resolves under the **`require` condition**, which none of them declare —
+ * they are ESM-only (`types`/`development`/`production`/`import`). So every
+ * lookup threw `ERR_PACKAGE_PATH_NOT_EXPORTED`, the map was always `{}`, and
+ * the behaviour `packages/vite/README.md` documented never once ran. Apps
+ * compensated with a hand-maintained `resolve.alias` map that grew per package.
+ *
+ * `import.meta.resolve` is what applies the same conditions Vite and Node use
+ * for an `import`, so it lands on the package's real entry — the **`dist`**
+ * one. That matters: `__DEV__` is defined only by `defineLibConfig` (the
+ * package builds), and the app plugin emits no `define`, so aliasing to `src`
+ * would leave every `if (__DEV__)` in the family referencing an undefined
+ * global. Aliasing to dist is also exactly what the hand-written maps did.
+ *
+ * The remaining constraint is ORDER: Vite's matcher is `importee === find ||
+ * importee.startsWith(find + '/')` followed by a plain prefix replace, so a
+ * bare `@sigx/resume` entry ahead of `@sigx/resume/client` rewrites the
+ * subpath to `…/dist/index.js/client`. Subpaths must come first — that prefix
+ * rule is the whole reason the hand-written maps were so long.
+ */
+function resolveSpecifierFile(specifier: string): string | null {
     try {
-        const require = createRequire(import.meta.url);
-        const pkgPath = require.resolve(`${packageName}/package.json`);
-        const pkgDir = path.dirname(pkgPath);
-        return path.join(pkgDir, 'src', entry);
+        const url = import.meta.resolve(specifier);
+        return url.startsWith('file:') ? fileURLToPath(url) : null;
     } catch {
+        // Not installed, or a condition this process can't satisfy — the
+        // caller skips it rather than failing the whole config.
         return null;
     }
+}
+
+/** The installed package's own directory (where its package.json lives). */
+function resolvePackageDir(packageName: string): string | null {
+    let dir = resolveSpecifierFile(packageName);
+    if (!dir) return null;
+    dir = path.dirname(dir);
+    // Walk up to the package root — the entry may sit any depth below it.
+    for (let i = 0; i < 10; i++) {
+        const manifest = path.join(dir, 'package.json');
+        if (fs.existsSync(manifest)) {
+            try {
+                const { name } = JSON.parse(fs.readFileSync(manifest, 'utf-8')) as { name?: string };
+                if (name === packageName) return dir;
+            } catch { /* unreadable — keep walking */ }
+        }
+        const up = path.dirname(dir);
+        if (up === dir) break;
+        dir = up;
+    }
+    return null;
+}
+
+/**
+ * Alias entries for one package: one per `exports` subpath, longest key first,
+ * each pointing at the file that subpath actually resolves to.
+ */
+function aliasEntriesFor(packageName: string, dir: string): Array<[string, string]> {
+    let exportsField: unknown;
+    try {
+        exportsField = (JSON.parse(
+            fs.readFileSync(path.join(dir, 'package.json'), 'utf-8')
+        ) as { exports?: unknown }).exports;
+    } catch {
+        return [];
+    }
+    const subpaths =
+        exportsField && typeof exportsField === 'object' && !Array.isArray(exportsField)
+            ? Object.keys(exportsField as Record<string, unknown>).filter(k => k.startsWith('.'))
+            : ['.'];
+
+    const entries: Array<[string, string]> = [];
+    for (const sub of subpaths) {
+        // Wildcards can't be aliased to one file — skip them.
+        if (sub.includes('*')) continue;
+        const specifier = sub === '.' ? packageName : `${packageName}/${sub.slice(2)}`;
+        const file = resolveSpecifierFile(specifier);
+        if (file) entries.push([specifier, file]);
+    }
+    // Longest specifier first: subpaths must win over the bare name.
+    entries.sort((a, b) => b[0].length - a[0].length);
+    return entries;
 }
 
 // ============================================================================
@@ -257,39 +335,49 @@ export function sigxPlugin(options: SigxPluginOptions = {}): Plugin {
         },
 
         async config(userConfig, { command }) {
-            // In dev mode, alias @sigx/* packages to their source files
-            // This ensures a single reactivity instance across all packages
+            // In dev, resolve the whole @sigx family to ONE physical copy each.
+            // Two copies of @sigx/reactivity split the signal graph, and two of
+            // any DI-token owner split `provides` — both fail silently (#431).
             if (command === 'serve') {
-                const sigxSrc = resolvePackageSrc('sigx');
-                const reactivitySrc = resolvePackageSrc('@sigx/reactivity');
-                const runtimeCoreSrc = resolvePackageSrc('@sigx/runtime-core');
-                const runtimeDomSrc = resolvePackageSrc('@sigx/runtime-dom');
-                const serverRendererSrc = resolvePackageSrc('@sigx/server-renderer');
-
-                const alias: Record<string, string> = {};
-                if (sigxSrc) {
-                    alias['sigx/internals'] = resolvePackageSrc('sigx', 'internals.ts')!;
-                    alias['sigx/jsx-runtime'] = sigxSrc;
-                    alias['sigx/jsx-dev-runtime'] = sigxSrc;
-                    alias['sigx'] = sigxSrc;
-                }
-                if (reactivitySrc) {
-                    alias['@sigx/reactivity/internals'] = resolvePackageSrc('@sigx/reactivity', 'internals.ts')!;
-                    alias['@sigx/reactivity'] = reactivitySrc;
-                }
-                if (runtimeCoreSrc) {
-                    alias['@sigx/runtime-core/internals'] = resolvePackageSrc('@sigx/runtime-core', 'internals.ts')!;
-                    alias['@sigx/runtime-core'] = runtimeCoreSrc;
-                }
-                if (runtimeDomSrc) {
-                    alias['@sigx/runtime-dom/internals'] = resolvePackageSrc('@sigx/runtime-dom', 'internals.ts')!;
-                    alias['@sigx/runtime-dom'] = runtimeDomSrc;
-                }
-                if (serverRendererSrc) alias['@sigx/server-renderer'] = serverRendererSrc;
-
                 const root = userConfig.root
                     ? path.resolve(userConfig.root)
                     : process.cwd();
+
+                // The project's own alias keys win: a consumer that pinned a
+                // specifier deliberately must keep it. `mergeConfig(userConfig,
+                // pluginResult)` lets the PLUGIN override on a key collision,
+                // so half-applying our map over a hand-written one would point
+                // the bare specifier and its subpaths at different files —
+                // exactly the two-live-copies failure this exists to prevent.
+                // Vite accepts aliases as an object OR as an array of
+                // `{ find, replacement }` where `find` may be a **RegExp**.
+                // Comparing stringified keys would silently miss the regex
+                // form and generate entries for a package the project is
+                // deliberately routing elsewhere, which is the collision this
+                // check exists to avoid.
+                const userAlias = userConfig.resolve?.alias;
+                const userMatchers: Array<(specifier: string) => boolean> = Array.isArray(userAlias)
+                    ? userAlias.map(a =>
+                        a.find instanceof RegExp
+                            ? (s: string) => (a.find as RegExp).test(s)
+                            : (s: string) => s === String(a.find))
+                    : Object.keys(userAlias ?? {}).map(k => (s: string) => s === k);
+                const isUserAliased = (specifier: string) =>
+                    userMatchers.some(m => m(specifier));
+
+                const alias: Record<string, string> = {};
+                for (const name of collectSigxOptimizeDepsExcludes(root)) {
+                    const dir = resolvePackageDir(name);
+                    if (!dir) continue;
+                    const entries = aliasEntriesFor(name, dir);
+                    // All of a package's entries or none. Half-applying is
+                    // worse than not applying: the merged alias list is
+                    // user-keys-then-plugin-keys, so a user's bare `sigx`
+                    // sitting ahead of our `sigx/internals` would prefix-match
+                    // first and rewrite the subpath into `…/index.js/internals`.
+                    if (entries.some(([specifier]) => isUserAliased(specifier))) continue;
+                    for (const [specifier, file] of entries) alias[specifier] = file;
+                }
                 const serverOverride = await resolveHmrPortOverride(userConfig, hmrPort);
 
                 return {

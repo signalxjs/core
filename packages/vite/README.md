@@ -32,10 +32,21 @@ a **single module instance** in every environment (two instances mean signals
 written through one never trigger effects tracked by the other — silently
 dead UI):
 
-- **Dev**: aliases the core `@sigx/*` packages to source, and excludes **all**
-  `@sigx/*` packages from `optimizeDeps` pre-bundling — the core packages plus
-  every `@sigx/*` dependency found in your `package.json` (store, router,
-  daisyui, …), so prebundled chunks can't carry a second reactivity copy.
+- **Dev**: generates a `resolve.alias` entry for every installed `@sigx/*`
+  package **and every one of its `exports` subpaths**, each pinned to that
+  package's built entry, so the whole family resolves to one physical copy.
+  Subpath entries are emitted before bare ones — Vite matches aliases by
+  prefix, so a bare `@sigx/resume` ahead of `@sigx/resume/client` would rewrite
+  the subpath into a nonexistent path. It also excludes **all** `@sigx/*`
+  packages from `optimizeDeps` pre-bundling — the core packages plus every
+  `@sigx/*` dependency found in your `package.json` (store, router, daisyui,
+  …), so prebundled chunks can't carry a second reactivity copy.
+
+  If your config already aliases a package, the plugin leaves that package
+  **entirely** alone (all of its entries or none — a partially overridden set
+  is worse than none, since a bare key ahead of its own subpaths breaks them).
+  You should not need a hand-written map; if you do, that's a bug worth
+  reporting.
 - **SSR**: sets `ssr.noExternal: ['sigx', /^@sigx\//]` so the whole family
   stays in the SSR module graph instead of splitting between Vite's module
   runner and Node's resolver.

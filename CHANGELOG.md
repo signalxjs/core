@@ -8,6 +8,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- **`@sigx/vite`: the dev `resolve.alias` map is real (#487).** It never ran.
+  `resolvePackageSrc` looked packages up with
+  `createRequire(...).resolve('<pkg>/package.json')`, which fails twice over —
+  no `@sigx` package exports `./package.json`, and `createRequire` resolves
+  under the **`require` condition**, which none of them declare (they are
+  ESM-only). Every lookup threw `ERR_PACKAGE_PATH_NOT_EXPORTED`, so the map was
+  always `{}` and the behaviour the README documented had never once executed.
+  Nothing asserted on it: the plugin tests covered `optimizeDeps.exclude` and
+  `ssr.noExternal` only. Apps compensated with hand-maintained alias maps that
+  grew per package and per exports subpath (`examples/spa-ssr` carried 16
+  lines; a real consumer app carried the same).
+
+  The map is now generated from what is installed, via `import.meta.resolve`
+  (the same conditions Vite and Node apply to an `import`), with an entry per
+  `exports` subpath, emitted longest-key-first — Vite matches aliases by
+  prefix, so a bare `@sigx/resume` ahead of `@sigx/resume/client` would rewrite
+  the subpath into `…/index.js/client`. Targets are the packages' **built**
+  entries, never `src`: `__DEV__` is defined only by `defineLibConfig`, so a
+  src alias would leave every `if (__DEV__)` in the family referencing an
+  undefined global.
+
+  A package the project already aliases is skipped **entirely** — all of its
+  entries or none. `mergeConfig(userConfig, pluginResult)` lets the plugin win
+  on a key collision, so half-applying over a hand-written map would point a
+  bare specifier and its subpaths at different files: the two-live-copies
+  failure the map exists to prevent. `examples/spa-ssr`'s hand-written map is
+  deleted as a result.
+
 - **`invalidates` now reaches every mounted `useData` read, not only the ones
   carrying a `cache` option (#484).** A mutation's `invalidates` — declaration-level
   on a `serverFn`, or `useAction`'s `cache.invalidates` — silently refetched

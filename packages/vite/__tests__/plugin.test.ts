@@ -388,3 +388,114 @@ describe('hotUpdate — full-reload for server-only source (#450)', () => {
         expect(sent).toEqual([]);
     });
 });
+
+// ============================================================================
+// resolve.alias (dev) — #487
+// ============================================================================
+
+/**
+ * The dev alias map is what keeps the whole `@sigx` family resolving to ONE
+ * physical copy each. It was dead code from the day it was written: it looked
+ * packages up with `require.resolve('<pkg>/package.json')`, which no `@sigx`
+ * package exports, so every lookup threw and the map was always `{}`. Nothing
+ * asserted on it — `optimizeDeps.exclude` and `ssr.noExternal` were covered,
+ * `resolve.alias` was not — so the README documented behaviour that never ran
+ * and apps carried hand-written maps instead.
+ *
+ * These tests exist mostly to make that impossible again: the first one fails
+ * on the whole class of "the map came out empty".
+ */
+describe('config hook — resolve.alias (serve, #487)', () => {
+    it('resolves the core packages — the lookup that used to throw for every one', async () => {
+        const root = makeProjectRoot();
+        const config = await runConfigHook({ root }, 'serve');
+
+        for (const pkg of SIGX_CORE_PACKAGES) {
+            expect(config.resolve.alias[pkg], `alias for ${pkg}`).toBeTruthy();
+            // Built dist, never src: `__DEV__` is defined by the package builds
+            // only, so a src alias would leave the family referencing an
+            // undefined global.
+            expect(config.resolve.alias[pkg]).not.toMatch(/[/\\]src[/\\]/);
+            expect(fs.existsSync(config.resolve.alias[pkg])).toBe(true);
+        }
+    });
+
+    it('emits an entry per exports subpath, subpaths ordered before the bare name', async () => {
+        const root = makeProjectRoot();
+        const config = await runConfigHook({ root }, 'serve');
+        const keys = Object.keys(config.resolve.alias);
+
+        // Subpath entries exist at all (the reason a hand map grows per package).
+        expect(keys).toContain('@sigx/runtime-core/internals');
+        expect(keys).toContain('sigx/internals');
+        expect(config.resolve.alias['@sigx/runtime-core/internals'])
+            .not.toBe(config.resolve.alias['@sigx/runtime-core']);
+
+        // Vite matches `importee === find || importee.startsWith(find + '/')`
+        // and then prefix-REPLACES, so a bare key ahead of its own subpath
+        // would rewrite `@sigx/runtime-core/internals` to `…/index.js/internals`.
+        for (const key of keys) {
+            const bare = keys.indexOf(key.split('/').slice(0, key.startsWith('@') ? 2 : 1).join('/'));
+            const self = keys.indexOf(key);
+            if (bare !== -1 && bare !== self) {
+                expect(bare, `${key} must be ordered before its bare specifier`).toBeGreaterThan(self);
+            }
+        }
+    });
+
+    it('leaves a package alone when the project already aliases any of its specifiers', async () => {
+        const root = makeProjectRoot();
+        const config = await runConfigHook(
+            { root, resolve: { alias: { 'sigx': '/pinned/sigx.js' } } },
+            'serve'
+        );
+
+        // All of a package's entries or none: a user's bare `sigx` merged ahead
+        // of our `sigx/internals` would prefix-match first and break it.
+        expect(config.resolve.alias['sigx']).toBeUndefined();
+        expect(config.resolve.alias['sigx/internals']).toBeUndefined();
+        // Other packages are unaffected.
+        expect(config.resolve.alias['@sigx/reactivity']).toBeTruthy();
+    });
+
+    it('honours the ARRAY alias form, including a RegExp find', async () => {
+        const root = makeProjectRoot();
+        const config = await runConfigHook(
+            { root, resolve: { alias: [{ find: /^@sigx\/reactivity/, replacement: '/pinned/reactivity.js' }] } },
+            'serve'
+        );
+
+        // A stringified RegExp key never equals a specifier, so a naive
+        // comparison would generate entries for a package the project is
+        // deliberately routing elsewhere.
+        expect(config.resolve.alias['@sigx/reactivity']).toBeUndefined();
+        expect(config.resolve.alias['@sigx/reactivity/internals']).toBeUndefined();
+        expect(config.resolve.alias['sigx']).toBeTruthy();
+    });
+
+    it('honours an exact string find in the array form', async () => {
+        const root = makeProjectRoot();
+        const config = await runConfigHook(
+            { root, resolve: { alias: [{ find: 'sigx', replacement: '/pinned/sigx.js' }] } },
+            'serve'
+        );
+
+        expect(config.resolve.alias['sigx']).toBeUndefined();
+        expect(config.resolve.alias['sigx/internals']).toBeUndefined();
+        expect(config.resolve.alias['@sigx/reactivity']).toBeTruthy();
+    });
+
+    it('the user entry survives the merge Vite performs', async () => {
+        const root = makeProjectRoot();
+        const userConfig: any = { root, resolve: { alias: { 'sigx': '/pinned/sigx.js' } } };
+        const merged = mergeConfig(userConfig, await runConfigHook(userConfig, 'serve'));
+
+        expect(merged.resolve.alias['sigx']).toBe('/pinned/sigx.js');
+    });
+
+    it('adds no aliases in build mode', async () => {
+        const root = makeProjectRoot();
+        const config = await runConfigHook({ root }, 'build');
+        expect(config.resolve?.alias).toBeUndefined();
+    });
+});
