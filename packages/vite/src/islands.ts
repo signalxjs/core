@@ -120,6 +120,39 @@ export function injectSignalNames(code: string): string {
 }
 
 /**
+ * The project root as the module graph will spell it (#512).
+ *
+ * Every path-keying plugin here mixes two sources: `discover()` walks the
+ * filesystem from `config.root`, while `transform`/`load`/`hotUpdate` receive
+ * Vite's resolved ids. Rolldown resolves ids THROUGH the filesystem, so when
+ * the root traverses a symlink the two disagree — `/var/…` from the walk,
+ * `/private/var/…` from the id — and the same file registers under two keys.
+ * In `@sigx/resume` that surfaces as every component warning as its own
+ * duplicate and being dropped from the registry and the manifest.
+ *
+ * `normalizePath` (applied at every keying site for #324/#406) settles
+ * separators, not symlinks. Resolving the ROOT once is the cheap fix: the walk
+ * then produces real paths by construction, with no per-file syscall.
+ *
+ * Gated on `resolve.preserveSymlinks`, which is the whole point: a project that
+ * asks Vite to preserve symlinks gets ids in the ALIASED spelling, and
+ * resolving root would introduce the very mismatch this removes. A failing
+ * `realpathSync` (root does not exist yet, permissions) falls back to the path
+ * as given — this must never be the thing that breaks a build.
+ */
+export function resolveRoot(config: {
+    root: string;
+    resolve?: { preserveSymlinks?: boolean };
+}): string {
+    if (config.resolve?.preserveSymlinks) return config.root;
+    try {
+        return fs.realpathSync.native(config.root);
+    } catch {
+        return config.root;
+    }
+}
+
+/**
  * Walk a directory collecting files (bounded to the project tree). Sorted —
  * readdir order varies across filesystems, and discovery order decides
  * first-wins duplicate resolution, which must not depend on the machine.
@@ -169,7 +202,9 @@ export function sigxIslands(options: SigxIslandsOptions = {}): Plugin {
         name: 'sigx:islands',
 
         configResolved(config) {
-            root = config.root;
+            // #512: the spelling the module graph will use, so discovery keys
+            // and transform ids agree under a symlinked root.
+            root = resolveRoot(config);
             discover();
         },
 

@@ -39,7 +39,7 @@ import { createFilter, normalizePath, transformWithOxc } from 'vite';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { extractResumeHandlers, formMarkedImportsOf, offsetToLoc, type ResumeExtraction } from './resume-extract.js';
-import { injectSignalNames, walkFiles } from './islands.js';
+import { injectSignalNames, resolveRoot, walkFiles } from './islands.js';
 
 export interface SigxResumeOptions {
     /**
@@ -234,7 +234,9 @@ export function sigxResume(options: SigxResumeOptions = {}): Plugin {
         enforce: 'pre',
 
         configResolved(config) {
-            root = config.root;
+            // #512: the spelling the module graph will use, so discovery keys
+            // and transform ids agree under a symlinked root.
+            root = resolveRoot(config);
             isServe = config.command === 'serve';
             const server = config.plugins?.find((p) => p.name === 'sigx:server');
             const api = (server?.api ?? null) as typeof serverApi;
