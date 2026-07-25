@@ -70,7 +70,13 @@ describe('a symlinked project root (#512)', () => {
         mkdirSync(join(real, 'src', 'islands'), { recursive: true });
         writeFileSync(join(real, 'src', 'resume', 'Counter.tsx'), COUNTER);
         writeFileSync(join(real, 'src', 'islands', 'Widget.island.tsx'), ISLAND);
-        symlinkSync(real, link, 'dir');
+        // `'junction'` on Windows, not `'dir'`: a directory symlink needs
+        // elevation or Developer Mode there, so `'dir'` EPERMs on an ordinary
+        // contributor's machine (GitHub's runners are elevated, so CI would
+        // never have told us). A junction needs no privilege, is a directory
+        // link, and reproduces the same condition — a root reached through a
+        // link. It requires an absolute target, which this is.
+        symlinkSync(real, link, process.platform === 'win32' ? 'junction' : 'dir');
         real = realpathSync.native(real);
     });
 

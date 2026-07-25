@@ -25,7 +25,16 @@ Object.defineProperty(globalThis, '__DEV__', {
 // path with nothing to remember. It does NOT paper over the product bug of the
 // same origin — plugins resolve their own root (`resolveRoot`, islands.ts), and
 // `symlink-root.test.ts` builds through a deliberate symlink to prove it.
-const realTmp = realpathSync.native(tmpdir());
-process.env.TMPDIR = realTmp;   // POSIX
-process.env.TEMP = realTmp;     // Windows
-process.env.TMP = realTmp;
+// Same fallback posture as the product-side `resolveRoot`, and for a sharper
+// reason: `os.tmpdir()` does not guarantee the directory exists (it reads
+// TMPDIR/TEMP/TMP, which a machine may point anywhere), and this file runs
+// before every test — an uncaught throw here takes the whole suite with it.
+try {
+    const realTmp = realpathSync.native(tmpdir());
+    process.env.TMPDIR = realTmp;   // POSIX
+    process.env.TEMP = realTmp;     // Windows
+    process.env.TMP = realTmp;
+} catch {
+    // Leave the environment as found: tests then behave exactly as they did
+    // before this block existed.
+}
