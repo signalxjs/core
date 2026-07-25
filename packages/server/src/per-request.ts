@@ -98,14 +98,18 @@ export function perRequest<T>(setup: (rq: ServerFnContext) => T): (rq: ServerFnC
     // Identity is the ACCESSOR, not the setup: `perRequest(fn)` called twice
     // is two independent values, and re-exporting one accessor is one value.
     const token: object = {};
-    const label = setup.name || 'request value';
+    // Two strings, because they read in different places: `label` identifies
+    // the value in prose, `hint` has to be pasteable code — an anonymous setup
+    // would otherwise produce "call it as request value(rq)".
+    const label = setup.name || 'this request value';
+    const hint = setup.name || 'value';
 
     return function perRequestValue(rq: ServerFnContext): T {
         if (__DEV__ && (rq === null || typeof rq !== 'object' || typeof rq.locals !== 'object')) {
             throw new Error(
-                `[sigx server] the per-request value "${label}" was called without a request ` +
-                `context — call it as ${label}(rq), with the \`rq\` your server function, guard ` +
-                `or handler received (rfc-server-v3 §2.3).`
+                `[sigx server] ${label} was called without a request context — call it as ` +
+                `${hint}(rq), with the \`rq\` your server function, guard or handler received ` +
+                `(rfc-server-v3 §2.3).`
             );
         }
         const store = storeOf(rq);
@@ -113,7 +117,7 @@ export function perRequest<T>(setup: (rq: ServerFnContext) => T): (rq: ServerFnC
         if (cell !== undefined) {
             if (cell === RESOLVING) {
                 throw new Error(
-                    `[sigx server] circular request value: the setup for "${label}" called its ` +
+                    `[sigx server] circular request value: the setup for ${label} called its ` +
                     `own accessor before it returned. A value cannot derive from itself — move ` +
                     `the shared part into a third value that both call.`
                 );

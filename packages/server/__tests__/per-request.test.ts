@@ -199,18 +199,35 @@ describe('perRequest — memoization semantics', () => {
     });
 });
 
-describe('perRequest — the store stays invisible', () => {
-    it('never shows up in locals through keys, spread, symbols or JSON', async () => {
+describe('perRequest — the store stays out of the way', () => {
+    it('does not survive enumeration: keys, spread or JSON of locals', async () => {
         const value = perRequest(async () => 'v');
         const rq = createDetachedContext();
         await value(rq);
 
         expect(Object.keys(rq.locals)).toEqual([]);
+        // The slot is a SYMBOL key, so it was never in `Object.keys`; the
+        // non-enumerable flag is what keeps it out of a spread, which copies
+        // own enumerable symbols too.
         expect(Object.getOwnPropertySymbols({ ...rq.locals })).toEqual([]);
         expect(JSON.stringify(rq.locals)).toBe('{}');
         // …and a user-written local is unaffected.
         rq.locals.user = 'alice';
         expect(JSON.stringify(rq.locals)).toBe('{"user":"alice"}');
+        expect({ ...rq.locals }).toEqual({ user: 'alice' });
+    });
+
+    it('is still reachable by deliberate reflection — hidden, not private', async () => {
+        // Stated rather than asserted-away: `Object.getOwnPropertySymbols`
+        // reports non-enumerable keys, so the slot is visible to code that
+        // goes looking. The guarantee is only that ordinary handling of
+        // `locals` — logging, spreading, serializing — never trips over it.
+        const value = perRequest(async () => 'v');
+        const rq = createDetachedContext();
+        await value(rq);
+        expect(Object.getOwnPropertySymbols(rq.locals)).toEqual([
+            Symbol.for('sigx.serverfn.requestValues')
+        ]);
     });
 });
 
