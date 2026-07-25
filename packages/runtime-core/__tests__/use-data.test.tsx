@@ -312,6 +312,69 @@ describe('useData', () => {
         expect(cell.value).toBe('v2');
     });
 
+    /**
+     * A fetch that legitimately resolves `null` — a "not found" read — is a
+     * VALUE, not "nothing yet". The cell used to derive its state from
+     * `data !== null`, so refreshing a ready null-valued cell went back to
+     * `'pending'`, `loading` flipped true and `match` rendered the pending arm
+     * over live content — the exact thing rev-6 of rfc-async forbids (#485).
+     */
+    it('refresh() on a ready NULL-valued cell refreshes, it does not go pending', async () => {
+        let resolvers: Array<(v: string | null) => void> = [];
+        let cell!: AsyncState<string | null>;
+        const arms: string[] = [];
+
+        const App = component(() => {
+            cell = useData('null-swr', () => new Promise<string | null>(r => { resolvers.push(r); }));
+            return () => (
+                <div class="out">
+                    {cell.match({
+                        pending: () => { arms.push('pending'); return 'skeleton'; },
+                        ready: (v) => { arms.push('ready'); return `value:${String(v)}`; }
+                    })}
+                </div>
+            );
+        });
+        const container = mount(jsx(App, {}));
+        resolvers[0](null);
+        await settle();
+        expect(cell.state).toBe('ready');
+        expect(cell.value).toBeNull();
+        expect(cell.hasValue).toBe(true);   // null IS a value
+        expect(container.querySelector('.out')?.textContent).toBe('value:null');
+
+        arms.length = 0;
+        const p = cell.refresh();
+        await tick();
+        expect(cell.state).toBe('refreshing');
+        expect(cell.loading).toBe(false);
+        expect(arms).not.toContain('pending'); // no skeleton over live content
+
+        resolvers[1]('v2');
+        await p;
+        await settle();
+        expect(cell.state).toBe('ready');
+        expect(cell.value).toBe('v2');
+    });
+
+    it('an unsettled cell has no value; a settled one does', async () => {
+        let resolve!: (v: string | null) => void;
+        let cell!: AsyncState<string | null>;
+        const App = component(() => {
+            cell = useData('has-value', () => new Promise<string | null>(r => { resolve = r; }));
+            return () => <div />;
+        });
+        mount(jsx(App, {}));
+        await tick();
+        expect(cell.hasValue).toBe(false);
+        expect(cell.value).toBeNull();      // indistinguishable on `value` alone
+
+        resolve(null);
+        await settle();
+        expect(cell.hasValue).toBe(true);   // …but not on hasValue
+        expect(cell.value).toBeNull();
+    });
+
     it('refresh() never rejects, even when the fetcher fails', async () => {
         let cell!: AsyncState<string>;
         let calls = 0;

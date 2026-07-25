@@ -245,6 +245,43 @@ describe('@sigx/cache', () => {
         expect(a.state).toBe('ready');
     });
 
+    /**
+     * The store carries `hasValue` precisely to tell "no value yet" from a
+     * legitimate null (its own comment says so), but the engine re-derived
+     * presence with a null test when staging a revalidate — so a cached
+     * `null` revalidated as 'pending' and flashed a skeleton over live
+     * content (#485).
+     */
+    it('a cached NULL revalidates as refreshing, not pending', async () => {
+        let resolvers: Array<(v: string | null) => void> = [];
+        let cell!: AsyncState<string | null>;
+
+        const Root = component(() => {
+            cell = useData(
+                'null-cached',
+                () => new Promise<string | null>(r => { resolvers.push(r); }),
+                { cache: { staleTime: 0 } }
+            );
+            return () => <div />;
+        });
+        mountWith(cachePlugin(), jsx(Root, {}));
+        resolvers[0](null);
+        await settle();
+        expect(cell.state).toBe('ready');
+        expect(cell.value).toBeNull();
+        expect(cell.hasValue).toBe(true);
+
+        void cell.refresh();
+        await tick();
+        expect(cell.state).toBe('refreshing');
+        expect(cell.loading).toBe(false);
+
+        resolvers[1]('later');
+        await settle();
+        expect(cell.state).toBe('ready');
+        expect(cell.value).toBe('later');
+    });
+
     // ====================================================================
     // Action effects: invalidates + optimistic
     // ====================================================================
