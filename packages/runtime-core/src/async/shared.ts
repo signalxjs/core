@@ -38,7 +38,11 @@ export interface MatchArms<T, R> {
      * extra state. Omitted ⇒ null + bubble to errorScope / app onError.
      */
     error?: (e: Error, retry: () => void, stale: T | null) => R;
-    /** The happy path — the only type-safe route to a non-null T. */
+    /**
+     * The happy path. Reached when the cell HAS a value — which for a nullable
+     * `T` includes a legitimately `null` one, so this is "the value is
+     * present", not "the value is non-null" (#485).
+     */
     ready: (v: T) => R;
 }
 
@@ -47,6 +51,17 @@ export interface AsyncState<T> {
     readonly state: AsyncStateName;
     /** SWR last-good; kept across same-key refresh(), CLEARED on key change. */
     readonly value: T | null;
+    /**
+     * Whether `value` is a VALUE rather than "nothing yet" (#485).
+     *
+     * `value !== null` is not that question, and reading it as such is wrong
+     * for any nullable `T`: a fetch that legitimately resolves `null` — a
+     * "not found" read — looks identical to an unsettled cell. Prefer `state`
+     * (`'ready'`/`'refreshing'` ⇒ present) in templates; this is the direct
+     * form for engines and for code that holds a value it must not conflate
+     * with absence.
+     */
+    readonly hasValue: boolean;
     readonly error: Error | null;
     /** state === 'pending' ONLY — "nothing to show yet". Refresh indicators read state === 'refreshing'. */
     readonly loading: boolean;
