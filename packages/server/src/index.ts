@@ -223,15 +223,23 @@ const NO_GUARDS: readonly ServerFnGuard[] = [];
  * non-Vite builds), so the warning means "some of this build was checked and
  * this was not", never "you are not using Vite".
  */
-function warnUnchecked(fn: object, name: string): void {
-    if (!__DEV__ || (fn as { __sigxGuardChecked?: boolean }).__sigxGuardChecked === true) return;
-    if (!(globalThis as { __SIGX_GUARDS_CHECKED__?: boolean }).__SIGX_GUARDS_CHECKED__) return;
+function warnUnchecked(fn: object, name: string): boolean {
+    if (!__DEV__ || (fn as { __sigxGuardChecked?: boolean }).__sigxGuardChecked === true) {
+        return false;
+    }
+    if (!(globalThis as { __SIGX_GUARDS_CHECKED__?: boolean }).__SIGX_GUARDS_CHECKED__) {
+        return false;
+    }
     console.warn(
         `[sigx server] server function ${name ? `"${name}" ` : ''}was never analyzed by the ` +
         `guard check — this build has \`requireGuards\` on, but its module is outside the ` +
         `sigxServer() \`include\`/\`scan\` patterns, so nothing verified that it declares a ` +
         `guard chain. Add its directory to \`scan\` (rfc-server-v3 §1.5). Fires once per function.`
     );
+    // Latched by the caller: the stamp lands AFTER the wrapper is built, so
+    // this cannot be decided at definition time — but a hot function must not
+    // repeat it per call.
+    return true;
 }
 
 function unguardedContradiction(name: string): Error {
@@ -353,6 +361,7 @@ function createServerFn(
         name = options.handler.name || '';
     }
 
+    let warnedUnchecked = false;
     // In-process (SSR-time) calls run the same pipeline against a detached
     // context — no network hop, and no transport symbol (rfc-server §7 v1).
     // `.with(options)` is the per-call options channel (#353): explicit, so
@@ -370,7 +379,7 @@ function createServerFn(
                     `apply it to. It only affects the client stub's fetch (#315).`
                 );
             }
-            if (__DEV__) warnUnchecked(wrapper, name);
+            if (__DEV__ && !warnedUnchecked) warnedUnchecked = warnUnchecked(wrapper, name);
             return invoke(resolveInProcessContext(options?.signal, options?.context), { symbol: '', name }, args);
         };
     const wrapper = callWith();
@@ -557,6 +566,7 @@ function createServerStream<A extends unknown[], T>(
     async function* pump(rq: ServerFnContext, args: A): AsyncGenerator<T> {
         yield* (await invoke(rq, { symbol: '', name }, args)) as AsyncGenerator<T>;
     }
+    let warnedUnchecked = false;
     // `.with(options)` — the same per-call channel as serverFn's, minus
     // `fresh` (#448). #362 left streams out on the strength of the signal
     // argument alone (consumer break/return already aborts), which said
@@ -580,7 +590,7 @@ function createServerStream<A extends unknown[], T>(
             // detached context's `request`/`url` throw descriptively. Resolved
             // HERE, at call time — the ambient scope belongs to whoever
             // called, not to whoever first pulls a chunk.
-            if (__DEV__) warnUnchecked(wrapper, name);
+            if (__DEV__ && !warnedUnchecked) warnedUnchecked = warnUnchecked(wrapper, name);
             const rq = resolveInProcessContext(options?.signal, options?.context);
             // rfc-server-v3 §1.2 (F-B): an in-process stream runs the SAME
             // pipeline the wire does. It ran NO middleware at all before, so a
