@@ -485,10 +485,20 @@ export function createRenderer<HostNode = any, HostElement = any>(
 
         // If types are different, replace completely
         if (!isSameVNode(oldVNode, newVNode)) {
-            const parent = hostParentNode(oldVNode.dom) || container;
-            // With unified trailing markers, vnode.dom is always the trailing anchor
-            // so hostNextSibling gives us the correct insertion point
-            const nextSibling = oldVNode.dom ? hostNextSibling(oldVNode.dom) : null;
+            // With unified trailing markers, vnode.dom is always the trailing
+            // anchor, so hostNextSibling gives the correct insertion point.
+            // A HYDRATED vnode can reach here with no anchor of its own though
+            // — a Fragment (the hydration walk binds no anchor comment, unlike
+            // mount) or a component whose SSR marker was unreachable (#478) —
+            // and `hostParentNode(null)` throws on the DOM host. Fall back to
+            // the first host node the old subtree actually occupies: same
+            // result whenever `dom` is set, and a recovery rather than a
+            // correctness guarantee when it is not (for a multi-node Fragment
+            // the sibling captured here is itself unmounted below, leaving the
+            // host's stale-anchor guard to degrade the insert to an append).
+            const ref = oldVNode.dom ?? firstHostNode(oldVNode);
+            const parent = (ref ? hostParentNode(ref) : null) || container;
+            const nextSibling = ref ? hostNextSibling(ref) : null;
             unmount(oldVNode, parent as HostElement);
             // Thread the namespace context so a replacement inside a
             // namespaced subtree keeps it. When the context is unknown, let

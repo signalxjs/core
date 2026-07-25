@@ -63,7 +63,11 @@ export default [
     // 13.4 → 13.5 KB with #452: §6.3 automatic boundary dep capture
     // (recordBoundaryDep — the nearest-boundary parent-chain fold in
     // serverUseAsync); sat at 13.44 KB.
-    limit: '13.5 KB',
+    // 13.5 → 13.6 KB with #478: hydrated component vnodes now always get a
+    // trailing anchor (synthesized when the SSR marker is unreachable, as it
+    // is inside a streamed placeholder wrapper) and the streamed-boundary
+    // flow adopts the walk's live vnode; sat at 13.56 KB after trims.
+    limit: '13.6 KB',
     ignore: ['sigx', 'sigx/*', '@sigx/*', 'node:stream'],
   },
   {
@@ -73,7 +77,10 @@ export default [
     // (the token + provide/get pair packs call from install(app)); sat at
     // 5.57 KB. The eager-page cost lives on the scheduler entry, which is
     // untouched (2.6 KB).
-    limit: '5.65 KB',
+    // 5.65 → 5.75 KB with #478: the same anchor/live-vnode fix as the root
+    // entry above — these are its client-side bytes; sat at 5.71 KB. The
+    // scheduler entry is still untouched (2.61 KB).
+    limit: '5.75 KB',
     ignore: ['sigx', 'sigx/*', '@sigx/*'],
   },
   {

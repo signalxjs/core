@@ -25,11 +25,42 @@ import {
     getBoundaryTable,
     getBoundaryRecord,
     findComponentBoundaries,
+    findBoundaryMarker,
+    invalidateMarkerIndex,
     parseMarkerId,
     isSkipPlaceholder,
     firstElementBetween,
     scheduleByStrategy
 } from './scheduler';
+
+// ============= The pending-boundary bridge =============
+
+/**
+ * What the root walk knows about a streamed boundary it skipped, handed to
+ * the `sigx:async-ready` flow so the replacement hydrates the LIVE vnode
+ * from the parent's tree instead of an orphan copy (#478).
+ *
+ * Without it the walk-skipped vnode stays a ghost forever — no `dom`, no
+ * `_effect`, no `_subTree` — and the next patch from its parent either mounts
+ * a duplicate or dereferences a null anchor.
+ */
+interface PendingBoundary {
+    /** The live vnode the walk was about to hydrate. */
+    vnode: VNode;
+    /** Its real DOM parent (the placeholder's parent, not the placeholder). */
+    parent: Node;
+    /** The component's trailing `<!--$c:N-->` marker — OUTSIDE the wrapper. */
+    marker: Comment | null;
+}
+
+/**
+ * The bridge rides an expando on the placeholder element rather than a
+ * module-level map: the reference then lives exactly as long as the
+ * placeholder does, so nothing needs clearing on SPA navigation and no entry
+ * can go stale. Same discipline as the renderer's `element.__vnode` and
+ * `hydrate()`'s `container._vnode`.
+ */
+type PendingCarrier = { __sigxPendingBoundary?: PendingBoundary };
 
 // ============= Mount/hydrate primitives =============
 
@@ -133,6 +164,17 @@ export function scheduleWalkedBoundary(
         if (componentName !== 'Anonymous') {
             registerComponent(componentName, componentFactory);
         }
+        // Hand this position to that flow: the LIVE vnode, its real parent and
+        // the trailing marker the server emitted outside the wrapper. Hydrating
+        // the live vnode is what keeps the parent's tree patchable afterwards
+        // (#478). `vnode.dom` stays null until then — pointing it at the marker
+        // would make a parent patch during the streaming window treat a comment
+        // node as this component's element, since `_effect` does not exist yet.
+        (contentStart as unknown as PendingCarrier).__sigxPendingBoundary = {
+            vnode,
+            parent,
+            marker: trailingMarker
+        };
         return trailingMarker ? trailingMarker.nextSibling : dom;
     }
 
@@ -210,16 +252,25 @@ export async function hydrateAsyncBoundary(container: Element, record: SSRBounda
     if (record.hydrate === 'never') {
         return;
     }
-    if (!record.component) {
+
+    if (container.hasAttribute('data-hydrated')) {
+        return;
+    }
+
+    // The root walk hands over the live vnode for a placeholder it skipped
+    // (#478); only the record-driven path — `boundaries: 'explicit'`, where no
+    // walk ever ran — has to rebuild one from the table. Taken, not read: a
+    // consumed entry must not seed a later hydration of the same placeholder.
+    const carrier = container as unknown as PendingCarrier;
+    const pending = carrier.__sigxPendingBoundary;
+    delete carrier.__sigxPendingBoundary;
+    if (!pending && !record.component) {
         if (__DEV__) {
             console.error(`[Hydrate] No component name in boundary record`);
         }
         return;
     }
 
-    if (container.hasAttribute('data-hydrated')) {
-        return;
-    }
     // Mark synchronously, BEFORE any await, so duplicate triggers (the
     // leftover scan racing the sigx:async-ready event, or repeated events for
     // one id) can't both pass the guard above and double-mount the component.
@@ -228,18 +279,41 @@ export async function hydrateAsyncBoundary(container: Element, record: SSRBounda
     // one resolved promise) and the guard holds.
     container.setAttribute('data-hydrated', '');
 
-    const component = await loadBoundaryComponent(record);
-    if (!component) {
-        if (__DEV__) {
-            console.error(`[Hydrate] Component "${record.component}" could not be resolved`);
+    let vnode: VNode;
+    if (pending) {
+        vnode = pending.vnode;
+    } else {
+        const component = await loadBoundaryComponent(record);
+        if (!component) {
+            if (__DEV__) {
+                console.error(`[Hydrate] Component "${record.component}" could not be resolved`);
+            }
+            return;
         }
-        return;
+        vnode = recordVNode(component, record);
     }
+
+    // Anchor the component on its real trailing marker, which the server
+    // emitted OUTSIDE the wrapper (it closes the div first). Handing
+    // `hydrateComponent` the placeholder itself is what makes it treat the
+    // wrapper as a wrapper (content = its children) — the walk-driven path's
+    // shape. Passing the wrapper's firstChild instead left `vnode.dom` null,
+    // and the next patch touching the component crashed on it (#478).
+    // (Ids start at 1, so a NaN/0 attribute falls out as falsy.)
+    const id = Number(container.getAttribute('data-async-placeholder'));
+    const marker = pending?.marker ?? (id ? findBoundaryMarker(id) : null);
+    const parent = pending?.parent ?? container.parentNode;
 
     // Seed restored boundary signal state BEFORE hydrating.
     seedBoundaryState(reviveFromServer(record.state) as Record<string, any>);
     try {
-        hydrateComponent(recordVNode(component, record), container.firstChild, container);
+        if (marker && parent) {
+            hydrateComponent(vnode, container, parent, marker);
+        } else {
+            // No reachable marker (or a detached placeholder): hydrate the
+            // wrapper's children in place, as before.
+            hydrateComponent(vnode, container.firstChild, container);
+        }
     } finally {
         // Clear even on throw so stale state can't seed the next hydration.
         seedBoundaryState(null);
@@ -254,6 +328,10 @@ export async function hydrateAsyncBoundary(container: Element, record: SSRBounda
 export function hydrateLeftoverBoundaries(container: Element): void {
     const placeholders = container.querySelectorAll('[data-async-placeholder]:not([data-hydrated])');
     if (placeholders.length === 0) return;
+    // Every replace already applied mutated the DOM; the marker index each
+    // boundary's anchor lookup uses must not predate them. (The
+    // sigx:async-ready listener invalidates per event — this path has no event.)
+    invalidateMarkerIndex();
 
     const table = getBoundaryTable();
     for (const placeholder of placeholders) {

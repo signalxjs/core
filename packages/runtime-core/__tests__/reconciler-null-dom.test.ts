@@ -174,6 +174,47 @@ describe('reconcileChildrenArray with null .dom', () => {
         expect(() => renderer.render(v4, container)).not.toThrow();
     });
 
+    // The replace branch of patch() — reached when a subtree's ROOT changes
+    // type, which is how a router swaps pages. A hydrated vnode can sit there
+    // with no anchor of its own: hydration binds none for Fragments, and a
+    // streamed component's marker was once unreachable (#478). The host's
+    // parentNode op dereferences what it is handed (this mock included), so an
+    // unguarded read is a hard crash that wedges the app.
+    describe('replacing a vnode that has no .dom of its own (#478)', () => {
+        it('does not crash when the old ROOT vnode has a null .dom', () => {
+            const v1 = jsx('section', { children: 'old' }) as VNode;
+            renderer.render(v1, container);
+            expect(container.children.length).toBe(1);
+
+            // What hydration leaves behind: a live vnode with no DOM ref.
+            v1.dom = null;
+
+            const v2 = jsx('div', { children: 'new' }) as VNode;
+            expect(() => renderer.render(v2, container)).not.toThrow();
+            expect(container.children.some((c: any) => c.type === 'div')).toBe(true);
+        });
+
+        it('replaces a null-anchored Fragment into the right parent', () => {
+            // A Fragment as the subtree root, exactly what a component
+            // returning <>…</> hydrates to.
+            const v1 = jsx(Fragment, { children: [jsx('span', { children: 'streamed' })] }) as VNode;
+            renderer.render(v1, container);
+            const span = v1.children[0].dom;
+            expect(span.parentNode).toBe(container);
+
+            // Hydration never binds the fragment's trailing anchor.
+            v1.dom = null;
+
+            const v2 = jsx('p', { children: 'client' }) as VNode;
+            expect(() => renderer.render(v2, container)).not.toThrow();
+
+            // The parent came from the fragment's first host node, so the
+            // replacement landed in the container and the old child is gone.
+            expect(v2.dom.parentNode).toBe(container);
+            expect(container.children).not.toContain(span);
+        });
+    });
+
     it('should handle new children being added alongside Comment VNodes', () => {
         // Initial: [Comment, Comment, Span]
         const v1 = jsx('div', {
