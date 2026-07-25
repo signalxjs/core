@@ -456,9 +456,12 @@ What replaces it, one line each; the argument is in v3 §2:
   promised could not be honored on WinterCG, where `createFetchHandler` settles
   its scope at the shell; until the `keepAlive` extension lands, teardown
   belongs to the app's own handler, which already owns the request.
-- **Testing** — no override seam. A request value is reached through the module
-  that defines it, so it is swapped the way any module is, or bypassed entirely
-  by passing an explicit context (`fn.with({ context })`).
+- **Testing** — no override seam, and none needed for either lifetime. A
+  process-lifetime value is a module export, so `vi.mock` replaces it with
+  nothing to register and nothing to restore; a request-lifetime value derives
+  from the context the test already supplies (`fn.with({ context })`), so it
+  runs its real setup against a real `Request` rather than a stub. §2.3's test
+  shows both.
 - **Making one visible to SSR components** is still userland and still
   uncoupled: `app.defineProvide(useX, () => readX(rq))` in the per-request
   entry.
@@ -477,10 +480,12 @@ module riding a preset, the client, and a test.
 
 ```ts
 // src/services.server.ts — no composition root, no container. A module-level
-// const IS the process lifetime (§1.5); the lazy form is what workerd needs,
-// where bindings only exist inside `fetch`.
+// const IS the process lifetime (§1.5). Lazy on purpose: on workerd there is
+// no `env` at module evaluation — the entry stashes the bindings when the
+// first request arrives, and the first caller builds the pool. On Node the
+// `??=` is the only difference from a bare `const`.
 let _pool: Pool | undefined;
-export const db = (): Pool => (_pool ??= createPool(process.env.DATABASE_URL!));
+export const db = (): Pool => (_pool ??= createPool(bindings().DATABASE_URL));
 
 // src/request.server.ts — request lifetime: computed at most once per
 // request/render, shared by every guard, handler and nested in-process call.
@@ -538,11 +543,20 @@ point of the request store.
 
 ```ts
 // cart.test.ts — drive it with an explicit context; no HTTP, no container
+import { vi } from 'vitest';
+
+// Process-lifetime dependencies ARE modules, so they mock like modules. This
+// is what replaces an override seam: nothing to register, nothing to restore.
+vi.mock('./services.server', () => ({ db: () => fakeDb() }));
+
 import * as cart from './cart.server';
 
+// Request-lifetime values need no mocking — the supplied context IS the input
+// they derive from, so `session` decodes this cookie exactly as in production,
+// once, shared by the guard and the handler.
 const request = new Request('http://t.test/', { headers: { cookie } });
 await expect(cart.add.with({ context: request })({ sku: 's1', qty: 2 }))
-    .resolves.toMatchObject({ count: 1 });     // guard ran, session decoded once
+    .resolves.toMatchObject({ count: 1 });     // guard ran, fakeDb hit, no HTTP
 ```
 
 The dependency surface of `cart.server.ts` is its import list — no container,
