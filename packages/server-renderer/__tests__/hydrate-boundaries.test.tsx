@@ -362,10 +362,17 @@ describe('boundary hydrator', () => {
             return vnode._subTreeRef?.current ?? vnode._subTree;
         }
 
-        it('anchors a component the walk hydrates INSIDE a placeholder wrapper', async () => {
+        it('anchors the component that OWNS the wrapper on its real marker', async () => {
             // No boundary table: the plain walk owns this region, which is the
             // shape a page component with streamed useData has — its parent's
-            // content IS the wrapper, so its own marker is out of reach.
+            // content IS the wrapper.
+            //
+            // The wrapper is named after the streamed component's own marker
+            // (`data-async-placeholder="2"` ↔ `<!--$c:2-->`), so `Streamed`
+            // descends into it and claims that marker — the same anchor it
+            // would get if it had never been streamed. `Shell`, whose content
+            // start is the same wrapper, must NOT descend: its own `$c:1` is
+            // a reachable sibling (#492).
             const { Streamed, setups } = makeStreamed();
             const Shell = component(() => () => <Streamed />, { name: 'Shell' });
 
@@ -378,11 +385,61 @@ describe('boundary hydrator', () => {
 
             const child = subTreeOf((container as any)._vnode);
             expect(child.type).toBe(Streamed);
-            // A synthesized trailing anchor, at the end of its range inside
-            // the wrapper — never null, and never a sibling's node.
+            // Never null (that was the #478 crash) and never a sibling's or a
+            // descendant's node.
             expect(child.dom).not.toBeNull();
             expect(child.dom.nodeType).toBe(Node.COMMENT_NODE);
-            expect(child.dom.parentNode).toBe(container.querySelector('[data-async-placeholder]'));
+            expect(child.dom.data).toBe('$c:2');
+            expect((container as any)._vnode.dom.data).toBe('$c:1');
+        });
+
+        it('synthesizes an anchor when the marker is genuinely unreachable', async () => {
+            // A streamed component nested inside ANOTHER wrapper: its own
+            // marker was emitted outside the outer wrapper and the outer
+            // region was replaced wholesale, so there is no marker to claim.
+            // That is the case #490's synthesis exists for, and the ownership
+            // test above deliberately keeps it (a null anchor still descends).
+            const { Streamed, setups } = makeStreamed();
+            const Shell = component(() => () => <Streamed />, { name: 'Shell' });
+
+            container = createSSRContainer(
+                `<div data-async-placeholder="9" style="display:contents;">` +
+                `${REPLACED('<div class="s">streamed</div>')}</div>`
+            );
+            const inner = container.querySelector('[data-async-placeholder="2"]')!;
+            // Drop the trailing markers inside the outer wrapper, leaving the
+            // inner region with nothing to anchor on.
+            inner.nextSibling!.remove();
+            hydrate((Shell as any)({}), container, makeAppContext());
+            await nextTick();
+
+            expect(setups()).toBe(1);
+            expect(container.querySelectorAll('.s').length).toBe(1);
+
+            const child = subTreeOf((container as any)._vnode);
+            expect(child.dom).not.toBeNull();
+            expect(child.dom.nodeType).toBe(Node.COMMENT_NODE);
+            expect(child.dom.data).toBe('');
+        });
+
+        it('does not revive a boundary whose region left the document', async () => {
+            // The replace lands AFTER a client-side navigation removed the
+            // region: setup must not run, or the app carries a live component
+            // rendering into detached DOM forever (#492).
+            const { Streamed, record, setups } = makeStreamed();
+            const detached = document.createElement('div');
+            detached.innerHTML = REPLACED('<div class="s">streamed</div>');
+            const placeholder = detached.querySelector('[data-async-placeholder]')!;
+            (placeholder as any).__sigxPendingBoundary = {
+                vnode: { type: Streamed, props: {}, key: null, children: [], dom: null },
+                parent: detached,
+                marker: null
+            };
+
+            await hydrateAsyncBoundary(placeholder, record);
+
+            expect(setups()).toBe(0);
+            expect(placeholder.hasAttribute('data-hydrated')).toBe(false);
         });
 
         it('a parent patch replacing that component does not crash', async () => {

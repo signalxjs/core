@@ -1,7 +1,7 @@
 import { signal, defineInjectable, type Signal } from 'sigx';
 import { TechDetails } from './lazy-sections';
 
-export type Route = '/' | '/counter' | '/forms' | '/data' | '/ai' | '/about';
+export type Route = '/' | '/counter' | '/forms' | '/data' | '/router-stream' | '/ai' | '/about';
 
 /**
  * The route table owns its lazy chunk refs (docs/router-ssr-contract.md §2):
@@ -14,6 +14,7 @@ const ROUTE_TABLE: ReadonlyArray<{ path: Route; chunks?: () => Promise<unknown>[
     { path: '/counter' },
     { path: '/forms' },
     { path: '/data' },
+    { path: '/router-stream' },
     { path: '/ai' },
     { path: '/about', chunks: () => [TechDetails.preload()] }
 ];
