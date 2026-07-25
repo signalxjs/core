@@ -96,9 +96,17 @@ app.use(vite.middlewares);
 app.use(await createDevRequestHandler(vite, { entry: '/src/entry-server.tsx' }));
 
 // prod: resolve manifest entries into DocumentOptions.assets
-import { collectAssets } from '@sigx/vite/ssr';
+import { collectAssets } from '@sigx/vite/assets';
 const assets = collectAssets(manifest, ['index.html']);
 ```
+
+`@sigx/vite/assets` imports **nothing** — no `node:` builtins — and its one
+`process.env` read is `typeof`-guarded, so a workerd/Deno/Bun entry (where
+`process` may not exist at all) can use it directly. Import it from `/assets`, not
+`/ssr`: the latter also carries the dev request handler, which does import
+`node:fs/promises` and `node:path`, and pulling that into an edge graph is not
+possible. `@sigx/vite/ssr` still re-exports it, so existing imports keep
+working.
 
 ### Styles in dev
 

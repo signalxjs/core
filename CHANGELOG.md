@@ -65,6 +65,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- **`@sigx/vite/assets` — `collectAssets` without the `node:` graph (#486).**
+  The manifest → `DocumentOptions.assets` resolver is a pure function, but it
+  shared a module with the dev request handler, whose top level imports
+  `node:fs/promises` and `node:path`. A workerd/edge entry that wanted
+  per-route asset resolution could not import it at all, and the only way to
+  ship was to hand-port the function into the app. The pure half now lives on
+  its own entry that imports nothing, and its one `process.env` read is
+  `typeof`-guarded (workerd has no `process`). `@sigx/vite/ssr` re-exports it,
+  so every existing import is unchanged. A test pins the entry's import list —
+  in the source *and* in the built dist — to empty.
+
 - **`@sigx/runtime-core` / `@sigx/server-renderer`**: a **function passed as children** is now invoked as a scoped slot — `<Comp>{(p) => <span>{p.greeting}</span>}</Comp>` calls the function with the slot's scoped props (Vue scoped-slots / Solid render-prop semantics), identical output to the `slots={{ default: (p) => … }}` prop form (#476). Previously a bare function child was dropped as an empty node; only functions provided via the `slots` prop received scoped props. Function items in the extracted default/named children arrays are invoked once per accessor call, so reactivity is preserved — the call happens inside the consumer's render — on both the client (`createSlots`) and SSR (`renderToString`), keeping hydration in agreement. A function returning `null`/`undefined` is dropped and an array is flattened one level, matching the `slots`-prop branch; named element-based slots (`slot="x"` children) are unaffected. Enables the `asChild` render-prop pattern without a userland workaround.
 
 ### Fixed

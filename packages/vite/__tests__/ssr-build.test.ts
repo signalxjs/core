@@ -12,6 +12,8 @@ import { mkdtempSync, writeFileSync, mkdirSync, rmSync, existsSync, readFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { sigxPlugin } from '../src/index';
+// Imported through `/ssr` on purpose: the re-export is the back-compat
+// promise of the #486 split, and this pins it.
 import { collectAssets, type ViteManifest } from '../src/ssr';
 
 describe('collectAssets', () => {
