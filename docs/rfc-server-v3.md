@@ -212,7 +212,7 @@ spelled as a word:
 
 ```ts
 export const submitPat = serverFn({
-    unauthenticated: true,     // deliberate: this IS the sign-in
+    unguarded: true,     // deliberate: this IS the sign-in
     form: true,
     input: PatSchema,
     handler: async (rq, pat) => …
@@ -222,12 +222,18 @@ export const submitPat = serverFn({
 - **Runtime-inert; the build reads it statically.** Literal `true` only, the
   same discipline `form` already has (#437).
 - **Contradicting a preset throws at definition time.**
-  `authed({ unauthenticated: true })` is a lie — the preset's guards still run —
+  `authed({ unguarded: true })` is a lie — the preset's guards still run —
   and it fails at module load, in the same non-`__DEV__` channel as the existing
   `form`-without-`input` throw (`index.ts:291-306`). Boot/CI, never per-request.
-- **It makes the public surface greppable.** `grep -rn unauthenticated
+- **It makes the public surface greppable.** `grep -rn unguarded
   --include='*.server.ts' src/` prints every deliberately-open endpoint in the
   app — a list a security review can read, which nothing produces today.
+- **The word is `unguarded`, not `unauthenticated`,** because it mirrors what
+  the gate checks. `requireGuards` asks "did you declare a chain?", not "is
+  there a session?" — a function guarded only by a rate limiter is
+  unauthenticated but not unguarded, and the pair should not use two
+  vocabularies for one question. The cost, accepted: `unauthenticated` was the
+  slightly better word for the grep above.
 
 ### 1.4 The guarantee is a build gate
 
@@ -236,17 +242,33 @@ forgets the line is unguarded on **all five** transports. Runtime cannot restore
 the guarantee without the fail-open registry §1.1 rejected. The build can.
 
 ```ts
-// vite.config.ts
-sigxServer({ requireGuards: true })     // or 'warn' during migration; default false
+// vite.config.ts — nothing to write: this is the default
+sigxServer()
+
+sigxServer({ requireGuards: 'warn' })   // migration rung: list them, don't fail
+sigxServer({ requireGuards: false })    // opt OUT, deliberately
 ```
 
-Every extracted server function must be **preset-derived**, declare **`use`**, or
-declare **`unauthenticated: true`**. A bare `serverFn(async (rq) => …)` is a
-build error naming both remedies, with its file and line.
+Every extracted server function — `serverFn` **and `serverStream`**, both are
+public endpoints — must be **preset-derived**, declare **`use`**, or declare
+**`unguarded: true`**. A bare `serverFn(async (rq) => …)` is a build error
+naming all three remedies, with its file and line.
 
-Default `false`, deliberately: an app that authorizes inside handler bodies is a
-legitimate shape (the parent RFC's own opening examples do), and defaulting to
-`true` would wall existing apps into errors.
+**Default `true`.** The earlier draft defaulted it off, reasoning that an app
+authorizing inside handler bodies is a legitimate shape and that defaulting on
+would wall existing apps into errors. The second half is the part that does not
+apply: there is no installed base to wall in. Shipping the guarantee off by
+default means shipping it to nobody — the apps that most need "you forgot a
+guard on this new module" are exactly the ones that will never read this
+document and flip a flag. Default-on inverts the failure: forgetting is a build
+error, and *declining* is a word you type once (`unguarded: true`) in the
+function it applies to.
+
+The first thing this costs is honesty in our own tree: `examples/resume`'s six
+server functions declare no chains, so they must each say `unguarded: true` —
+which is true of them, and is the demonstration. Any app that genuinely
+authorizes in handler bodies writes the same word, or `requireGuards: false`
+once.
 
 This is the extractor's existing kind of work. It already presence-detects
 options keys (`hasServerFnOptionKey`, `server-fn-extract.ts:184`, used for
@@ -367,17 +389,17 @@ On top of it, one typed accessor:
  * shared by every guard, handler and nested in-process call in that flow.
  * The accessor takes `rq` — the ctx-first idiom, no ambient lookup.
  */
-export function defineRequestValue<T>(
+export function perRequest<T>(
     setup: (rq: ServerFnContext) => T
 ): (rq: ServerFnContext) => T;
 ```
 
 ```ts
 // src/session.server.ts
-export const session = defineRequestValue(async (rq) =>
+export const session = perRequest(async (rq) =>
     decodeSession(rq.request.headers.get('cookie')));
 
-export const github = defineRequestValue(async (rq) => {
+export const github = perRequest(async (rq) => {
     const s = await session(rq);                    // the SAME memoized promise
     if (!s) throw new ServerFnError(401, 'Sign in');
     return createGitHubClient(s.token);
@@ -427,11 +449,41 @@ than only the constrained one. But it is a *pattern the docs must teach*, not a
 property module scope hands you for free — recorded here so the trade is priced
 honestly rather than assumed away.
 
-**Naming** is open: `defineRequestValue` reads as "a value, per request" and
-matches the `define*` family (`defineInjectable`, `defineFactory`,
-`defineProvide`). `defineRequestScoped` and `requestMemo` are the alternatives
-considered; the first is longer for no gain, the second under-sells that this is
-the typed hand-off, not a cache.
+**Naming — settled (#506), with the rule it follows.** The API is `perRequest`,
+with no `define` prefix. Three prefixes are in use across sigx, and they are not
+interchangeable:
+
+| Prefix | Examples | Means |
+|---|---|---|
+| `create*` | `createRouter`, `createServerFnHandler`, `createRequestHandler`, `createBoundaryRefresh` | returns a fresh instance you wire up |
+| `define*` | `defineApp`, `defineStore`, `defineInjectable`, `defineFactory`, `defineDirective`, `defineTypeHandler` | declares something **whose value comes from elsewhere** — an app plugins attach to, a store instantiated per app, an injectable supplied by a token, a description the framework looks up |
+| bare | `signal`, `computed`, `component`, `serverFn`, `serverStream`, `persist` | **you handed it the implementation** and get the working thing back |
+
+Calling a `perRequest` accessor runs the setup you passed, so it sits in the
+third row beside its package neighbours — `@sigx/server` has no `define*` in its
+vocabulary at all. The `define` on the removed `defineServerService` came from
+the app-DI family (`defineInjectable`/`defineFactory`/`defineProvide`), which is
+the kinship this section spent its length declining; carrying the prefix over
+would have re-asserted it in the name.
+
+`perRequest` over `requestValue` because the only non-obvious thing about the
+API is the guarantee — computed once, shared by every guard, handler and nested
+in-process call in the flow — and the name should be that guarantee. Also
+considered: `requestHandler`, rejected outright (`createRequestHandler`,
+`NodeRequestHandler` and `createDevRequestHandler` already own that phrase in
+this repo, and it universally means "takes a Request, returns a Response" — the
+thing a per-request value runs *inside*); `oncePerRequest`, correct but
+adverbial; `requestScoped`, which borrows DI's `'scoped'` lifetime vocabulary
+(`defineFactory(setup, 'scoped')`) for something deliberately not DI.
+
+**`serverFn` is not renamed**, and this is where that is recorded so it is not
+re-litigated: it already obeys the table above. The strongest argument the other
+way — a serverFn *is* resolved by symbol from a registry at the endpoint, which
+is `define*`-shaped — does not carry, because that registry is build-generated
+and the author never names it. The convention also already has two historical
+exceptions (`defineApp` is really a `create*`; `defineProvide` is an action, not
+a definition), so renaming the package's most-used export to chase it would be
+churn against every doc, example and downstream consumer for no gain.
 
 ### 2.4 Keying, and why no new seam
 
@@ -451,9 +503,10 @@ token to the memoized value. Consequences:
 - **What a request is, per transport**, follows the store rather than a separate
   keying rule: endpoint wire = the ctx the endpoint built (`server/index.ts:618`,
   put in the scope at `:636`); in-process under an SSR scope = the one
-  `{ request, locals }` the scope normalized; `fn.with({ context: request })` =
-  its own per-call bag (pass `{ request, locals }` to share across explicit
-  calls — documented); detached = per call.
+  `{ request, locals }` the scope normalized; `fn.with({ context })` = the
+  object the caller passed, so **the same object twice shares one store and a
+  fresh `new Request()` per call does not** — which is how a test isolates two
+  calls without any framework ceremony; detached = per call.
 
 ### 2.5 Memoization semantics
 
@@ -463,6 +516,11 @@ token to the memoized value. Consequences:
 - **A throwing setup does not memoize its rejection** beyond the current
   request's store — a rejected value stays rejected for that request (retrying
   a failed session decode within one request would be a footgun, not a feature).
+- **Values compose with no API at all.** One setup calls another —
+  `const s = await session(rq)` inside `github`'s setup — and both memoize
+  independently against the same store. This is the whole of what the removed
+  two-lifetime design needed a resolution graph, a captive-dependency rule and a
+  throwing `rq` getter to express.
 - **Re-entrancy is an error.** A setup resolving itself throws "circular request
   value" rather than memoizing `undefined`.
 
@@ -486,12 +544,23 @@ delivered honestly yet:
   resources out of a still-settling handler — and covers **four** stream
   terminal paths, not three (F-C).
 
-**So: v1 memoizes and does not dispose.** `defineRequestValue` has no
+**So: v1 memoizes and does not dispose.** `perRequest` has no
 `onDispose`. Disposal ships as its own phase, together with `keepAlive`, and
 until it does, `rfc-server.md` §2.1's claim that around-middleware needs
 (timing, tracing) "ride a request-scoped service whose `onDispose` fires when
 the response has fully flushed" is **withdrawn** — an app that needs teardown
 owns it in its own handler, where it already has the request.
+
+**The gap that leaves is accepted, not filled (#506).** Between now and phase 5
+there is no framework answer for tracing or timing, and the two obvious
+stopgaps were both declined. An endpoint `onFinish` (sibling of `onError` /
+`timeoutMs`) would be cheap and genuinely useful for RPC telemetry — and
+wire-only, recreating precisely the transport asymmetry §4 exists to correct,
+for a mechanism we would then have to retire when real disposal lands. Pulling
+disposal forward into phase 2 was the other option; it makes the first shipping
+phase carry the `keepAlive` change to `@sigx/server-renderer`'s fetch handler,
+which is the riskiest single edit in the whole plan. So: the app's handler owns
+teardown, said plainly in the docs rather than left for someone to discover.
 
 When disposal does land, two rules from §2.2 carry over unchanged because they
 are correct: disposers registered **synchronously, before the setup's first
@@ -512,10 +581,20 @@ means what it says, and one render has one store no matter how many times a
 scope is opened around it.
 
 The case it must not break is a genuinely different nested request (a worker
-rendering a subrequest of itself). The merge therefore keys on the request: an
-inner source whose request is a *different* URL/method opens a fresh store, and
-`__DEV__` says so once. This ships as its own PR (#495) because it is a behavior
-change to a shared primitive, not a new API.
+rendering a subrequest of itself).
+
+**The rule, settled (#506): same URL + method means the same request.** An inner
+scope whose source matches the enclosing one on both reuses its store; anything
+else opens a fresh one, and `__DEV__` says so once. Object identity was the
+alternative and is too strict to fix the bug it exists for — the Node path
+builds a fresh `Request` from the `IncomingMessage` on every scope entry
+(`scope.ts:77-97`), so identity would leave the documented pre-seed recipe
+broken exactly where it is documented. "Always merge, outermost wins" was the
+other alternative, and it silently merges a subrequest that is genuinely a
+different request, which is the one thing the rule must not do.
+
+This ships as its own PR (#495) because it is a behavior change to a shared
+primitive, not a new API.
 
 ### 2.8 What replaces "if a local wants a type, it wants to be a service"
 
@@ -523,7 +602,7 @@ That sentence (`rfc-server.md:558-560`) presumed (A). Its replacement:
 
 > `rq.locals` stays `Record<string, unknown>` — it is the untyped face of the
 > request store, for values a guard hands to a handler in one flow. When a value
-> wants a **type**, it wants to be a **request value**: `defineRequestValue`
+> wants a **type**, it wants to be a **request value**: `perRequest`
 > gives it an accessor whose return type is inferred from its own setup, and the
 > accessor is the only way to reach it, so there is nothing to cast.
 
@@ -533,6 +612,21 @@ the same as §2.2's: a throwing accessor (`requireUser(rq): NonNullable<User>`),
 paid once per app rather than once per handler. Declaration-merging on a
 `ServerFnLocals` interface was considered and rejected: it types the bag without
 guaranteeing anyone filled it, which is exactly the lie P3 describes.
+
+**Which face to reach for is not a preference (#506).** A per-request value is
+the recommended hand-off; `rq.locals` is the escape hatch and the compatibility
+surface — an untyped slot for something too small or too transient to name.
+Docs, examples and the package README should show the typed face and mention
+`locals` as the fallback, not present them as equals. Two blessed ways to do one
+thing is the shape #503 removed a whole design for; shipping it inside one
+design would be the same mistake at smaller scale.
+
+**One more name that stays as-is: `ServerFnGuard`.** With `use:` reading as
+middleware, "guard" looks like the inconsistent choice — but it is load-bearing.
+Middleware implies around-ness, and these are before-only with no `next`
+(rfc-server §2.1). Renaming to `ServerFnMiddleware` would advertise a capability
+the design deliberately does not have, so the mismatch stays and this paragraph
+is why.
 
 ### 2.9 Compatibility
 
@@ -581,6 +675,11 @@ a candidate to extend when the store lands.
   take recorded.
 - **Cross-module presets** — still deferred (a module-graph resolver inside
   per-file pure extractors, N.5, to delete one line per module).
+- **An endpoint `onFinish` hook** *(#506)* — the obvious stopgap for the
+  tracing/timing gap disposal leaves open, and declined for the same reason
+  `guard` needed correcting: it fires for wire requests only, so it would ship a
+  second transport-asymmetric mechanism weeks after §4 corrected the first, and
+  would need retiring when real disposal lands (§2.6).
 - **Around-middleware, chainable builders, classes/controllers, an app-DI
   bridge, a `createContext` hook** — unchanged from the parent RFC's non-goals.
   Nothing here re-opens them.
@@ -621,7 +720,7 @@ Each phase is independently mergeable, and owes the tests named beside it.
    wire-shaped invoke (the F-B regression); a plain function's hashed symbol is
    **byte-identical** to today (pin a literal hash); editing the shared guard
    re-mints every derived hashed symbol and no stable symbol.
-2. **`defineRequestValue` + the shared store (§2.3-2.5, #494)** — the scope
+2. **`perRequest` + the shared store (§2.3-2.5, #494)** — the scope
    normalizing its source once, the symbol slot, memoization.
    *Proves:* one value across many in-process calls in **one** render, and never
    across two concurrent renders; a guard and a handler racing on first touch
@@ -629,12 +728,16 @@ Each phase is independently mergeable, and owes the tests named beside it.
    (workerd) degradation — explicit `rq` still works, nothing splits.
 3. **The nested-scope merge (F-D, #495)** — its own PR, with the
    different-request escape hatch.
-4. **`requireGuards` + `unauthenticated` (#489, §1.3-1.4)** — the extractor
-   error channel and the `__sigxGuardChecked` stamp. (§4's doc corrections do
-   not wait for this phase; they ship with the RFC.)
-   *Proves:* a bare `serverFn` fails the build naming both remedies;
-   preset-derived / `use` / `unauthenticated` all pass; the preset contradiction
-   throws at definition time; `'warn'` warns without failing.
+4. **`requireGuards` + `unguarded` (#489, §1.3-1.4)** — the extractor
+   error channel and the `__sigxGuardChecked` stamp, defaulting to **on**, which
+   makes this the one phase that changes every existing build in the repo:
+   `examples/resume`'s six functions and any other undeclared `serverFn`/
+   `serverStream` must gain `unguarded: true` in the same PR. (§4's doc
+   corrections do not wait for this phase; they ship with the RFC.)
+   *Proves:* a bare `serverFn` fails the build naming all three remedies;
+   preset-derived / `use` / `unguarded` all pass; a `serverStream` is held to the
+   same rule; the preset contradiction throws at definition time; `'warn'` warns
+   without failing and `false` opts out.
 5. **Disposal + `keepAlive` (§2.6, F-A, F-C)** — only after the contract
    extension exists.
    *Proves:* disposal after a normal stream, an **empty** generator, a
