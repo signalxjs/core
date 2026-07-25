@@ -58,18 +58,18 @@ const inflight = new Map<string, InflightEntry>();
  * something only core can hold, so it lives here and the cache pack delegates.
  * That is also what makes `invalidates` work with no cache pack installed.
  */
-const mountedByKey = new Map<string, Set<() => void>>();
+const mountedByKey = new Map<string, Set<(force: boolean) => void>>();
 
-function registerMounted(key: string, refresh: () => void): void {
+function registerMounted(key: string, run: (force: boolean) => void): void {
     let set = mountedByKey.get(key);
     if (!set) mountedByKey.set(key, (set = new Set()));
-    set.add(refresh);
+    set.add(run);
 }
 
-function unregisterMounted(key: string, refresh: () => void): void {
+function unregisterMounted(key: string, run: (force: boolean) => void): void {
     const set = mountedByKey.get(key);
     if (!set) return;
-    set.delete(refresh);
+    set.delete(run);
     if (set.size === 0) mountedByKey.delete(key);
 }
 
@@ -84,6 +84,13 @@ function unregisterMounted(key: string, refresh: () => void): void {
  * undone by the next unmount/remount (a client-side navigation away and back),
  * with no refetch at all, until a full page load.
  *
+ * ONE fetch per key, not one per cell: several components can read the same
+ * key (that is what the `inflight` dedupe above is for), and `refresh()`
+ * FORCES — it drops the shared in-flight entry so the next acquire starts a
+ * new run. Having every cell force would make N mounted readers issue N
+ * requests and leave all but the last observing a superseded one. So the first
+ * cell on a key forces, and the rest join the run it just started.
+ *
  * Returns the number of keys touched, so a caller can dev-warn when a pattern
  * matched nothing (a silent no-op is how #484 stayed invisible for so long).
  *
@@ -94,14 +101,14 @@ export function invalidateKeys(patterns: ReadonlyArray<string | readonly unknown
     const matchers = patterns.map(preparePattern);
     let touched = 0;
 
-    // Collect first: a refresh() may settle synchronously and re-register, and
+    // Collect first: a run may settle synchronously and re-register, and
     // mutating the map mid-iteration is how that turns into a missed cell.
-    const hits: Array<() => void> = [];
+    const hits: Array<Array<(force: boolean) => void>> = [];
     for (const [key, set] of mountedByKey) {
         if (!matchers.some(m => m.match(key))) continue;
         touched++;
         invalidateRestored(key);
-        for (const refresh of set) hits.push(refresh);
+        if (set.size > 0) hits.push([...set]);
     }
     // The blob can hold keys nothing is mounted on (a route the user has left,
     // or one SSR transferred and the client has not read yet) — those must be
@@ -112,7 +119,10 @@ export function invalidateKeys(patterns: ReadonlyArray<string | readonly unknown
         touched++;
         invalidateRestored(key);
     }
-    for (const refresh of hits) refresh();
+    for (const perKey of hits) {
+        // First forces the refetch; the others join that same in-flight run.
+        for (let i = 0; i < perKey.length; i++) perKey[i](i === 0);
+    }
     return touched;
 }
 
@@ -273,7 +283,7 @@ export function createDataCell<T>(
      * not the cell, so the Set entry can be removed on key change and dispose
      * without depending on `refresh`'s closure identity.
      */
-    const onInvalidate = (): void => { void refresh(); };
+    const onInvalidate = (force: boolean): void => { void startRun(force); };
 
     function setKey(canon: string | null, raw: unknown): void {
         untrack(() => {

@@ -317,7 +317,7 @@ export class CacheStore {
 
         if (__DEV__ && touched === 0) {
             console.warn(
-                `[sigx cache] invalidate(${JSON.stringify(pattern)}) matched nothing — ` +
+                `[sigx-cache] invalidate(${JSON.stringify(pattern)}) matched nothing — ` +
                 'no cached entry, no mounted useData cell and no transferred state. ' +
                 'A key is the canonical form of what the read passed to useData: ' +
                 "useData(['posts', id], …) has key '[\"posts\",<id>]', and a tuple " +

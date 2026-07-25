@@ -317,6 +317,35 @@ describe('@sigx/cache', () => {
     });
 
     /**
+     * Several components reading one key share a single in-flight fetch — that
+     * is what core's dedupe is for. Invalidation must not break it: `refresh()`
+     * FORCES (it drops the shared entry), so N cells each forcing would issue N
+     * requests and leave all but the last observing a superseded run.
+     */
+    it('invalidating a key shared by several reads issues ONE fetch', async () => {
+        let calls = 0;
+        let save!: { run(input: void): Promise<{ ok: boolean }> };
+        let a!: AsyncState<number>, b!: AsyncState<number>;
+
+        const Root = component(() => {
+            a = useData('shared', async () => ++calls);
+            b = useData('shared', async () => ++calls);
+            save = useAction(async () => 'saved', { cache: { invalidates: ['shared'] } } as any);
+            return () => <div />;
+        });
+        mountWith(cachePlugin(), jsx(Root, {}));
+        await settle();
+        expect(calls).toBe(1); // deduped on mount
+
+        await save.run();
+        await settle();
+
+        expect(calls).toBe(2); // ONE refetch, not one per cell
+        expect(a.value).toBe(2);
+        expect(b.value).toBe(2); // both observe the same run
+    });
+
+    /**
      * The second half of the same bug, and the one nobody had noticed: the
      * `__SIGX_ASYNC__` blob kept the stale value. Every successful fetch is
      * written back there, and a fresh mount restores from it as 'ready'

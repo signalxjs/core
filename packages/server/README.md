@@ -151,7 +151,7 @@ matches — a `cache` option is not required, and neither is the cache pack
 (#484). It also drops the matching keys from the SSR transfer blob, so
 navigating away and back refetches rather than restoring the pre-mutation
 value. Patterns are exact keys or tuple prefixes: `['cart']` matches
-`useData(() => ['cart', id], …)`, and a bare function reference matches every
+`useData(() => ['cart', id], fetchCart)`, and a bare function reference matches every
 read of that server function.
 
 ### Single-flight boundary refresh
