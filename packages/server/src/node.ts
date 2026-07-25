@@ -11,6 +11,12 @@
  * app.use(createServerFnHandler({ functions: serverFns, guard: requireSession }));
  * app.use(createRequestHandler({ ... }));   // document rendering, unchanged
  * ```
+ *
+ * `guard` is the WIRE-level backstop: it runs for requests this handler
+ * serves, not for in-process (SSR-time) calls made while the document handler
+ * below renders (rfc-server-v3 §4, #493). Auth that must hold on every
+ * transport goes in the function's definition — `use:`, or one
+ * `serverFnPreset({ use })` per server module.
  */
 
 import { Readable } from 'node:stream';
