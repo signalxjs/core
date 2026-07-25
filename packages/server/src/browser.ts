@@ -23,7 +23,7 @@ export type {
     StandardSchemaV1,
     WrappedServerFn
 } from './types';
-export type { ServerFnOptions, ServerFnReadCache } from './index';
+export type { ServerFnOptions, ServerFnPreset, ServerFnReadCache } from './index';
 
 export function serverFn(): never {
     throw new Error(
@@ -36,6 +36,14 @@ export function serverFn(): never {
 export function serverStream(): never {
     throw new Error(
         '[sigx server] serverStream() reached the browser unextracted — is the @sigx/vite/server ' +
+        'plugin configured, and does this file match its include pattern ' +
+        '(default **/*.server.{ts,tsx})?'
+    );
+}
+
+export function serverFnPreset(): never {
+    throw new Error(
+        '[sigx server] serverFnPreset() reached the browser unextracted — is the @sigx/vite/server ' +
         'plugin configured, and does this file match its include pattern ' +
         '(default **/*.server.{ts,tsx})?'
     );

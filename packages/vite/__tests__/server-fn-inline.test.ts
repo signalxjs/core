@@ -524,3 +524,72 @@ export const Widget = () => submit;
         expect(result.fns[0].form).toBe(false);
     });
 });
+
+describe('extractInlineServerFns — serverFnPreset is file-form only (#398)', () => {
+    const PRESET = `
+import { component } from 'sigx';
+import { serverFn, serverFnPreset } from '@sigx/server';
+
+const authed = serverFnPreset({ use: [requireUser] });
+const load = authed(async (rq) => 1);
+const feed = authed.stream(async function* (rq) { yield 1; });
+
+export const Panel = component((ctx) => {
+    return () => <button onClick={() => load()} />;
+});
+`;
+
+    it('errors at every preset call site and emits no modules', () => {
+        const result = extract(PRESET, '/src/Panel.tsx');
+        // The declaration and both derived call sites — the author sees all
+        // of them at once rather than one per rebuild.
+        expect(result.errors).toHaveLength(3);
+        for (const error of result.errors) {
+            expect(error.message).toContain('*.server.ts');
+            expect(error.message).toContain('serverFnPreset()');
+        }
+        expect(result.fns).toEqual([]);
+        expect(result.clientModule).toBeNull();
+        expect(result.ssrModule).toBeNull();
+    });
+
+    it('reaches the error in a file that imports ONLY the preset', () => {
+        // Without the widened early return this returned empty before
+        // anything could be reported.
+        const code = `
+import { serverFnPreset } from '@sigx/server';
+const authed = serverFnPreset({ use: [] });
+`;
+        const result = extract(code, '/src/guards.ts');
+        expect(result.errors).toHaveLength(1);
+        expect(result.errors[0].message).toContain('serverFnPreset()');
+    });
+
+    it('covers the namespace form too', () => {
+        const code = `
+import * as srv from '@sigx/server';
+const authed = srv.serverFnPreset({ use: [] });
+const load = authed(async () => 1);
+`;
+        const result = extract(code, '/src/Panel.tsx');
+        expect(result.errors).toHaveLength(2);
+    });
+});
+
+describe('extractInlineServerFns — options spread (#398)', () => {
+    it('warns without blocking extraction', () => {
+        const code = `
+import { component } from 'sigx';
+import { serverFn } from '@sigx/server';
+const load = serverFn({ ...shared, handler: async () => 1 });
+export const P = component((ctx) => {
+    return () => <button onClick={() => load()} />;
+});
+`;
+        const result = extract(code, '/src/P.tsx');
+        expect(result.errors).toEqual([]);
+        expect(result.fns).toHaveLength(1);
+        expect(result.warnings).toHaveLength(1);
+        expect(result.warnings[0]).toContain('spread');
+    });
+});

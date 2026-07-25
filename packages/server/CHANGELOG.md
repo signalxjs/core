@@ -2,7 +2,52 @@
 
 ## [Unreleased]
 
+### Added
+
+- **`serverFnPreset` — shared per-module middleware (#398).** A `use:` chain
+  is the only mechanism that runs on **every** transport (the endpoint's
+  `guard` is wire-only, #493), which made app-wide auth a line repeated on
+  every function in every server module. `serverFnPreset({ use })` returns
+  `serverFn`'s exact overloads bound to that chain, plus `preset.stream` for
+  `serverStream`:
+
+  ```ts
+  export const appGuards = [requireUser];              // src/guards.ts
+
+  const authed = serverFnPreset({ use: appGuards });   // src/board.server.ts
+  export const boardIssues = authed({ input: BoardKey, handler });
+  export const feed        = authed.stream(async function* (rq) { … });
+  ```
+
+  Preset guards run before the function's own `use:`. The array is copied at
+  definition — a policy the app can mutate afterwards is not a policy. Not a
+  builder: a preset carries `use` and nothing else and cannot derive another
+  preset. Same-module only, because the extractors analyze one file at a
+  time; exporting a preset is a build warning and using one in the inline
+  (component-file) form is a build error, both naming the remedy — share the
+  guard **array**. Editing the shared chain re-mints the hashed symbols of
+  every function derived from it, the way editing a body already does; stable
+  symbols (`<id>#<name>`) never move.
+
 ### Fixed
+
+- **An SSR-time `serverStream` ran no middleware at all (#398).** Its
+  in-process wrapper called the generator directly instead of going through
+  the invoke pipeline, so a stream that was fully guarded over the wire was
+  completely unguarded during a render — the same transport asymmetry #493
+  documented for the endpoint `guard`, in miniature. In-process streams now
+  run the same pipeline the wire does. Observable consequence: a guard veto
+  rejects on the **first pull** rather than at the call, which is exactly
+  where the wire path's pre-first-yield error already surfaced. The call
+  itself stays synchronous, and consumer cancellation still reaches the
+  implementation's `finally`.
+
+- **The direct form had no middleware seam at all (#398).**
+  `serverFn(async (rq, …) => …)` accepted no `use:` and had no loop to
+  prepend one to, so a preset's guards would have silently not run there. It
+  now runs its preset chain — inside the direct branch, so a multi-argument
+  direct-form function is unaffected by the options form's single-input
+  arity check.
 
 - **Documentation: the endpoint `guard` is wire-only (#493).** The README, the
   `ServerFnRequestOptions.guard` JSDoc and `rfc-server.md` described it as

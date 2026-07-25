@@ -179,6 +179,13 @@ export interface ServerFnOptions<S, R> {
     handler(rq: ServerFnContext, input: S): R | Promise<R>;
 }
 
+/**
+ * The base chain of a plain `serverFn`/`serverStream` — one shared empty
+ * array, so the un-presetted path never allocates and the loops that read it
+ * cost an iterator that stops immediately.
+ */
+const NO_GUARDS: readonly ServerFnGuard[] = [];
+
 /** Wrap a server-only function. Client callers get `(...args) => Promise<R>`. */
 export function serverFn<A extends unknown[], R>(
     impl: (rq: ServerFnContext, ...args: A) => R | Promise<R>
@@ -195,6 +202,23 @@ export function serverFn<S = void, R = unknown>(
 ): ServerFnCallable<[S] extends [void] ? [] : [S], Awaited<R>>;
 export function serverFn(
     arg: ((rq: ServerFnContext, ...args: unknown[]) => unknown) | ServerFnOptions<unknown, unknown>
+): ServerFnCallable<unknown[], unknown> {
+    return createServerFn(arg);
+}
+
+/**
+ * The shared body of `serverFn` and of a preset's derived form (rfc-server
+ * §2.1, amended by rfc-server-v3 §1.2).
+ *
+ * `baseUse` is the preset's ALREADY-COPIED guard array — empty for a plain
+ * `serverFn`, so nothing on that path allocates. It is prepended INSIDE each
+ * branch rather than by routing the direct form through the options-form
+ * pipeline: that pipeline rejects `args.length > 1`, and a multi-argument
+ * direct-form preset function is §2.1's headline example.
+ */
+function createServerFn(
+    arg: ((rq: ServerFnContext, ...args: unknown[]) => unknown) | ServerFnOptions<unknown, unknown>,
+    baseUse: readonly ServerFnGuard[] = NO_GUARDS
 ): ServerFnCallable<unknown[], unknown> {
     let invoke: ServerFnInvoke;
     let name: string;
@@ -217,6 +241,11 @@ export function serverFn(
                     `Zod/Valibot/ArkType; rfc-server §5). Fires once per function.`
                 );
             }
+            // The preset's chain — the direct form's only middleware seam
+            // (rfc-server-v3 §1.2). It had none at all before #398, so a
+            // preset-derived direct-form function was guarded on the wire and
+            // unguarded during SSR, which is P1 in miniature.
+            for (const guard of baseUse) await guard(rq, info);
             return arg(rq, ...args);
         };
         name = arg.name || '';
@@ -238,6 +267,10 @@ export function serverFn(
                     `rfc-server §5). Fires once per function.`
                 );
             }
+            // Preset guards run FIRST: app-wide policy establishes what the
+            // per-function chain then reads off `rq.locals`. "Prepended" is
+            // the RFC's word for it, and the order is pinned by a test.
+            for (const guard of baseUse) await guard(rq, info);
             for (const guard of options.use ?? []) {
                 await guard(rq, info);
             }
@@ -380,6 +413,14 @@ function assertNotLiveClient(name: string): void {
 export function serverStream<A extends unknown[], T>(
     impl: (rq: ServerFnContext, ...args: A) => AsyncGenerator<T>
 ): ServerStreamCallable<A, T> {
+    return createServerStream(impl);
+}
+
+/** `serverStream`'s body, plus a preset's already-copied guard array. */
+function createServerStream<A extends unknown[], T>(
+    impl: (rq: ServerFnContext, ...args: A) => AsyncGenerator<T>,
+    baseUse: readonly ServerFnGuard[] = NO_GUARDS
+): ServerStreamCallable<A, T> {
     const name = impl.name || '';
     // #412: same unvalidated-wire-args surface as serverFn's direct form,
     // same once-per-fn dev signal — but streams have no options form, so the
@@ -398,8 +439,19 @@ export function serverStream<A extends unknown[], T>(
                 `await Schema['~standard'].validate(arg)). Fires once per function.`
             );
         }
+        for (const guard of baseUse) await guard(rq, info);
         return impl(rq, ...(args as A));
     };
+    /**
+     * The in-process body, as an async generator so `callWith` can keep
+     * returning an `AsyncIterable` SYNCHRONOUSLY while `invoke` — which is
+     * async — runs on the first pull. `yield*`, never `for await`: delegation
+     * forwards `.return()`/`.throw()` to `impl`'s generator, so a consumer
+     * that `break`s still runs its `finally`.
+     */
+    async function* pump(rq: ServerFnContext, args: A): AsyncGenerator<T> {
+        yield* (await invoke(rq, { symbol: '', name }, args)) as AsyncGenerator<T>;
+    }
     // `.with(options)` — the same per-call channel as serverFn's, minus
     // `fresh` (#448). #362 left streams out on the strength of the signal
     // argument alone (consumer break/return already aborts), which said
@@ -420,8 +472,16 @@ export function serverStream<A extends unknown[], T>(
             }
             // Explicit beats ambient, exactly as for serverFn: an explicit
             // context wins over `runWithServerFnContext`, and with neither the
-            // detached context's `request`/`url` throw descriptively.
-            return impl(resolveInProcessContext(options?.signal, options?.context), ...args);
+            // detached context's `request`/`url` throw descriptively. Resolved
+            // HERE, at call time — the ambient scope belongs to whoever
+            // called, not to whoever first pulls a chunk.
+            const rq = resolveInProcessContext(options?.signal, options?.context);
+            // rfc-server-v3 §1.2 (F-B): an in-process stream runs the SAME
+            // pipeline the wire does. It ran NO middleware at all before, so a
+            // guarded stream over RPC was an unguarded one during SSR. A veto
+            // now surfaces on the first pull — which is exactly where the wire
+            // path's pre-first-yield error surfaces too.
+            return pump(rq, args);
         };
     const wrapper = callWith();
     return Object.assign(wrapper, {
@@ -430,4 +490,61 @@ export function serverStream<A extends unknown[], T>(
         __sigxName: name,
         __sigxStream: true as const
     });
+}
+
+/**
+ * A preset's derived form: `serverFn`'s EXACT overloads, plus the
+ * `serverStream` twin at `.stream`.
+ *
+ * NOT a builder — `preset.stream` is a second one-shot factory over the same
+ * `use` array, never an accumulating chain. Chainable builders stay a non-goal
+ * (rfc-server §2.1).
+ */
+export type ServerFnPreset = typeof serverFn & { stream: typeof serverStream };
+
+/**
+ * Shared per-module middleware (rfc-server §2.1, amended by rfc-server-v3
+ * §1.2) — the answer to #489 that keeps the transport guarantee.
+ *
+ * A guard chain has to be DEFINITION-level to reach every transport: the
+ * endpoint's `guard` is wire-only (§4/#493), a process registry would need a
+ * `globalThis` seam whose miss is fail-open on the auth path, and the request
+ * scope is absent by design without `AsyncLocalStorage`. What is captured in
+ * the wrapper is read by the one `invoke` every transport shares — no lookup,
+ * no ordering hazard, no platform dependency.
+ *
+ * The repetition #489 objects to is answered by sharing the guard ARRAY, so
+ * the policy lives in one file and each server module spends one line:
+ *
+ * ```ts
+ * // src/guards.ts
+ * export const appGuards = [requireUser];
+ *
+ * // src/board.server.ts
+ * const authed = serverFnPreset({ use: appGuards });
+ * export const boardIssues = authed({ input: BoardKey, handler: async (rq, k) => … });
+ * export const feed        = authed.stream(async function* (rq) { … });
+ * ```
+ *
+ * SAME-MODULE only: the extractors are per-file by contract, so a preset
+ * imported from another module is invisible where it is used and the functions
+ * derived from it would not extract at all. Exporting one is a build warning.
+ */
+export function serverFnPreset(base: { use: ServerFnGuard[] }): ServerFnPreset {
+    // Copied ONCE, at definition: a policy the app can push to afterwards is
+    // not a policy.
+    const use = base.use.slice();
+    const derived = (
+        arg: ((rq: ServerFnContext, ...args: unknown[]) => unknown) | ServerFnOptions<unknown, unknown>
+    ): ServerFnCallable<unknown[], unknown> => createServerFn(arg, use);
+    const derivedStream = <A extends unknown[], T>(
+        impl: (rq: ServerFnContext, ...args: A) => AsyncGenerator<T>
+    ): ServerStreamCallable<A, T> => createServerStream(impl, use);
+    // The cast RESTATES the overloads; it does not change the runtime.
+    // `derived` is literally `serverFn`'s implementation signature, and a
+    // single signature is never assignable to both public overloads. It goes
+    // on the TARGET so `Object.assign`'s `T & U` keeps every call signature —
+    // an intersection of call signatures IS an overload set — while `.stream`
+    // is still checked against `typeof serverStream` by the return type.
+    return Object.assign(derived as unknown as typeof serverFn, { stream: derivedStream });
 }
