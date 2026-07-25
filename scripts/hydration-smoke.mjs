@@ -254,7 +254,10 @@ await withApp({ filter: '@sigx/spa-ssr-example', dir: 'examples/spa-ssr', port: 
     async (page, origin) => {
         console.log('\n[hydration-smoke] spa-ssr (root walk)');
 
-        for (const route of ['/', '/about', '/counter', '/data', '/router-stream']) {
+        // `/router-stream` is deliberately NOT in this loop — it gets one
+        // navigation in the dedicated block below, which makes the same two
+        // assertions plus its own.
+        for (const route of ['/', '/about', '/counter', '/data']) {
             await page.goto(origin + route, { waitUntil: 'load', timeout: 20000 });
             await settle(page);
 
@@ -273,6 +276,9 @@ await withApp({ filter: '@sigx/spa-ssr-example', dir: 'examples/spa-ssr', port: 
         // what #478 shipped as fixed and #492 found still broken.
         await page.goto(origin + '/router-stream', { waitUntil: 'load', timeout: 20000 });
         await settle(page);
+
+        const rsEv = await assertMarkerSurvival(page, 'spa-ssr /router-stream');
+        assert(rsEv.hydratorRan, 'spa-ssr /router-stream: the hydrator ran (#app._vnode set)');
 
         // Content the LAYOUT renders after the routed page is hydrated in
         // place, once. Pre-#492 the layout descended into the placeholder and
