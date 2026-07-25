@@ -1,9 +1,12 @@
 # RFC: rfc-server v3 — request-scoped context & guard completeness
 
-Status: **proposed**. Tracking: signalxjs/core#491.
-Amends `rfc-server.md` §2.1 (`serverFnPreset`, #398) and **re-opens** its §2.2
-(`defineServerService`, #399) — that section is a candidate here, not a
-premise. Pre-1.0, no-compat, same stance as the parent RFC: one way to do it.
+Status: **accepted** (§2's mechanism decided, #503; implementation phased in
+§5). Tracking: signalxjs/core#491.
+Amends `rfc-server.md` §2.1 (`serverFnPreset`, #398) and **replaces** its §2.2
+(`defineServerService`, #399) — that specification has been **removed from
+`rfc-server.md`** rather than deferred, so this document is the only place the
+rejected design and its reasons are recorded (§2.2 below). Pre-1.0, no-compat,
+same stance as the parent RFC: one way to do it.
 
 Everything below is stated against the code as it exists at
 `d624fea`, with `file:line` evidence. Where the parent RFC and the code
@@ -272,11 +275,13 @@ the same rule (N.5).
 
 ---
 
-## §2 Request-scoped context — re-opened
+## §2 Request-scoped context — decided
 
-`rfc-server.md` §2.2 (`defineServerService`) is a candidate here, not the
-premise. This section states the requirement from the evidence, evaluates the
-options, and picks — with the argument on the record either way.
+`defineServerService` was a candidate here, not the premise. This section states
+the requirement from the evidence, evaluates the options, and picks. The
+decision is **(B)**, §2.3; `rfc-server.md` §2.2 has been reduced to a pointer at
+this section and the specification it carried is gone from the tree (#503), so
+the summary of (A) below is the surviving record of what was rejected and why.
 
 ### 2.1 The requirement
 
@@ -308,12 +313,14 @@ the case for it:
   be" (`rfc-server.md:1607-1614`). The distance between "a container" and "not a
   container" here is mostly vocabulary.
 - **The `'process'` lifetime largely restates §1.5.** "Services are modules" —
-  and a module-level `const pool = createPool()` already *is* a lazy-enough
+  and a module-level `const pool = createPool()`, or its two-line lazy form
+  where a runtime demands one (see the qualification in §2.3), already *is* a
   process singleton with an import graph for a dependency list. What `'process'`
-  adds over that is disposal-on-test-restore; what it costs is the
-  captive-dependency rule, the throwing `rq` getter, `overrideServerService`,
-  and a second store to key and reason about. That is a large surface for one
-  benefit that `vi.mock` also provides.
+  adds over that is lazy init as a framework feature plus
+  disposal-on-test-restore; what it costs is the captive-dependency rule, the
+  throwing `rq` getter, `overrideServerService`, and a second store to key and
+  reason about. That is a large surface for benefits an app can write itself in
+  two lines and `vi.mock` respectively.
 - **The bare `useX()` form reintroduces ambient resolution at the call site** —
   the exact thing the parent RFC rejects for `rq` itself: "no ambient
   `getRequestEvent()` global (Solid) at the CALL site — the context is always a
@@ -400,6 +407,26 @@ module, so it mocks like any module), no captive-dependency rule (it cannot
 exist with one lifetime), no ambient no-arg form, and no new global seam. The
 whole mechanism is roughly fifty lines.
 
+**One qualification on "module scope is the process lifetime", because the
+unqualified claim is wrong on the platform this framework ships an adapter
+for.** On Node a module-level `const pool = createPool(...)` is exactly the
+process singleton `'process'` provided. On workerd it is not always available:
+bindings do not exist at module evaluation (they arrive with `fetch`), and some
+construction at global scope is forbidden outright — the same constraint that
+makes this package's own detached `AbortSignal` lazy (`context.ts:121-124`), and
+why Pulse builds its server services on first fetch rather than at import. The
+replacement is the lazy form, not a framework lifetime:
+
+```ts
+let _pool: Pool | undefined;
+export const db = (): Pool => (_pool ??= createPool(env.DATABASE_URL));
+```
+
+Two lines, no container, and it is what an app writes on every runtime rather
+than only the constrained one. But it is a *pattern the docs must teach*, not a
+property module scope hands you for free — recorded here so the trade is priced
+honestly rather than assumed away.
+
 **Naming** is open: `defineRequestValue` reads as "a value, per request" and
 matches the `define*` family (`defineInjectable`, `defineFactory`,
 `defineProvide`). `defineRequestScoped` and `requestMemo` are the alternatives
@@ -418,8 +445,8 @@ token to the memoized value. Consequences:
   handler saw different sessions*. Registry symbols make the slot one slot.
 - **No `__SIGX_SERVERFN_SERVICES__`.** The store travels on the context, so
   there is nothing to look up globally and no WeakMap to key on a source object.
-  `docs/seams.md:228-241` reserves that row for #399; if this design lands, the
-  row is **released** rather than claimed — one fewer global, and the seams
+  `docs/seams.md` carried that row as *reserved* for #399; with this decision it
+  is **released** (#503) rather than claimed — one fewer global, and the seams
   registry's "prefer a DI token / prefer no seam" rule is honored.
 - **What a request is, per transport**, follows the store rather than a separate
   keying rule: endpoint wire = the ctx the endpoint built (`server/index.ts:618`,
