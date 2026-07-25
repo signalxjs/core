@@ -197,6 +197,13 @@ export function hydrateComponent(
 
     // Track where the component's DOM starts
     let endDom: Node | null = dom;
+    // Where the component's range ENDS inside `hydrateParent`, for the
+    // synthesized trailing anchor below: a sibling to insert before, or null
+    // for "the end of its child list". Only the branches that hydrate against
+    // SSR content have a bound — every mount-fresh path appends (it inserts at
+    // `anchor || null`, and the anchor is null whenever we synthesize).
+    // (Assigned inside the render effect below, hence the widening cast.)
+    let tailBound = null as Node | null;
 
     if (renderFn) {
         componentCtx.renderFn = renderFn;
@@ -299,6 +306,7 @@ export function hydrateComponent(
                         removeSSRRange(hydrateDom, rangeEnd, hydrateParent);
                         mount(subTree, hydrateParent as Element, rangeEnd);
                         endDom = rangeEnd;
+                        tailBound = rangeEnd;
                     } else if (hasSSRContent) {
                         // Hydrate against existing SSR DOM (inside the
                         // placeholder wrapper when one exists)
@@ -307,6 +315,7 @@ export function hydrateComponent(
                         // exactly the region its descendants may claim markers
                         // from (#373).
                         endDom = hydrateNode(subTree, hydrateDom, hydrateParent, rangeEnd);
+                        tailBound = endDom;
                     } else if (hydrateParent !== parent) {
                         // Empty placeholder wrapper — mount inside it
                         mount(subTree, hydrateParent as Element, null);
@@ -345,8 +354,28 @@ export function hydrateComponent(
         componentCtx.update = () => componentEffect();
     }
 
-    // Use trailing anchor comment as the component's dom reference
-    vnode.dom = anchor || endDom;
+    // The component's dom reference is its TRAILING ANCHOR — the SSR marker
+    // when this position had one to claim. Without a marker, synthesize one at
+    // the end of the component's range, exactly as `mountComponent` always
+    // allocates an anchor comment: everything downstream (patch's replace
+    // branch, unmount, the fragment/component range walks) derives the
+    // component's DOM span from it.
+    //
+    // A marker is genuinely unreachable in the streamed shape: the server
+    // closes the `data-async-placeholder` wrapper and only THEN emits
+    // `<!--$c:N-->`, so a component hydrating INSIDE that wrapper — because an
+    // ancestor's content is the wrapper — can never see its own. The two old
+    // fallbacks were both wrong: `endDom` is the first node AFTER this
+    // component's content and belongs to a sibling (unmount would delete it),
+    // and null crashed the next patch on `parentNode of null` (#478).
+    if (anchor) {
+        vnode.dom = anchor;
+    } else {
+        const synthesized = document.createComment('');
+        const before = tailBound && tailBound.parentNode === hydrateParent ? tailBound : null;
+        hydrateParent.insertBefore(synthesized, before);
+        vnode.dom = synthesized;
+    }
 
     // Run created + mount hooks — untracked, mirroring runtime-core's
     // mount path (#111): during hydration these run inside an ancestor's

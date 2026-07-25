@@ -16,6 +16,7 @@ import {
     getBoundaryTable
 } from '../src/client/scheduler';
 import { registerComponent } from '../src/client/registry';
+import { hydrateAsyncBoundary } from '../src/client/hydration-core';
 import { clearClientPlugins } from '../src/client/hydrate-context';
 import {
     provideHydrateDefaults,
@@ -322,6 +323,162 @@ describe('boundary hydrator', () => {
             // The sigx:async-ready flow owns it; the fallback is not hydrated
             expect(setupRuns).toBe(0);
             expect(container.innerHTML).toContain('loading…');
+        });
+    });
+
+    /**
+     * A streamed region must stay PATCHABLE after `$SIGX_REPLACE` (#478).
+     * Every hydrated component vnode needs a trailing anchor, and in the
+     * streamed shape the server's `<!--$c:N-->` marker sits OUTSIDE the
+     * `data-async-placeholder` wrapper — so a component hydrating inside that
+     * wrapper cannot claim it, and the boundary flow used to hydrate an orphan
+     * copy of the vnode against the wrapper's children. Either way the vnode
+     * the parent holds was left with `dom === null`, and the next patch
+     * touching it threw `Cannot read properties of null (reading 'parentNode')`.
+     */
+    describe('streamed regions stay patchable after the replace (#478)', () => {
+        /** The replace has landed: real content inside the wrapper, marker outside. */
+        const REPLACED = (inner: string) =>
+            `<div data-async-placeholder="2" style="display:contents;">${inner}</div><!--$c:2-->`;
+
+        function makeStreamed(label = 'Streamed') {
+            const name = uniqueName(label);
+            let setups = 0;
+            const Streamed = component(() => {
+                setups++;
+                return () => <div class="s">streamed</div>;
+            }, { name });
+            registerComponent(name, Streamed as any);
+            return {
+                name,
+                Streamed,
+                record: { hydrate: 'load', component: name } as SSRBoundaryRecord,
+                setups: () => setups
+            };
+        }
+
+        /** The parent's vnode for the boundary child — the one a later patch touches. */
+        function subTreeOf(vnode: any): any {
+            return vnode._subTreeRef?.current ?? vnode._subTree;
+        }
+
+        it('anchors a component the walk hydrates INSIDE a placeholder wrapper', async () => {
+            // No boundary table: the plain walk owns this region, which is the
+            // shape a page component with streamed useData has — its parent's
+            // content IS the wrapper, so its own marker is out of reach.
+            const { Streamed, setups } = makeStreamed();
+            const Shell = component(() => () => <Streamed />, { name: 'Shell' });
+
+            container = createSSRContainer(`${REPLACED('<div class="s">streamed</div>')}<!--$c:1-->`);
+            hydrate((Shell as any)({}), container, makeAppContext());
+            await nextTick();
+
+            expect(setups()).toBe(1);
+            expect(container.querySelectorAll('.s').length).toBe(1);
+
+            const child = subTreeOf((container as any)._vnode);
+            expect(child.type).toBe(Streamed);
+            // A synthesized trailing anchor, at the end of its range inside
+            // the wrapper — never null, and never a sibling's node.
+            expect(child.dom).not.toBeNull();
+            expect(child.dom.nodeType).toBe(Node.COMMENT_NODE);
+            expect(child.dom.parentNode).toBe(container.querySelector('[data-async-placeholder]'));
+        });
+
+        it('a parent patch replacing that component does not crash', async () => {
+            const { Streamed } = makeStreamed();
+            const Other = component(() => () => <p class="o">other</p>, { name: 'Other' });
+            const view = signal<'streamed' | 'other'>('streamed');
+            // The RouterView shape: the subtree ROOT changes component type,
+            // which is patch()'s replace branch — the crash site.
+            const Shell = component(
+                () => () => (view.value === 'streamed' ? <Streamed /> : <Other />),
+                { name: 'Shell' }
+            );
+
+            container = createSSRContainer(`${REPLACED('<div class="s">streamed</div>')}<!--$c:1-->`);
+            hydrate((Shell as any)({}), container, makeAppContext());
+            await nextTick();
+
+            view.value = 'other';
+            await nextTick();
+
+            expect(container.querySelectorAll('.o').length).toBe(1);
+            expect(container.querySelector('.s')).toBeNull();
+        });
+
+        it('the boundary flow hydrates the LIVE vnode, anchored on its real marker', async () => {
+            // With a record, the walk SKIPS the placeholder and hands the live
+            // vnode to the streamed-boundary flow (here: hydrate()'s leftover
+            // scan, since the replace already landed).
+            const { Streamed, record, setups } = makeStreamed();
+            const Shell = component(() => () => <main>{<Streamed />}</main>, { name: 'Shell' });
+
+            container = createSSRContainer(
+                `<main>${REPLACED('<div class="s">streamed</div>')}</main><!--$c:1-->`
+            );
+            setBoundaryTable({ '2': record });
+
+            hydrate((Shell as any)({}), container, makeAppContext());
+            await nextTick();
+
+            expect(setups()).toBe(1);
+            expect(container.querySelectorAll('.s').length).toBe(1);
+
+            const main = subTreeOf((container as any)._vnode);
+            const child = main.children[0];
+            // The vnode the PARENT holds is the one that got hydrated…
+            expect(child.type).toBe(Streamed);
+            expect(child._effect).toBeTruthy();
+            expect(subTreeOf(child)).toBeTruthy();
+            // …and it is anchored on its real `<!--$c:2-->` marker.
+            expect(child.dom).not.toBeNull();
+            expect(child.dom.nodeType).toBe(Node.COMMENT_NODE);
+            expect(child.dom.data).toBe('$c:2');
+        });
+
+        it("a hydrate:'never' boundary keeps no handoff alive on its placeholder", async () => {
+            // The walk skips and hands over; the flow then declines to hydrate.
+            // The wrapper survives an unmount by design, so an unconsumed
+            // handoff would keep the skipped vnode reachable with it.
+            const { Streamed, record, setups } = makeStreamed('NeverStream');
+            const Shell = component(() => () => <main>{<Streamed />}</main>, { name: 'Shell' });
+
+            container = createSSRContainer(
+                `<main>${REPLACED('<div class="s">streamed</div>')}</main><!--$c:1-->`
+            );
+            setBoundaryTable({ '2': { ...record, hydrate: 'never' } });
+
+            hydrate((Shell as any)({}), container, makeAppContext());
+            await nextTick();
+
+            const placeholder = container.querySelector('[data-async-placeholder]')! as any;
+            expect(setups()).toBe(0); // static by contract
+            expect(placeholder.__sigxPendingBoundary).toBeUndefined();
+        });
+
+        it('the record-driven path (explicit mode, no walk) hydrates against the wrapper', async () => {
+            const name = uniqueName('Explicit');
+            let mountedEl: Element | null = null;
+            registerComponent(name, component((ctx) => {
+                ctx.onMounted((m: { el: Element }) => { mountedEl = m.el; });
+                return () => <div class="s">streamed</div>;
+            }, { name }) as any);
+
+            const Root = component(() => () => <main>x</main>, { name: 'Root' });
+            container = createSSRContainer(`${REPLACED('<div class="s">streamed</div>')}<!--$c:1-->`);
+            setBoundaryTable({ '2': { hydrate: 'load', component: name } });
+
+            hydrate((Root as any)({}), container, makeAppContext({ boundaries: 'explicit' }));
+            await nextTick();
+
+            const placeholder = container.querySelector('[data-async-placeholder]')!;
+            // Content hydrated inside the wrapper, exactly once…
+            expect(container.querySelectorAll('.s').length).toBe(1);
+            expect(placeholder.querySelectorAll('.s').length).toBe(1);
+            // …and the component's element context is the wrapper's PARENT,
+            // matching what the same component sees when it is not streamed.
+            expect(mountedEl).toBe(container);
         });
     });
 

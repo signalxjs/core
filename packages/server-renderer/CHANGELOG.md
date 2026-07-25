@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+**Fixed: a streamed `$SIGX_REPLACE` region hydrates with a real trailing anchor, so the next patch can't crash (#478).**
+
+- A hydrated component vnode could be left with **no DOM reference at all**,
+  and the next reactive patch touching it — a client-side navigation, a cell
+  state change — died on `TypeError: Cannot read properties of null (reading
+  'parentNode')`, wedging the app. The region itself hydrated with no visible
+  error, so the crash surfaced later and elsewhere.
+- Root of it: the server closes the `<div data-async-placeholder>` wrapper and
+  only THEN emits the component's trailing `<!--$c:N-->` marker, so a component
+  hydrating *inside* that wrapper can never claim it. `hydrateComponent` used to
+  fall back to `endDom` — the first node AFTER its content, which belongs to a
+  sibling — or to null. It now **synthesizes a trailing anchor comment** at the
+  end of the component's range when no marker is reachable, exactly as
+  `mountComponent` always allocates one; every hydrated component vnode is
+  patchable again. A page whose markers are reachable is byte-identical: nothing
+  is synthesized.
+- `hydrateAsyncBoundary` also hydrated the wrapper's *children* with the
+  placeholder as the parent and no marker, which defeated the wrapper handling
+  the walk-driven path uses. It now hands `hydrateComponent` the placeholder
+  itself plus the component's real marker (matched by exact id among the
+  placeholder's following siblings).
+- And the walk-skipped vnode is no longer abandoned: when the root walk skips a
+  streamed placeholder it hands the **live vnode** (with its parent and marker)
+  to the `sigx:async-ready` flow through an expando on the placeholder, so the
+  vnode the parent tree holds is the one that gets `_effect`/`_subTree` —
+  previously an orphan copy was hydrated instead and the parent kept a ghost
+  forever, which mounted a duplicate on a same-type patch and crashed on a
+  different-type one.
+- Behaviour note: a streamed boundary component's `ctx.el` (and its mount hook's
+  `ctx.el`) is now the placeholder's **parent** rather than the placeholder,
+  matching what the same component sees when it is not streamed.
+- Two residues, unchanged and deliberate: the empty
+  `<div data-async-placeholder style="display:contents">` survives an unmount
+  (the wrapper is not part of the vnode tree, and its `data-hydrated` flag is
+  the dedupe guard the leftover scan and `hydrateTableBoundary` rely on), and a
+  boundary marked `hydrate: 'never'` stays a ghost by design — a parent patch
+  over it now recovers with a fresh mount instead of throwing.
+
 **Added: automatic boundary dep capture (`SSRBoundaryRecord.deps`, rfc-server §6.3, #452).**
 
 - `serverUseAsync` records every canonical `useData` key on the NEAREST
