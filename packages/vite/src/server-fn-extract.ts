@@ -109,12 +109,44 @@ export interface ServerFnExtractOptions {
     endpoint: string;
     /** Which symbol stubs carry: hashed (web, default) or stable (`role: 'client'`). */
     stubSymbols?: 'hashed' | 'stable';
+    /**
+     * The guard-declaration gate (rfc-server-v3 §1.4, #489). Every extracted
+     * `serverFn` and `serverStream` must be preset-derived, declare `use`, or
+     * declare `unguarded: true` — a bare one is a build error naming all three
+     * remedies.
+     *
+     * **Defaults to `true`.** A `use:` chain is the only mechanism that runs
+     * on every transport, so forgetting one on a new server module is silently
+     * unguarded on all five. Runtime cannot restore that guarantee without a
+     * fail-open registry; the build can. There is no installed base to wall
+     * in, and a guarantee shipped off by default ships to nobody — least of
+     * all to the apps that most need "you forgot a guard here", which are the
+     * ones that will never read an RFC and flip a flag.
+     *
+     * `'warn'` is the migration rung: it lists them without failing. `false`
+     * opts out deliberately — an app that authorizes inside handler bodies is
+     * a legitimate shape.
+     */
+    requireGuards?: boolean | 'warn';
+}
+
+/** A located build failure. Shared by both extractors. */
+export interface ServerFnExtractionError {
+    /** UTF-16 offset in the original source (for line/column reporting). */
+    offset: number;
+    message: string;
 }
 
 export interface ServerFnExtraction {
     fns: ExtractedServerFn[];
     /** Non-`serverFn` value exports — throwing `__serverOnly` stubs. */
     serverOnly: string[];
+    /**
+     * HARD failures — the build must not proceed. Empty unless `requireGuards`
+     * is on. The stub module is still produced: the client must never receive
+     * the real module, whatever else is wrong.
+     */
+    errors: ServerFnExtractionError[];
     /** Constructs the extraction cannot represent client-side (re-exports…). */
     warnings: string[];
     /** The full client replacement module. */
@@ -216,6 +248,55 @@ export function optionsSpreadWarning(name: string): string {
     );
 }
 
+/**
+ * Statically detect a `use:` chain (#489) — presence only, like `cache`: the
+ * guards are runtime values the pipeline reads off the definition, and the
+ * gate's question is "did you declare one?", not "is it any good".
+ */
+export function readServerFnUseOption(call: Node): boolean {
+    return hasServerFnOptionKey(call, 'use');
+}
+
+/**
+ * Statically detect `unguarded: true` (#489) — the LITERAL only, the same
+ * discipline `form` has. This bit stands between a function and a build error
+ * that exists to catch a forgotten guard, so a non-literal that happened to be
+ * falsy at runtime must not silence it.
+ */
+export function readServerFnUnguardedOption(call: Node): boolean {
+    const args = (call.arguments as Node[]) ?? [];
+    if (args.length !== 1 || args[0]?.type !== 'ObjectExpression') return false;
+    for (const prop of (args[0].properties as Node[]) ?? []) {
+        if (prop.type !== 'Property' || prop.computed === true) continue;
+        const key = prop.key as Node;
+        const keyName =
+            key.type === 'Identifier' ? (key.name as string)
+            : key.type === 'Literal' ? String(key.value)
+            : '';
+        if (keyName !== 'unguarded') continue;
+        const value = prop.value as Node;
+        return value.type === 'Literal' && value.value === true;
+    }
+    return false;
+}
+
+/**
+ * The message the gate fails with. It names all three remedies, because the
+ * check verifies DECLARATION, not correctness — the honest limit (§1.5) is
+ * that it converts "silently unguarded" into "a list a human wrote", which is
+ * the unit a review can act on.
+ */
+export function missingGuardError(name: string, stream: boolean): string {
+    const wrapper = stream ? 'serverStream' : 'serverFn';
+    return (
+        `${wrapper} "${name}" declares no guard chain. Every server function is a public ` +
+        `endpoint reachable on every transport, so it must either derive from a ` +
+        `serverFnPreset({ use }), declare its own \`use: [...]\`, or say \`unguarded: true\` ` +
+        `if it is deliberately open (rfc-server-v3 §1.3-1.4). Turn this check off with ` +
+        `sigxServer({ requireGuards: false }), or down with 'warn' while migrating.`
+    );
+}
+
 /** Presence of a non-computed key on the single object-literal argument. */
 function hasServerFnOptionKey(call: Node, keyName: string): boolean {
     const args = (call.arguments as Node[]) ?? [];
@@ -314,15 +395,27 @@ export const KEY_STAMP_MARKER = '/*! sigx:server-fn-keys */';
  * two names mints two symbols — the FIRST export's key wins here, matching
  * the stub whose key a client actually calls through first.
  */
-export function serverFnKeyStamps(fns: ExtractedServerFn[]): string {
+export function serverFnKeyStamps(fns: ExtractedServerFn[], guardChecked = false): string {
     const seen = new Set<string>();
     const lines: string[] = [];
     for (const fn of fns) {
-        if (fn.stream || !fn.local || seen.has(fn.local)) continue;
+        if (!fn.local || seen.has(fn.local)) continue;
         seen.add(fn.local);
-        lines.push(`${fn.local}.__sigxKey = ${JSON.stringify(fn.stableSymbol)};`);
+        // Streams are not `useData` targets, so they get no key — but they ARE
+        // held to the guard gate, so they still get the checked marker.
+        if (!fn.stream) lines.push(`${fn.local}.__sigxKey = ${JSON.stringify(fn.stableSymbol)};`);
+        // The §1.5 mitigation: a `*.server.ts` outside `include`/`scan` is
+        // never analyzed, so the gate cannot see it and a prod build would be
+        // silently unguarded. Marking what WAS checked makes absence the
+        // alarm — a missing signal degrades to silence, never a false pass.
+        if (guardChecked) lines.push(`${fn.local}.__sigxGuardChecked = true;`);
     }
     if (lines.length === 0) return '';
+    // One build-wide marker beside the per-fn ones: it is what lets the
+    // runtime tell "checked build, unchecked function" (warn) from "no
+    // transform at all" (say nothing) — see `__SIGX_GUARDS_CHECKED__` in
+    // docs/seams.md.
+    if (guardChecked) lines.unshift('globalThis.__SIGX_GUARDS_CHECKED__ = true;');
     return `\n${KEY_STAMP_MARKER}\n${lines.join('\n')}\n`;
 }
 
@@ -429,6 +522,10 @@ export function extractServerFns(
     }
 
     const warnings: string[] = [];
+    const errors: ServerFnExtractionError[] = [];
+    // Default ON: forgetting is the failure mode worth catching, and declining
+    // is a word you type once in the function it applies to (§1.4).
+    const requireGuards = options.requireGuards ?? true;
 
     /** local name → wrapped call source + kind + explicit stable id + GET
      *  mark, for `export { x }` resolution. */
@@ -507,6 +604,19 @@ export function extractServerFns(
             }
             if (call.kind === 'fn' && hasServerFnOptionsSpread(init)) {
                 warnings.push(optionsSpreadWarning(local));
+            }
+            // The guard gate (#489). Preset-derived counts — that IS the
+            // declaration — as does `use`, as does saying `unguarded: true`.
+            // A stream is held to the same rule: it is a public endpoint too.
+            if (
+                requireGuards !== false &&
+                call.presetSource === undefined &&
+                !readServerFnUseOption(init) &&
+                !readServerFnUnguardedOption(init)
+            ) {
+                const message = missingGuardError(local, call.kind === 'stream');
+                if (requireGuards === 'warn') warnings.push(message);
+                else errors.push({ offset: init.start, message });
             }
             const callSource = code.slice(init.start, init.end);
             localFnSources.set(local, {
@@ -657,5 +767,5 @@ export function extractServerFns(
     }
     if (lines.length === 0) lines.push('export {};');
 
-    return { fns, serverOnly, warnings, stubModule: lines.join('\n') };
+    return { fns, serverOnly, errors, warnings, stubModule: lines.join('\n') };
 }

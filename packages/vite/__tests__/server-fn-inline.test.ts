@@ -32,6 +32,9 @@ function extract(
     extra?: Partial<ServerFnExtractOptions>
 ) {
     return extractInlineServerFns(code, file, {
+        // Extraction mechanics, not the guard gate (#489, default ON) — its
+        // own behaviour is covered in its own describe below.
+        requireGuards: false,
         stableId: file.slice(1),
         endpoint: BASE,
         ...extra

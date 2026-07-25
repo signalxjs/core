@@ -36,8 +36,9 @@ describe('sigxServer end-to-end (real vite build)', () => {
         writeFileSync(join(root, 'src', 'api.server.ts'), `
 import { serverFn } from '@sigx/server';
 
-export const addToCart = serverFn(async (rq, id: string) => {
-    return '${SECRET}: ' + id;
+export const addToCart = serverFn({
+    unguarded: true,
+    handler: async (rq, id: string) => '${SECRET}: ' + id
 });
 `);
         writeFileSync(join(root, 'src', 'resume', 'Buy.tsx'), `
@@ -58,7 +59,10 @@ export const Buy = component<{ sku: string }>((ctx) => {
 import { component } from 'sigx';
 import { serverFn } from '@sigx/server';
 
-export const stamp = serverFn(async (rq) => 'INLINE_${SECRET}:' + rq.url.pathname);
+export const stamp = serverFn({
+    unguarded: true,
+    handler: async (rq) => 'INLINE_${SECRET}:' + rq.url.pathname
+});
 
 export const Widget = component(() => {
     return () => <button onClick={() => stamp()}>stamp</button>;
@@ -239,8 +243,9 @@ describe('sigxServer end-to-end — rev 2: role:client + shared package (#320)',
         write('packages/shared/src/cart.server.ts', `
 import { serverFn } from '@sigx/server';
 
-export const addToCart = serverFn(async (rq, id: string) => {
-    return '${SECRET}: ' + id;
+export const addToCart = serverFn({
+    unguarded: true,
+    handler: async (rq, id: string) => '${SECRET}: ' + id
 });
 `);
         write('apps/native/src/entry.ts',

@@ -4,6 +4,41 @@
 
 ### Added
 
+- **`requireGuards` + `unguarded: true` — forgetting a guard is now a build
+  error (#489).** A `use:` chain is the only mechanism that runs on every
+  transport, so a new `*.server.ts` that forgets one was silently unguarded on
+  all five — and runtime cannot restore that guarantee without a registry whose
+  miss would be fail-open. The build can. `sigxServer({ requireGuards })`
+  requires every extracted `serverFn` **and `serverStream`** to be
+  preset-derived, declare `use`, or declare `unguarded: true`; a bare one fails
+  the build naming all three remedies, with file and line.
+
+  **It defaults to `true`.** There is no installed base to wall in, and a
+  guarantee shipped off by default ships to nobody — least of all to the apps
+  that most need "you forgot a guard on this new module". `'warn'` is the
+  migration rung; `false` is the deliberate opt-out for an app that authorizes
+  inside handler bodies. `examples/resume` pays the price first: all six of its
+  functions now say `unguarded: true`, which is true of them and is the
+  demonstration.
+
+  `unguarded` is a word rather than an omission because "I meant this to be
+  public" and "I forgot" must not look identical, and because it makes the open
+  surface greppable. Declaring it on a preset-derived function throws at
+  definition time — the preset's guards still run, so the claim would be false.
+  Two limits are stated rather than implied: the check verifies **declaration,
+  not correctness** (`use: [logRequest]` passes), and a module outside
+  `include`/`scan` is never analyzed — so the build stamps what it *did* check
+  and dev warns on an unstamped call, making absence the alarm rather than a
+  false pass.
+
+- **`serverStream` gains an options form (#489).**
+  `serverStream({ use, unguarded, handler })`, alongside the direct form. A
+  stream is a public endpoint, so the gate holds it to the same rule — and it
+  needed somewhere to declare. It also gives streams a first-class `use:`,
+  which until now was reachable only through `preset.stream`. Deliberately no
+  `input`: a stream takes many arguments and has no single-input shape to
+  validate.
+
 - **`perRequest` — a value computed once per request, typed without a cast
   (#494).** Work derived from the request (a decoded session, an authenticated
   API client, a request id) was recomputed by every call that needed it: a page

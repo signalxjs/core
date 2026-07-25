@@ -36,8 +36,11 @@
 import { parseAst } from 'vite';
 import {
     hasServerFnOptionsSpread,
+    missingGuardError,
     mintSymbols,
     optionsSpreadWarning,
+    readServerFnUnguardedOption,
+    readServerFnUseOption,
     readServerFnCacheOption,
     readServerFnFormOption,
     readServerFnIdOption,
@@ -485,6 +488,7 @@ export function extractInlineServerFns(
     // -- find module-scope declarations and misplaced calls --
     const fns: InlineServerFn[] = [];
     const errors: InlineExtractionError[] = [];
+    const requireGuards = options.requireGuards ?? true;
     const warnings: string[] = [];
     const clientSplices: Splice[] = [];
     /** Call nodes accepted as module-scope declarations. */
@@ -565,6 +569,19 @@ export function extractInlineServerFns(
                 );
             }
             if (!stream && hasServerFnOptionsSpread(call)) warnings.push(optionsSpreadWarning(name));
+            // The guard gate (#489). An inline server function is extracted and
+            // is a public endpoint like any other, so it is held to the same
+            // rule — minus the preset remedy, which is file-form only, so the
+            // message here names the two that apply.
+            if (
+                requireGuards !== false &&
+                !readServerFnUseOption(call) &&
+                !readServerFnUnguardedOption(call)
+            ) {
+                const message = missingGuardError(name, stream);
+                if (requireGuards === 'warn') warnings.push(message);
+                else errors.push({ offset: call.start, message });
+            }
             const isGet = !stream && readServerFnCacheOption(call);
             const declaresInvalidates = !stream && readServerFnInvalidatesOption(call);
             const isFormTarget = !stream && readServerFnFormOption(call);

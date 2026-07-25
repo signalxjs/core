@@ -505,3 +505,27 @@ describe('serverFnPreset — shared per-module middleware (#398)', () => {
         void stream;
     });
 });
+
+describe('unguarded — the deliberate opt-out (#489)', () => {
+    it('is runtime-inert on a plain function', async () => {
+        const open = serverFn({ unguarded: true, handler: async () => 'ok' });
+        await expect(open()).resolves.toBe('ok');
+    });
+
+    it('contradicting a preset throws at DEFINITION time, not per request', () => {
+        const authed = serverFnPreset({ use: [() => {}] });
+        // Not __DEV__-gated: a security declaration that is false must fail at
+        // boot or in CI, where a dev-only warning would be silent.
+        expect(() => authed({ unguarded: true, handler: async () => 1 })).toThrow(
+            /declares `unguarded: true` but derives from a serverFnPreset/
+        );
+        expect(() =>
+            authed.stream({ unguarded: true, handler: async function* () { yield 1; } })
+        ).toThrow(/declares `unguarded: true` but derives from a serverFnPreset/);
+    });
+
+    it('a preset-derived function without the contradiction is unaffected', async () => {
+        const authed = serverFnPreset({ use: [() => {}] });
+        await expect(authed({ handler: async () => 'ok' })()).resolves.toBe('ok');
+    });
+});

@@ -96,6 +96,31 @@ export interface SigxServerOptions {
      */
     guard?: string;
     /**
+     * The guard-declaration gate (rfc-server-v3 §1.4, #489). Every extracted
+     * `serverFn` and `serverStream` must be preset-derived, declare `use`, or
+     * declare `unguarded: true`; a bare one is a build error naming all three
+     * remedies, with its file and line.
+     *
+     * **Default `true`.** The endpoint's `guard` above is wire-only, so a
+     * chain that must hold everywhere lives in the definition — and a new
+     * `*.server.ts` that forgets one is silently unguarded on every transport.
+     * Runtime cannot restore that guarantee without a registry whose miss
+     * would be fail-open; the build can. Shipping it off by default would ship
+     * it to nobody.
+     *
+     * `'warn'` lists them without failing (the migration rung); `false` opts
+     * out deliberately, for an app that authorizes inside handler bodies.
+     *
+     * The check verifies **declaration, not correctness**: `use: [logRequest]`
+     * passes. That is the honest limit — it converts "silently unguarded" into
+     * a list a human wrote, which is the unit a review can act on. And a
+     * `*.server.ts` outside `include`/`scan` is never analyzed at all, so
+     * under this flag the SSR stamp carries a `__sigxGuardChecked` marker and
+     * `__DEV__` warns when a function without one is invoked: absence is the
+     * alarm, so a missing signal degrades to silence rather than a false pass.
+     */
+    requireGuards?: boolean | 'warn';
+    /**
      * Dev boundary refresh (rfc-server §6.3): a Vite-root-relative module
      * exporting `renderBoundaries`, forwarded to the dev endpoint — the
      * same shape `createBoundaryRefresh` (`@sigx/resume/server`) builds for
@@ -192,7 +217,8 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
     const extractOptions = (file: string): ServerFnExtractOptions => ({
         stableId: computeStableId(file, root, pkgCache),
         endpoint,
-        stubSymbols: role === 'client' ? 'stable' : 'hashed'
+        stubSymbols: role === 'client' ? 'stable' : 'hashed',
+        requireGuards: options.requireGuards
     });
 
     /** Is FILE inside the Vite root? (Scanned packages may not be.) */
@@ -484,6 +510,18 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
             // The incoming code is authoritative (dev edits arrive here before
             // any fs watcher) — re-extract and refresh the registry cache.
             const extraction = extractInto(clean, code);
+            // Errors first, and located — the guard gate (#489) reports here
+            // in the same shape the inline form already used.
+            if (extraction && extraction.errors.length > 0) {
+                this.error(
+                    extraction.errors
+                        .map((e) => {
+                            const loc = offsetToLoc(code, e.offset);
+                            return `${relPath(clean)}:${loc.line}:${loc.column} ${e.message}`;
+                        })
+                        .join('\n')
+                );
+            }
             for (const warning of extraction?.warnings ?? []) {
                 this.warn(`[sigx:server] ${relPath(clean)}: ${warning}`);
             }
@@ -508,7 +546,10 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
             // key identically on both sides). Marker-guarded: rolldown may
             // re-run the transform over its own stamped output.
             if (extraction && !code.includes(KEY_STAMP_MARKER)) {
-                const stamps = serverFnKeyStamps(extraction.fns);
+                const stamps = serverFnKeyStamps(
+                    extraction.fns,
+                    (options.requireGuards ?? true) !== false
+                );
                 if (stamps) return { code: code + stamps, map: null };
             }
             return null;

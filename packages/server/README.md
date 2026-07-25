@@ -120,8 +120,10 @@ options form with an `input` schema. In dev, a function that receives wire
 input it has no validator for logs a once-per-function warning — the
 direct form always (its types are compile-time only), the options form
 when `input` is omitted. Declaring `input` is what resolves both.
-`serverStream` has no options form, so validate its arguments at the top
-of the generator (any Standard Schema validates standalone).
+`serverStream` has an options form too — `use` and `unguarded`, so a stream
+can declare a guard chain (see below) — but deliberately no `input`: a stream
+takes many arguments and has no single-input shape to validate. Validate at the
+top of the generator (any Standard Schema validates standalone).
 
 ### Shared middleware — `serverFnPreset`
 
@@ -166,6 +168,57 @@ Preset guards run **first**, then the function's own `use:` chain.
   derived from it (the preset's source is part of their content hash), the
   way editing a function body already does. Stable symbols (`<id>#<name>`)
   never move, so installed clients keep their routes.
+
+### The guard gate — `requireGuards` and `unguarded`
+
+A preset per module is a mechanism, not a guarantee: a new `*.server.ts` that
+forgets the line is unguarded on **every** transport, and no runtime check can
+restore that without a registry whose miss would fail open. The build can, so
+it does — **on by default**:
+
+```js
+// vite.config.js — nothing to write; this is the default
+sigxServer()
+
+sigxServer({ requireGuards: 'warn' })    // migration rung: list them, don't fail
+sigxServer({ requireGuards: false })     // opt OUT, deliberately
+```
+
+Every extracted `serverFn` **and `serverStream`** — streams are public
+endpoints too — must be preset-derived, declare `use`, or say so:
+
+```ts
+export const submitPat = serverFn({
+    unguarded: true,          // deliberate: this IS the sign-in
+    form: true,
+    input: PatSchema,
+    handler: async (rq, pat) => …
+});
+```
+
+A bare `serverFn(async (rq) => …)` is a build error naming all three remedies,
+with its file and line. `unguarded` is a word rather than an omission because
+"I meant this to be public" and "I forgot" must not look identical — and
+because it makes the open surface greppable:
+`grep -rn unguarded --include='*.server.ts' src/` prints every deliberately
+open endpoint, which is a list a security review can read.
+
+Since the declaration channel is the options form, a function that needs to
+declare uses the options form (`serverStream` has one for exactly this — `use`
+and `unguarded`, no `input`; validate stream arguments in the generator).
+Writing `unguarded: true` on a **preset-derived** function throws at
+definition time: the preset's guards still run, so the declaration would be
+false.
+
+Two limits, stated rather than implied:
+
+- **It checks declaration, not correctness.** `use: [logRequest]` passes. What
+  it buys is converting "silently unguarded" into a list a human wrote.
+- **A module outside `include`/`scan` is never analyzed**, so it ships
+  unchecked. Under the flag the build stamps what it *did* check and dev warns
+  when an unstamped function is called — absence is the alarm, so a missing
+  signal degrades to silence rather than to a false pass. A production build
+  with an unanalyzed module stays unguarded; add its directory to `scan`.
 
 ### Server-declared invalidation
 
@@ -754,7 +807,9 @@ Every server function is a public HTTP endpoint; the defaults assume that:
   never enters the handler, so it runs only that function's own `use` chain.
   Auth that must hold on every transport belongs in the definition — `use:` on
   each function, or one `serverFnPreset({ use })` shared by the module
-  (rfc-server-v3 §1, #489/#493).
+  (rfc-server-v3 §1, #489/#493). The build's `requireGuards` check (on by
+  default) is what makes "nobody forgot one" a guarantee rather than an
+  intention.
 - **`maxBodyBytes`** (1 MiB default) enforced while reading.
 - **Error masking**: only `ServerFnError` crosses the wire verbatim; other
   throws become a generic 500 in production.

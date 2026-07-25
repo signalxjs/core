@@ -655,3 +655,96 @@ export const b = serverFn(async () => 1);
         expect(result.warnings).toEqual([]);
     });
 });
+
+/* ------------------------------------------------------------------ */
+/* requireGuards (#489, rfc-server-v3 §1.4)                            */
+/* ------------------------------------------------------------------ */
+
+describe('extractServerFns — requireGuards', () => {
+    const BARE = `
+import { serverFn, serverStream } from '@sigx/server';
+export const read = serverFn(async (rq) => 1);
+export const feed = serverStream(async function* (rq) { yield 1; });
+`;
+
+    it('is ON by default — a bare serverFn and a bare serverStream both fail', () => {
+        const result = extractServerFns(BARE, '/src/x.server.ts', opts('src/x.server.ts'));
+        expect(result.errors).toHaveLength(2);
+        for (const error of result.errors) {
+            // All three remedies, so the message is actionable on its own.
+            expect(error.message).toContain('serverFnPreset');
+            expect(error.message).toContain('use: [...]');
+            expect(error.message).toContain('unguarded: true');
+            expect(error.offset).toBeGreaterThan(0);
+        }
+        expect(result.errors[0].message).toContain('serverFn "read"');
+        expect(result.errors[1].message).toContain('serverStream "feed"');
+        // The stub module is still produced: whatever else is wrong, the
+        // client must never be handed the real module.
+        expect(result.stubModule).toContain('__serverFnStub(');
+    });
+
+    it('accepts all three remedies, on both wrappers', () => {
+        const code = `
+import { serverFn, serverStream, serverFnPreset } from '@sigx/server';
+const authed = serverFnPreset({ use: [requireUser] });
+export const a = authed(async (rq) => 1);
+export const b = authed.stream(async function* (rq) { yield 1; });
+export const c = serverFn({ use: [requireUser], handler: async () => 1 });
+export const d = serverFn({ unguarded: true, handler: async () => 1 });
+export const e = serverStream({ use: [requireUser], handler: async function* () { yield 1; } });
+export const f = serverStream({ unguarded: true, handler: async function* () { yield 1; } });
+`;
+        const result = extractServerFns(code, '/src/x.server.ts', opts('src/x.server.ts'));
+        expect(result.errors).toEqual([]);
+        expect(result.fns.map((fn) => fn.name).sort()).toEqual(['a', 'b', 'c', 'd', 'e', 'f']);
+    });
+
+    it("'warn' lists them without failing, and false opts out entirely", () => {
+        const warned = extractServerFns(
+            BARE,
+            '/src/x.server.ts',
+            opts('src/x.server.ts', { requireGuards: 'warn' })
+        );
+        expect(warned.errors).toEqual([]);
+        expect(warned.warnings).toHaveLength(2);
+        expect(warned.warnings[0]).toContain('declares no guard chain');
+
+        const off = extractServerFns(
+            BARE,
+            '/src/x.server.ts',
+            opts('src/x.server.ts', { requireGuards: false })
+        );
+        expect(off.errors).toEqual([]);
+        expect(off.warnings).toEqual([]);
+    });
+
+    it('demands the LITERAL true — a variable does not silence the gate', () => {
+        const code = `
+import { serverFn } from '@sigx/server';
+export const read = serverFn({ unguarded: isPublic, handler: async () => 1 });
+`;
+        const result = extractServerFns(code, '/src/x.server.ts', opts('src/x.server.ts'));
+        expect(result.errors).toHaveLength(1);
+    });
+
+    it('stamps __sigxGuardChecked on what it checked, streams included', () => {
+        const code = `
+import { serverFn, serverStream } from '@sigx/server';
+export const read = serverFn({ unguarded: true, handler: async () => 1 });
+export const feed = serverStream({ unguarded: true, handler: async function* () { yield 1; } });
+`;
+        const result = extractServerFns(code, '/src/x.server.ts', opts('src/x.server.ts'));
+        const stamps = serverFnKeyStamps(result.fns, true);
+        expect(stamps).toContain('globalThis.__SIGX_GUARDS_CHECKED__ = true;');
+        expect(stamps).toContain('read.__sigxGuardChecked = true;');
+        // A stream gets the marker but never a data key.
+        expect(stamps).toContain('feed.__sigxGuardChecked = true;');
+        expect(stamps).not.toContain('feed.__sigxKey');
+
+        // With the gate off, nothing claims to have been checked — absence is
+        // the alarm, so a false "checked" would be the worst outcome.
+        expect(serverFnKeyStamps(result.fns)).not.toContain('__sigxGuardChecked');
+        expect(serverFnKeyStamps(result.fns)).not.toContain('__SIGX_GUARDS_CHECKED__');
+    });
+});

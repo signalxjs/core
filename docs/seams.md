@@ -248,6 +248,27 @@ redundant assignment. A throwing resolver is swallowed — the detached
 context's descriptive error is more actionable than a leaked internal one.
 `fn.with({ context })` wins over whatever is ambient.
 
+### `__SIGX_GUARDS_CHECKED__`
+
+| | |
+|---|---|
+| **Stamped by** | `@sigx/vite`'s server-fn transform, in the SSR-side stamp block, when `sigxServer({ requireGuards })` is not `false` |
+| **Read by** | `server/src/index.ts` — the `__DEV__` unchecked-function warning |
+| **Contract** | `true` when this build ran the guard-declaration gate |
+
+The build-wide half of rfc-server-v3 §1.5's mitigation for its own residual
+gap (#489). The gate can only check `*.server.ts` modules the plugin's
+`include`/`scan` reaches, so a module outside them ships unanalyzed and
+silently unguarded. Each checked function is stamped `__sigxGuardChecked`, and
+this global says the build was doing the checking at all — together they let
+the runtime tell "checked build, unchecked function" (warn) from "no transform
+here" (say nothing, which is every unit test and hand-wired non-Vite build).
+
+**Absence is the alarm, so a miss degrades to silence, never a false pass** —
+the inverse of the usual seam rule, and deliberate: a seam whose absence
+asserted "guarded" would be exactly the fail-open the RFC rejects. Dev-only;
+production builds are not covered, which §1.5 records rather than papers over.
+
 ### `__SIGX_LIVE_CLIENT__`
 
 | | |
