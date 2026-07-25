@@ -6,6 +6,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- **`@sigx/vite`: the dev `resolve.alias` map is real (#487).** It never ran.
+  `resolvePackageSrc` looked packages up with
+  `createRequire(...).resolve('<pkg>/package.json')`, which fails twice over —
+  no `@sigx` package exports `./package.json`, and `createRequire` resolves
+  under the **`require` condition**, which none of them declare (they are
+  ESM-only). Every lookup threw `ERR_PACKAGE_PATH_NOT_EXPORTED`, so the map was
+  always `{}` and the behaviour the README documented had never once executed.
+  Nothing asserted on it: the plugin tests covered `optimizeDeps.exclude` and
+  `ssr.noExternal` only. Apps compensated with hand-maintained alias maps that
+  grew per package and per exports subpath (`examples/spa-ssr` carried 16
+  lines; a real consumer app carried the same).
+
+  The map is now generated from what is installed, via `import.meta.resolve`
+  (the same conditions Vite and Node apply to an `import`), with an entry per
+  `exports` subpath, emitted longest-key-first — Vite matches aliases by
+  prefix, so a bare `@sigx/resume` ahead of `@sigx/resume/client` would rewrite
+  the subpath into `…/index.js/client`. Targets are the packages' **built**
+  entries, never `src`: `__DEV__` is defined only by `defineLibConfig`, so a
+  src alias would leave every `if (__DEV__)` in the family referencing an
+  undefined global.
+
+  A package the project already aliases is skipped **entirely** — all of its
+  entries or none. `mergeConfig(userConfig, pluginResult)` lets the plugin win
+  on a key collision, so half-applying over a hand-written map would point a
+  bare specifier and its subpaths at different files: the two-live-copies
+  failure the map exists to prevent. `examples/spa-ssr`'s hand-written map is
+  deleted as a result.
+
 ### Added
 
 - **`@sigx/runtime-core` / `@sigx/server-renderer`**: a **function passed as children** is now invoked as a scoped slot — `<Comp>{(p) => <span>{p.greeting}</span>}</Comp>` calls the function with the slot's scoped props (Vue scoped-slots / Solid render-prop semantics), identical output to the `slots={{ default: (p) => … }}` prop form (#476). Previously a bare function child was dropped as an empty node; only functions provided via the `slots` prop received scoped props. Function items in the extracted default/named children arrays are invoked once per accessor call, so reactivity is preserved — the call happens inside the consumer's render — on both the client (`createSlots`) and SSR (`renderToString`), keeping hydration in agreement. A function returning `null`/`undefined` is dropped and an array is flattened one level, matching the `slots`-prop branch; named element-based slots (`slot="x"` children) are unaffected. Enables the `asChild` render-prop pattern without a userland workaround.

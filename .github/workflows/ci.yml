@@ -359,6 +359,12 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # The dev alias map resolves the family's published entry points, so
+      # asserting on it needs them to exist (#487). The `test` job already
+      # builds before testing; this keeps coverage running the same suite.
+      - name: Build
+        run: pnpm build
+
       - name: Run tests with coverage
         run: pnpm test:coverage
 
