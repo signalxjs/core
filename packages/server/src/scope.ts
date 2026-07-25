@@ -103,11 +103,37 @@ export function toContextInit(source: ScopeSource): ServerFnContextInit {
         : (source as Request | Partial<ServerFnContext>);
 }
 
+/**
+ * What a SCOPE stores: `toContextInit`, plus the one guarantee a scope adds —
+ * a `locals` object (rfc-server-v3 §2.3, #494).
+ *
+ * That object IS the per-request store. `contextFrom` prefers a supplied
+ * `locals` (`./context`), so every context derived inside this scope shares
+ * one bag instead of minting a fresh `{}` per call — which is why a guard that
+ * decoded a session could not hand it to the next call, and why one signed-in
+ * render re-did the same decode once per cell.
+ *
+ * A source that ALREADY carries `locals` is stored as is, never copied: the
+ * endpoint's own context and an app pre-seeding `{ request, locals: { user } }`
+ * both hand in the bag they intend to be the store, and identity is what makes
+ * it one. (Only that branch can hold a full `ServerFnContext` with the throwing
+ * `request`/`url` getters `contextFrom` documents, so the spread below never
+ * reads one.)
+ */
+export function toScopeInit(source: ScopeSource): Partial<ServerFnContext> {
+    const init = toContextInit(source);
+    // A bare Request is wrapped rather than left bare — nothing is lost:
+    // `contextFrom` reads `partial.request`, derives `url` from it, and its
+    // abortSignal fallback reaches `request.signal` through the same field.
+    if (init instanceof Request) return { request: init, locals: {} };
+    return init.locals ? init : { ...init, locals: {} };
+}
+
 /** The slice of AsyncLocalStorage this uses — typed here so the module needs
  *  no `node:async_hooks` types at build time. */
 interface ContextStore {
-    run<R>(ctx: ServerFnContextInit, fn: () => R): R;
-    getStore(): ServerFnContextInit | undefined;
+    run<R>(ctx: Partial<ServerFnContext>, fn: () => R): R;
+    getStore(): Partial<ServerFnContext> | undefined;
 }
 
 let _storePromise: Promise<ContextStore | null> | undefined;
@@ -132,7 +158,7 @@ let _warnedNoStore = false;
  */
 function ensureContextStore(): Promise<ContextStore | null> {
     _storePromise ??= import('node:async_hooks')
-        .then(({ AsyncLocalStorage }) => new AsyncLocalStorage<ServerFnContextInit>())
+        .then(({ AsyncLocalStorage }) => new AsyncLocalStorage<Partial<ServerFnContext>>())
         .catch(() => null);
     return _storePromise.then((als) => {
         if (!als) {
@@ -161,7 +187,7 @@ export async function runInScope<T>(source: ScopeSource, fn: () => T | Promise<T
     if (!store) return fn();
     // No cast: `run` hands back exactly what `fn` returned — a value or a
     // promise — and this function being async settles either into Promise<T>.
-    return store.run(toContextInit(source), fn);
+    return store.run(toScopeInit(source), fn);
 }
 
 // The seam. Stamped at IMPORT, unlike `__SIGX_SERVERFN_CONTEXT__` (which

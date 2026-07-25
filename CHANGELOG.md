@@ -8,6 +8,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- **`@sigx/server`: `perRequest` — one value per request, typed without a cast
+  (#494).** An in-process call got a fresh `rq.locals` every time, so work
+  derived from the request was redone by every function that needed it — a page
+  with five SSR-enabled cells decoded the same session five times.
+  `perRequest(setup)` returns an accessor taking `rq`; the value is computed at
+  most once per request/render and shared by every guard, handler and nested
+  in-process call in that flow. Memoized promise included (a guard and a
+  handler racing on first touch share one in-flight decode), sticky on failure
+  for that request, and it throws on self-reference. Values compose by calling
+  each other, with no composition API. **Behaviour change that makes it
+  possible**: the request scope now stores `{ request, locals }` rather than a
+  bare `Request`, so `rq.locals` is a per-request store rather than a per-call
+  scratchpad — which is what the wire path already did. No disposal in v1, and
+  no new `globalThis` seam.
+
 - **`@sigx/server` / `@sigx/vite`: `serverFnPreset` — shared per-module
   middleware (#398).** A `use:` chain is the only mechanism that runs on every
   transport, so app-wide auth was a line repeated on every server function.

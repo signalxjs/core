@@ -358,7 +358,7 @@ serverFn(async (rq, ...args) => {
     rq.abortSignal;      // fires on client disconnect (never a reactive signal)
     rq.responseHeaders;  // mutable response headers
     rq.status(201);      // success status override
-    rq.locals;           // guard hand-off (auth results)
+    rq.locals;           // guard hand-off — ONE bag per request (see below)
 });
 ```
 
@@ -400,13 +400,82 @@ with neither the throw stays — a function reading `rq.request` when nothing
 supplied one is a bug worth seeing, not a silent `undefined`.
 
 `context` accepts a `Request` or a partial `ServerFnContext` (to set `locals`,
-say). A supplied `Request` also supplies `rq.abortSignal`, so wire its signal
+say). Passing `{ request, locals }` — the **same object** on each call — shares
+one request store across explicit calls; a fresh `Request` per call is its own
+store, which is how a test isolates two calls with no framework ceremony. A supplied `Request` also supplies `rq.abortSignal`, so wire its signal
 to the client disconnect (`res.once('close', …)` under Node) and SSR-time work
 stops when the client goes away. `rq.responseHeaders`/`rq.status()` stay inert
 either way: there is no
 HTTP response to affect, and pretending otherwise would silently drop headers.
 On the client `.with({ context })` is ignored, with a dev warning — a stub's
 context is the request it makes.
+
+### Per-request values — `perRequest`
+
+Work derived from the request — a decoded session, an authenticated API
+client, a request id — should be computed **once per request**, no matter how
+many functions in that flow need it. It isn't, by default: every call used to
+get a fresh `rq.locals`, so a page with five SSR-enabled cells decoded the same
+session five times (cookie parse → verify → database read → decrypt, each
+time).
+
+A scope now carries one store for the whole request, and `perRequest` is its
+typed face:
+
+```ts
+// src/session.server.ts
+import { perRequest, ServerFnError } from '@sigx/server';
+
+export const session = perRequest(async (rq) =>
+    decodeSession(rq.request.headers.get('cookie')));
+
+export const github = perRequest(async (rq) => {
+    const s = await session(rq);          // the SAME memoized promise
+    if (!s) throw new ServerFnError(401, 'Sign in');
+    return createGitHubClient(s.token);
+});
+
+// src/guards.ts
+export const requireUser: ServerFnGuard = async (rq) => {
+    if (!(await session(rq))) throw new ServerFnError(401, 'Sign in');
+};
+
+// src/board.server.ts
+const authed = serverFnPreset({ use: [requireUser] });
+
+export const boardIssues = authed({
+    input: BoardKey,
+    handler: async (rq, key) => (await github(rq)).issues(key),   // no decode, no cast
+});
+```
+
+The accessor takes `rq` — no ambient lookup at the call site, the same rule
+`rq` itself follows. Values **compose by calling each other**; there is no
+composition API.
+
+- **The value is memoized, promise included.** An async setup memoizes the
+  *promise*, so a guard and a handler racing on first touch share one in-flight
+  decode. There is never a second code path.
+- **A failed setup stays failed for that request.** Retrying a failed session
+  decode once per cell would be a footgun, not a feature.
+- **A setup that resolves itself throws** "circular request value" rather than
+  memoizing `undefined`.
+- **The store follows the request**, per transport: the endpoint's context on
+  the wire, the one the scope normalized in-process, the object you handed
+  `.with({ context })`, and per call when nothing supplied either. Without
+  `AsyncLocalStorage` (workerd with no `nodejs_compat`) there is no scope to
+  share, so a value is computed per invocation — the guards and handler of one
+  call still share it, exactly as before this existed.
+- **No disposal in v1.** `perRequest` has no `onDispose`: on WinterCG runtimes
+  the render's scope settles at the shell, so "released when the response has
+  flushed" would fire mid-stream. An app that needs teardown owns it in its own
+  handler, where it already has the request.
+
+`rq.locals` is the other face of the same store — the **escape hatch**, for a
+value too small or too transient to name, and the reason a guard can still
+write `rq.locals.x` and have the handler read it. Reach for a per-request value
+first: it types itself from its own setup, and the accessor is the only way to
+get at it, so there is nothing to cast.
 
 ## The endpoint
 
@@ -691,7 +760,7 @@ Every server function is a public HTTP endpoint; the defaults assume that:
 
 | Entry | Runs on | What |
 |---|---|---|
-| `@sigx/server` | server (browser condition throws) | `serverFn`, `serverStream`, `serverFnPreset`, `ServerFnError`, `isServerFnError`, types |
+| `@sigx/server` | server (browser condition throws) | `serverFn`, `serverStream`, `serverFnPreset`, `perRequest`, `ServerFnError`, `isServerFnError`, types |
 | `@sigx/server/client` | any client (browser, lynx, terminal) | the generated stubs' runtime + `configureServerFn` (dependency-free) |
 | `@sigx/server/server` | anywhere (WinterCG) | `handleServerFnRequest(request, options)` |
 | `@sigx/server/node` | Node | `createServerFnHandler(options)` — connect-style |
