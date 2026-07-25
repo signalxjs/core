@@ -52,6 +52,8 @@ function createCachedRead<T>(
         st: 'idle' as StateName,
         data: null as T | null,
         err: null as Error | null,
+        /** Whether `data` is a value rather than "nothing yet" (#485). */
+        has: false,
     });
 
     let canonKey: string | null = null;
@@ -61,6 +63,8 @@ function createCachedRead<T>(
     let staleVal: T | null = null;
     /** Previous key's value — shown through a key change under keepPreviousData. */
     let previousData: T | null = null;
+    /** …and whether there WAS one: `previousData !== null` conflates a cached null (#485). */
+    let hasPreviousData = false;
     let disposed = false;
 
     const reportUnhandled = makeUnhandledReporter(instance, 'useData');
@@ -71,6 +75,7 @@ function createCachedRead<T>(
             batch(() => {
                 state.st = 'idle';
                 state.data = null;
+                state.has = false;
                 state.err = null;
             });
             return;
@@ -79,23 +84,33 @@ function createCachedRead<T>(
         const inflight = e.promise !== null;
         batch(() => {
             if (inflight) {
-                const shown = e.hasValue ? (e.value as T) : keepPreviousData ? previousData : null;
-                state.st = shown !== null ? 'refreshing' : 'pending';
+                // `hasValue` is the store's own presence bit — its comment
+                // says exactly why it exists. Re-deriving presence with a null
+                // test here threw it away, so a cached `null` revalidated as
+                // 'pending' and flashed a skeleton over live content (#485).
+                const showCached = e.hasValue;
+                const showPrevious = !showCached && keepPreviousData && hasPreviousData;
+                const shown = showCached ? (e.value as T) : showPrevious ? previousData : null;
+                state.st = showCached || showPrevious ? 'refreshing' : 'pending';
                 state.data = shown;
+                state.has = showCached || showPrevious;
                 state.err = null;
             } else if (e.error) {
                 if (e.hasValue) staleVal = e.value as T;
                 state.st = 'errored';
                 state.data = null;
+                state.has = false;
                 state.err = e.error;
             } else if (e.hasValue) {
                 staleVal = e.value as T;
                 state.st = 'ready';
                 state.data = e.value as T;
+                state.has = true;
                 state.err = null;
             } else {
                 state.st = 'pending';
                 state.data = keepPreviousData ? previousData : null;
+                state.has = keepPreviousData && hasPreviousData;
                 state.err = null;
             }
         });
@@ -115,6 +130,7 @@ function createCachedRead<T>(
             }
             // Leaving the old key: remember its value for keepPreviousData.
             previousData = state.data;
+            hasPreviousData = state.has;
             if (canonKey !== null) store.unsubscribe(canonKey, subscriber);
             canonKey = canon;
             rawArg = raw;
@@ -151,6 +167,9 @@ function createCachedRead<T>(
         },
         get value() {
             return state.data;
+        },
+        get hasValue() {
+            return state.has;
         },
         get error() {
             return state.err;

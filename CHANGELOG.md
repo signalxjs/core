@@ -6,6 +6,39 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- **`AsyncState.hasValue` — presence, separate from the value (#485).** Every
+  `useData` cell, the `@sigx/cache` cell, `all()` and the SSR-side state now
+  expose `readonly hasValue: boolean`. Additive for readers.
+
+### Fixed
+
+- **A `useData` cell whose value is legitimately `null` no longer flashes a
+  skeleton over live content (#485).** The cell derived its state name from
+  `data !== null`, so a ready cell holding `null` — a "not found" read — went
+  back to `'pending'` on `refresh()`, `loading` flipped true, and `match`
+  rendered the **pending arm** over content that was already on screen. That
+  is exactly what rev 6 of rfc-async forbids ("`loading` means nothing to show
+  yet… it never flashes a skeleton over live content during a background
+  revalidate"). Asymmetric, too: an `undefined`-valued cell took the
+  `'refreshing'` branch and a `null`-valued one did not. `@sigx/cache` had the
+  same bug in the opposite direction — the store already carries a `hasValue`
+  bit whose own comment says it exists to disambiguate a legitimate null, and
+  the engine threw it away by re-deriving presence with a null test when
+  staging a revalidate.
+
+  Reported as "`null` is indistinguishable from *no data* in the
+  `__SIGX_ASYNC__` transfer". The transfer is **not** where it was lost: that
+  seam is presence-based (`peekRestored` uses `hasOwnProperty`, so a
+  transferred `null` — or an `undefined` carried by the codec's `$undef`
+  handler — is a hit). No wrapper is needed there, and adding one would break
+  the mixed-store/idempotent-transform rule. The conflation was `value !== null`
+  standing in for "has a value" inside the cell, and the docs that told users
+  to rely on it: the `ready` arm was documented as "the only type-safe route to
+  a **non-null** T", when what it actually guarantees — and now says — is that
+  the value is **present**.
+
 ### Fixed
 
 - **`@sigx/vite`: the dev `resolve.alias` map is real (#487).** It never ran.

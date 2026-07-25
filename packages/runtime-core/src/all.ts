@@ -130,6 +130,12 @@ export function all(...sources: unknown[]): AllState<unknown, unknown> {
         get value() {
             return combinedValue();
         },
+        get hasValue() {
+            // The combination is only a value when every member is (#485) —
+            // discriminated on state, not on a null test, so a member that
+            // legitimately resolved null still counts as present.
+            return members.every((m) => m.hasValue);
+        },
         get error() {
             return firstError();
         },

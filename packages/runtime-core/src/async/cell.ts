@@ -149,6 +149,18 @@ export function createDataCell<T>(
         st: 'idle' as AsyncStateName,
         data: null as T | null,
         err: null as Error | null,
+        /**
+         * Whether `data` is a VALUE, as opposed to "nothing yet" (#485).
+         *
+         * `data !== null` cannot answer that: a fetch legitimately resolving
+         * `null` — a "not found" read — is indistinguishable from an unsettled
+         * cell. Reading it as presence made a ready null-valued cell go back to
+         * `'pending'` on refresh, which flashes a skeleton over live content
+         * and violates the pinned rule that `loading` means "nothing to show
+         * yet" (docs/rfc-async.md). It also made the `ready` arm's documented
+         * "value is present" guarantee false for a nullable `T`.
+         */
+        has: false,
     });
 
     /** Last-good value — survives a failed refresh (handed to the error arm as `stale`). */
@@ -247,7 +259,7 @@ export function createDataCell<T>(
             // truth — invalidate so later mounts fetch instead of restoring.
             invalidateRestored(key);
             batch(() => {
-                state.st = state.data !== null ? 'refreshing' : 'pending';
+                state.st = state.has ? 'refreshing' : 'pending';
                 state.err = null;
             });
             release();
@@ -262,6 +274,7 @@ export function createDataCell<T>(
             batch(() => {
                 state.st = 'ready';
                 state.data = v;
+                state.has = true;
                 state.err = null;
             });
         } catch (e) {
@@ -273,6 +286,7 @@ export function createDataCell<T>(
                 // last-good value survives in `stale` for the error arm.
                 state.st = 'errored';
                 state.data = null;
+                state.has = false;
                 state.err = err;
             });
         }
@@ -300,6 +314,7 @@ export function createDataCell<T>(
                 batch(() => {
                     state.st = 'idle';
                     state.data = null;
+                    state.has = false;
                     state.err = null;
                 });
                 return;
@@ -312,6 +327,7 @@ export function createDataCell<T>(
                 batch(() => {
                     state.st = 'ready';
                     state.data = v;
+                    state.has = true;
                     state.err = null;
                 });
                 return;
@@ -321,6 +337,7 @@ export function createDataCell<T>(
             batch(() => {
                 state.st = 'pending';
                 state.data = null;
+                state.has = false;
                 state.err = null;
             });
             // SSR without a provider should never happen (the server walk
@@ -341,6 +358,9 @@ export function createDataCell<T>(
         },
         get value() {
             return state.data;
+        },
+        get hasValue() {
+            return state.has;
         },
         get error() {
             return state.err;
@@ -389,6 +409,7 @@ export const INERT_IDLE_CELL: AsyncState<never> = (() => {
     const cell: AsyncState<never> = {
         state: 'idle',
         value: null,
+        hasValue: false,
         error: null,
         loading: false,
         match<R>(arms: MatchArms<never, R>): R | undefined {

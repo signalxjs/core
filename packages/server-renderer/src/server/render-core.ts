@@ -351,6 +351,7 @@ function createComponentState(
 const INERT_PENDING_STATE = Object.freeze({
     state: 'pending' as const,
     value: null,
+    hasValue: false,
     error: null,
     loading: true,
     match: (arms: { pending?: () => unknown }) => arms.pending?.(),
@@ -448,6 +449,10 @@ function serverUseAsync(
     return {
         get state() { return state.st; },
         get value() { return state.data; },
+        // 'ready' is the only state that has one, and it is set together with
+        // `data` above — so a fetcher resolving `null` still reads as present,
+        // matching the client cell (#485).
+        get hasValue() { return state.st === 'ready'; },
         get loading() { return state.st === 'pending'; },
         get error() { return state.failure; },
         match(arms: Parameters<typeof matchAsyncState>[1]) {

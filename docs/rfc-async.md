@@ -253,6 +253,7 @@ always a bug; treating it like `''` keeps "no parameters yet ⇒ no fetch").
 interface AsyncState<T> {
   readonly state: 'idle' | 'pending' | 'ready' | 'refreshing' | 'errored';
   readonly value: T | null;          // SWR last-good; kept across refresh(), CLEARED on key change
+  readonly hasValue: boolean;        // rev 9: `value` is a VALUE, not "nothing yet" — see below
   readonly error: Error | null;      // normalized; mutually exclusive with value
   readonly loading: boolean;         // state === 'pending' ONLY — "nothing to show yet" (rev 6)
 
@@ -292,9 +293,19 @@ interface AsyncState<T> {
 **`match` is sugar at runtime, load-bearing for types.** Plain `state` checks
 work (`if (x.loading) …`), but TypeScript cannot narrow `value: T | null`
 across reactive getter reads — `ready: (v: T) => R` is the only *type-safe*
-path to a non-null `T`. `match` also carries the error-bubbling guarantee
+path to the value. `match` also carries the error-bubbling guarantee
 (an omitted `error` arm is never silently swallowed). Both are contract, not
 convenience.
+
+**`value` is not a presence signal (rev 9).** For a nullable `T`, a fetch that
+legitimately resolves `null` — a "not found" read — is a VALUE, and
+`value !== null` cannot tell it from an unsettled cell. Presence is `state`
+(`'ready'`/`'refreshing'` ⇒ present) or, directly, **`hasValue`**. The engine
+itself used to get this wrong: it derived its state name from `data !== null`,
+so refreshing a ready null-valued cell went back to `'pending'` and flashed a
+skeleton over live content, breaking the rev-6 rule below. The `ready` arm
+therefore means "the value is present", not "the value is non-null" — a
+nullable `T` reaches it with `null`, which is correct and type-honest.
 
 **State → arm mapping** (`match` is exactly this table):
 
