@@ -12,6 +12,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   `useData` cell, the `@sigx/cache` cell, `all()` and the SSR-side state now
   expose `readonly hasValue: boolean`. Additive for readers.
 
+- **`@sigx/vite/assets` — `collectAssets` without the `node:` graph (#486).**
+  The manifest → `DocumentOptions.assets` resolver is a pure function, but it
+  shared a module with the dev request handler, whose top level imports
+  `node:fs/promises` and `node:path`. A workerd/edge entry that wanted
+  per-route asset resolution could not import it at all, and the only way to
+  ship was to hand-port the function into the app. The pure half now lives on
+  its own entry that imports nothing, and its one `process.env` read is
+  `typeof`-guarded (workerd has no `process`). `@sigx/vite/ssr` re-exports it,
+  so every existing import is unchanged. A test pins the entry's import list —
+  in the source *and* in the built dist — to empty.
+
+- **`@sigx/runtime-core` / `@sigx/server-renderer`**: a **function passed as children** is now invoked as a scoped slot — `<Comp>{(p) => <span>{p.greeting}</span>}</Comp>` calls the function with the slot's scoped props (Vue scoped-slots / Solid render-prop semantics), identical output to the `slots={{ default: (p) => … }}` prop form (#476). Previously a bare function child was dropped as an empty node; only functions provided via the `slots` prop received scoped props. Function items in the extracted default/named children arrays are invoked once per accessor call, so reactivity is preserved — the call happens inside the consumer's render — on both the client (`createSlots`) and SSR (`renderToString`), keeping hydration in agreement. A function returning `null`/`undefined` is dropped and an array is flattened one level, matching the `slots`-prop branch; named element-based slots (`slot="x"` children) are unaffected. Enables the `asChild` render-prop pattern without a userland workaround.
+
 ### Fixed
 
 - **A `useData` cell whose value is legitimately `null` no longer flashes a
@@ -38,8 +51,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   to rely on it: the `ready` arm was documented as "the only type-safe route to
   a **non-null** T", when what it actually guarantees — and now says — is that
   the value is **present**.
-
-### Fixed
 
 - **`@sigx/vite`: the dev `resolve.alias` map is real (#487).** It never ran.
   `resolvePackageSrc` looked packages up with
@@ -95,23 +106,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   `keyMatches` move to runtime-core and are re-exported from `@sigx/cache`
   unchanged; `@sigx/server`'s §6.3 copy stays (that package takes no
   runtime-core dependency by design) and the parity test still pins them.
-
-### Added
-
-- **`@sigx/vite/assets` — `collectAssets` without the `node:` graph (#486).**
-  The manifest → `DocumentOptions.assets` resolver is a pure function, but it
-  shared a module with the dev request handler, whose top level imports
-  `node:fs/promises` and `node:path`. A workerd/edge entry that wanted
-  per-route asset resolution could not import it at all, and the only way to
-  ship was to hand-port the function into the app. The pure half now lives on
-  its own entry that imports nothing, and its one `process.env` read is
-  `typeof`-guarded (workerd has no `process`). `@sigx/vite/ssr` re-exports it,
-  so every existing import is unchanged. A test pins the entry's import list —
-  in the source *and* in the built dist — to empty.
-
-- **`@sigx/runtime-core` / `@sigx/server-renderer`**: a **function passed as children** is now invoked as a scoped slot — `<Comp>{(p) => <span>{p.greeting}</span>}</Comp>` calls the function with the slot's scoped props (Vue scoped-slots / Solid render-prop semantics), identical output to the `slots={{ default: (p) => … }}` prop form (#476). Previously a bare function child was dropped as an empty node; only functions provided via the `slots` prop received scoped props. Function items in the extracted default/named children arrays are invoked once per accessor call, so reactivity is preserved — the call happens inside the consumer's render — on both the client (`createSlots`) and SSR (`renderToString`), keeping hydration in agreement. A function returning `null`/`undefined` is dropped and an array is flattened one level, matching the `slots`-prop branch; named element-based slots (`slot="x"` children) are unaffected. Enables the `asChild` render-prop pattern without a userland workaround.
-
-### Fixed
 
 - **`@sigx/server-renderer` / `@sigx/runtime-core`**: a streamed `$SIGX_REPLACE` region no longer hydrates without DOM references, so the next patch touching it stops crashing with `TypeError: Cannot read properties of null (reading 'parentNode')` (#478). Found building a real app: a `useData` cell that settles during streaming SSR makes the renderer emit a component-level replace; the region hydrated with no visible error, but the component vnode was left with no trailing anchor, and the next reactive patch — a client-side navigation, a cell state change — threw and wedged the app. Three causes, all fixed: the server closes the `data-async-placeholder` wrapper *before* emitting the component's `<!--$c:N-->` marker, so a component hydrating inside the wrapper can never claim it — hydration now **synthesizes a trailing anchor comment** at the end of the component's range instead of borrowing a sibling's node or leaving null, mirroring what mounting always does (nothing is synthesized when the marker is reachable, so ordinary pages are unchanged); the streamed-boundary entry point hydrated the wrapper's children with the wrapper as parent and no marker, and now passes the wrapper itself plus the real marker; and a placeholder the root walk skipped left the parent's vnode a permanent ghost, since an orphan copy was hydrated in its place — the walk now hands the **live vnode** over to the `sigx:async-ready` flow. `patch()`'s replace branch also no longer dereferences a null `dom` (it derives the range from the subtree's first host node, matching the recovery its Text and Element branches already had), so any remaining null-anchored vnode — a hydrated `Fragment` still has no anchor — degrades to a fresh mount instead of a hard crash. One behaviour change: a streamed boundary component's `ctx.el` is now the placeholder's parent rather than the placeholder, matching the non-streamed path.
 
