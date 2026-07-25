@@ -86,8 +86,13 @@ export interface SigxServerOptions {
     scan?: string[];
     /**
      * Dev guard: a Vite-root-relative module (e.g. '/src/fn-guard.ts') whose
-     * `guard` export runs before every dev invocation — keep dev and prod
-     * enforcing the same auth seam (rfc-server §5).
+     * `guard` export is forwarded to the dev endpoint, so dev and prod enforce
+     * the same WIRE-level backstop (rfc-server §5).
+     *
+     * Like its production twin it runs for endpoint requests only — an
+     * in-process (SSR-time) call never reaches the endpoint, in dev or in prod
+     * (rfc-server-v3 §4, #493). A chain that must run on every transport goes
+     * in the function's definition (`use:` / `serverFnPreset`).
      */
     guard?: string;
     /**
