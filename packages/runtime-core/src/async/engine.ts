@@ -28,6 +28,11 @@ import { createToken, setProvided } from '../di/token.js';
  * @internal — the §7 pack contract surface.
  */
 export interface AsyncReadHandle<T> {
+    /**
+     * The cell this engine hands to `useData`. Implementing `AsyncState`
+     * includes `hasValue` — the engine's own "is there a value" bit, which
+     * `value !== null` cannot stand in for once `T` is nullable (#485).
+     */
     state: AsyncState<T>;
     setKey(canon: string | null, raw: unknown): void;
     dispose(): void;

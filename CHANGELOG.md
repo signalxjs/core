@@ -8,10 +8,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
-- **`AsyncState.hasValue` — presence, separate from the value (#485).** Every
-  `useData` cell, the `@sigx/cache` cell, `all()` and the SSR-side state now
-  expose `readonly hasValue: boolean`. Additive for readers.
-
 - **`@sigx/vite/assets` — `collectAssets` without the `node:` graph (#486).**
   The manifest → `DocumentOptions.assets` resolver is a pure function, but it
   shared a module with the dev request handler, whose top level imports
@@ -24,6 +20,37 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   in the source *and* in the built dist — to empty.
 
 - **`@sigx/runtime-core` / `@sigx/server-renderer`**: a **function passed as children** is now invoked as a scoped slot — `<Comp>{(p) => <span>{p.greeting}</span>}</Comp>` calls the function with the slot's scoped props (Vue scoped-slots / Solid render-prop semantics), identical output to the `slots={{ default: (p) => … }}` prop form (#476). Previously a bare function child was dropped as an empty node; only functions provided via the `slots` prop received scoped props. Function items in the extracted default/named children arrays are invoked once per accessor call, so reactivity is preserved — the call happens inside the consumer's render — on both the client (`createSlots`) and SSR (`renderToString`), keeping hydration in agreement. A function returning `null`/`undefined` is dropped and an array is flattened one level, matching the `slots`-prop branch; named element-based slots (`slot="x"` children) are unaffected. Enables the `asChild` render-prop pattern without a userland workaround.
+
+### Changed
+
+- **Breaking — `AsyncState` gains a required `hasValue` member (#485, #510).**
+  Reading a cell is unaffected: `readonly hasValue: boolean` is purely
+  additive for anything that only *consumes* an `AsyncState`, and it is the
+  answer to "does this cell have a value" for a nullable `T`, where
+  `value !== null` cannot be (see the fix below).
+
+  **Implementors must add it.** `AsyncState<T>` is on the **§7 pack contract
+  surface** — `AsyncReadHandle.state: AsyncState<T>`
+  (`runtime-core/src/async/engine.ts`) is what an `AsyncEngine` returns, and
+  a third-party engine pack is meant to be a drop-in equal of `@sigx/cache`.
+  Every `AsyncState` implementation therefore needs one line:
+
+  ```ts
+  get hasValue() { return /* this engine's presence bit */; }
+  ```
+
+  Not optional-with-a-default on purpose: a `hasValue?: boolean` that packs
+  could omit would silently read as "no value" at every call site that trusts
+  it, which is the exact conflation this member exists to remove. All six
+  in-tree producers were updated (the `useData` cell, `INERT_IDLE_CELL`, the
+  `@sigx/cache` cell, `all()`, `serverUseAsync`, `INERT_PENDING_STATE`).
+
+  Two semantics worth stating rather than leaving to be inferred:
+  - **`all()`** reports `hasValue` only when **every** member has one —
+    matching how it combines everything else.
+  - **`keepPreviousData`** now tracks presence separately from the value, so a
+    previous key whose value was `null` shows as `'refreshing'` where it
+    previously fell through to `'pending'`.
 
 ### Fixed
 
