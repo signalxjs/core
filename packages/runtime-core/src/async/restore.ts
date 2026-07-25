@@ -90,6 +90,20 @@ export function peekRestored(key: string): { hit: boolean; value: unknown } {
     return MISS;
 }
 
+/**
+ * Every key currently in the page blob.
+ *
+ * For pattern-driven invalidation (#484): a matching key with nothing mounted
+ * on it must still be swept, or the next mount restores the stale value as
+ * `ready` and never fetches. Returns own keys only, on the same
+ * null-prototype blob `writeBack` maintains.
+ */
+export function restoredKeys(): string[] {
+    if (!isLiveClient()) return [];
+    const blob = (globalThis as AsyncBlobGlobal).__SIGX_ASYNC__;
+    return blob ? Object.keys(blob) : [];
+}
+
 /** Invalidate a restored entry — called before fetching fresh data. */
 export function invalidateRestored(key: string): void {
     if (!isLiveClient()) return;

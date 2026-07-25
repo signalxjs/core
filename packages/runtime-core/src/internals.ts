@@ -76,7 +76,12 @@ export { reportUnhandledAsyncError } from './app.js';
 // (docs/seams.md). Exported so `@sigx/cache` reads the blob through the same
 // functions instead of re-implementing them; a second copy meant a second
 // place to apply the codec, and the decode was already missed once.
-export { peekRestored, invalidateRestored, writeBack, reviveFromServer } from './async/restore.js';
+export { peekRestored, invalidateRestored, writeBack, reviveFromServer, restoredKeys } from './async/restore.js';
+// Key-addressable refresh of mounted useData cells (#484) — what an engine
+// pack's `invalidate(pattern)` delegates to, and the canonical meaning of an
+// `invalidates` declaration.
+export { invalidateKeys } from './async/cell.js';
+export { preparePattern, keyMatches, type PatternMatcher } from './async/key-match.js';
 // Live-client declaration (for non-web platform-identity modules — lynx/terminal;
 // NOT for @sigx/runtime-dom/platform, which SSR also evaluates)
 export { declareLiveClient, isLiveClient } from './async/environment.js';
