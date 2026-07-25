@@ -33,4 +33,27 @@ export interface ResumePluginOptions {
      * ```
      */
     manifest?: ResumeManifest;
+
+    /**
+     * Client-side hydration mode for the app this plugin is installed on.
+     *
+     * - **`'auto'` (default)** — `hydrate()` walks the root as usual and
+     *   intercepts resume boundaries on the way past, leaving them for the
+     *   loader to wake on interaction. Everything *around* them hydrates.
+     *   This is what an app-rooted `app.use(resumePlugin())` wants: an app
+     *   with a root has a root to hydrate.
+     * - **`'explicit'`** — no root walk at all; only table-listed boundaries
+     *   are scheduled. Correct for an app-less resumable page, whose whole
+     *   bootstrap is the generated loader entry — but note that such a page
+     *   never calls `app.use()` in the first place.
+     *
+     * Until #483 this was **unconditionally `'explicit'`**, which made the
+     * documented client recipe silently disable full-tree hydration: every
+     * resume record is `hydrate: 'never'`, and explicit mode schedules only
+     * table boundaries, so a coexisting app hydrated *nothing at all* and
+     * shipped a dead shell. Resume gets its boundary isolation from the
+     * server-set `hydrate: 'never'`, not from this default — unlike
+     * `islandsPlugin`, where explicit mode IS the pack's semantics.
+     */
+    boundaries?: 'auto' | 'explicit';
 }

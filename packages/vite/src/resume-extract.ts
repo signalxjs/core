@@ -759,6 +759,35 @@ const LANG_BY_EXT: Record<string, 'ts' | 'tsx' | 'js' | 'jsx'> = {
     '.mts': 'ts'
 };
 
+/**
+ * The `form: true` server functions a module imports (#488).
+ *
+ * Used by `sigxResume()` to explain a `<form>` it will never stamp, because
+ * the file is outside its `include`. Parses only the module's imports — the
+ * caller has already gated on the source containing a `<form>`, which is rare
+ * enough that a parse is affordable and a regex is not worth the false
+ * positives.
+ */
+export function formMarkedImportsOf(
+    code: string,
+    id: string,
+    resolveServerFn: (specifier: string, exportName: string) => { form: boolean } | null
+): string[] {
+    const clean = id.split('?')[0];
+    const ext = clean.slice(clean.lastIndexOf('.'));
+    const program = parseAst(code, { lang: LANG_BY_EXT[ext] ?? 'tsx' }, clean) as unknown as Node;
+    const scan = scanModule(program);
+
+    const found: string[] = [];
+    for (const imp of scan.imports.values()) {
+        // Same exclusions as the stamping path: a namespace or default import
+        // is never a stamp target, so warning about one would be noise.
+        if (imp.typeOnly || imp.kind === 'namespace' || imp.kind === 'default') continue;
+        if (resolveServerFn(imp.source, imp.imported ?? imp.local)?.form) found.push(imp.local);
+    }
+    return found;
+}
+
 export function extractResumeHandlers(
     code: string,
     id: string,
@@ -815,14 +844,16 @@ export function extractResumeHandlers(
      * (RPC and native POST). Ambiguity and author-provided action/method
      * warn and skip — zero form-marked captures is silently today's page.
      */
-    const formActionFor = (
-        component: string,
-        site: HandlerSite,
-        imports: ImportedBinding[]
-    ): string | null => {
-        if (!opts.resolveServerFn || site.event !== 'submit') return null;
-        if (tagNameOf(site.element) !== 'form') return null;
+    /**
+     * The form-marked server functions a `<form>`'s submit handler captures.
+     * Empty when this site is not a stampable form at all — which is the
+     * silent case, and is why this is separate from the stamping below: the
+     * hydrate branch needs the same answer to explain what it is dropping.
+     */
+    const formTargetsFor = (site: HandlerSite, imports: ImportedBinding[]): Set<string> => {
         const seen = new Set<string>();
+        if (!opts.resolveServerFn || site.event !== 'submit') return seen;
+        if (tagNameOf(site.element) !== 'form') return seen;
         for (const imp of imports) {
             // Namespace imports are opaque here, and default-exported
             // serverFns are never extracted (the server transform warns
@@ -831,6 +862,15 @@ export function extractResumeHandlers(
             const hit = opts.resolveServerFn(imp.source, imp.imported ?? imp.local);
             if (hit?.form) seen.add(hit.stableSymbol);
         }
+        return seen;
+    };
+
+    const formActionFor = (
+        component: string,
+        site: HandlerSite,
+        imports: ImportedBinding[]
+    ): string | null => {
+        const seen = formTargetsFor(site, imports);
         if (seen.size === 0) return null;
         if (seen.size > 1) {
             warnings.push(
@@ -1060,7 +1100,28 @@ export function extractResumeHandlers(
             // pack's delegation can fully hydrate the boundary on first
             // interaction (no core scheduling — resumable pages ship no
             // upfront runtime to install interaction listeners with).
+            let warnedForm = false;
             for (const { site, preventDefault } of allSites) {
+                // §6.4: only resume-mode components stamp a native action, so
+                // ONE unextractable capture silently costs this form its no-JS
+                // fallback. The generic "not resumable" warning above doesn't
+                // mention the form, which is what made this invisible (#488).
+                //
+                // The per-handler capture list is only computed for extracted
+                // handlers, which by definition this component has none of —
+                // so ask against the MODULE's imports. That is a superset, but
+                // the narrowing that matters is already applied: the site has
+                // to be a `<form>`'s own submit handler.
+                if (!warnedForm && formTargetsFor(site, [...moduleScan.imports.values()]).size > 0) {
+                    warnedForm = true; // once per component, not once per form site
+                    warnings.push(
+                        `${comp.exported} fell back to HYDRATE mode and renders a <form> while the ` +
+                        `module imports a \`form: true\` server function. If that form's submit ` +
+                        `handler calls it, no native action is stamped (only resume-mode components ` +
+                        `stamp one), so the form does not work without JS. Make the component's ` +
+                        `handlers fully extractable to keep the no-JS fallback (rfc-server §6.4).`
+                    );
+                }
                 events.add(site.event);
                 let attrs = ` data-sigx-wake:${site.event}=""`;
                 if (preventDefault) attrs += ` data-sigx-pd:${site.event}=""`;

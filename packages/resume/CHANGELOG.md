@@ -2,6 +2,24 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **The client install no longer disables full-tree hydration (#483).**
+  `install(app)` declared `boundaries: 'explicit'` unconditionally, which
+  switches `hydrate()` to the no-root-walk path: it schedules the boundary
+  table and returns. Every resume record is `hydrate: 'never'`, which that
+  scheduler skips, so an app calling `app.use(resumePlugin())` on the client
+  hydrated **nothing** — a dead shell, no error, no warning. The mode is now
+  opt-in via `resumePlugin({ boundaries: 'explicit' })`; the default leaves
+  core's `'auto'` walk alone, which is what an app-rooted install wants.
+  Resume's boundary isolation comes from the server-set `hydrate: 'never'`,
+  not from a client hydration default.
+
+  **Behaviour-breaking** if you relied on the implicit mode: pass the option.
+  The README gains the Client section it never had — the coexist recipe
+  existed only in the `plugin.ts` docstring, and described the app-less
+  posture rather than coexistence.
+
 ### Changed
 
 - **BREAKING (pre-release) — boundary refresh is data-keyed (#452).**

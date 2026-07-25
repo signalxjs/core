@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { extractResumeHandlers, offsetToLoc } from '../src/resume-extract';
+import { extractResumeHandlers, formMarkedImportsOf, offsetToLoc } from '../src/resume-extract';
 
 const COUNTER = `
 import { component } from 'sigx';
@@ -647,6 +647,73 @@ export const Feedback = component((ctx) => {
         expect(result.code).toContain(` action="/_sigx/fn/${ENCODED}" method="post"`);
         const pd = result.code.match(/data-sigx-pd:submit=""/g);
         expect(pd).toHaveLength(1);
+    });
+
+    /**
+     * §6.4 stamps only in resume mode, so ONE unextractable capture demotes
+     * the component to hydrate mode and the native action silently vanishes —
+     * the generic "not resumable" warning says nothing about the form (#488).
+     */
+    it('warns when a hydrate-mode component drops its form action', () => {
+        const result = extractResumeHandlers(`
+import { component } from 'sigx';
+import { submitFeedback } from './api.server';
+const helper = () => 1;                    // module-local ⇒ ineligible capture
+export const Feedback = component((ctx) => {
+    return () => (
+        <form onSubmit={async (e) => { e.preventDefault(); helper(); await submitFeedback({}); }}>
+            <input name="message" />
+        </form>
+    );
+});
+`, '/src/Feedback.tsx', { resolveServerFn });
+
+        expect(result.components[0].mode).toBe('hydrate');
+        expect(result.code).not.toContain('action="/_sigx/fn/');
+        expect(result.warnings.join("\n")).toMatch(/HYDRATE mode/);
+        expect(result.warnings.join('\n')).toMatch(/without JS/);
+    });
+
+    it('stays quiet for a hydrate-mode component whose form targets nothing form-marked', () => {
+        const result = extractResumeHandlers(`
+import { component } from 'sigx';
+const helper = () => 1;
+export const Plain = component(() => {
+    return () => (
+        <form onSubmit={(e) => { e.preventDefault(); helper(); }}>
+            <input name="q" />
+        </form>
+    );
+});
+`, '/src/Plain.tsx', { resolveServerFn });
+
+        expect(result.components[0].mode).toBe('hydrate');
+        expect(result.warnings.join('\n')).not.toMatch(/HYDRATE mode/);
+    });
+
+    describe('formMarkedImportsOf — the out-of-include gate (#488)', () => {
+        it('reports form-marked named imports', () => {
+            expect(
+                formMarkedImportsOf(FEEDBACK('() => submitFeedback({})'), '/src/Feedback.tsx', resolveServerFn)
+            ).toEqual(['submitFeedback']);
+        });
+
+        it('reports nothing when the import is not form-marked', () => {
+            expect(
+                formMarkedImportsOf(FEEDBACK('() => submitFeedback({})'), '/src/Feedback.tsx',
+                    () => ({ stableSymbol: 'x', form: false }))
+            ).toEqual([]);
+        });
+
+        it('ignores namespace, default and type-only imports — none can be a stamp target', () => {
+            const code = `
+import type { A } from './api.server';
+import * as api from './api.server';
+import def from './api.server';
+export const X = () => null;
+`;
+            expect(formMarkedImportsOf(code, '/src/X.tsx', () => ({ stableSymbol: 'x', form: true }))).toEqual([]);
+        });
     });
 
     it('honors a custom endpoint', () => {

@@ -27,6 +27,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- **`@sigx/resume`: `app.use(resumePlugin())` on the CLIENT no longer disables
+  full-tree hydration (#483).** Its install declared
+  `boundaries: 'explicit'` unconditionally, which takes `hydrate()` down the
+  no-root-walk path — it schedules the boundary table and returns before the
+  walk runs. Every resume record is `hydrate: 'never'`, which that scheduler
+  skips outright, so an app installing the plugin the way the docstring showed
+  hydrated **nothing at all**: a dead shell, no error, no warning. The working
+  coexist recipe had to be reverse-engineered by the first app to try it.
+  The mode is now opt-in — `resumePlugin({ boundaries: 'explicit' })` — and
+  the default leaves core's `'auto'` walk in place, which is what an
+  app-rooted install wants. Resume's isolation comes from the server-set
+  `hydrate: 'never'`, not from a client hydration default (unlike islands,
+  where explicit mode IS the pack's semantics). Behaviour-breaking for anyone
+  who relied on the implicit mode; pass the option to restore it. The
+  `@sigx/resume` README gains the Client section it never had.
+
+- **`@sigx/vite`: a `form: true` `<form>` that will never be stamped now says
+  so (#488).** Two silences, both costing a form its no-JS fallback with no
+  diagnostic. A `<form>` in a file outside `sigxResume()`'s `include` was
+  never analysed at all — the plugin now warns before the filter bail (gated
+  on a cheap `<form` regex, then an import scan). And inside a `*.resume.tsx`,
+  a component demoted to hydrate mode by one unextractable capture drops its
+  action silently — the generic "not resumable" warning never mentioned the
+  form. `serverFn`'s `form` JSDoc now states the resume-component requirement
+  up front. §6.4's deferral of hydrate-mode stamping is unchanged; this closes
+  the discoverability gap, not the feature gap.
+
 - **A `useData` cell whose value is legitimately `null` no longer flashes a
   skeleton over live content (#485).** The cell derived its state name from
   `data !== null`, so a ready cell holding `null` — a "not found" read — went

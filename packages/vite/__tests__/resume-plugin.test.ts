@@ -327,6 +327,61 @@ export const Feedback = component((ctx) => {
         expect(result.code).toContain('data-sigx-pd:submit=""');
     });
 
+    /**
+     * A `<form>` in a file OUTSIDE `include` is never analysed — `transform()`
+     * bails on the filter before the extractor runs — so nothing was stamped
+     * and nothing said so (#488). The warning is deliberately hedged: this
+     * file is never parsed for handler sites, so the plugin cannot know
+     * whether the form's submit handler actually calls the imported fn.
+     */
+    it('warns about a form:true import in a file outside include', () => {
+        const { resume, root } = makeWiredProject();
+        const warnings: string[] = [];
+        const file = join(root, 'src/Feedback.tsx');   // NOT *.resume.tsx
+        const result = resume.transform.call(
+            { environment: { name: 'ssr' }, warn: (m: string) => warnings.push(m) },
+            FEEDBACK,
+            file
+        );
+        expect(result).toBeNull();                     // filtered out, as before
+        expect(warnings).toHaveLength(1);
+        expect(warnings[0]).toContain('[sigx:resume]');
+        expect(warnings[0]).toContain('submitFeedback');
+        expect(warnings[0]).toContain('without JS');
+
+        // Once per file — dev re-transforms the same module constantly.
+        resume.transform.call(
+            { environment: { name: 'ssr' }, warn: (m: string) => warnings.push(m) },
+            FEEDBACK,
+            file
+        );
+        expect(warnings).toHaveLength(1);
+    });
+
+    it('stays quiet for an out-of-include file with no <form>', () => {
+        const { resume, root } = makeWiredProject();
+        const warnings: string[] = [];
+        const result = resume.transform.call(
+            { environment: { name: 'ssr' }, warn: (m: string) => warnings.push(m) },
+            "import { submitFeedback } from './api.server';\nexport const x = () => submitFeedback({});\n",
+            join(root, 'src/plain.tsx')
+        );
+        expect(result).toBeNull();
+        expect(warnings).toHaveLength(0);
+    });
+
+    it('stays quiet for an out-of-include <form> importing nothing form-marked', () => {
+        const { resume, root } = makeWiredProject();
+        const warnings: string[] = [];
+        const result = resume.transform.call(
+            { environment: { name: 'ssr' }, warn: (m: string) => warnings.push(m) },
+            "import { component } from 'sigx';\nexport const F = component(() => () => <form><input /></form>);\n",
+            join(root, 'src/NoTarget.tsx')
+        );
+        expect(result).toBeNull();
+        expect(warnings).toHaveLength(0);
+    });
+
     it("role: 'client' builds never stamp", () => {
         const { resume, root } = makeWiredProject({ role: 'client' });
         const file = join(root, 'src/Feedback.resume.tsx');

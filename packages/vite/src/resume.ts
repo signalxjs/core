@@ -38,7 +38,7 @@ import type { Plugin } from 'vite';
 import { createFilter, normalizePath, transformWithOxc } from 'vite';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { extractResumeHandlers, offsetToLoc, type ResumeExtraction } from './resume-extract.js';
+import { extractResumeHandlers, formMarkedImportsOf, offsetToLoc, type ResumeExtraction } from './resume-extract.js';
 import { injectSignalNames, walkFiles } from './islands.js';
 
 export interface SigxResumeOptions {
@@ -83,6 +83,9 @@ export function sigxResume(options: SigxResumeOptions = {}): Plugin {
      * <form> elements that capture a form-marked serverFn get real
      * action/method attributes stamped.
      */
+    /** Files already warned about an unstampable form — dev re-transforms. */
+    const warnedForms = new Set<string>();
+
     let serverApi: {
         role?: string;
         endpoint?: string;
@@ -97,6 +100,52 @@ export function sigxResume(options: SigxResumeOptions = {}): Plugin {
     const handlersIdFor = (file: string): string => HANDLERS_PREFIX + relPath(file) + HANDLERS_SUFFIX;
     const fileOfHandlersId = (resolved: string): string =>
         normalizePath(path.resolve(root, resolved.slice(RESOLVED_HANDLERS_PREFIX.length, -HANDLERS_SUFFIX.length)));
+
+    /**
+     * A `<form>` that targets a `form: true` server function, in a file the
+     * resume transform never looks at (#488).
+     *
+     * `form: true` stamps a native `action`/`method` so the form works with no
+     * JS — but stamping lives in the resume extractor, and the extractor only
+     * runs on files matching this plugin's `include` (`*.resume.tsx` and
+     * `resume/**` by default). Everywhere else the form is never analysed at
+     * all, so nothing was stamped and nothing said so: the author gets a form
+     * that silently only works once JS has loaded.
+     *
+     * Cheap regex gate first — this runs on EVERY module the dev server
+     * transforms, and parsing imports for the ~99% of files with no `<form>`
+     * would be pure cost.
+     */
+    function warnUnstampableForm(this: { warn(msg: string): void }, code: string, file: string): void {
+        const resolve = serverApi?.resolveServerFn;
+        if (!resolve || !/<form[\s>]/.test(code)) return;
+        if (warnedForms.has(file)) return;
+
+        let targets: string[];
+        try {
+            targets = formMarkedImportsOf(code, file, (specifier, exportName) =>
+                resolve(normalizePath(file), specifier, exportName));
+        } catch {
+            return; // Unparsable mid-edit — the real transform reports it.
+        }
+        if (targets.length === 0) return;
+
+        warnedForms.add(file);
+        // Deliberately hedged: this file is outside `include`, so it is never
+        // parsed for handler sites and we cannot know whether the <form>'s
+        // submit handler actually calls one of these. Naming the condition is
+        // what keeps it from reading as a false assertion.
+        this.warn(
+            `[sigx:resume] ${relPath(file)} renders a <form> and imports ` +
+            `${targets.map(t => `\`${t}\``).join(', ')}, declared \`form: true\`. ` +
+            `If that form's submit handler calls one of them, it gets NO native ` +
+            `action/method: stamping only runs on files matching sigxResume()'s ` +
+            `\`include\`, and this file does not match — so the form would not work ` +
+            `without JS. Move the component into a \`*.resume.tsx\` file (or widen ` +
+            `\`include\`) to get the no-JS fallback, or drop \`form: true\` if RPC-only ` +
+            `is what you want (rfc-server §6.4).`
+        );
+    }
 
     function extractInto(file: string, code: string): ResumeExtraction | null {
         // Map keys must use ONE separator: discovery walks the fs (native
@@ -253,7 +302,10 @@ export function sigxResume(options: SigxResumeOptions = {}): Plugin {
 
         transform(code, id) {
             const clean = id.split('?')[0];
-            if (!filter(clean)) return null;
+            if (!filter(clean)) {
+                warnUnstampableForm.call(this, code, clean);
+                return null;
+            }
             // The incoming code is authoritative (dev edits arrive here before
             // any fs watcher) — re-extract and refresh the registry cache.
             const extraction = extractInto(clean, code);
