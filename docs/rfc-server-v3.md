@@ -515,6 +515,16 @@ else will ever read; afterwards its siblings in the same render see it. That is
 the point, it matches what the wire path already does, and it is pre-1.0 —
 recorded here rather than hedged around.
 
+One interaction to state: §5.2a requires a `public: true` cached read's output
+to depend only on its arguments, naming "auth-derived `rq.locals`" among the
+things it must not consult. Sharing widens what a public read *could* reach
+during a render — the dev heuristic `warnPublicRequestTouch`
+(`server/index.ts:807-828`) trips on `rq.request`, not on `locals`. It stays a
+wire-response concern (an in-process read emits no `Cache-Control`, so nothing
+shared is ever cached from a render), but the §5.2a rule should say `locals` is
+now a per-request store rather than a per-call scratchpad, and the heuristic is
+a candidate to extend when the store lands.
+
 ---
 
 ## §3 What this revision does not do
