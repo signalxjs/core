@@ -8,7 +8,7 @@
  * worked, because the spread's per-key `get` had created that dep.
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { render } from '@sigx/runtime-dom';
 import { component, jsx } from '@sigx/runtime-core';
 import { signal } from '@sigx/reactivity';
@@ -19,6 +19,10 @@ describe('spread forwarding sees a newly-added prop key', () => {
     beforeEach(() => {
         container = document.createElement('div');
         document.body.appendChild(container);
+    });
+
+    afterEach(() => {
+        container.remove();
     });
 
     const keysOf = (props: Record<string, any>) =>

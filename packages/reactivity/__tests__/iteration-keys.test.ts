@@ -194,6 +194,43 @@ describe('key-set reactivity', () => {
             list[0] = 9;
             expect(spy).toHaveBeenCalledTimes(1);
         });
+
+        // `delete list[0]` leaves a hole: Object.keys loses '0' while length
+        // stays 2, so routing the array key set to `length` has to fire on
+        // delete even though length did not move.
+        it('re-runs an enumerating reader when an index is deleted', () => {
+            const list = signal<number[]>([1, 2]);
+            const seen: string[][] = [];
+            effect(() => { seen.push(Object.keys(list)); });
+
+            delete list[0];
+            expect(seen).toEqual([['0', '1'], ['1']]);
+            expect(list.length).toBe(2);
+        });
+
+        it('re-runs a spread when an index is deleted', () => {
+            const list = signal<(number | undefined)[]>([1, 2]);
+            const seen: (number | undefined)[][] = [];
+            effect(() => { seen.push([...list]); });
+
+            delete list[0];
+            expect(seen[seen.length - 1]).toEqual([undefined, 2]);
+        });
+
+        // The mirror case: filling the hole grows the key set back without
+        // moving length.
+        it('re-runs an enumerating reader when a hole is filled', () => {
+            const list = signal<number[]>([1, 2]);
+            delete list[0];
+
+            const seen: string[][] = [];
+            effect(() => { seen.push(Object.keys(list)); });
+            expect(seen).toEqual([['1']]);
+
+            list[0] = 7;
+            expect(seen).toEqual([['1'], ['0', '1']]);
+            expect(list.length).toBe(2);
+        });
     });
 
     describe('collections keep their own iteration tracking', () => {

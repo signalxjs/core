@@ -347,11 +347,14 @@ export function signal<T>(target: T): PrimitiveSignal<T> | Signal<T & object> {
             // value, so it gets its own dep. Adding or deleting a key
             // triggers it; changing a value does not.
             //
-            // Arrays key on `length` instead: an index write already
-            // triggers `length` (see the `set` trap below), so there is no
-            // second dep to keep in sync. Collections track iteration
-            // themselves in `collections.ts` — `ownKeys` on a Map returns
-            // its internal slots, not its entries.
+            // Arrays key on `length` instead of carrying a second dep, since
+            // an index write already triggers it. The `set` and
+            // `deleteProperty` traps below therefore route an array's
+            // key-set changes to `length` too — including the two cases
+            // where the key set moves but the length does not (`delete
+            // list[i]`, and filling the hole it leaves). Collections track
+            // iteration themselves in `collections.ts` — `ownKeys` on a Map
+            // returns its internal slots, not its entries.
             //
             // Note this trap is never invoked by `obj.foo`, so plain
             // property access pays nothing for it.
@@ -372,13 +375,13 @@ export function signal<T>(target: T): PrimitiveSignal<T> | Signal<T & object> {
             // value is `undefined` — the `Object.is` guard below would
             // swallow exactly that case.
             //
-            // Three guards keep this off the common path, in ascending cost:
-            // a defined `oldValue` means the key is already readable, so the
+            // Two guards keep this off the common path, in ascending cost: a
+            // defined `oldValue` means the key is already readable, so the
             // overwhelmingly common write (existing key, defined value) stops
-            // at one `=== undefined`; nothing can be listening when `depsMap`
-            // is null; and arrays are covered by `length`. Only then do we pay
-            // the `hasOwnProperty` probe. Measured, the probe was ~3% of a
-            // tracked write before the `oldValue` guard was added.
+            // at one `=== undefined`; and nothing can be listening when
+            // `depsMap` is null. Only then do we pay the `hasOwnProperty`
+            // probe. Measured, that probe was ~3% of a tracked write before
+            // the `oldValue` guard was added.
             //
             // Known gap, deliberate: assigning over an INHERITED defined
             // property does create an own key and so does change
@@ -387,28 +390,34 @@ export function signal<T>(target: T): PrimitiveSignal<T> | Signal<T & object> {
             // target whose prototype carries data properties — `signal()` is
             // called on plain objects and arrays in practice — and the price
             // of closing it is the probe on every write.
-            const isNewKey = oldValue === undefined && !isArray && depsMap !== null &&
+            const isNewKey = oldValue === undefined && depsMap !== null &&
                 !Object.prototype.hasOwnProperty.call(obj, prop);
 
             const result = Reflect.set(obj, prop, newValue);
 
             if (isNewKey) {
                 const dep = depsMap!.get(prop);
-                const iterDep = depsMap!.get(ITERATION_KEY);
-                if (dep && iterDep) {
+                // Arrays carry their enumeration dep on `length` (see the
+                // `ownKeys` trap), so a new index routes there. That covers
+                // filling a hole left by `delete list[i]`, where the key set
+                // grows but `length` does not move; a plain append lands here
+                // too and triggers the same pair the length-change branch
+                // below would have.
+                const keysDep = depsMap!.get(isArray ? 'length' : ITERATION_KEY);
+                if (dep && keysDep) {
                     // Two deps for one write — batch so a subscriber of
                     // both runs once.
                     startBatch();
                     try {
                         trigger(dep);
-                        trigger(iterDep);
+                        trigger(keysDep);
                     } finally {
                         endBatch();
                     }
                 } else if (dep) {
                     trigger(dep);
-                } else if (iterDep) {
-                    trigger(iterDep);
+                } else if (keysDep) {
+                    trigger(keysDep);
                 }
                 notifySignalUpdated(signalId, prop);
                 return result;
@@ -473,22 +482,26 @@ export function signal<T>(target: T): PrimitiveSignal<T> | Signal<T & object> {
             if (result && hasKey) {
                 if (depsMap) {
                     const dep = depsMap.get(prop);
-                    // The key set shrank — see the `ownKeys` trap. Arrays
-                    // never key on ITERATION_KEY, so this is a plain miss
-                    // for them.
-                    const iterDep = depsMap.get(ITERATION_KEY);
-                    if (dep && iterDep) {
+                    // The key set shrank — see the `ownKeys` trap for which
+                    // dep carries it. Arrays route to `length` even though
+                    // `length` itself does not change: `delete list[0]`
+                    // leaves a hole, so `Object.keys(list)` loses a key while
+                    // the length stays put. Over-notifying a `length`
+                    // subscriber is the right trade — under-notifying an
+                    // enumerating one is a stale read.
+                    const keysDep = depsMap.get(Array.isArray(obj) ? 'length' : ITERATION_KEY);
+                    if (dep && keysDep) {
                         startBatch();
                         try {
                             trigger(dep);
-                            trigger(iterDep);
+                            trigger(keysDep);
                         } finally {
                             endBatch();
                         }
                     } else if (dep) {
                         trigger(dep);
-                    } else if (iterDep) {
-                        trigger(iterDep);
+                    } else if (keysDep) {
+                        trigger(keysDep);
                     }
                 }
                 // Devtools: a delete is also a state change — `$set()`
