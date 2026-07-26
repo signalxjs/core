@@ -21,6 +21,7 @@ import type {
 // so existing imports from './component.js' continue to work
 export type {
     ComponentAttributeExtensions,
+    ComponentAttributes,
     Define,
     ModelBinding,
     EventDefinition,

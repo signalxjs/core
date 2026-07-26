@@ -34,6 +34,9 @@ export { createPropsAccessor } from './utils/props-accessor.js';
 export { createSlots, invokeFunctionChildren } from './utils/slots.js';
 export type { InternalSlotsObject } from './utils/slots.js';
 export { normalizeSubTree } from './utils/normalize.js';
+// Style-string parsing, shared with the SSR serializer so the two cannot
+// drift on the parens/comment edge cases.
+export { parseStringStyle } from './utils/style.js';
 
 // Platform bridge
 export { setPlatformModelProcessor, getPlatformModelProcessor, registerModelProcessor, getModelProcessors } from './platform.js';

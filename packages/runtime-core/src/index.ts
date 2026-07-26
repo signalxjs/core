@@ -50,6 +50,10 @@ export {
 } from './component.js';
 export type {
     ComponentAttributeExtensions,
+    // Must stay exported from the package entry: `declare module
+    // '@sigx/runtime-core'` can only merge into declarations this module
+    // exports, and runtime-dom fills this one by augmentation.
+    ComponentAttributes,
     Define,
     ModelBinding,
     EventDefinition,
@@ -94,7 +98,15 @@ export { useStream } from './use-stream.js';
 
 // Model (two-way binding)
 export { createModel, createModelFromBinding, isModel } from './model.js';
+
 export type { Model, ModelBindingTuple } from './model.js';
+
+// Rest props / attribute forwarding. Forwarding leftover props onto an
+// element is plain JS (`const { own, ...rest } = ctx.props`); this is the one
+// piece JS cannot do, because a JSX spread is flattened by the compiler and
+// later keys clobber earlier ones.
+export { mergeProps } from './props.js';
+export type { MergeSource } from './props.js';
 
 // Error handling
 export { errorScope } from './error-scope.js';
