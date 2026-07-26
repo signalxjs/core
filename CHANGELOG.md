@@ -106,6 +106,38 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- **Framework-internal keys no longer reach the DOM when props are forwarded
+  by spread (#523).** Forwarding a component's leftover props onto its root
+  element — `const { own, ...rest } = ctx.props;` then `<button {...rest} />` —
+  used to carry framework keys with it.
+
+  `key` and `ref` are now peeled before setup runs, alongside `children` /
+  `slots` / `$models`, so `ctx.props` never contains them. Both are vnode-level
+  concerns the renderer reads off the vnode directly, and leaving them visible
+  was a live hazard: a spread onto the root element bound the consumer's `ref` a
+  **second** time — with the element, after the renderer had already called it
+  with the `expose()` value — and a spread onto a child put a key on it that
+  the author never wrote. `lazy` re-forwards `ref` explicitly, so
+  `<LazyThing ref={r} />` is unchanged.
+
+  At the element, `patchProp` now also skips `client:*` (a hydration-strategy
+  directive is meaningless as a DOM attribute, and SSR already skipped it — so
+  a spread rendered `client:load=""` on the client and nothing on the server)
+  and any `Model`-valued prop, which would otherwise stringify to
+  `[object Object]`. `serializeOpenTagProps` gained the matching skips for
+  `modelModifiers` and `Model` values, closing a server/client divergence that
+  predates rest props.
+
+  **Behaviour change:** `ctx.props.key` and `ctx.props.ref` are now
+  `undefined`. Neither was meaningful to read.
+
+- **`@sigx/runtime-dom` (dev): two spellings of one event on the same element
+  now warn (#523).** `onClick` and `onclick` both resolve to a `'click'`
+  listener and share one invoker slot, so whichever is patched last silently
+  wins and the other never runs — easy to hit once a component sets its own
+  handler and a consumer's arrives via a props spread. The collision itself is
+  unchanged; it is just no longer silent. `__DEV__` only, once per element and
+  event.
 - **`{...ctx.props}` forwarding now sees a prop the parent had never passed
   before (#521).** A wrapper that forwards its props by spread —
   `component(ctx => () => <Child {...ctx.props} />)` — did not re-render when

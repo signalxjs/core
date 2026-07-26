@@ -12,13 +12,33 @@ import { isModel } from '../model.js';
  * `children` and the `slots` prop are separated out to feed slot
  * creation, and `$models` entries that pass `isModel` are merged into
  * the remaining data props for unified access (`props.model.value`).
+ *
+ * `key` and `ref` are peeled off too, and deliberately do NOT reach
+ * `ctx.props`. The renderer takes both off the vnode directly — `key` at
+ * `jsx()` time, `ref` to deliver the `expose()` value — so a component has
+ * no reason to read them, and leaving them visible is a live hazard once
+ * props are forwarded by spread: `<button {...rest} />` would bind the
+ * consumer's `ref` a second time (now to the element, after the renderer
+ * already called it with the exposed value), and `<Child {...rest} />` would
+ * put a key on a child the author never keyed — `jsx()` reads `props.key` as
+ * the vnode key, and that decides sibling identity. `ref` comes back as
+ * `forwardedRef` for the
+ * one caller that must re-forward it deliberately — see `lazy`.
  */
 export function splitComponentProps(initialProps: Record<string, any>): {
     children: any;
     slotsFromProps: Record<string, any> | undefined;
     propsWithModels: Record<string, any>;
+    forwardedRef: any;
 } {
-    const { children, slots: slotsFromProps, $models: modelsData, ...propsData } = initialProps;
+    const {
+        children,
+        slots: slotsFromProps,
+        $models: modelsData,
+        key: _key,
+        ref: forwardedRef,
+        ...propsData
+    } = initialProps;
 
     const propsWithModels: Record<string, any> = { ...propsData };
     if (modelsData) {
@@ -33,7 +53,7 @@ export function splitComponentProps(initialProps: Record<string, any>): {
         }
     }
 
-    return { children, slotsFromProps, propsWithModels };
+    return { children, slotsFromProps, propsWithModels, forwardedRef };
 }
 
 /**

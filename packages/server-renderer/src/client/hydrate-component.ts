@@ -86,7 +86,7 @@ export function hydrateComponent(
     const initialProps = vnode.props || {};
     // Strategy packs (e.g. islands) strip their own marker props before
     // delegating here — core has no knowledge of any directive prefix.
-    const { children, slotsFromProps, propsWithModels } = splitComponentProps(initialProps);
+    const { children, slotsFromProps, propsWithModels, forwardedRef } = splitComponentProps(initialProps);
 
     // Create reactive props
     const reactiveProps = signal(propsWithModels);
@@ -124,7 +124,10 @@ export function hydrateComponent(
         expose: () => { },
         renderFn: null,
         update: () => { },
-        ssr: ssrHelper
+        ssr: ssrHelper,
+        // Mirrors the client mount path — peeled out of props so a spread
+        // cannot re-bind it; only `lazy` reads it.
+        __forwardedRef: forwardedRef
     };
 
     // Let plugins transform the context before setup runs (mirror of the

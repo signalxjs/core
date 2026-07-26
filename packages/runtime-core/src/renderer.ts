@@ -985,7 +985,7 @@ export function createRenderer<HostNode = any, HostElement = any>(
         let exposeCalled = false;
 
         const initialProps = vnode.props || {};
-        const { children, slotsFromProps, propsWithModels } = splitComponentProps(initialProps);
+        const { children, slotsFromProps, propsWithModels, forwardedRef } = splitComponentProps(initialProps);
         
         // Wrap renderer-internal reactives so the devtools owner
         // attribution isn't polluted by the parent's render effect.
@@ -1039,7 +1039,10 @@ export function createRenderer<HostNode = any, HostElement = any>(
                 exposeCalled = true;
             },
             renderFn: null, // Will be set after setup returns
-            update: () => { } // Placeholder, will be set after effect is created
+            update: () => { }, // Placeholder, will be set after effect is created
+            // Peeled out of props so a spread cannot re-bind it; see
+            // splitComponentProps. Only `lazy` reads it.
+            __forwardedRef: forwardedRef
         } as unknown as ComponentSetupContext;
 
         // Apply context extensions from plugins (e.g., SSR helper)
