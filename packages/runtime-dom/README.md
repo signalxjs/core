@@ -91,6 +91,34 @@ package's published types) can declare it, and every JSX file gets the
 typed attribute. Unregistered names still work untyped via the
 `use:${string}` catch-all.
 
+## Host attributes on components (`Define.Attrs`)
+
+This package owns what `Define.Attrs` means on the web, by augmenting
+`ComponentAttributes` from `@sigx/runtime-core`. A component that forwards its
+leftover props to an element declares the opt-in and gets the set:
+
+```tsx
+type ButtonProps = Define.Prop<'variant', 'primary' | 'ghost'> & Define.Attrs;
+```
+
+The set is **universal attributes only** — the global HTML attributes (`id`,
+`class`, `style`, `title`, `role`, `tabIndex`, `hidden`, `dir`, `lang`, …), the
+`data-*` and `aria-*` patterns, and DOM event handlers. Per-tag attributes are
+deliberately excluded: `size`, `type`, `value`, `disabled`, `name`,
+`placeholder` and friends are exactly the names real components declare as
+domain props, so they belong to each component's own contract rather than to a
+passthrough.
+
+Handlers are advertised in **camelCase only** (`onClick`, not `onclick`), even
+though both work at runtime. Two spellings of one event resolve to the same DOM
+listener slot, so only one of them ever runs — sigx warns about that in dev,
+and `mergeProps` merges them into a single entry. Advertising one spelling is
+the type-level half of the same fix.
+
+There is no `[key: string]` index signature and no `on${string}` catch-all:
+either would disable excess-property checking on every opted-in component, and
+typo safety is the reason the opt-in exists at all.
+
 ## Model directive modifiers
 
 `model={...}` accepts a `modelModifiers` prop. The built-ins are:

@@ -31,6 +31,69 @@ const Timer = component(() => {
 });
 ```
 
+### Rest props — forwarding what you didn't consume
+
+Forwarding a component's leftover props onto its root element is plain JS.
+Destructure what the component consumes; the rest is what the consumer passed:
+
+```tsx
+const Button = component<ButtonProps>(ctx => () => {
+  const { variant, ...rest } = ctx.props;
+  return <button class={variant} {...rest} />;
+});
+```
+
+The destructure **is** the declared-props list — there is no helper for it, and
+the rest object is typed by TypeScript off the props type. Framework-internal
+keys (`key`, `ref`, `children`, model bindings, `client:*` directives) never
+appear in `ctx.props` or reach the DOM, so the spread is safe.
+
+For the component's props type to accept host attributes in the first place,
+declare `& Define.Attrs`:
+
+```tsx
+type ButtonProps = Define.Prop<'variant', 'primary' | 'ghost'> & Define.Attrs;
+```
+
+Declare it only if the component really does forward — a type that compiles and
+then drops the attribute is the failure mode the opt-in exists to prevent.
+
+#### `mergeProps` — when both sides set the same key
+
+A JSX spread is flattened by the compiler into one object literal before the
+runtime sees it, so `<button {...rest} {...bag} />` lets later keys clobber
+earlier ones. If the consumer and the component both set `class`, one is lost;
+same for `onClick`. `mergeProps` combines them instead:
+
+```tsx
+const Button = component<ButtonProps>(ctx => {
+  const merged = mergeProps(
+    () => { const { variant: _v, ...rest } = ctx.props; return rest; },
+    () => ({ class: 'btn', onClick: onActivate })
+  );
+  return () => <button {...merged}>{ctx.slots.default?.()}</button>;
+});
+```
+
+| Key | Rule |
+|---|---|
+| `class` / `className` | concatenated in argument order, emitted as `class` |
+| `style` | merged into an object; string sources are parsed first |
+| `on*` handlers | chained in source order, **grouped by the event they resolve to** — `onClick` and `onclick` become one entry, so two handlers can never collide in the same DOM listener slot |
+| `ref` | chained; every source's ref is fed |
+| everything else | exact spread semantics — the last source with the key wins, including an explicit `undefined` |
+
+Two things to know. `mergeProps` is **not** a defaults helper: it replaces a
+spread, so it behaves like one (destructuring with defaults already covers
+defaults). And call it **once in setup**, as above — the derived `ref` and
+chained handlers are identity-cached, and rebuilding them each render hands the
+renderer fresh functions that make it tear down and re-apply refs for nothing.
+Sources may be thunks, so the result stays reactive either way.
+
+Chaining cannot express *swallow*. A component that gates a consumer handler —
+dropping `onClick` while disabled — keeps destructuring it out and calling it
+itself.
+
 ### Setup reactions are disposed on unmount
 
 `effect()`, `watch()`, and non-detached `effectScope()` created **directly in a

@@ -8,6 +8,54 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- **`mergeProps` — compose props from several sources (#525).** Forwarding a
+  component's leftover props onto its root element is plain JS
+  (`const { color, ...rest } = ctx.props;` then `<button {...rest} />`).
+  *Combining* two sources is not: a JSX spread is lowered by the compiler into
+  a single object literal before the runtime sees it, so
+  `<button {...rest} {...bag} />` lets later keys clobber earlier ones. If the
+  consumer and the component both set `class`, one is lost — same for
+  `onClick`, and `onClick` vs `onclick` land in the same DOM listener slot.
+
+  `mergeProps(...sources)` combines the four kinds of key that must not
+  overwrite: `class`/`className` concatenate into one slot, `style` merges into
+  an object (string sources parsed), `on*` handlers chain in source order and
+  are **grouped by the event they resolve to** so two spellings become one
+  entry, and `ref`s chain. Everything else follows exact spread semantics —
+  the last source with the key wins, including an explicit `undefined`. It is
+  not a defaults helper.
+
+  Sources may be objects or zero-arg thunks; the result resolves on read, so
+  thunks stay reactive. Call it **once in setup** — the derived `ref` and
+  chained handlers are identity-cached, which a per-render call throws away:
+
+  ```tsx
+  const merged = mergeProps(
+      () => { const { variant: _v, ...rest } = ctx.props; return rest; },
+      () => ({ class: 'btn', onClick: onActivate })
+  );
+  return () => <button {...merged}>{slots.default?.()}</button>;
+  ```
+
+  Chaining cannot express *swallow*: a component that gates a consumer handler
+  (dropping `onClick` while disabled) keeps destructuring it out and calling it
+  itself.
+
+- **`Define.Attrs` — a component opts into accepting host attributes
+  (#525).** Intersect it into a props type to declare that the component
+  forwards leftover props to an element, and it gains `id`, `class`, `style`,
+  `title`, `role`, `tabIndex`, the other global HTML attributes, the
+  `data-*`/`aria-*` patterns, and camelCase DOM event handlers.
+  `Define.WithAttrs<TOwn>` is the form for a component that declares a prop of
+  its own with a colliding name — the component's declaration wins.
+
+  The platform fills the set by augmenting the new `ComponentAttributes`
+  interface, so `@sigx/runtime-core` keeps no dependency on a renderer.
+  Deliberately **universal attributes only**: per-tag names (`size`, `type`,
+  `value`, `disabled`, `name`, `placeholder`, …) are exactly what real
+  components declare as domain props, so they stay part of each component's own
+  contract.
+
 - **`@sigx/reactivity`: a reactive object's KEY SET is now a dependency
   (#521).** Enumerating a reactive object inside an effect or computed —
   `Object.keys()`, `for…in`, object spread, rest destructuring — additionally
@@ -103,6 +151,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   in the source *and* in the built dist — to empty.
 
 - **`@sigx/runtime-core` / `@sigx/server-renderer`**: a **function passed as children** is now invoked as a scoped slot — `<Comp>{(p) => <span>{p.greeting}</span>}</Comp>` calls the function with the slot's scoped props (Vue scoped-slots / Solid render-prop semantics), identical output to the `slots={{ default: (p) => … }}` prop form (#476). Previously a bare function child was dropped as an empty node; only functions provided via the `slots` prop received scoped props. Function items in the extracted default/named children arrays are invoked once per accessor call, so reactivity is preserved — the call happens inside the consumer's render — on both the client (`createSlots`) and SSR (`renderToString`), keeping hydration in agreement. A function returning `null`/`undefined` is dropped and an array is flattened one level, matching the `slots`-prop branch; named element-based slots (`slot="x"` children) are unaffected. Enables the `asChild` render-prop pattern without a userland workaround.
+
+### Changed
+
+- **BREAKING (types): host attributes on a component are now an opt-in
+  (#525).** `JSX.IntrinsicAttributes` used to declare `id`, `class`, `style`
+  and the `data-*`/`aria-*` patterns. TypeScript adds that interface to
+  **every** JSX element type, so those attributes compiled on every component —
+  including ones that forwarded nothing, where the attribute silently vanished.
+  That is exactly how a component library ends up shipping
+  `<Button data-density="compact">` that typechecks and does nothing.
+
+  `IntrinsicAttributes` now carries only `key`. A component that forwards its
+  leftover props declares `& Define.Attrs`; one that does not, correctly
+  rejects them. **Intrinsic elements are unaffected** — `HTMLAttributes`
+  declares `id`, `class`, `className`, `style` and both index signatures
+  directly, so `<div class="x">` never went through `IntrinsicAttributes`.
+
+  To migrate: add `& Define.Attrs` to the props type of any component that
+  spreads its rest props onto an element. Nothing in this repo needed it,
+  which is itself the point — no example passed those attributes to a
+  component, because doing so never worked.
+
+  **One honest limit.** TypeScript exempts JSX attribute names that are not
+  valid identifiers from excess-property checking, so `data-*` and `aria-*`
+  compile on *any* component whatever its props type says. No declaration can
+  make those an error; only the runtime forwarding fixes them. Pinned by a
+  test so the limit is not mistaken for a gap.
 
 ### Fixed
 

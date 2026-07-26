@@ -30,6 +30,34 @@ export interface ComponentAttributeExtensions {
 }
 
 /**
+ * The host attributes a component opts into accepting, via `Define.Attrs`.
+ *
+ * EMPTY in core — the platform fills it by augmentation, which is what keeps
+ * runtime-core free of any dependency on a renderer:
+ *
+ * @example
+ * ```ts
+ * // In @sigx/runtime-dom
+ * declare module '@sigx/runtime-core' {
+ *     interface ComponentAttributes {
+ *         id?: string;
+ *         onClick?: (e: MouseEvent) => void;
+ *         // …
+ *     }
+ * }
+ * ```
+ *
+ * Unlike {@link ComponentAttributeExtensions}, which widens *every* component,
+ * this is inert until a component intersects it into its own props type. A
+ * component that does not forward its leftover props should not advertise
+ * that it accepts them — a type that compiles and then silently drops the
+ * attribute is the failure mode this exists to prevent.
+ */
+export interface ComponentAttributes {
+    // Host attributes are added here by the platform via module augmentation
+}
+
+/**
  * Namespace for component definition types.
  * Provides a discoverable API for defining props, events, models, slots, and exposed APIs.
  *
@@ -49,6 +77,43 @@ export interface ComponentAttributeExtensions {
  * ```
  */
 export namespace Define {
+    /**
+     * Opt into accepting host attributes — `id`, `class`, `style`, `title`,
+     * `data-*`, `aria-*`, DOM event handlers and the rest of the universal
+     * set the platform declares on {@link ComponentAttributes}.
+     *
+     * Declare it only if the component actually forwards its leftover props
+     * to an element, or the type promises something the component drops:
+     *
+     * @example
+     * ```tsx
+     * type ButtonProps =
+     *     & Define.Prop<'variant', 'primary' | 'secondary'>
+     *     & Define.Attrs;
+     *
+     * const Button = component<ButtonProps>(ctx => {
+     *     const merged = mergeProps(() => {
+     *         const { variant: _v, ...rest } = ctx.props;
+     *         return rest;
+     *     }, () => ({ class: 'btn' }));
+     *     return () => <button {...merged}>…</button>;
+     * });
+     * ```
+     */
+    export type Attrs = ComponentAttributes;
+
+    /**
+     * {@link Attrs} for a component that declares a prop of its own with the
+     * same name as a host attribute — the component's declaration wins.
+     *
+     * @example
+     * ```tsx
+     * // `title` here is a heading, not the HTML tooltip attribute.
+     * type DialogProps = Define.WithAttrs<Define.Prop<'title', string, true>>;
+     * ```
+     */
+    export type WithAttrs<TOwn> = TOwn & Omit<ComponentAttributes, keyof TOwn>;
+
     /**
      * Define a single prop with type, required/optional status
      */

@@ -167,13 +167,23 @@ interface CSSProperties {
 
 declare global {
     namespace JSX {
+        /**
+         * Added by TypeScript to EVERY JSX element type, intrinsic and
+         * component alike — so anything declared here is accepted on every
+         * component whether or not it forwards it.
+         *
+         * That is why it carries `key` and nothing else. `id`, `class`,
+         * `style` and the `data-*`/`aria-*` patterns used to live here, which
+         * meant `<SomeComponent data-density="compact">` typechecked on a
+         * component that never forwarded it — the attribute simply vanished.
+         * Host attributes are now an opt-in a component declares for itself
+         * (`& Define.Attrs`, see ComponentAttributes below).
+         *
+         * Intrinsic elements are unaffected: `HTMLAttributes` declares `id`,
+         * `class`, `className`, `style` and both index signatures directly.
+         */
         interface IntrinsicAttributes {
             key?: string | number | null;
-            id?: string;
-            class?: string;
-            style?: string | CSSProperties;
-            [key: `data-${string}`]: any;
-            [key: `aria-${string}`]: any;
         }
 
         interface IntrinsicElements {
@@ -1050,6 +1060,116 @@ declare global {
             z?: number | string;
             zoomAndPan?: string;
         }
+    }
+}
+
+/**
+ * The DOM's half of `Define.Attrs` — what a component is promising to accept
+ * when it opts into forwarding host attributes.
+ *
+ * Scope is deliberately **universal only**: the global HTML attributes, the
+ * `data-*`/`aria-*` patterns, and real DOM events. Per-tag attributes are
+ * excluded on purpose — `size`, `type`, `value`, `disabled`, `name`, `min`,
+ * `max`, `step`, `required`, `placeholder` are exactly the names real
+ * components declare as domain props, and pulling them in would collide with
+ * (and silently widen) those declarations. A component that wants one of them
+ * declares it, which is where it belongs: it is part of that component's
+ * contract, not a passthrough.
+ *
+ * Three rules this interface must keep:
+ *
+ * 1. **No `[key: string]` index signature.** It would disable
+ *    excess-property checking on every opted-in component, and typo safety is
+ *    the entire reason the opt-in exists.
+ * 2. **No `on${string}` catch-all**, unlike `HTMLAttributes` above which can
+ *    afford one. On a *component* the pattern is picked up by `keyof` and
+ *    mishandled by `EventNames`, and it would hide handler typos. The curated
+ *    list is a feature: it advertises camelCase, which is the type-level half
+ *    of the same-event-two-spellings problem `patchProp` warns about.
+ * 3. **No `any`-typed members**, for the same `EventNames` reason.
+ */
+declare module '@sigx/runtime-core' {
+    interface ComponentAttributes {
+        // Global HTML attributes
+        id?: string;
+        class?: string;
+        className?: string;
+        style?: string | CSSProperties;
+        title?: string;
+        role?: string;
+        tabIndex?: number;
+        hidden?: boolean | 'hidden' | 'until-found' | '';
+        inert?: boolean;
+        popover?: 'auto' | 'manual' | '' | boolean;
+        dir?: 'ltr' | 'rtl' | 'auto';
+        lang?: string;
+        slot?: string;
+        part?: string;
+        draggable?: boolean | 'true' | 'false';
+        // Names and types mirror `HTMLAttributes` above deliberately: an
+        // opted-in component should accept exactly the spellings an intrinsic
+        // element does, or `<Button autoFocus>` would fail while
+        // `<button autoFocus>` compiles. `autofocus` is carried in both
+        // spellings there, so it is here too.
+        spellCheck?: boolean | 'true' | 'false';
+        translate?: 'yes' | 'no' | '';
+        autoFocus?: boolean;
+        autofocus?: boolean;
+        accessKey?: string;
+        contentEditable?: boolean | 'true' | 'false' | 'inherit';
+        enterKeyHint?: 'enter' | 'done' | 'go' | 'next' | 'previous' | 'search' | 'send';
+        inputMode?: 'none' | 'text' | 'decimal' | 'numeric' | 'tel' | 'search' | 'email' | 'url';
+
+        // Patterns. Hyphenated names cannot collide with a declared prop.
+        [key: `data-${string}`]: unknown;
+        [key: `aria-${string}`]: unknown;
+
+        // DOM events, camelCase only — see rule 2 above.
+        onClick?: (e: MouseEvent) => void;
+        onDblClick?: (e: MouseEvent) => void;
+        onContextMenu?: (e: MouseEvent) => void;
+        onMouseDown?: (e: MouseEvent) => void;
+        onMouseUp?: (e: MouseEvent) => void;
+        onMouseEnter?: (e: MouseEvent) => void;
+        onMouseLeave?: (e: MouseEvent) => void;
+        onMouseMove?: (e: MouseEvent) => void;
+        onMouseOver?: (e: MouseEvent) => void;
+        onMouseOut?: (e: MouseEvent) => void;
+        onPointerDown?: (e: PointerEvent) => void;
+        onPointerUp?: (e: PointerEvent) => void;
+        onPointerMove?: (e: PointerEvent) => void;
+        onPointerEnter?: (e: PointerEvent) => void;
+        onPointerLeave?: (e: PointerEvent) => void;
+        onPointerCancel?: (e: PointerEvent) => void;
+        onKeyDown?: (e: KeyboardEvent) => void;
+        onKeyUp?: (e: KeyboardEvent) => void;
+        onKeyPress?: (e: KeyboardEvent) => void;
+        onFocus?: (e: FocusEvent) => void;
+        onBlur?: (e: FocusEvent) => void;
+        onFocusIn?: (e: FocusEvent) => void;
+        onFocusOut?: (e: FocusEvent) => void;
+        onInput?: (e: Event) => void;
+        onChange?: (e: Event) => void;
+        onSubmit?: (e: Event) => void;
+        onReset?: (e: Event) => void;
+        onTouchStart?: (e: TouchEvent) => void;
+        onTouchEnd?: (e: TouchEvent) => void;
+        onTouchMove?: (e: TouchEvent) => void;
+        onTouchCancel?: (e: TouchEvent) => void;
+        onWheel?: (e: WheelEvent) => void;
+        onScroll?: (e: Event) => void;
+        onDrag?: (e: DragEvent) => void;
+        onDragStart?: (e: DragEvent) => void;
+        onDragEnd?: (e: DragEvent) => void;
+        onDragOver?: (e: DragEvent) => void;
+        onDragEnter?: (e: DragEvent) => void;
+        onDragLeave?: (e: DragEvent) => void;
+        onDrop?: (e: DragEvent) => void;
+        onAnimationStart?: (e: AnimationEvent) => void;
+        onAnimationEnd?: (e: AnimationEvent) => void;
+        onAnimationIteration?: (e: AnimationEvent) => void;
+        onTransitionEnd?: (e: TransitionEvent) => void;
+        onTransitionCancel?: (e: TransitionEvent) => void;
     }
 }
 

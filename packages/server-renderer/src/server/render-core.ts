@@ -41,7 +41,11 @@ import {
     getProvided,
     invokeFunctionChildren,
     splitComponentProps,
+    // Moved into @sigx/runtime-core when mergeProps needed the same parser.
+    // Re-exported below so this module's surface is unchanged.
+    parseStringStyle,
 } from 'sigx/internals';
+export { parseStringStyle };
 import type { SSRContext, SSRErrorInfo } from './context';
 import type { ResolvedBoundary, SSRBoundaryRecord } from '../boundary';
 import { generateAppendScript } from './streaming';
@@ -102,40 +106,6 @@ export function camelToKebab(str: string): string {
 
 // ============= Style Parsing =============
 
-const styleCommentRE = /\/\*[^]*?\*\//g;
-
-/**
- * Parse a CSS string into a style object.
- *
- * Handles edge cases: parens in values (e.g., `linear-gradient(...)`),
- * CSS comments, and colons in values.
- *
- * @internal exported for direct unit tests only
- */
-export function parseStringStyle(cssText: string): Record<string, string> {
-    const ret: Record<string, string> = {};
-    const stripped = cssText.replace(styleCommentRE, '');
-    let start = 0;
-    let depth = 0;
-
-    for (let i = 0; i <= stripped.length; i++) {
-        const ch = stripped.charCodeAt(i);
-        if (ch === 40 /* ( */) { depth++; continue; }
-        if (ch === 41 /* ) */) { depth--; continue; }
-        // Split on ';' only outside parentheses, or at end of string
-        if ((ch === 59 /* ; */ && depth === 0) || i === stripped.length) {
-            const decl = stripped.slice(start, i);
-            start = i + 1;
-            const colon = decl.indexOf(':');
-            if (colon > 0) {
-                const prop = decl.slice(0, colon).trim();
-                const value = decl.slice(colon + 1).trim();
-                if (prop) ret[prop] = value;
-            }
-        }
-    }
-    return ret;
-}
 
 /**
  * Serialize a style object to a CSS string.

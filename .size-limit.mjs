@@ -38,7 +38,17 @@ export default [
     // public entry + /internals (createRenderer & co.) — see the fixture.
     name: '@sigx/runtime-core (incl. renderer internals)',
     path: 'scripts/size/runtime-core-with-internals.mjs',
-    limit: '13.5 KB',
+    // 13.5 → 14.25 KB with #525: `mergeProps` (the one part of prop
+    // forwarding a compiler-flattened JSX spread cannot do — class concat,
+    // style merge, handler chaining with case normalization, ref chaining)
+    // plus `parseStringStyle`, moved here from the SSR serializer so both
+    // sides share one parser. The fixture namespace-re-exports both entries,
+    // so none of it tree-shakes; sat at 14.26 KB, of which ~0.1 KB is the
+    // two-pass key bucketing that keeps a handler-shaped key out of both the
+    // handler group and the plain map (returning it twice from `ownKeys`
+    // throws on any spread). @sigx/server-renderer drops 13.67 → 13.51 KB for
+    // the same move.
+    limit: '14.3 KB',
     // Not redundant: the fixture's imports are relative, but the dist files
     // themselves import @sigx/reactivity as bare specifiers.
     ignore: ['@sigx/*'],
