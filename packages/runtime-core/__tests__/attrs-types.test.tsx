@@ -97,6 +97,38 @@ describe('host attributes are opt-in', () => {
         expect(_wrong).toBeDefined();
     });
 
+    it('accepts the same attribute spellings an intrinsic element does', () => {
+        // ComponentAttributes mirrors HTMLAttributes' names and types on
+        // purpose. If they drift, `<Open autoFocus>` fails while
+        // `<button autoFocus>` compiles, which is indefensible.
+        const opted = (
+            <Open
+                variant="a"
+                autoFocus
+                spellCheck="false"
+                contentEditable="true"
+                enterKeyHint="send"
+                inputMode="numeric"
+                translate="no"
+                hidden="until-found"
+                popover="auto"
+            />
+        );
+        const intrinsic = (
+            <button
+                autoFocus
+                spellCheck="false"
+                contentEditable="true"
+                enterKeyHint="send"
+                inputMode="numeric"
+                translate="no"
+                hidden="until-found"
+                popover="auto"
+            />
+        );
+        expect([opted, intrinsic].length).toBe(2);
+    });
+
     it('keeps intrinsic elements untouched', () => {
         // HTMLAttributes declares these directly, so narrowing
         // IntrinsicAttributes to `key` alone cannot reach them.

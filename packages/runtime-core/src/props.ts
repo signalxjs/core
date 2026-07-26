@@ -139,7 +139,11 @@ export function mergeProps(...sources: MergeSource[]): Record<string, any> {
             const props = resolve(source);
             if (!props) continue;
 
-            for (const key in props) {
+            // `Object.keys`, not `for…in`: object spread copies own
+            // enumerable properties only, and this promises to behave exactly
+            // like a spread. `for…in` would walk the prototype chain and
+            // forward inherited keys the spread it replaces never would.
+            for (const key of Object.keys(props)) {
                 const value = props[key];
 
                 if (isClassKey(key)) {

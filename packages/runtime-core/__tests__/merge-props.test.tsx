@@ -40,6 +40,17 @@ describe('mergeProps', () => {
             expect(merged.n).toBe(2);
         });
 
+        it('copies own enumerable keys only, like a spread — not inherited ones', () => {
+            const base = { inherited: 'nope' };
+            const source = Object.create(base) as Record<string, unknown>;
+            source.own = 'yes';
+
+            // `{ ...source }` would be `{ own: 'yes' }`, so this must be too.
+            expect({ ...source }).toEqual({ own: 'yes' });
+            expect({ ...mergeProps(source) }).toEqual({ own: 'yes' });
+            expect('inherited' in mergeProps(source)).toBe(false);
+        });
+
         it('supports has / ownKeys / destructuring', () => {
             const merged = mergeProps({ a: 1 }, { b: 2 });
             expect('a' in merged).toBe(true);

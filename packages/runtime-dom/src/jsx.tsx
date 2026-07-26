@@ -1098,21 +1098,27 @@ declare module '@sigx/runtime-core' {
         title?: string;
         role?: string;
         tabIndex?: number;
-        hidden?: boolean;
+        hidden?: boolean | 'hidden' | 'until-found' | '';
         inert?: boolean;
+        popover?: 'auto' | 'manual' | '' | boolean;
         dir?: 'ltr' | 'rtl' | 'auto';
         lang?: string;
         slot?: string;
         part?: string;
         draggable?: boolean | 'true' | 'false';
-        spellcheck?: boolean | 'true' | 'false';
-        translate?: 'yes' | 'no';
+        // Names and types mirror `HTMLAttributes` above deliberately: an
+        // opted-in component should accept exactly the spellings an intrinsic
+        // element does, or `<Button autoFocus>` would fail while
+        // `<button autoFocus>` compiles. `autofocus` is carried in both
+        // spellings there, so it is here too.
+        spellCheck?: boolean | 'true' | 'false';
+        translate?: 'yes' | 'no' | '';
+        autoFocus?: boolean;
         autofocus?: boolean;
         accessKey?: string;
-        contentEditable?: boolean | 'true' | 'false' | 'inherit' | 'plaintext-only';
-        enterKeyHint?: string;
-        inputMode?: string;
-        popover?: string;
+        contentEditable?: boolean | 'true' | 'false' | 'inherit';
+        enterKeyHint?: 'enter' | 'done' | 'go' | 'next' | 'previous' | 'search' | 'send';
+        inputMode?: 'none' | 'text' | 'decimal' | 'numeric' | 'tel' | 'search' | 'email' | 'url';
 
         // Patterns. Hyphenated names cannot collide with a declared prop.
         [key: `data-${string}`]: unknown;
