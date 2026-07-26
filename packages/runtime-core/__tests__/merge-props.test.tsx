@@ -108,6 +108,16 @@ describe('mergeProps', () => {
             const merged = mergeProps({ style: 'background: linear-gradient(45deg, red, blue)' });
             expect(merged.style).toEqual({ background: 'linear-gradient(45deg, red, blue)' });
         });
+
+        it('ignores a style value that is neither a string nor an object', () => {
+            // `Object.assign` skips null/undefined sources rather than
+            // throwing, so an unusable style part contributes nothing and the
+            // read stays safe.
+            expect(() => ({ ...mergeProps({ style: 1 as any }) })).not.toThrow();
+            expect(mergeProps({ style: 1 as any }).style).toEqual({});
+            expect(mergeProps({ style: 1 as any }, { style: { color: 'red' } }).style)
+                .toEqual({ color: 'red' });
+        });
     });
 
     describe('handlers', () => {

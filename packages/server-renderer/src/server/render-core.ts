@@ -41,10 +41,10 @@ import {
     getProvided,
     invokeFunctionChildren,
     splitComponentProps,
+    // Moved into @sigx/runtime-core when mergeProps needed the same parser.
+    // Re-exported below so this module's surface is unchanged.
+    parseStringStyle,
 } from 'sigx/internals';
-// Moved into @sigx/runtime-core when mergeProps needed the same parser; still
-// re-exported below so this module's public surface is unchanged.
-import { parseStringStyle } from 'sigx/internals';
 export { parseStringStyle };
 import type { SSRContext, SSRErrorInfo } from './context';
 import type { ResolvedBoundary, SSRBoundaryRecord } from '../boundary';
