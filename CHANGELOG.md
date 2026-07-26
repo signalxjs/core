@@ -8,6 +8,37 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- **`@sigx/reactivity`: a reactive object's KEY SET is now a dependency
+  (#521).** Enumerating a reactive object inside an effect or computed —
+  `Object.keys()`, `for…in`, object spread, rest destructuring — additionally
+  subscribes to its key set, so a key appearing or disappearing re-runs the
+  reader. The subscription is on top of the per-key ones: `Object.keys()` reads
+  no values and depends on the key set alone, while a spread copies every value
+  and so still re-runs when one of them changes.
+  `'x' in state` subscribes to the same per-key dep a read of `state.x` would,
+  so presence and value agree. Previously only per-key reads were tracked, and
+  the framework was inconsistent with itself: `ITERATION_KEY` already existed
+  and Map/Set iteration and `.size` were already reactive, while plain objects
+  were not.
+
+  Implemented as `ownKeys` and `has` traps on the object proxy. Neither trap is
+  invoked by `state.foo`, so plain property access is unaffected; the only
+  added work on the write path is one `hasOwnProperty` probe, and only once
+  something has subscribed. Arrays key on `length` rather than on an iteration
+  dep, since an index write already triggers `length`. Collections keep their
+  own tracking in `collections.ts`.
+
+  **Behaviour change to be aware of:** an existing effect that enumerates
+  reactive state will now re-run in cases where it previously did not. That is
+  the point of the fix, but it is observable — a reader that enumerated state
+  purely for a side effect will run more often than before. In particular,
+  adding keys one at a time to an object something enumerates now costs one
+  re-run per key, so bulk key insertion is quadratic unless wrapped in
+  `batch()`:
+
+  ```tsx
+  batch(() => { for (const [k, v] of entries) state[k] = v; });   // one re-run
+  ```
 - **`@sigx/server` / `@sigx/vite`: forgetting a guard is now a build error
   (#489).** `sigxServer({ requireGuards })` — **on by default** — requires
   every extracted `serverFn` and `serverStream` to be preset-derived, declare
@@ -107,6 +138,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   handler and a consumer's arrives via a props spread. The collision itself is
   unchanged; it is just no longer silent. `__DEV__` only, once per element and
   event.
+- **`{...ctx.props}` forwarding now sees a prop the parent had never passed
+  before (#521).** A wrapper that forwards its props by spread —
+  `component(ctx => () => <Child {...ctx.props} />)` — did not re-render when
+  the parent started passing a *new* prop key, so the child never received it.
+  The spread enumerated the props object, and enumeration created no
+  dependency on the key set; there was no dep for the new key to trigger. Note
+  the asymmetry this had: *removing* a prop always worked, because the spread's
+  per-key read had created that dep. Same fix for rest destructuring
+  (`const { own, ...rest } = ctx.props`) forwarded onto an element.
 - **`@sigx/server`: a nested request scope no longer clobbers the enclosing one
   (#495).** The README documented
   `runWithServerFnContext({ request, locals: { user } }, () => renderHandler(…))`
