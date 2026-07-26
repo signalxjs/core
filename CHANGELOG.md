@@ -8,6 +8,35 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- **`@sigx/reactivity`: a reactive object's KEY SET is now a dependency
+  (#521).** Enumerating a reactive object inside an effect or computed —
+  `Object.keys()`, `for…in`, object spread, rest destructuring — subscribes to
+  its key set, so a key appearing or disappearing re-runs the reader.
+  `'x' in state` subscribes to the same per-key dep a read of `state.x` would,
+  so presence and value agree. Previously only per-key reads were tracked, and
+  the framework was inconsistent with itself: `ITERATION_KEY` already existed
+  and Map/Set iteration and `.size` were already reactive, while plain objects
+  were not.
+
+  Implemented as `ownKeys` and `has` traps on the object proxy. Neither trap is
+  invoked by `state.foo`, so plain property access is unaffected; the only
+  added work on the write path is one `hasOwnProperty` probe, and only once
+  something has subscribed. Arrays key on `length` rather than on an iteration
+  dep, since an index write already triggers `length`. Collections keep their
+  own tracking in `collections.ts`.
+
+  **Behaviour change to be aware of:** an existing effect that enumerates
+  reactive state will now re-run in cases where it previously did not. That is
+  the point of the fix, but it is observable — a reader that enumerated state
+  purely for a side effect will run more often than before. In particular,
+  adding keys one at a time to an object something enumerates now costs one
+  re-run per key, so bulk key insertion is quadratic unless wrapped in
+  `batch()`:
+
+  ```tsx
+  batch(() => { for (const [k, v] of entries) state[k] = v; });   // one re-run
+  ```
+
 - **`AsyncState.hasValue` — presence, separate from the value (#485).** Every
   `useData` cell, the `@sigx/cache` cell, `all()` and the SSR-side state now
   expose `readonly hasValue: boolean`. Additive for readers.
@@ -26,6 +55,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **`@sigx/runtime-core` / `@sigx/server-renderer`**: a **function passed as children** is now invoked as a scoped slot — `<Comp>{(p) => <span>{p.greeting}</span>}</Comp>` calls the function with the slot's scoped props (Vue scoped-slots / Solid render-prop semantics), identical output to the `slots={{ default: (p) => … }}` prop form (#476). Previously a bare function child was dropped as an empty node; only functions provided via the `slots` prop received scoped props. Function items in the extracted default/named children arrays are invoked once per accessor call, so reactivity is preserved — the call happens inside the consumer's render — on both the client (`createSlots`) and SSR (`renderToString`), keeping hydration in agreement. A function returning `null`/`undefined` is dropped and an array is flattened one level, matching the `slots`-prop branch; named element-based slots (`slot="x"` children) are unaffected. Enables the `asChild` render-prop pattern without a userland workaround.
 
 ### Fixed
+
+- **`{...ctx.props}` forwarding now sees a prop the parent had never passed
+  before (#521).** A wrapper that forwards its props by spread —
+  `component(ctx => () => <Child {...ctx.props} />)` — did not re-render when
+  the parent started passing a *new* prop key, so the child never received it.
+  The spread enumerated the props object, and enumeration created no
+  dependency on the key set; there was no dep for the new key to trigger. Note
+  the asymmetry this had: *removing* a prop always worked, because the spread's
+  per-key read had created that dep. Same fix for rest destructuring
+  (`const { own, ...rest } = ctx.props`) forwarded onto an element.
 
 - **`@sigx/resume`: `app.use(resumePlugin())` on the CLIENT no longer disables
   full-tree hydration (#483).** Its install declared
