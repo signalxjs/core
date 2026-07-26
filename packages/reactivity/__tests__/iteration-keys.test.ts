@@ -74,6 +74,17 @@ describe('key-set reactivity', () => {
             expect(spy).toHaveBeenCalledTimes(1);
         });
 
+        // The key-set dep is additional, not a replacement: a spread copies
+        // every value through the `get` trap, so it subscribes per key too.
+        it('DOES re-run a spread when a value changes, via the per-key deps', () => {
+            const state = signal<Record<string, number>>({ a: 1 });
+            const seen: Record<string, number>[] = [];
+            effect(() => { seen.push({ ...state }); });
+
+            state.a = 99;
+            expect(seen).toEqual([{ a: 1 }, { a: 99 }]);
+        });
+
         it('re-assigning an existing key does not re-run an enumerating reader', () => {
             const state = signal<Record<string, number>>({ a: 1, b: 2 });
             const spy = vi.fn(() => Object.keys(state));

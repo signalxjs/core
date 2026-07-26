@@ -343,9 +343,15 @@ export function signal<T>(target: T): PrimitiveSignal<T> | Signal<T & object> {
         },
         ownKeys(obj) {
             // Enumeration — `Object.keys`, `for…in`, object spread, rest
-            // destructuring — depends on the KEY SET, not on any single
-            // value, so it gets its own dep. Adding or deleting a key
-            // triggers it; changing a value does not.
+            // destructuring — depends on the KEY SET rather than on any one
+            // value, so the key set gets a dep of its own: adding or deleting
+            // a key triggers it, changing a value does not.
+            //
+            // This dep is ADDITIONAL, not a replacement. `Object.keys` reads
+            // no values and so subscribes to the key set alone, but spread
+            // and rest destructuring copy each value through the `get` trap
+            // and therefore subscribe per key as well — they re-run on a
+            // value change through those deps, not through this one.
             //
             // Arrays key on `length` instead of carrying a second dep, since
             // an index write already triggers it. The `set` and

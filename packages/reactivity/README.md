@@ -29,12 +29,12 @@ batch(() => {
 // Logs once: "count: 2, doubled: 4"
 ```
 
-### Reading a value tracks the key; enumerating tracks the key set
+### Reading a value tracks the key; enumerating also tracks the key set
 
 Reading `state.foo` subscribes to that one key. **Enumerating** a reactive
-object — `Object.keys()`, `for…in`, object spread, rest destructuring —
-subscribes to its *key set* instead, so a key appearing or disappearing re-runs
-the reader while a value change does not:
+object — `Object.keys()`, `for…in`, object spread, rest destructuring — adds a
+subscription to its *key set*, so a key appearing or disappearing re-runs the
+reader:
 
 ```tsx
 const state = signal<Record<string, number>>({ a: 1 });
@@ -42,6 +42,16 @@ const state = signal<Record<string, number>>({ a: 1 });
 effect(() => console.log(Object.keys(state)));
 state.b = 2;   // logs ['a', 'b'] — the key set changed
 state.a = 99;  // logs nothing    — no key appeared or disappeared
+```
+
+The key-set subscription is *additional*, not a replacement. `Object.keys()`
+reads no values, so it depends on the key set alone — but object spread and
+rest destructuring copy each value out, so they subscribe per key as well and
+do re-run when one of those values changes:
+
+```tsx
+effect(() => console.log({ ...state }));
+state.a = 99;  // logs — the spread read `a`, so it depends on it
 ```
 
 `'x' in state` subscribes to the same per-key dependency a read of `state.x`
