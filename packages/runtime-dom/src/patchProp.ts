@@ -39,6 +39,19 @@ function routeEventError(e: unknown, appContext: AppContext | null | undefined):
     }
 }
 
+/**
+ * Clear a rendering of a key that must never appear on an element.
+ *
+ * Declining to write is not enough on its own: the attribute can already be
+ * there. A prop that held a string and now holds a `Model` was written on an
+ * earlier patch, and markup can predate the skip. Cheap — the `hasAttribute`
+ * guard means the usual case (nothing there) costs one lookup, and every
+ * caller is an already-rare path.
+ */
+function clearStale(dom: Element, key: string): void {
+    if (dom.hasAttribute?.(key)) dom.removeAttribute(key);
+}
+
 export function patchProp(dom: Element, key: string, prevValue: any, nextValue: any, isSVG?: boolean, appContext?: AppContext | null) {
     // Guard: skip if dom is null (shouldn't happen but protects against edge cases)
     if (!dom) return;
@@ -60,7 +73,7 @@ export function patchProp(dom: Element, key: string, prevValue: any, nextValue: 
     // `modelModifiers` configures the model directive (trim/lazy/number/debounce);
     // it is read off the model handler in the onUpdate:modelValue branch below and
     // is never rendered to the DOM.
-    if (key === 'modelModifiers') return;
+    if (key === 'modelModifiers') return clearStale(dom, key);
 
     // Hydration-strategy directives belong to the pack that reads them off the
     // component vnode (islands' `client:load` &c.). They are meaningless on an
@@ -68,13 +81,13 @@ export function patchProp(dom: Element, key: string, prevValue: any, nextValue: 
     // `{...rest}` props spread would render `client:load=""` on the client and
     // nothing on the server, which is a hydration mismatch as well as junk
     // markup.
-    if (key.startsWith('client:')) return;
+    if (key.startsWith('client:')) return clearStale(dom, key);
 
     // A two-way `Model` reaches props under its own name (splitComponentProps
     // merges `$models` back in), so a props spread can carry one onto an
     // element, where `String(model)` would render `[object Object]`. The model
     // channel is `model` / `onUpdate:*`, never an attribute.
-    if (isModel(newValue)) return;
+    if (isModel(newValue)) return clearStale(dom, key);
 
     if (key === 'style') {
         const el = dom as HTMLElement;

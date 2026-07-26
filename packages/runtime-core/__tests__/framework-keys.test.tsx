@@ -10,8 +10,9 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render } from '@sigx/runtime-dom';
+import { render, patchProp } from '@sigx/runtime-dom';
 import { component, jsx, createModel, lazy } from '@sigx/runtime-core';
+import { signal } from '@sigx/reactivity';
 
 const tick = () => new Promise<void>(r => setTimeout(r, 0));
 
@@ -134,6 +135,34 @@ describe('framework keys never reach the DOM', () => {
             const el = container.querySelector('div')!;
             expect(el.getAttribute('id')).toBe('keep');
             expect(el.hasAttribute('title')).toBe(false);
+        });
+
+        // Declining to write is not enough when the attribute is already
+        // there: a prop that held a string and now holds a Model was written
+        // on an earlier patch, and the stale value would otherwise stick.
+        it('clears an attribute a prop leaves behind when it becomes a Model', () => {
+            const store = { title: 'hello' };
+            const model = createModel<string>([store, 'title'], v => { store.title = v; });
+            const value = signal<{ v: any }>({ v: 'plain' });
+
+            const Comp = component(() => () => jsx('div', { title: value.v }));
+
+            render(jsx(Comp, {}), container);
+            const el = container.querySelector('div')!;
+            expect(el.getAttribute('title')).toBe('plain');
+
+            value.v = model;
+            expect(el.hasAttribute('title')).toBe(false);
+        });
+
+        it('clears a client:* attribute that is already on the element', () => {
+            const el = document.createElement('div');
+            el.setAttribute('client:load', '');
+            container.appendChild(el);
+
+            patchProp(el, 'client:load', undefined, true);
+
+            expect(el.hasAttribute('client:load')).toBe(false);
         });
     });
 
