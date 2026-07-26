@@ -40,6 +40,7 @@ import {
     ERROR_SCOPE_TOKEN,
     getProvided,
     invokeFunctionChildren,
+    splitComponentProps,
 } from 'sigx/internals';
 import type { SSRContext, SSRErrorInfo } from './context';
 import type { ResolvedBoundary, SSRBoundaryRecord } from '../boundary';
@@ -217,20 +218,14 @@ function createComponentState(
     const componentName = (vnode.type as any).__name || 'Anonymous';
     const allProps = vnode.props || {};
 
-    // Destructure props (filter out framework-internal keys). `key` and `ref`
-    // are peeled here for the same reason the client peels them in
-    // `splitComponentProps`: they are vnode-level concerns, and leaving them
-    // in props means a `{...rest}` spread renders them. The three
+    // Use the SAME splitter the client mount and hydration paths use, rather
+    // than a second destructure that has to be kept in step by hand. It had
+    // already drifted: this path discarded `$models` while the client merged
+    // each model back into props under its own name, so `props.title` was a
+    // `Model` on the client and absent on the server. The three
     // prop-construction paths must agree key-for-key or SSR and hydration
     // disagree on the markup.
-    const {
-        children,
-        slots: slotsFromProps,
-        $models: _modelsData,
-        key: _key,
-        ref: _ref,
-        ...propsData
-    } = allProps;
+    const { children, slotsFromProps, propsWithModels: propsData } = splitComponentProps(allProps);
 
     // Create slots from children, mirroring the client slot extractor so
     // server and client agree on slot presence (otherwise hydration could
