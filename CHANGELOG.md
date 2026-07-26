@@ -106,6 +106,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- **SSR gives a component the same props the client does (#527).** The server
+  render path had its own props destructure and discarded `$models`, while the
+  client merges each model back into props under its own name. A component
+  taking `Define.Model<'title', string>` therefore saw `props.title` as a
+  `Model` on the client and `undefined` on the server — it rendered from state
+  it did not have, and then hydrated against markup that disagreed. Both paths
+  now go through the same `splitComponentProps`, so the parity is structural
+  rather than two implementations kept in step by hand.
+
+- **`@sigx/resume`: a lowercase event handler no longer makes a boundary
+  unrefreshable (#527).** The lossy-snapshot check forgives dropped `on*`
+  handlers — they never shape server HTML — but it identified them by
+  requiring an upper-case third character, which is the camelCase convention
+  rather than a rule. `onclick` is equally valid, it is the spelling the DOM
+  attribute types advertise, and forwarding props by spread makes lowercase
+  handlers easy to pass along. Those boundaries were stamped
+  `refreshable: false` for carrying a handler, which is the one thing the check
+  exists to forgive. It now tests `typeof value === 'function'`, which is also
+  stricter in the other direction: an `on`-prefixed *data* prop that the
+  snapshot cannot carry is correctly still lossy.
+
+
 - **Framework-internal keys no longer reach the DOM when props are forwarded
   by spread (#523).** Forwarding a component's leftover props onto its root
   element — `const { own, ...rest } = ctx.props;` then `<button {...rest} />` —

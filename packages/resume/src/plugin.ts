@@ -172,7 +172,17 @@ export function resumePlugin(options?: ResumePluginOptions): SSRPack {
                     for (const key in propsData) {
                         const value = propsData[key];
                         if (value === undefined || key === 'key' || key === 'ref') continue;
-                        if (key.startsWith('on') && key.length > 2 && key[2] === key[2].toUpperCase()) {
+                        // Any `on*` FUNCTION is a handler, whatever its
+                        // casing. The old test required an upper-case third
+                        // character, which is the camelCase convention rather
+                        // than a rule — `onclick` is equally valid, the DOM
+                        // attribute types advertise exactly that spelling, and
+                        // a props spread makes lowercase handlers easy to
+                        // forward. Those boundaries were being marked lossy
+                        // for carrying a handler, which is the one thing this
+                        // check is supposed to forgive. The `typeof` is what
+                        // keeps a genuine data prop like `once: true` honest.
+                        if (key.startsWith('on') && key.length > 2 && typeof value === 'function') {
                             continue;
                         }
                         if (!props || !(key in props)) {
