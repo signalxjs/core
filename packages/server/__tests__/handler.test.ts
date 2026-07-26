@@ -366,6 +366,42 @@ describe('handleServerFnRequest — guard seam', () => {
             error: { message: 'sign in first', status: 401 }
         });
     });
+
+    // The standing pin (rfc-server-v3 §5). `guard` lives INSIDE this handler,
+    // so it covers the wire transports and nothing else — an in-process
+    // (SSR-time) call never enters it. That asymmetry is documented (§4,
+    // #493) and deliberate (§1.1: the alternatives all fail open), so it is
+    // executable here and a future "fix" cannot change it silently. The
+    // transport-independent chain is the definition's `use:` /
+    // `serverFnPreset`.
+    it('does NOT run for an in-process call — the endpoint guard is wire-only (§1.1/§4)', async () => {
+        let guarded = 0;
+        const secret = serverFn(async () => 'data');
+        const options: Partial<ServerFnRequestOptions> = {
+            resolve: () => secret,
+            guard: () => {
+                guarded += 1;
+            }
+        };
+        // Mounting the handler does not wrap the function: calling it
+        // directly, exactly as `useData` does during SSR, bypasses it.
+        void options;
+        await expect(secret()).resolves.toBe('data');
+        expect(guarded).toBe(0);
+
+        // …while the same function over the wire IS guarded, so the test
+        // pins the asymmetry rather than just the absence.
+        const res = await handleServerFnRequest(
+            new Request(`${ORIGIN}/_sigx/fn/secret_fn_00000007`, {
+                method: 'POST',
+                headers: { 'content-type': 'application/json', origin: ORIGIN },
+                body: '{"args":[]}'
+            }),
+            options as ServerFnRequestOptions
+        );
+        await expect(res.json()).resolves.toEqual({ data: 'data' });
+        expect(guarded).toBe(1);
+    });
 });
 
 describe('handleServerFnRequest — pollution reviver', () => {

@@ -182,6 +182,18 @@ export interface WrappedServerFn {
      */
     __sigxKey?: string;
     /**
+     * Build-stamped (true) when `sigxServer({ requireGuards })` ANALYZED this
+     * function — rfc-server-v3 §1.5's mitigation for its own residual gap.
+     *
+     * A `*.server.ts` outside the plugin's `include`/`scan` is never extracted,
+     * so the gate cannot see it and it would ship unguarded with no signal.
+     * Marking what WAS checked makes absence the alarm: `__DEV__` warns when a
+     * function without the stamp is invoked, so a missing signal degrades to
+     * silence rather than to a false pass. Prod is still not covered — no
+     * candidate mechanism closes that without failing open somewhere worse.
+     */
+    __sigxGuardChecked?: boolean;
+    /**
      * Present when the options form declared `invalidates` (rfc-server
      * §6.2): VALIDATED input (stashed on the request context by the
      * pipeline) + settled result → patterns the endpoint RESOLVES (fn refs

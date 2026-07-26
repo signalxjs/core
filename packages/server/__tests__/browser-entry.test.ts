@@ -6,7 +6,14 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { serverFn, serverStream, isServerFnError, ServerFnError } from '../src/browser';
+import {
+    serverFn,
+    serverStream,
+    serverFnPreset,
+    perRequest,
+    isServerFnError,
+    ServerFnError
+} from '../src/browser';
 import { createDetachedContext } from '../src/context';
 
 describe('@sigx/server browser entry', () => {
@@ -17,6 +24,16 @@ describe('@sigx/server browser entry', () => {
 
     it('serverStream throws the same way', () => {
         expect(() => serverStream()).toThrow(/serverStream\(\) reached the browser unextracted/);
+    });
+
+    it('serverFnPreset throws the same way (#398)', () => {
+        expect(() => serverFnPreset()).toThrow(/serverFnPreset\(\) reached the browser unextracted/);
+    });
+
+    it('perRequest throws the same way (#494)', () => {
+        // A `session.server.ts` exporting only per-request values has no
+        // serverFn to shout, so this is the only loud signal it has.
+        expect(() => perRequest()).toThrow(/perRequest\(\) reached the browser unextracted/);
     });
 
     it('the error channel is real in the browser build', () => {

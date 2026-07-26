@@ -103,11 +103,139 @@ export function toContextInit(source: ScopeSource): ServerFnContextInit {
         : (source as Request | Partial<ServerFnContext>);
 }
 
+/**
+ * What a SCOPE stores: `toContextInit`, plus the one guarantee a scope adds —
+ * a `locals` object (rfc-server-v3 §2.3, #494).
+ *
+ * That object IS the per-request store. `contextFrom` prefers a supplied
+ * `locals` (`./context`), so every context derived inside this scope shares
+ * one bag instead of minting a fresh `{}` per call — which is why a guard that
+ * decoded a session could not hand it to the next call, and why one signed-in
+ * render re-did the same decode once per cell.
+ *
+ * A source that ALREADY carries `locals` is stored as is, never copied: the
+ * endpoint's own context and an app pre-seeding `{ request, locals: { user } }`
+ * both hand in the bag they intend to be the store, and identity is what makes
+ * it one. (Only that branch can hold a full `ServerFnContext` with the throwing
+ * `request`/`url` getters `contextFrom` documents, so the spread below never
+ * reads one.)
+ *
+ * With an `enclosing` scope open for the SAME request, the new source merges
+ * over it rather than replacing it (§2.7, #495) — see {@link sameRequest}.
+ */
+export function toScopeInit(
+    source: ScopeSource,
+    enclosing?: Partial<ServerFnContext>
+): Partial<ServerFnContext> {
+    const init = toContextInit(source);
+    // A bare Request is wrapped rather than left bare — nothing is lost:
+    // `contextFrom` reads `partial.request`, derives `url` from it, and its
+    // abortSignal fallback reaches `request.signal` through the same field.
+    const incoming: Partial<ServerFnContext> =
+        init instanceof Request ? { request: init } : init;
+
+    if (enclosing && sameRequest(enclosing, incoming)) {
+        // Prototype delegation rather than a spread OF THE ENCLOSING init: a
+        // spread reads every enumerable property, and a context built by
+        // `contextFrom` carries lazy `request`/`url` getters that throw when
+        // nothing supplied a request. Inheriting leaves them lazy and keeps
+        // `responseHeaders`/`status` pointing at the ones the outer scope owns.
+        const merged: Partial<ServerFnContext> = Object.create(enclosing);
+        for (const key of Object.keys(incoming) as (keyof ServerFnContext)[]) {
+            // Supplied fields win; an explicit `undefined` must not shadow the
+            // enclosing value. READING is what needs the guard: a context built
+            // by `contextFrom` carries `request`/`url` as ENUMERABLE getters
+            // that throw when nothing supplied a request, so an app forwarding
+            // its own `rq` into a nested scope would otherwise crash the render
+            // on a field it never set. A throwing getter means "not supplied".
+            let value: unknown;
+            try {
+                value = incoming[key];
+            } catch {
+                continue;
+            }
+            if (value !== undefined) (merged as Record<string, unknown>)[key] = value;
+        }
+        // One request, one store — the whole point. An inner source carrying
+        // its OWN bag keeps it: that is the deliberate way to isolate a nested
+        // render (a subrequest on behalf of a different principal, say).
+        merged.locals = incoming.locals ?? enclosing.locals ?? {};
+        return merged;
+    }
+
+    if (__DEV__ && enclosing) noticeFreshStore(enclosing, incoming);
+    return incoming.locals ? incoming : { ...incoming, locals: {} };
+}
+
+/**
+ * "Same URL + method means the same request" (#506), computed defensively:
+ * either side may be a bare `Partial<ServerFnContext>` with no request at all,
+ * and the incoming side may be a `Request` the Node path just built from an
+ * `IncomingMessage` — which is exactly why object identity was rejected as the
+ * rule (it would leave the documented pre-seed recipe broken precisely where
+ * it is documented).
+ *
+ * PROTOCOL is excluded deliberately: it is the one component two
+ * normalizations of the same wire request legitimately disagree on
+ * (`socket.encrypted` vs `x-forwarded-proto`), so including it would decline
+ * the merge behind any TLS-terminating proxy. Host, path and query differing
+ * means a different target.
+ */
+function requestKey(init: Partial<ServerFnContext>): string | undefined {
+    try {
+        const request = init.request;
+        const url = init.url ?? (request ? new URL(request.url) : undefined);
+        if (!url) return undefined;
+        return `${(request?.method ?? 'GET').toUpperCase()} ${url.host}${url.pathname}${url.search}`;
+    } catch {
+        // A throwing `request` getter must not break a render; "no key" means
+        // "makes no claim", which merges.
+        return undefined;
+    }
+}
+
+/**
+ * No claim on either side merges — an app pre-seeding
+ * `runWithServerFnContext({ locals: { user } }, …)` says nothing about which
+ * request it is, and merging is unambiguously right there. Two claims must
+ * agree.
+ */
+function sameRequest(outer: Partial<ServerFnContext>, incoming: Partial<ServerFnContext>): boolean {
+    const a = requestKey(outer);
+    const b = requestKey(incoming);
+    return a === undefined || b === undefined || a === b;
+}
+
+/**
+ * The latch lives on `globalThis`, not in a module variable, so "once per
+ * process" is true rather than "once per module copy" — in dev the Vite module
+ * runner and Node hold two copies of this module, the same hazard documented
+ * for `__SIGX_SERVERFN_CONTEXT__`. Not a seam: nothing reads it across a
+ * package boundary, it is dev-warning bookkeeping with no contract.
+ */
+const NESTED_NOTICE = Symbol.for('sigx.serverfn.warnedNestedRequest');
+
+function noticeFreshStore(
+    outer: Partial<ServerFnContext>,
+    incoming: Partial<ServerFnContext>
+): void {
+    const latch = globalThis as Record<symbol, unknown>;
+    if (latch[NESTED_NOTICE] === true) return;
+    latch[NESTED_NOTICE] = true;
+    console.warn(
+        `[sigx server] a nested server-function scope names a different request ` +
+        `(${requestKey(outer)} → ${requestKey(incoming)}), so it gets its OWN request store: ` +
+        `\`rq.locals\` and per-request values from the enclosing scope are not shared with it. ` +
+        `Same URL + method nests into one store (docs/rfc-server-v3.md §2.7). ` +
+        `Fires once per process.`
+    );
+}
+
 /** The slice of AsyncLocalStorage this uses — typed here so the module needs
  *  no `node:async_hooks` types at build time. */
 interface ContextStore {
-    run<R>(ctx: ServerFnContextInit, fn: () => R): R;
-    getStore(): ServerFnContextInit | undefined;
+    run<R>(ctx: Partial<ServerFnContext>, fn: () => R): R;
+    getStore(): Partial<ServerFnContext> | undefined;
 }
 
 let _storePromise: Promise<ContextStore | null> | undefined;
@@ -132,7 +260,7 @@ let _warnedNoStore = false;
  */
 function ensureContextStore(): Promise<ContextStore | null> {
     _storePromise ??= import('node:async_hooks')
-        .then(({ AsyncLocalStorage }) => new AsyncLocalStorage<ServerFnContextInit>())
+        .then(({ AsyncLocalStorage }) => new AsyncLocalStorage<Partial<ServerFnContext>>())
         .catch(() => null);
     return _storePromise.then((als) => {
         if (!als) {
@@ -158,10 +286,14 @@ function ensureContextStore(): Promise<ContextStore | null> {
 /** Open a scope, or run `fn` unscoped when the runtime has no ALS. */
 export async function runInScope<T>(source: ScopeSource, fn: () => T | Promise<T>): Promise<T> {
     const store = await ensureContextStore();
+    // No ALS: nothing encloses anything, so there is nothing to merge and no
+    // notice to give — this runtime never had a scope to nest in.
     if (!store) return fn();
+    // `getStore()` AFTER the await deliberately: AsyncLocalStorage follows
+    // async continuations, so this still reads the scope of whoever called.
     // No cast: `run` hands back exactly what `fn` returned — a value or a
     // promise — and this function being async settles either into Promise<T>.
-    return store.run(toContextInit(source), fn);
+    return store.run(toScopeInit(source, store.getStore()), fn);
 }
 
 // The seam. Stamped at IMPORT, unlike `__SIGX_SERVERFN_CONTEXT__` (which

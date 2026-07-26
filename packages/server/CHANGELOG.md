@@ -2,7 +2,157 @@
 
 ## [Unreleased]
 
+### Added
+
+- **`requireGuards` + `unguarded: true` — forgetting a guard is now a build
+  error (#489).** A `use:` chain is the only mechanism that runs on every
+  transport, so a new `*.server.ts` that forgets one was silently unguarded on
+  all five — and runtime cannot restore that guarantee without a registry whose
+  miss would be fail-open. The build can. `sigxServer({ requireGuards })`
+  requires every extracted `serverFn` **and `serverStream`** to be
+  preset-derived, declare `use`, or declare `unguarded: true`; a bare one fails
+  the build naming all three remedies, with file and line.
+
+  **It defaults to `true`.** There is no installed base to wall in, and a
+  guarantee shipped off by default ships to nobody — least of all to the apps
+  that most need "you forgot a guard on this new module". `'warn'` is the
+  migration rung; `false` is the deliberate opt-out for an app that authorizes
+  inside handler bodies. `examples/resume` pays the price first: all six of its
+  functions now say `unguarded: true`, which is true of them and is the
+  demonstration.
+
+  `unguarded` is a word rather than an omission because "I meant this to be
+  public" and "I forgot" must not look identical, and because it makes the open
+  surface greppable. Declaring it on a preset-derived function throws at
+  definition time — the preset's guards still run, so the claim would be false.
+  Two limits are stated rather than implied: the check verifies **declaration,
+  not correctness** (`use: [logRequest]` passes), and a module outside
+  `include`/`scan` is never analyzed — so the build stamps what it *did* check
+  and dev warns on an unstamped call, making absence the alarm rather than a
+  false pass.
+
+- **`serverStream` gains an options form (#489).**
+  `serverStream({ use, unguarded, handler })`, alongside the direct form. A
+  stream is a public endpoint, so the gate holds it to the same rule — and it
+  needed somewhere to declare. It also gives streams a first-class `use:`,
+  which until now was reachable only through `preset.stream`. Deliberately no
+  `input`: a stream takes many arguments and has no single-input shape to
+  validate.
+
+- **`perRequest` — a value computed once per request, typed without a cast
+  (#494).** Work derived from the request (a decoded session, an authenticated
+  API client, a request id) was recomputed by every call that needed it: a page
+  with five SSR-enabled cells decoded the same session five times.
+
+  ```ts
+  export const session = perRequest(async (rq) =>
+      decodeSession(rq.request.headers.get('cookie')));
+
+  export const github = perRequest(async (rq) => {
+      const s = await session(rq);          // the SAME memoized promise
+      if (!s) throw new ServerFnError(401, 'Sign in');
+      return createGitHubClient(s.token);
+  });
+  ```
+
+  The accessor takes `rq` — no ambient lookup at the call site, the rule `rq`
+  itself follows. Values compose by calling each other, with no composition
+  API. The setup's return is memoized **promise included**, so a guard and a
+  handler racing on first touch share one in-flight decode; a failed setup
+  stays failed for that request; a setup that resolves itself throws "circular
+  request value". Instances live on a non-enumerable
+  `Symbol.for('sigx.serverfn.requestValues')` slot of `rq.locals`, so there is
+  no new global seam and `locals` still spreads, logs and serializes clean.
+  **No disposal in v1**, deliberately: on WinterCG runtimes a render's scope
+  settles at the shell, so "released when the response has flushed" would fire
+  mid-stream — teardown belongs to the app's own handler until the `keepAlive`
+  scope extension lands. `perRequest` throws from the browser entry like its
+  neighbours, which matters more than it looks: a `session.server.ts` exporting
+  only per-request values has no `serverFn` to shout.
+
+### Changed
+
+- **A nested request scope MERGES into the enclosing one instead of clobbering
+  it (#495).** `runInScope` replaced the stored value outright, and the
+  document handlers always open their own inner scope with the raw request — so
+  the README's own recipe,
+  `runWithServerFnContext({ request, locals: { user } }, () => renderHandler(…))`,
+  silently discarded the pre-seed and every call inside saw `locals: {}`. That
+  is the first thing an app reaches for when it hits the missing per-request
+  slot, so the two failures compounded. A nested scope for the **same request**
+  now keeps the enclosing store: the inner source's fields win where supplied,
+  and the enclosing `locals` stays the store, so one render has one store no
+  matter how many times a scope is opened around it.
+
+  **Same request = same URL + method.** Object identity was the alternative and
+  is too strict to fix the bug it exists for — the Node path builds a fresh
+  `Request` from the `IncomingMessage` on every scope entry, so identity would
+  leave the recipe broken exactly where it is documented. Protocol is excluded
+  from the comparison, since `socket.encrypted` and `x-forwarded-proto` are two
+  legitimate normalizations of one wire request and a TLS-terminating proxy
+  must not split the store. A source that names **no** request makes no claim
+  and always merges — so `runWithServerFnContext({ locals }, …)` is the
+  simplest pre-seed there is. Anything else opens a fresh store and `__DEV__`
+  says so once per process, naming both keys; to isolate a nested render on
+  purpose (a subrequest for a different principal), hand it its own `locals`.
+
+- **The request scope stores `{ request, locals }`, not a bare `Request`
+  (#494).** `rq.locals` is now genuinely shared by every in-process call in one
+  request/render instead of being a fresh `{}` per call — it is the untyped
+  face of the per-request store (`perRequest` is the typed one, and the
+  recommended hand-off). **Observable, and the point**: a function writing
+  `rq.locals.x` used to write into a bag nobody would ever read; now its
+  siblings in the same render see it, and a guard that decodes a session can
+  hand it to the next call. The wire path already behaved this way — the
+  endpoint has always put its full context in the scope — so this makes the
+  in-process path agree with it rather than inventing a rule, and nothing on
+  the wire changes. A caller's own bag is kept by identity, so the documented
+  `runWithServerFnContext({ request, locals }, …)` pre-seed is the store.
+
+- **`serverFnPreset` — shared per-module middleware (#398).** A `use:` chain
+  is the only mechanism that runs on **every** transport (the endpoint's
+  `guard` is wire-only, #493), which made app-wide auth a line repeated on
+  every function in every server module. `serverFnPreset({ use })` returns
+  `serverFn`'s exact overloads bound to that chain, plus `preset.stream` for
+  `serverStream`:
+
+  ```ts
+  export const appGuards = [requireUser];              // src/guards.ts
+
+  const authed = serverFnPreset({ use: appGuards });   // src/board.server.ts
+  export const boardIssues = authed({ input: BoardKey, handler });
+  export const feed        = authed.stream(async function* (rq) { … });
+  ```
+
+  Preset guards run before the function's own `use:`. The array is copied at
+  definition — a policy the app can mutate afterwards is not a policy. Not a
+  builder: a preset carries `use` and nothing else and cannot derive another
+  preset. Same-module only, because the extractors analyze one file at a
+  time; exporting a preset is a build warning and using one in the inline
+  (component-file) form is a build error, both naming the remedy — share the
+  guard **array**. Editing the shared chain re-mints the hashed symbols of
+  every function derived from it, the way editing a body already does; stable
+  symbols (`<id>#<name>`) never move.
+
 ### Fixed
+
+- **An SSR-time `serverStream` ran no middleware at all (#398).** Its
+  in-process wrapper called the generator directly instead of going through
+  the invoke pipeline, so a stream that was fully guarded over the wire was
+  completely unguarded during a render — the same transport asymmetry #493
+  documented for the endpoint `guard`, in miniature. In-process streams now
+  run the same pipeline the wire does. Observable consequence: a guard veto
+  rejects on the **first pull** rather than at the call, which is exactly
+  where the wire path's pre-first-yield error already surfaced. The call
+  itself stays synchronous, and consumer cancellation still reaches the
+  implementation's `finally`.
+
+- **The direct form had no middleware seam at all (#398).**
+  `serverFn(async (rq, …) => …)` accepted no `use:` and had no loop to
+  prepend one to, so a preset's guards would have silently not run there. It
+  now runs its preset chain — inside the direct branch, so a multi-argument
+  direct-form function is unaffected by the options form's single-input
+  arity check.
 
 - **Documentation: the endpoint `guard` is wire-only (#493).** The README, the
   `ServerFnRequestOptions.guard` JSDoc and `rfc-server.md` described it as

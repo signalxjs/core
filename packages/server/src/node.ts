@@ -236,6 +236,19 @@ function toWebRequest(req: IncomingMessage, res: ServerResponse): Request {
  * ambient, and with neither, `rq.request` keeps throwing its descriptive
  * error rather than returning undefined.
  *
+ * **Nesting merges** (rfc-server-v3 §2.7, #495). Wrapping a render that opens
+ * its own scope — which `createRequestHandler` does — is the point of the
+ * recipe above, so a pre-seed like
+ * `runWithServerFnContext({ request, locals: { user } }, …)` is carried
+ * through: the inner scope's fields win where supplied, and the enclosing
+ * `locals` stays the request store. "Same request" is same URL + method
+ * (protocol excluded, so a TLS-terminating proxy does not split it); anything
+ * else gets its own store, with a once-per-process `__DEV__` notice naming
+ * both. To isolate a nested render deliberately — a subrequest on behalf of a
+ * different principal — hand the inner scope its own `locals`. Simplest of
+ * all: pre-seed with `{ locals }` alone and no request, which makes no claim
+ * about which request it is and always merges.
+ *
  * **Runtime support.** CALLING this loads `node:async_hooks` (the import is
  * dynamic — importing this entry pulls nothing), so ambient context needs
  * Node, Deno, or workerd with `nodejs_compat`. Where it is missing, `fn` runs

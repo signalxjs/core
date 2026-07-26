@@ -207,7 +207,11 @@ calls `provideTypeHandlers` AND stamps the RPC wire codec
 | **Contract** | `() => Request \| Partial<ServerFnContext> \| undefined` |
 
 The ambient request for in-process (SSR-time) server-function calls
-(rfc-server §7, #309). A global rather than a module variable because `.` and
+(rfc-server §7, #309). Since #494 a scope always resolves to a
+`Partial<ServerFnContext>` carrying `locals` — never a bare `Request` — because
+that object IS the per-request store every call in the flow shares
+(rfc-server-v3 §2.3). The wider contract stands: an app may still stamp a
+resolver returning a bare `Request`. A global rather than a module variable because `.` and
 `./node` are separate dist entries, and in dev the Vite module runner and Node
 can hold two copies of the same module — the same hazard that makes
 `ServerFnError` a brand check rather than `instanceof`.
@@ -231,11 +235,39 @@ with no scope registered the handlers call straight through, so
 AsyncLocalStorage stays never-required (rfc-ssr-platform §2.3) and an app
 without `@sigx/server` pays nothing.
 
+A nested `run()` for the SAME request — same URL + method, protocol excluded —
+MERGES into the enclosing scope instead of replacing it (#495): the inner
+source's fields win where supplied and the enclosing `locals` stays the request
+store, so the documented `runWithServerFnContext({ request, locals }, …)`
+pre-seed survives the handler opening its own scope around the render. A
+different request opens a fresh store with a once-per-process `__DEV__` notice.
+
 Re-stamped on every scope entry, not just the first: anything may clobber or
 delete a global, and a store nothing can read is a worse failure than a
 redundant assignment. A throwing resolver is swallowed — the detached
 context's descriptive error is more actionable than a leaked internal one.
 `fn.with({ context })` wins over whatever is ambient.
+
+### `__SIGX_GUARDS_CHECKED__`
+
+| | |
+|---|---|
+| **Stamped by** | `@sigx/vite`'s server-fn transform, in the SSR-side stamp block, when `sigxServer({ requireGuards })` is not `false` |
+| **Read by** | `server/src/index.ts` — the `__DEV__` unchecked-function warning |
+| **Contract** | `true` when this build ran the guard-declaration gate |
+
+The build-wide half of rfc-server-v3 §1.5's mitigation for its own residual
+gap (#489). The gate can only check `*.server.ts` modules the plugin's
+`include`/`scan` reaches, so a module outside them ships unanalyzed and
+silently unguarded. Each checked function is stamped `__sigxGuardChecked`, and
+this global says the build was doing the checking at all — together they let
+the runtime tell "checked build, unchecked function" (warn) from "no transform
+here" (say nothing, which is every unit test and hand-wired non-Vite build).
+
+**Absence is the alarm, so a miss degrades to silence, never a false pass** —
+the inverse of the usual seam rule, and deliberate: a seam whose absence
+asserted "guarded" would be exactly the fail-open the RFC rejects. Dev-only;
+production builds are not covered, which §1.5 records rather than papers over.
 
 ### `__SIGX_LIVE_CLIENT__`
 

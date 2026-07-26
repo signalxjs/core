@@ -984,8 +984,13 @@ What replaces the POST defenses, point by point:
   `no-store`; (d) `public` carries the **args-only contract**: the
   handler's output must not consult `rq.request.headers`, cookies, or
   auth-derived `rq.locals`. The guard still *runs* (it may reject), but
-  its identity must not shape a public body. `__DEV__` warns
-  heuristically when a public read touches `rq.request`.
+  its identity must not shape a public body. Note since #494 that
+  `rq.locals` is a per-REQUEST store shared by every call in a flow, not a
+  per-call scratchpad, so the rule now covers anything a sibling call in the
+  same render put there. It stays a wire-response concern — an in-process read
+  emits no `Cache-Control`, so nothing shared during a render is ever cached.
+  `__DEV__` warns heuristically when a public read touches `rq.request`;
+  extending that heuristic to `locals` is a candidate, not done.
 - **Cache poisoning.** The cache key is the full URL, and under the
   args-only rule the arguments are the *only* input channel — so every
   input is in the key, and unkeyed-header poisoning is impossible when
