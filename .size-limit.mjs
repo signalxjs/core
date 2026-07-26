@@ -43,9 +43,12 @@ export default [
     // style merge, handler chaining with case normalization, ref chaining)
     // plus `parseStringStyle`, moved here from the SSR serializer so both
     // sides share one parser. The fixture namespace-re-exports both entries,
-    // so none of it tree-shakes; sat at 14.16 KB. @sigx/server-renderer drops
-    // 13.67 → 13.51 KB for the same move.
-    limit: '14.25 KB',
+    // so none of it tree-shakes; sat at 14.26 KB, of which ~0.1 KB is the
+    // two-pass key bucketing that keeps a handler-shaped key out of both the
+    // handler group and the plain map (returning it twice from `ownKeys`
+    // throws on any spread). @sigx/server-renderer drops 13.67 → 13.51 KB for
+    // the same move.
+    limit: '14.3 KB',
     // Not redundant: the fixture's imports are relative, but the dist files
     // themselves import @sigx/reactivity as bare specifiers.
     ignore: ['@sigx/*'],

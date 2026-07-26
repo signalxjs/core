@@ -31,13 +31,17 @@ function isClassKey(key: string): boolean {
 }
 
 /**
- * An `on*` key that is a DOM event handler rather than a channel of its own.
- * `onUpdate:modelValue` and friends carry stamped handler state and a
- * dedicated `patchProp` branch, so they are passed through untouched.
+ * An `on*`-shaped key, i.e. one that could name a DOM event handler.
+ *
+ * `onUpdate:modelValue` and friends are excluded: they carry stamped handler
+ * state and have a dedicated `patchProp` branch, so they pass through as
+ * ordinary last-wins keys.
+ *
+ * Note this tests the KEY only. Whether a group forms also depends on some
+ * source supplying a function for the event — see `collect`.
  */
-function isChainableHandler(key: string, value: unknown): boolean {
-    return typeof value === 'function'
-        && key.length > 2
+function isHandlerShapedKey(key: string): boolean {
+    return key.length > 2
         && key.charCodeAt(0) === 111 /* o */
         && key.charCodeAt(1) === 110 /* n */
         && !key.includes(':');
@@ -126,23 +130,41 @@ export function mergeProps(...sources: MergeSource[]): Record<string, any> {
         plain: Map<string, any>;
         classParts: string[];
         styleParts: unknown[];
-        handlers: Map<string, { key: string; fns: any[] }>;
+        handlers: Map<string, { key: string; entries: any[] }>;
         refs: any[];
     } {
         const plain = new Map<string, any>();
         const classParts: string[] = [];
         const styleParts: unknown[] = [];
-        const handlers = new Map<string, { key: string; fns: any[] }>();
+        const handlers = new Map<string, { key: string; entries: any[] }>();
         const refs: any[] = [];
 
-        for (const source of sources) {
-            const props = resolve(source);
+        // `Object.keys`, not `for…in`: object spread copies own enumerable
+        // properties only, and this promises to behave exactly like a spread.
+        // `for…in` would walk the prototype chain and forward inherited keys
+        // the spread it replaces never would.
+        const resolved = sources.map(resolve);
+
+        // Pass 1 — which events actually have a handler? A key only joins a
+        // handler group if SOME source gave that event a function. Without
+        // this a plain data prop that happens to start with `on` (`once`)
+        // would be grouped by its accidental event name, and — worse — a key
+        // could land in both `plain` and a group depending on source order,
+        // making `ownKeys` return it twice, which throws.
+        const eventsWithHandlers = new Set<string>();
+        for (const props of resolved) {
+            if (!props) continue;
+            for (const key of Object.keys(props)) {
+                if (isHandlerShapedKey(key) && typeof props[key] === 'function') {
+                    eventsWithHandlers.add(eventNameOf(key));
+                }
+            }
+        }
+
+        // Pass 2 — bucket every key exactly once.
+        for (const props of resolved) {
             if (!props) continue;
 
-            // `Object.keys`, not `for…in`: object spread copies own
-            // enumerable properties only, and this promises to behave exactly
-            // like a spread. `for…in` would walk the prototype chain and
-            // forward inherited keys the spread it replaces never would.
             for (const key of Object.keys(props)) {
                 const value = props[key];
 
@@ -158,14 +180,17 @@ export function mergeProps(...sources: MergeSource[]): Record<string, any> {
                     if (value) refs.push(value);
                     continue;
                 }
-                if (isChainableHandler(key, value)) {
+                if (isHandlerShapedKey(key) && eventsWithHandlers.has(eventNameOf(key))) {
                     const event = eventNameOf(key);
                     const group = handlers.get(event);
                     // First spelling seen owns the output key, so the merged
                     // object carries one handler prop per event no matter how
-                    // many spellings arrived.
-                    if (group) group.fns.push(value);
-                    else handlers.set(event, { key, fns: [value] });
+                    // many spellings arrived. Non-function values are kept in
+                    // the same ordered list — see `read`, where a later one
+                    // overwrites the handlers before it, exactly as a spread
+                    // would.
+                    if (group) group.entries.push(value);
+                    else handlers.set(event, { key, entries: [value] });
                     continue;
                 }
 
@@ -207,7 +232,16 @@ export function mergeProps(...sources: MergeSource[]): Record<string, any> {
 
         for (const group of state.handlers.values()) {
             if (group.key !== key) continue;
-            const fns = group.fns;
+            // A non-function value overwrites everything before it — that is
+            // what a spread would do — so only the run of functions after the
+            // last one chains. `[fn, undefined]` is `undefined`;
+            // `['x', fn1, fn2]` chains fn1 then fn2.
+            const entries = group.entries;
+            let from = entries.length;
+            while (from > 0 && typeof entries[from - 1] === 'function') from--;
+            if (from === entries.length) return entries[from - 1];
+
+            const fns = from === 0 ? entries : entries.slice(from);
             if (fns.length === 1) return fns[0];
             return cachedDerive(key, fns, () =>
                 (...args: any[]) => { for (const fn of fns) fn(...args); });

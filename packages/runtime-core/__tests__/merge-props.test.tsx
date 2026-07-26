@@ -163,6 +163,47 @@ describe('mergeProps', () => {
             const merged = mergeProps({ onClick: 'nope' }, { onClick: 'later' });
             expect(merged.onClick).toBe('later');
         });
+
+        // A handler-shaped key must land in exactly one bucket. When a
+        // function and a non-function arrived for the same event, it used to
+        // land in both the handler group AND the plain map, so `ownKeys`
+        // returned it twice and any spread threw
+        // "TypeError: 'ownKeys' on proxy: trap returned duplicate entries".
+        it('emits one key when a handler and a non-handler share an event', () => {
+            const fnFirst = mergeProps({ onClick: () => { } }, { onClick: undefined });
+            expect(Object.keys(fnFirst)).toEqual(['onClick']);
+            expect(() => ({ ...fnFirst })).not.toThrow();
+
+            const fnLast = mergeProps({ onClick: 'x' }, { onClick: () => { } });
+            expect(Object.keys(fnLast)).toEqual(['onClick']);
+            expect(() => ({ ...fnLast })).not.toThrow();
+        });
+
+        it('lets a non-function overwrite the handlers before it, as a spread would', () => {
+            const merged = mergeProps({ onClick: () => { } }, { onClick: undefined });
+            expect(merged.onClick).toBeUndefined();
+        });
+
+        it('resumes chaining after a reset, across spellings', () => {
+            const calls: string[] = [];
+            const merged = mergeProps(
+                { onClick: () => calls.push('before') },
+                { onclick: null },
+                { onClick: () => calls.push('after-1') },
+                { onclick: () => calls.push('after-2') }
+            );
+
+            expect(Object.keys(merged)).toEqual(['onClick']);
+            merged.onClick();
+            expect(calls).toEqual(['after-1', 'after-2']);
+        });
+
+        it('leaves a data prop that merely starts with "on" alone', () => {
+            // No source gives these events a function, so no group forms and
+            // they stay ordinary last-wins keys.
+            const merged = mergeProps({ once: true }, { onceMore: 'x' });
+            expect({ ...merged }).toEqual({ once: true, onceMore: 'x' });
+        });
     });
 
     describe('ref', () => {
