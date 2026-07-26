@@ -7,6 +7,16 @@ import { serverFn, ServerFnError } from '@sigx/server';
  * the browser.
  */
 
+/**
+ * Every function here says `unguarded: true` (rfc-server-v3 §1.3): the build's
+ * `requireGuards` check is on by default, and each of these really is a public
+ * endpoint — a demo with no sign-in. Declaring it is the point. An app with
+ * auth writes `use: [requireUser]`, or one `serverFnPreset({ use })` per
+ * module, and a `grep -rn unguarded` then prints its whole open surface.
+ *
+ * It is also why three of these use the OPTIONS form for a one-line handler:
+ * the direct form has nowhere to declare.
+ */
 const QUOTES = [
     'The server thinks, the client patches pixels.',
     'Named = transferred.',
@@ -22,8 +32,9 @@ const QUOTES = [
  * has. Both of these used to throw here while the identical code worked over
  * RPC.
  */
-export const requestSummary = serverFn(async (rq) => {
-    return `SSR request: ${rq.request.method} ${rq.url.pathname}`;
+export const requestSummary = serverFn({
+    unguarded: true,
+    handler: async (rq) => `SSR request: ${rq.request.method} ${rq.url.pathname}`
 });
 
 /**
@@ -34,6 +45,7 @@ export const requestSummary = serverFn(async (rq) => {
  * Set, and BigInt, not their JSON shadows.
  */
 export const getCatalog = serverFn({
+    unguarded: true,
     cache: { maxAge: 60, staleWhileRevalidate: 300 },
     handler: async (_rq, section: string) => ({
         section,
@@ -56,9 +68,10 @@ export const getCatalog = serverFn({
  */
 let votes = 3;
 
-export const getVotes = serverFn(async () => votes);
+export const getVotes = serverFn({ unguarded: true, handler: async () => votes });
 
 export const vote = serverFn({
+    unguarded: true,
     handler: async () => {
         votes += 1;
         return votes;
@@ -90,6 +103,7 @@ const FeedbackInput = {
  * plain RPC. One function, one validator, two transports.
  */
 export const submitFeedback = serverFn({
+    unguarded: true,
     form: true,
     input: FeedbackInput,
     handler: async (_rq, input: { message: string }) => {
@@ -98,16 +112,20 @@ export const submitFeedback = serverFn({
     }
 });
 
-export const getQuote = serverFn(async (rq, index: number) => {
-    if (!Number.isInteger(index)) {
-        throw new ServerFnError(400, 'index must be an integer');
+export const getQuote = serverFn({
+    unguarded: true,
+    handler: async (rq, index: number) => {
+        if (!Number.isInteger(index)) {
+            throw new ServerFnError(400, 'index must be an integer');
+        }
+        // Proof this ran server-side, and WHERE: `navigator.userAgent` NAMES
+        // the runtime on every tier — `Deno/…`, `Bun/…`, `Cloudflare-Workers`,
+        // `Node.js/…` (Node ≥ 21; the fallback covers Node 20). It replaced a
+        // `process.version` sniff, which stopped telling workerd apart from
+        // Node the moment the worker enabled nodejs_compat.
+        const runtime =
+            globalThis.navigator?.userAgent ??
+            `Node.js/${globalThis.process?.versions?.node ?? '?'}`;
+        return `${QUOTES[Math.abs(index) % QUOTES.length]} (via ${runtime})`;
     }
-    // Proof this ran server-side, and WHERE: `navigator.userAgent` NAMES the
-    // runtime on every tier — `Deno/…`, `Bun/…`, `Cloudflare-Workers`,
-    // `Node.js/…` (Node ≥ 21; the fallback covers Node 20). It replaced a
-    // `process.version` sniff, which stopped telling workerd apart from Node
-    // the moment the worker enabled nodejs_compat.
-    const runtime =
-        globalThis.navigator?.userAgent ?? `Node.js/${globalThis.process?.versions?.node ?? '?'}`;
-    return `${QUOTES[Math.abs(index) % QUOTES.length]} (via ${runtime})`;
 });

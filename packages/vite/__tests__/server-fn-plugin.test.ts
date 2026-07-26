@@ -30,7 +30,10 @@ function makeProject(
         mkdirSync(join(root, rel, '..'), { recursive: true });
         writeFileSync(join(root, rel), content);
     }
-    const plugin = sigxServer(options) as any;
+    // These tests are about EXTRACTION mechanics — symbols, stubs, registry
+    // keys — so the guard gate (#489, default ON) is opt-in here rather than
+    // noise on every fixture. Its own behaviour is covered below.
+    const plugin = sigxServer({ requireGuards: false, ...options }) as any;
     plugin.configResolved({ root, command });
     return { plugin, root };
 }
@@ -232,6 +235,68 @@ describe('sigxServer — inline extraction (non-matching files)', () => {
         expect(() =>
             plugin.transform.call(ctx('client'), bad, join(root, 'src/Bad.tsx'))
         ).toThrow(/module-scope binding "T"/);
+    });
+
+    it('requireGuards fails the build with a file and line (#489)', () => {
+        const bare =
+            `import { serverFn } from '@sigx/server';\n` +
+            `export const read = serverFn(async (rq) => 1);`;
+        const { plugin: gated, root: gatedRoot } = makeProject(
+            { 'src/api.server.ts': bare },
+            'build',
+            { requireGuards: true }
+        );
+        try {
+            expect(() =>
+                gated.transform.call(ctx('client'), bare, join(gatedRoot, 'src/api.server.ts'))
+            ).toThrow(/api\.server\.ts:2:21 .*declares no guard chain/s);
+        } finally {
+            rmSync(gatedRoot, { recursive: true, force: true });
+        }
+    });
+
+    it("requireGuards 'warn' reports without failing (#489)", () => {
+        const bare =
+            `import { serverFn } from '@sigx/server';\n` +
+            `export const read = serverFn(async (rq) => 1);`;
+        const { plugin: warned, root: warnRoot } = makeProject(
+            { 'src/api.server.ts': bare },
+            'build',
+            { requireGuards: 'warn' }
+        );
+        try {
+            const warnings: string[] = [];
+            const result = warned.transform.call(
+                ctx('client', warnings),
+                bare,
+                join(warnRoot, 'src/api.server.ts')
+            );
+            expect(result.code).toContain('__serverFnStub(');
+            expect(warnings.some((w) => w.includes('declares no guard chain'))).toBe(true);
+        } finally {
+            rmSync(warnRoot, { recursive: true, force: true });
+        }
+    });
+
+    it('a preset in a component file is a hard error — the gate reaches it (#398)', () => {
+        // The whole point of widening `callsServerFn`: a file whose only
+        // `@sigx/server` call is a preset used to be skipped before parsing,
+        // so the error never fired and the module went through untouched.
+        const bad =
+            `import { serverFnPreset } from '@sigx/server';\n` +
+            `const authed = serverFnPreset({ use: [] });\n` +
+            `export const load = authed(async (rq) => 1);`;
+        expect(() =>
+            plugin.transform.call(ctx('client'), bad, join(root, 'src/Preset.tsx'))
+        ).toThrow(/serverFnPreset\(\) is only supported in a \*\.server\.ts module/);
+
+        const namespaced =
+            `import * as srv from '@sigx/server';\n` +
+            `const authed = srv.serverFnPreset({ use: [] });\n` +
+            `export const load = authed(async (rq) => 1);`;
+        expect(() =>
+            plugin.transform.call(ctx('client'), namespaced, join(root, 'src/PresetNs.tsx'))
+        ).toThrow(/serverFnPreset\(\)/);
     });
 
     it('serverFn inside a component is a hard error with a location', () => {

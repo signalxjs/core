@@ -120,8 +120,105 @@ options form with an `input` schema. In dev, a function that receives wire
 input it has no validator for logs a once-per-function warning — the
 direct form always (its types are compile-time only), the options form
 when `input` is omitted. Declaring `input` is what resolves both.
-`serverStream` has no options form, so validate its arguments at the top
-of the generator (any Standard Schema validates standalone).
+`serverStream` has an options form too — `use` and `unguarded`, so a stream
+can declare a guard chain (see below) — but deliberately no `input`: a stream
+takes many arguments and has no single-input shape to validate. Validate at the
+top of the generator (any Standard Schema validates standalone).
+
+### Shared middleware — `serverFnPreset`
+
+A `use:` chain runs on **every** transport, which is what makes it the place
+app-wide auth belongs (the endpoint's `guard` is wire-only — see *Security
+defaults*). The cost is repetition: every function in every server module
+repeats the same line. `serverFnPreset` removes it without giving up the
+guarantee.
+
+```ts
+// src/guards.ts — the policy lives in ONE place
+export const appGuards = [requireUser];
+
+// src/board.server.ts — one line per server module
+import { serverFnPreset } from '@sigx/server';
+import { appGuards } from './guards';
+
+const authed = serverFnPreset({ use: appGuards });
+
+export const boardIssues = authed({ input: BoardKey, handler: async (rq, k) => … });
+export const addItem     = authed(async (rq, sku: string, qty: number) => …);
+export const feed        = authed.stream(async function* (rq) { … });
+```
+
+The derived form is `serverFn` exactly — both authoring forms, the same
+options (`id`, `input`, `use`, `invalidates`, `cache`, `form`), the same
+`.with()` channel, the same wire. `preset.stream` is the `serverStream` twin.
+Preset guards run **first**, then the function's own `use:` chain.
+
+- **Not a builder.** `preset.stream` is a second one-shot factory over the
+  same `use` array, never an accumulating chain — a preset carries `use` and
+  nothing else, and cannot derive another preset.
+- **The array is copied at definition.** Pushing to `appGuards` afterwards
+  changes nothing: a policy the app can mutate is not a policy.
+- **Same module only.** The build analyzes one file at a time, so a preset
+  imported from another module is invisible where it is used and the
+  functions derived from it would not extract at all. Exporting one is a
+  build warning; share the guard **array** instead, as above. For the same
+  reason a preset cannot be used in the inline (component-file) form — that
+  is a build error naming the remedy.
+- **Editing the shared chain re-mints the hashed symbols** of every function
+  derived from it (the preset's source is part of their content hash), the
+  way editing a function body already does. Stable symbols (`<id>#<name>`)
+  never move, so installed clients keep their routes.
+
+### The guard gate — `requireGuards` and `unguarded`
+
+A preset per module is a mechanism, not a guarantee: a new `*.server.ts` that
+forgets the line is unguarded on **every** transport, and no runtime check can
+restore that without a registry whose miss would fail open. The build can, so
+it does — **on by default**:
+
+```js
+// vite.config.js — nothing to write; this is the default
+sigxServer()
+
+sigxServer({ requireGuards: 'warn' })    // migration rung: list them, don't fail
+sigxServer({ requireGuards: false })     // opt OUT, deliberately
+```
+
+Every extracted `serverFn` **and `serverStream`** — streams are public
+endpoints too — must be preset-derived, declare `use`, or say so:
+
+```ts
+export const submitPat = serverFn({
+    unguarded: true,          // deliberate: this IS the sign-in
+    form: true,
+    input: PatSchema,
+    handler: async (rq, pat) => …
+});
+```
+
+A bare `serverFn(async (rq) => …)` is a build error naming all three remedies,
+with its file and line. `unguarded` is a word rather than an omission because
+"I meant this to be public" and "I forgot" must not look identical — and
+because it makes the open surface greppable:
+`grep -rn unguarded --include='*.server.ts' src/` prints every deliberately
+open endpoint, which is a list a security review can read.
+
+Since the declaration channel is the options form, a function that needs to
+declare uses the options form (`serverStream` has one for exactly this — `use`
+and `unguarded`, no `input`; validate stream arguments in the generator).
+Writing `unguarded: true` on a **preset-derived** function throws at
+definition time: the preset's guards still run, so the declaration would be
+false.
+
+Two limits, stated rather than implied:
+
+- **It checks declaration, not correctness.** `use: [logRequest]` passes. What
+  it buys is converting "silently unguarded" into a list a human wrote.
+- **A module outside `include`/`scan` is never analyzed**, so it ships
+  unchecked. Under the flag the build stamps what it *did* check and dev warns
+  when an unstamped function is called — absence is the alarm, so a missing
+  signal degrades to silence rather than to a false pass. A production build
+  with an unanalyzed module stays unguarded; add its directory to `scan`.
 
 ### Server-declared invalidation
 
@@ -314,7 +411,7 @@ serverFn(async (rq, ...args) => {
     rq.abortSignal;      // fires on client disconnect (never a reactive signal)
     rq.responseHeaders;  // mutable response headers
     rq.status(201);      // success status override
-    rq.locals;           // guard hand-off (auth results)
+    rq.locals;           // guard hand-off — ONE bag per request (see below)
 });
 ```
 
@@ -348,6 +445,17 @@ its endpoint, as every app with server functions does — has ambient context
 with no wiring at all. Call `runWithServerFnContext` yourself for renders sigx
 does not own, or to supply a request with your own abort wiring.
 
+Nesting **merges** rather than replacing: wrapping a render that opens its own
+scope is the point of form 2, so
+`runWithServerFnContext({ request, locals: { user } }, () => renderHandler(…))`
+is carried through — the inner scope's fields win where supplied, and the
+enclosing `locals` stays the request store. "Same request" means same URL +
+method (protocol excluded, so a TLS-terminating proxy does not split it);
+anything else gets its own store and a once-per-process dev notice naming both.
+Two ways to be deliberate: pre-seed with `{ locals }` and no request — it makes
+no claim about which request it is, so it always merges — or hand a nested
+render its own `locals` to isolate it on purpose.
+
 `runWithServerFnContext` uses `AsyncLocalStorage`, so the request survives
 every `await` in the render without threading a parameter through user code.
 It needs Node, Deno, or workerd with `nodejs_compat`; where it is missing the
@@ -356,13 +464,82 @@ with neither the throw stays — a function reading `rq.request` when nothing
 supplied one is a bug worth seeing, not a silent `undefined`.
 
 `context` accepts a `Request` or a partial `ServerFnContext` (to set `locals`,
-say). A supplied `Request` also supplies `rq.abortSignal`, so wire its signal
+say). Passing `{ request, locals }` — the **same object** on each call — shares
+one request store across explicit calls; a fresh `Request` per call is its own
+store, which is how a test isolates two calls with no framework ceremony. A supplied `Request` also supplies `rq.abortSignal`, so wire its signal
 to the client disconnect (`res.once('close', …)` under Node) and SSR-time work
 stops when the client goes away. `rq.responseHeaders`/`rq.status()` stay inert
 either way: there is no
 HTTP response to affect, and pretending otherwise would silently drop headers.
 On the client `.with({ context })` is ignored, with a dev warning — a stub's
 context is the request it makes.
+
+### Per-request values — `perRequest`
+
+Work derived from the request — a decoded session, an authenticated API
+client, a request id — should be computed **once per request**, no matter how
+many functions in that flow need it. It isn't, by default: every call used to
+get a fresh `rq.locals`, so a page with five SSR-enabled cells decoded the same
+session five times (cookie parse → verify → database read → decrypt, each
+time).
+
+A scope now carries one store for the whole request, and `perRequest` is its
+typed face:
+
+```ts
+// src/session.server.ts
+import { perRequest, ServerFnError } from '@sigx/server';
+
+export const session = perRequest(async (rq) =>
+    decodeSession(rq.request.headers.get('cookie')));
+
+export const github = perRequest(async (rq) => {
+    const s = await session(rq);          // the SAME memoized promise
+    if (!s) throw new ServerFnError(401, 'Sign in');
+    return createGitHubClient(s.token);
+});
+
+// src/guards.ts
+export const requireUser: ServerFnGuard = async (rq) => {
+    if (!(await session(rq))) throw new ServerFnError(401, 'Sign in');
+};
+
+// src/board.server.ts
+const authed = serverFnPreset({ use: [requireUser] });
+
+export const boardIssues = authed({
+    input: BoardKey,
+    handler: async (rq, key) => (await github(rq)).issues(key),   // no decode, no cast
+});
+```
+
+The accessor takes `rq` — no ambient lookup at the call site, the same rule
+`rq` itself follows. Values **compose by calling each other**; there is no
+composition API.
+
+- **The value is memoized, promise included.** An async setup memoizes the
+  *promise*, so a guard and a handler racing on first touch share one in-flight
+  decode. There is never a second code path.
+- **A failed setup stays failed for that request.** Retrying a failed session
+  decode once per cell would be a footgun, not a feature.
+- **A setup that resolves itself throws** "circular request value" rather than
+  memoizing `undefined`.
+- **The store follows the request**, per transport: the endpoint's context on
+  the wire, the one the scope normalized in-process, the object you handed
+  `.with({ context })`, and per call when nothing supplied either. Without
+  `AsyncLocalStorage` (workerd with no `nodejs_compat`) there is no scope to
+  share, so a value is computed per invocation — the guards and handler of one
+  call still share it, exactly as before this existed.
+- **No disposal in v1.** `perRequest` has no `onDispose`: on WinterCG runtimes
+  the render's scope settles at the shell, so "released when the response has
+  flushed" would fire mid-stream. An app that needs teardown owns it in its own
+  handler, where it already has the request.
+
+`rq.locals` is the other face of the same store — the **escape hatch**, for a
+value too small or too transient to name, and the reason a guard can still
+write `rq.locals.x` and have the handler read it. Reach for a per-request value
+first: it types itself from its own setup, and the accessor is the only way to
+get at it, so there is nothing to cast.
 
 ## The endpoint
 
@@ -384,7 +561,8 @@ app.use(createRequestHandler({ /* documents, unchanged */ }));
 
 `guard` covers requests this handler serves. It does **not** run for the
 in-process calls the document handler beside it makes while rendering — put
-auth that must hold on every transport in each function's `use:` chain
+auth that must hold on every transport in the function's definition — its
+`use:` chain, or a `serverFnPreset` shared across the module
 (rfc-server-v3 §1, #493).
 
 On WinterCG runtimes (Cloudflare, Deno, Bun) skip the adapter —
@@ -628,7 +806,10 @@ Every server function is a public HTTP endpoint; the defaults assume that:
   wire-level backstop, **not** an app-wide seam: an in-process (SSR-time) call
   never enters the handler, so it runs only that function's own `use` chain.
   Auth that must hold on every transport belongs in the definition — `use:` on
-  each function (rfc-server-v3 §1, #489/#493).
+  each function, or one `serverFnPreset({ use })` shared by the module
+  (rfc-server-v3 §1, #489/#493). The build's `requireGuards` check (on by
+  default) is what makes "nobody forgot one" a guarantee rather than an
+  intention.
 - **`maxBodyBytes`** (1 MiB default) enforced while reading.
 - **Error masking**: only `ServerFnError` crosses the wire verbatim; other
   throws become a generic 500 in production.
@@ -645,7 +826,7 @@ Every server function is a public HTTP endpoint; the defaults assume that:
 
 | Entry | Runs on | What |
 |---|---|---|
-| `@sigx/server` | server (browser condition throws) | `serverFn`, `ServerFnError`, `isServerFnError`, types |
+| `@sigx/server` | server (browser condition throws) | `serverFn`, `serverStream`, `serverFnPreset`, `perRequest`, `ServerFnError`, `isServerFnError`, types |
 | `@sigx/server/client` | any client (browser, lynx, terminal) | the generated stubs' runtime + `configureServerFn` (dependency-free) |
 | `@sigx/server/server` | anywhere (WinterCG) | `handleServerFnRequest(request, options)` |
 | `@sigx/server/node` | Node | `createServerFnHandler(options)` — connect-style |

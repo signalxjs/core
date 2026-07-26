@@ -8,6 +8,54 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- **`@sigx/server` / `@sigx/vite`: forgetting a guard is now a build error
+  (#489).** `sigxServer({ requireGuards })` — **on by default** — requires
+  every extracted `serverFn` and `serverStream` to be preset-derived, declare
+  `use`, or declare `unguarded: true`. A bare one fails the build naming all
+  three remedies, with file and line; `'warn'` lists them without failing and
+  `false` opts out. This is what turns "a chain that runs on every transport"
+  from a mechanism into a guarantee: runtime cannot check it without a seam
+  whose miss would be fail-open, so the build does. `serverStream` gains an
+  options form (`use`, `unguarded`; no `input`) because it needed somewhere to
+  declare — which also gives streams a first-class `use:` chain. Declaring
+  `unguarded` on a preset-derived function throws at definition time. Honest
+  limits: the check verifies declaration, not correctness, and a module outside
+  `include`/`scan` is never analyzed — so the build marks what it checked and
+  dev warns on an unstamped call, making absence the alarm rather than a false
+  pass. `examples/resume`'s six functions now declare `unguarded: true`.
+
+- **`@sigx/server`: `perRequest` — one value per request, typed without a cast
+  (#494).** An in-process call got a fresh `rq.locals` every time, so work
+  derived from the request was redone by every function that needed it — a page
+  with five SSR-enabled cells decoded the same session five times.
+  `perRequest(setup)` returns an accessor taking `rq`; the value is computed at
+  most once per request/render and shared by every guard, handler and nested
+  in-process call in that flow. Memoized promise included (a guard and a
+  handler racing on first touch share one in-flight decode), sticky on failure
+  for that request, and it throws on self-reference. Values compose by calling
+  each other, with no composition API. **Behaviour change that makes it
+  possible**: the request scope now stores `{ request, locals }` rather than a
+  bare `Request`, so `rq.locals` is a per-request store rather than a per-call
+  scratchpad — which is what the wire path already did. No disposal in v1, and
+  no new `globalThis` seam.
+
+- **`@sigx/server` / `@sigx/vite`: `serverFnPreset` — shared per-module
+  middleware (#398).** A `use:` chain is the only mechanism that runs on every
+  transport, so app-wide auth was a line repeated on every server function.
+  `serverFnPreset({ use })` returns `serverFn`'s exact overloads bound to that
+  chain, plus `preset.stream` for `serverStream`; the policy lives in one
+  shared guard array and each server module spends one line. Preset guards run
+  first; the array is copied at definition; a preset carries `use` and nothing
+  else. Same-module only — exporting one is a build warning and using one in a
+  component file is a build error, both naming the remedy. Editing the shared
+  chain re-mints the hashed symbols derived from it (stable symbols never
+  move); a plain function's symbol is byte-identical to before, pinned by a
+  literal in the tests. Two live bugs fixed alongside it: an SSR-time
+  `serverStream` ran **no** middleware, and the direct form had no middleware
+  seam at all. New build warning: a spread in a `serverFn({...})` options
+  literal hides `id`/`cache`/`invalidates`/`form` from the static readers,
+  which silently disables single-flight boundary refresh.
+
 - **`AsyncState.hasValue` — presence, separate from the value (#485).** Every
   `useData` cell, the `@sigx/cache` cell, `all()` and the SSR-side state now
   expose `readonly hasValue: boolean`. Additive for readers.
@@ -59,6 +107,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   handler and a consumer's arrives via a props spread. The collision itself is
   unchanged; it is just no longer silent. `__DEV__` only, once per element and
   event.
+- **`@sigx/server`: a nested request scope no longer clobbers the enclosing one
+  (#495).** The README documented
+  `runWithServerFnContext({ request, locals: { user } }, () => renderHandler(…))`
+  as the way to pre-seed a render, and it silently did nothing: the document
+  handlers open their own inner scope with the raw request, and an inner scope
+  replaced the stored value. A nested scope for the **same request** — same URL
+  and method, protocol excluded so a TLS-terminating proxy does not split it —
+  now merges: the inner source's fields win where supplied, the enclosing
+  `locals` stays the request store. A source naming no request always merges,
+  so `runWithServerFnContext({ locals }, …)` is the simplest pre-seed; anything
+  genuinely different gets its own store plus a once-per-process dev notice
+  naming both. Hand a nested render its own `locals` to isolate it deliberately.
 
 - **`@sigx/resume`: `app.use(resumePlugin())` on the CLIENT no longer disables
   full-tree hydration (#483).** Its install declared

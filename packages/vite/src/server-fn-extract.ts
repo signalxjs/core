@@ -109,12 +109,44 @@ export interface ServerFnExtractOptions {
     endpoint: string;
     /** Which symbol stubs carry: hashed (web, default) or stable (`role: 'client'`). */
     stubSymbols?: 'hashed' | 'stable';
+    /**
+     * The guard-declaration gate (rfc-server-v3 §1.4, #489). Every extracted
+     * `serverFn` and `serverStream` must be preset-derived, declare `use`, or
+     * declare `unguarded: true` — a bare one is a build error naming all three
+     * remedies.
+     *
+     * **Defaults to `true`.** A `use:` chain is the only mechanism that runs
+     * on every transport, so forgetting one on a new server module is silently
+     * unguarded on all five. Runtime cannot restore that guarantee without a
+     * fail-open registry; the build can. There is no installed base to wall
+     * in, and a guarantee shipped off by default ships to nobody — least of
+     * all to the apps that most need "you forgot a guard here", which are the
+     * ones that will never read an RFC and flip a flag.
+     *
+     * `'warn'` is the migration rung: it lists them without failing. `false`
+     * opts out deliberately — an app that authorizes inside handler bodies is
+     * a legitimate shape.
+     */
+    requireGuards?: boolean | 'warn';
+}
+
+/** A located build failure. Shared by both extractors. */
+export interface ServerFnExtractionError {
+    /** UTF-16 offset in the original source (for line/column reporting). */
+    offset: number;
+    message: string;
 }
 
 export interface ServerFnExtraction {
     fns: ExtractedServerFn[];
     /** Non-`serverFn` value exports — throwing `__serverOnly` stubs. */
     serverOnly: string[];
+    /**
+     * HARD failures — the build must not proceed. Empty unless `requireGuards`
+     * is on. The stub module is still produced: the client must never receive
+     * the real module, whatever else is wrong.
+     */
+    errors: ServerFnExtractionError[];
     /** Constructs the extraction cannot represent client-side (re-exports…). */
     warnings: string[];
     /** The full client replacement module. */
@@ -132,6 +164,16 @@ const LANG_BY_EXT: Record<string, 'ts' | 'tsx' | 'js' | 'jsx'> = {
 
 /** Statement types that only exist at compile time — never stubbed. */
 const TYPE_ONLY_DECLS = new Set(['TSTypeAliasDeclaration', 'TSInterfaceDeclaration']);
+
+/**
+ * What a module-level `const x = …(…)` resolved to: a server function, a
+ * stream, and — when it came through a `serverFnPreset` local — the preset
+ * call's source text, which the derived function's hash seed mixes in (#398).
+ */
+interface CallKind {
+    kind: 'fn' | 'stream';
+    presetSource?: string;
+}
 
 /**
  * Statically read the options-form `id` from a `serverFn({...})` call:
@@ -178,6 +220,81 @@ export function readServerFnCacheOption(call: Node): boolean {
  */
 export function readServerFnInvalidatesOption(call: Node): boolean {
     return hasServerFnOptionKey(call, 'invalidates');
+}
+
+/**
+ * A spread in a `serverFn({...})` options literal (#398). `id`, `cache`,
+ * `invalidates` and `form` are read statically from the call site, so keys
+ * arriving through a spread are invisible to every reader above — and the
+ * failure is silent in all four directions. Warning-only: the function still
+ * extracts, and the check deliberately fires even when the spread happens to
+ * carry none of them, because which keys it carries is undecidable here.
+ */
+export function hasServerFnOptionsSpread(call: Node): boolean {
+    const args = (call.arguments as Node[]) ?? [];
+    if (args.length !== 1 || args[0]?.type !== 'ObjectExpression') return false;
+    return ((args[0].properties as Node[]) ?? []).some((prop) => prop.type === 'SpreadElement');
+}
+
+/** The message for {@link hasServerFnOptionsSpread}, shared by both extractors. */
+export function optionsSpreadWarning(name: string): string {
+    return (
+        `serverFn "${name}": a spread (\`...\`) in the options literal hides \`id\`, \`cache\`, ` +
+        `\`invalidates\` and \`form\` from the build — all four are read STATICALLY from this ` +
+        `call site, so anything inside the spread is invisible: the stub stays POST-only, no ` +
+        `\`action\`/\`method\` is stamped, and a hidden \`invalidates\` silently disables ` +
+        `single-flight boundary refresh (rfc-server §6.3). Write those four keys literally at ` +
+        `the call site.`
+    );
+}
+
+/**
+ * Statically detect a `use:` chain (#489) — presence only, like `cache`: the
+ * guards are runtime values the pipeline reads off the definition, and the
+ * gate's question is "did you declare one?", not "is it any good".
+ */
+export function readServerFnUseOption(call: Node): boolean {
+    return hasServerFnOptionKey(call, 'use');
+}
+
+/**
+ * Statically detect `unguarded: true` (#489) — the LITERAL only, the same
+ * discipline `form` has. This bit stands between a function and a build error
+ * that exists to catch a forgotten guard, so a non-literal that happened to be
+ * falsy at runtime must not silence it.
+ */
+export function readServerFnUnguardedOption(call: Node): boolean {
+    const args = (call.arguments as Node[]) ?? [];
+    if (args.length !== 1 || args[0]?.type !== 'ObjectExpression') return false;
+    for (const prop of (args[0].properties as Node[]) ?? []) {
+        if (prop.type !== 'Property' || prop.computed === true) continue;
+        const key = prop.key as Node;
+        const keyName =
+            key.type === 'Identifier' ? (key.name as string)
+            : key.type === 'Literal' ? String(key.value)
+            : '';
+        if (keyName !== 'unguarded') continue;
+        const value = prop.value as Node;
+        return value.type === 'Literal' && value.value === true;
+    }
+    return false;
+}
+
+/**
+ * The message the gate fails with. It names all three remedies, because the
+ * check verifies DECLARATION, not correctness — the honest limit (§1.5) is
+ * that it converts "silently unguarded" into "a list a human wrote", which is
+ * the unit a review can act on.
+ */
+export function missingGuardError(name: string, stream: boolean): string {
+    const wrapper = stream ? 'serverStream' : 'serverFn';
+    return (
+        `${wrapper} "${name}" declares no guard chain. Every server function is a public ` +
+        `endpoint reachable on every transport, so it must either derive from a ` +
+        `serverFnPreset({ use }), declare its own \`use: [...]\`, or say \`unguarded: true\` ` +
+        `if it is deliberately open (rfc-server-v3 §1.3-1.4). Turn this check off with ` +
+        `sigxServer({ requireGuards: false }), or down with 'warn' while migrating.`
+    );
 }
 
 /** Presence of a non-computed key on the single object-literal argument. */
@@ -278,16 +395,44 @@ export const KEY_STAMP_MARKER = '/*! sigx:server-fn-keys */';
  * two names mints two symbols — the FIRST export's key wins here, matching
  * the stub whose key a client actually calls through first.
  */
-export function serverFnKeyStamps(fns: ExtractedServerFn[]): string {
+export function serverFnKeyStamps(fns: ExtractedServerFn[], guardChecked = false): string {
     const seen = new Set<string>();
     const lines: string[] = [];
     for (const fn of fns) {
-        if (fn.stream || !fn.local || seen.has(fn.local)) continue;
+        if (!fn.local || seen.has(fn.local)) continue;
         seen.add(fn.local);
-        lines.push(`${fn.local}.__sigxKey = ${JSON.stringify(fn.stableSymbol)};`);
+        // Streams are not `useData` targets, so they get no key — but they ARE
+        // held to the guard gate, so they still get the checked marker.
+        if (!fn.stream) lines.push(`${fn.local}.__sigxKey = ${JSON.stringify(fn.stableSymbol)};`);
+        // The §1.5 mitigation: a `*.server.ts` outside `include`/`scan` is
+        // never analyzed, so the gate cannot see it and a prod build would be
+        // silently unguarded. Marking what WAS checked makes absence the
+        // alarm — a missing signal degrades to silence, never a false pass.
+        if (guardChecked) lines.push(`${fn.local}.__sigxGuardChecked = true;`);
     }
     if (lines.length === 0) return '';
+    // One build-wide marker beside the per-fn ones: it is what lets the
+    // runtime tell "checked build, unchecked function" (warn) from "no
+    // transform at all" (say nothing) — see `__SIGX_GUARDS_CHECKED__` in
+    // docs/seams.md.
+    if (guardChecked) lines.unshift('globalThis.__SIGX_GUARDS_CHECKED__ = true;');
     return `\n${KEY_STAMP_MARKER}\n${lines.join('\n')}\n`;
+}
+
+/**
+ * Exporting a `serverFnPreset` looks like the way to share one policy across
+ * modules, and it silently is not: the extractors are per-file by contract
+ * (rfc-server N.5), so the importing module cannot see that the local is a
+ * preset and every function derived from it there extracts as nothing.
+ */
+function exportedPresetWarning(name: string): string {
+    return (
+        `serverFnPreset "${name}" is exported — a preset is a per-MODULE construct. The ` +
+        `extractors analyze one file at a time, so a preset imported elsewhere is invisible ` +
+        `there and the functions derived from it would not extract at all; this export becomes ` +
+        `a server-only stub. Share the guard ARRAY instead and declare one ` +
+        `serverFnPreset({ use }) per *.server.ts module (rfc-server-v3 §1.2).`
+    );
 }
 
 /**
@@ -308,6 +453,10 @@ export function extractServerFns(
     // namespace imports) and their module-level declarations --
     const wrapperLocals = new Map<string, 'fn' | 'stream'>();
     const namespaceLocals = new Set<string>();
+    /** Locals bound to `serverFnPreset` itself (#398) — kept separate from
+     *  `wrapperLocals` so a third kind never leaks into `wrapperKind`'s
+     *  return type, which every classification site reads. */
+    const presetFactoryLocals = new Set<string>();
     for (const stmt of program.body as Node[]) {
         if (stmt.type !== 'ImportDeclaration') continue;
         if (((stmt.source as Node).value as string) !== '@sigx/server') continue;
@@ -324,11 +473,59 @@ export function extractServerFns(
                 wrapperLocals.set((spec.local as Node).name as string, 'fn');
             } else if (imported === 'serverStream') {
                 wrapperLocals.set((spec.local as Node).name as string, 'stream');
+            } else if (imported === 'serverFnPreset') {
+                presetFactoryLocals.add((spec.local as Node).name as string);
             }
         }
     }
 
+    /** Is this init a `serverFnPreset(...)` / `srv.serverFnPreset(...)` call? */
+    const isPresetFactoryCall = (init: unknown): init is Node => {
+        if (!isNode(init) || init.type !== 'CallExpression' || !isNode(init.callee)) return false;
+        const callee = init.callee as Node;
+        if (callee.type === 'Identifier') {
+            return presetFactoryLocals.has((callee.name as string) ?? '');
+        }
+        return (
+            callee.type === 'MemberExpression' &&
+            callee.computed !== true &&
+            (callee.object as Node).type === 'Identifier' &&
+            namespaceLocals.has(((callee.object as Node).name as string) ?? '') &&
+            isNode(callee.property) &&
+            ((callee.property as Node).name as string) === 'serverFnPreset'
+        );
+    };
+
+    // -- pass 1b: preset locals (#398). Its own pass, not folded into the
+    // declaration loop below: `wrapperKind` is also consulted by pass 2's
+    // `export default` probe, so preset knowledge has to be COMPLETE before
+    // any classification runs. Source order happens to suffice today (using a
+    // module-level const above its declaration is a TDZ error, so it cannot
+    // legally occur), but that is an accident to not depend on.
+    /** preset local → the preset call's source text, the hash-seed prefix. */
+    const presetLocals = new Map<string, string>();
+    for (const stmt of program.body as Node[]) {
+        const decl =
+            stmt.type === 'ExportNamedDeclaration' && isNode(stmt.declaration)
+                ? (stmt.declaration as Node)
+                : stmt;
+        if (decl.type !== 'VariableDeclaration') continue;
+        for (const declarator of decl.declarations as Node[]) {
+            if ((declarator.id as Node).type !== 'Identifier') continue;
+            if (!isPresetFactoryCall(declarator.init)) continue;
+            const init = declarator.init as Node;
+            presetLocals.set(
+                (declarator.id as Node).name as string,
+                code.slice(init.start, init.end)
+            );
+        }
+    }
+
     const warnings: string[] = [];
+    const errors: ServerFnExtractionError[] = [];
+    // Default ON: forgetting is the failure mode worth catching, and declining
+    // is a word you type once in the function it applies to (§1.4).
+    const requireGuards = options.requireGuards ?? true;
 
     /** local name → wrapped call source + kind + explicit stable id + GET
      *  mark, for `export { x }` resolution. */
@@ -343,25 +540,39 @@ export function extractServerFns(
             form: boolean;
         }
     >();
-    const wrapperKind = (init: unknown): 'fn' | 'stream' | undefined => {
+    const wrapperKind = (init: unknown): CallKind | undefined => {
         if (!isNode(init) || init.type !== 'CallExpression' || !isNode(init.callee)) {
             return undefined;
         }
         const callee = init.callee as Node;
         if (callee.type === 'Identifier') {
-            return wrapperLocals.get((callee.name as string) ?? '');
+            const name = (callee.name as string) ?? '';
+            const direct = wrapperLocals.get(name);
+            if (direct !== undefined) return { kind: direct };
+            // `authed(...)` — a preset's derived serverFn.
+            const presetSource = presetLocals.get(name);
+            return presetSource === undefined ? undefined : { kind: 'fn', presetSource };
         }
-        // Namespace form: `srv.serverFn(...)` / `srv.serverStream(...)`.
         if (
             callee.type === 'MemberExpression' &&
             callee.computed !== true &&
             (callee.object as Node).type === 'Identifier' &&
-            namespaceLocals.has(((callee.object as Node).name as string) ?? '') &&
             isNode(callee.property)
         ) {
+            const object = ((callee.object as Node).name as string) ?? '';
             const prop = (callee.property as Node).name as string;
-            if (prop === 'serverFn') return 'fn';
-            if (prop === 'serverStream') return 'stream';
+            // `authed.stream(...)` — a preset's derived serverStream. Anything
+            // else on a preset is NOT a server function: falling through to
+            // 'fn' would let the option readers probe a generator argument.
+            const presetSource = presetLocals.get(object);
+            if (presetSource !== undefined) {
+                return prop === 'stream' ? { kind: 'stream', presetSource } : undefined;
+            }
+            // Namespace form: `srv.serverFn(...)` / `srv.serverStream(...)`.
+            if (namespaceLocals.has(object)) {
+                if (prop === 'serverFn') return { kind: 'fn' };
+                if (prop === 'serverStream') return { kind: 'stream' };
+            }
         }
         return undefined;
     };
@@ -374,29 +585,57 @@ export function extractServerFns(
         if (decl.type !== 'VariableDeclaration') continue;
         for (const declarator of decl.declarations as Node[]) {
             if ((declarator.id as Node).type !== 'Identifier') continue;
-            const kind = wrapperKind(declarator.init);
-            if (kind === undefined) continue;
+            const call = wrapperKind(declarator.init);
+            if (call === undefined) continue;
             const init = declarator.init as Node;
+            const local = (declarator.id as Node).name as string;
             // Explicit `id` is the OPTIONS form's field — serverStream is
             // direct-form only, so only serverFn calls are probed.
             const idOption =
-                kind === 'fn'
+                call.kind === 'fn'
                     ? readServerFnIdOption(init)
                     : { id: undefined, nonLiteral: false as const };
             if (idOption.nonLiteral) {
                 warnings.push(
-                    `serverFn "${(declarator.id as Node).name as string}": \`id\` must be a ` +
+                    `serverFn "${local}": \`id\` must be a ` +
                     `non-empty string literal (it is read statically) — falling back to the ` +
                     `file-derived stable id.`
                 );
             }
-            localFnSources.set((declarator.id as Node).name as string, {
-                source: code.slice(init.start, init.end),
-                stream: kind === 'stream',
+            if (call.kind === 'fn' && hasServerFnOptionsSpread(init)) {
+                warnings.push(optionsSpreadWarning(local));
+            }
+            // The guard gate (#489). Preset-derived counts — that IS the
+            // declaration — as does `use`, as does saying `unguarded: true`.
+            // A stream is held to the same rule: it is a public endpoint too.
+            if (
+                requireGuards !== false &&
+                call.presetSource === undefined &&
+                !readServerFnUseOption(init) &&
+                !readServerFnUnguardedOption(init)
+            ) {
+                const message = missingGuardError(local, call.kind === 'stream');
+                if (requireGuards === 'warn') warnings.push(message);
+                else errors.push({ offset: init.start, message });
+            }
+            const callSource = code.slice(init.start, init.end);
+            localFnSources.set(local, {
+                // A derived function's seed mixes the PRESET's source text
+                // ahead of the call's, so editing the shared guard chain
+                // re-mints every symbol derived from it (#398). `\0` is
+                // already this seed's field separator. A plain function takes
+                // the call source unchanged — its symbol is byte-identical to
+                // what it was before presets existed, which a pinned literal
+                // hash in the tests proves.
+                source:
+                    call.presetSource === undefined
+                        ? callSource
+                        : `${call.presetSource}\0${callSource}`,
+                stream: call.kind === 'stream',
                 explicitId: idOption.id,
-                get: kind === 'fn' && readServerFnCacheOption(init),
-                invalidates: kind === 'fn' && readServerFnInvalidatesOption(init),
-                form: kind === 'fn' && readServerFnFormOption(init)
+                get: call.kind === 'fn' && readServerFnCacheOption(init),
+                invalidates: call.kind === 'fn' && readServerFnInvalidatesOption(init),
+                form: call.kind === 'fn' && readServerFnFormOption(init)
             });
         }
     }
@@ -422,6 +661,7 @@ export function extractServerFns(
                 local: localName
             });
         } else {
+            if (presetLocals.has(localName)) warnings.push(exportedPresetWarning(localName));
             serverOnly.push(exportedName);
         }
     };
@@ -436,6 +676,9 @@ export function extractServerFns(
             continue;
         }
         if (stmt.type === 'ExportDefaultDeclaration') {
+            if (isPresetFactoryCall(stmt.declaration)) {
+                warnings.push(exportedPresetWarning('default'));
+            }
             if (isServerFnCall(stmt.declaration)) {
                 warnings.push(
                     'default-exported serverFn is not extracted — the transport symbol needs a ' +
@@ -524,5 +767,5 @@ export function extractServerFns(
     }
     if (lines.length === 0) lines.push('export {};');
 
-    return { fns, serverOnly, warnings, stubModule: lines.join('\n') };
+    return { fns, serverOnly, errors, warnings, stubModule: lines.join('\n') };
 }
