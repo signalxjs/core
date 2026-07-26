@@ -318,6 +318,40 @@ describe('refreshable: false stamping (lossy snapshots)', () => {
         expect(record.refreshable).toBeUndefined();
     });
 
+    it('does not stamp for a LOWERCASE on* handler prop', async () => {
+        // The check used to require an upper-case third character, which is
+        // the camelCase convention rather than a rule: `onclick` is equally
+        // valid — it is the spelling the DOM attribute types advertise — and
+        // a props spread makes lowercase handlers easy to forward. Such a
+        // boundary was marked unrefreshable for carrying a handler, which is
+        // the one thing this check exists to forgive.
+        const Counter = makeCounter();
+        const ssr = createSSR({ plugins: [resumePlugin()] });
+        const html = await ssr.render(<Counter initial={1} {...({ onclick: () => {} } as any)} />);
+        const record = Object.values(parseBoundaryTable(html))[0];
+        expect(record.refreshable).toBeUndefined();
+    });
+
+    it('still stamps for an on*-named prop that is dropped and is not a handler', async () => {
+        // `typeof value === 'function'` is what keeps the widened check
+        // honest. Note the name alone proves nothing — `onceEnabled: true`
+        // serializes fine and is correctly NOT lossy — so this uses a value
+        // the snapshot genuinely cannot carry.
+        const Counter = makeCounter();
+        const ssr = createSSR({ plugins: [resumePlugin()] });
+        const html = await ssr.render(<Counter initial={1} {...({ onToken: Symbol('x') } as any)} />);
+        const record = Object.values(parseBoundaryTable(html))[0];
+        expect(record.refreshable).toBe(false);
+    });
+
+    it('does not stamp for a serializable on*-named data prop', async () => {
+        const Counter = makeCounter();
+        const ssr = createSSR({ plugins: [resumePlugin()] });
+        const html = await ssr.render(<Counter initial={1} {...({ onceEnabled: true } as any)} />);
+        const record = Object.values(parseBoundaryTable(html))[0];
+        expect(record.refreshable).toBeUndefined();
+    });
+
     it('stamps for a dropped non-handler function prop (render prop)', async () => {
         const Counter = makeCounter();
         const ssr = createSSR({ plugins: [resumePlugin()] });

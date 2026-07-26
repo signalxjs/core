@@ -93,7 +93,10 @@ export default [
     // 5.65 → 5.75 KB with #478: the same anchor/live-vnode fix as the root
     // entry above — these are its client-side bytes; sat at 5.71 KB. The
     // scheduler entry is still untouched (2.61 KB).
-    limit: '5.75 KB',
+    // 5.75 → 5.8 KB with #523: the hydration path carries the peeled `ref`
+    // through to the setup context, mirroring the client mount path so the
+    // two cannot disagree on what props a component sees; sat at 5.76 KB.
+    limit: '5.8 KB',
     ignore: ['sigx', 'sigx/*', '@sigx/*'],
   },
   {

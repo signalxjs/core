@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { component, useData, Comment, Define } from 'sigx';
+import { component, useData, Comment, Define, createModel } from 'sigx';
 import { renderToString, createSSR } from '../src/index';
 import { createSSRContext } from '../src/server/context';
 import {
@@ -157,6 +157,22 @@ describe('renderToString — host element attribute serialization', () => {
         expect(await renderToString(HostHelper({ className: undefined }) as any)).toBe('<div></div>');
         expect(await renderToString(HostHelper({ className: null }) as any)).toBe('<div></div>');
         expect(await renderToString(HostHelper({ className: false }) as any)).toBe('<div></div>');
+    });
+
+    // Framework keys that a `{...rest}` props spread can carry onto an
+    // element. The client has always skipped these in patchProp; the server
+    // had not, so the two disagreed on the markup (#523).
+    it('omits modelModifiers', async () => {
+        const html = await renderToString(
+            HostHelper({ id: 'keep', modelModifiers: { trim: true } }) as any);
+        expect(html).toBe('<div id="keep"></div>');
+    });
+
+    it('omits a Model-valued prop rather than stringifying it', async () => {
+        const store = { title: 'hello' };
+        const model = createModel<string>([store, 'title'], v => { store.title = v; });
+        const html = await renderToString(HostHelper({ id: 'keep', title: model }) as any);
+        expect(html).toBe('<div id="keep"></div>');
     });
 
     it('serializes style object via stringifyStyle (camelCase → kebab-case)', async () => {

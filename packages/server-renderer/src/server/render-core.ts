@@ -27,7 +27,8 @@ import {
     Text,
     Comment,
     isComponent,
-    isDirective
+    isDirective,
+    isModel
 } from 'sigx';
 import type { JSXElement, ComponentSetupContext, SlotsObject, DirectiveDefinition, AppContext } from 'sigx';
 import {
@@ -39,6 +40,7 @@ import {
     ERROR_SCOPE_TOKEN,
     getProvided,
     invokeFunctionChildren,
+    splitComponentProps,
 } from 'sigx/internals';
 // Moved into @sigx/runtime-core when mergeProps needed the same parser; still
 // re-exported below so this module's public surface is unchanged.
@@ -186,8 +188,14 @@ function createComponentState(
     const componentName = (vnode.type as any).__name || 'Anonymous';
     const allProps = vnode.props || {};
 
-    // Destructure props (filter out framework-internal keys)
-    const { children, slots: slotsFromProps, $models: _modelsData, ...propsData } = allProps;
+    // Use the SAME splitter the client mount and hydration paths use, rather
+    // than a second destructure that has to be kept in step by hand. It had
+    // already drifted: this path discarded `$models` while the client merged
+    // each model back into props under its own name, so `props.title` was a
+    // `Model` on the client and absent on the server. The three
+    // prop-construction paths must agree key-for-key or SSR and hydration
+    // disagree on the markup.
+    const { children, slotsFromProps, propsWithModels: propsData } = splitComponentProps(allProps);
 
     // Create slots from children, mirroring the client slot extractor so
     // server and client agree on slot presence (otherwise hydration could
@@ -661,6 +669,14 @@ function serializeOpenTagProps(vnode: VNode, appContext: AppContext | null): str
         if (key === 'children' || key === 'key' || key === 'ref') continue;
         if (key.startsWith('client:')) continue; // Skip client directives
         if (key.startsWith('use:')) continue; // Skip element directives
+        // Configures the model directive; never rendered. The client has
+        // skipped this since forever (patchProp) — the server did not, so a
+        // props spread carrying it emitted modelModifiers="[object Object]"
+        // on the server and nothing on the client.
+        if (key === 'modelModifiers') continue;
+        // A two-way Model reaches props under its own name and would
+        // stringify to "[object Object]". Skipped on the client too.
+        if (isModel(value)) continue;
         // Nullish/false values omit the attribute entirely — matching the
         // client, where patchProp clears the style and removeAttribute-like
         // semantics apply. Without this, an unset pass-through prop like

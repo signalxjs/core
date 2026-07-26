@@ -124,9 +124,18 @@ export function lazy<T extends AnyComponentFactory>(
     }
 
     const LazyWrapper = component((ctx) => {
-        // Helper: forward wrapper's props, children, and named slots to inner component
+        // Helper: forward wrapper's props, children, named slots and ref to
+        // the inner component.
         function renderInner(Comp: T): JSXElement {
             const fwdProps: any = { ...ctx.props };
+            // `ref` no longer travels in props (splitComponentProps peels it,
+            // so a spread cannot bind it twice), so re-attach it explicitly.
+            // The wrapper never calls expose(), so without this a consumer's
+            // `ref` on a lazy() component would only ever be handed the
+            // wrapper's empty exposure instead of the inner component's.
+            if (ctx.__forwardedRef != null) {
+                fwdProps.ref = ctx.__forwardedRef;
+            }
             const defaultContent = ctx.slots.default?.() ?? [];
             if (defaultContent.length > 0) {
                 fwdProps.children = defaultContent;

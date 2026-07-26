@@ -400,6 +400,16 @@ export interface ComponentSetupContext<
      * @internal Present only in dev builds; `undefined` in production.
      */
     __hmrReload?(setup: SetupFn<any, any, any, any>): void;
+    /**
+     * The `ref` the consumer put on this component's vnode. It is peeled out
+     * of props (see `splitComponentProps`) so a props spread cannot bind it a
+     * second time, and the renderer already delivers the `expose()` value to
+     * it — so a component has no reason to read this.
+     *
+     * @internal The one legitimate use is re-forwarding it to a component
+     * this one wraps and renders in its place, which is what `lazy` does.
+     */
+    __forwardedRef?: any;
 }
 
 export type ViewFn = () => JSXElement | JSXElement[] | undefined;
