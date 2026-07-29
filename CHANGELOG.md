@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.14.0] — 2026-07-29
+
 ### Added
 
 - **`mergeProps` — compose props from several sources (#525).** Forwarding a
@@ -829,7 +831,8 @@ Initial public release of the SignalX (`sigx`) ecosystem on npm. Six packages pu
 - Node `^20.19.0 || >=22.12.0`
 - `@sigx/vite` peer-depends on `vite >=8.0.0`
 
-[Unreleased]: https://github.com/signalxjs/core/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/signalxjs/core/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/signalxjs/core/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/signalxjs/core/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/signalxjs/core/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/signalxjs/core/compare/v0.10.0...v0.11.0
