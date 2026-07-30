@@ -34,15 +34,18 @@ export function invokeSlotFn(fn: (scopedProps: any) => any, scopedProps?: any, n
         if (__DEV__ && fn.length > 0) {
             // `name` is dev-only, so its fallback lives in here rather than as a
             // default parameter — an initializer would survive into the prod
-            // build for a message that does not. Bracket notation in the
-            // suggestion: a slot name comes from a user-controlled `slot` prop,
-            // so it need not be a valid identifier (`slot="my-thing"`,
-            // `slot="__proto__"`) and dotted access would not parse.
+            // build for a message that does not.
             const label = name ?? 'default';
+            // The suggested call site is built with bracket access and a
+            // JSON-quoted key, so it parses for ANY slot name: a name comes from
+            // a user-controlled `slot` prop, so it need not be a valid
+            // identifier (`slot="my-thing"`, `slot="__proto__"`) and may itself
+            // contain quotes, backslashes or newlines.
             console.warn(
                 `[slots] slot "${label}" was invoked with no scoped props, but its fill declares a parameter. ` +
                 `The fill received an empty object, so anything it destructures reads as undefined. ` +
-                `Pass the props at the call site — slots['${label}']?.(props) — or drop the parameter from the fill.`
+                `Pass the props at the call site — slots[${JSON.stringify(label)}]?.(props) — ` +
+                `or drop the parameter from the fill.`
             );
         }
         result = fn({});
