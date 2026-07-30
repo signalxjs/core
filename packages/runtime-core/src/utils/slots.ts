@@ -36,15 +36,18 @@ export function invokeSlotFn(fn: (scopedProps: any) => any, scopedProps?: any, n
             // default parameter — an initializer would survive into the prod
             // build for a message that does not.
             const label = name ?? 'default';
-            // The suggested call site is built with bracket access and a
-            // JSON-quoted key, so it parses for ANY slot name: a name comes from
-            // a user-controlled `slot` prop, so it need not be a valid
-            // identifier (`slot="my-thing"`, `slot="__proto__"`) and may itself
-            // contain quotes, backslashes or newlines.
+            // The name is JSON-quoted in both places it appears — it comes from
+            // a user-controlled `slot` prop, so besides not being a valid
+            // identifier (`slot="my-thing"`, `slot="__proto__"`) it may contain
+            // quotes, backslashes or newlines. That keeps the message readable
+            // and makes the suggested bracket-access call site parse for any
+            // name. For an ordinary name the output is unchanged, since
+            // `JSON.stringify` supplies the same double quotes.
+            const quoted = JSON.stringify(label);
             console.warn(
-                `[slots] slot "${label}" was invoked with no scoped props, but its fill declares a parameter. ` +
+                `[slots] slot ${quoted} was invoked with no scoped props, but its fill declares a parameter. ` +
                 `The fill received an empty object, so anything it destructures reads as undefined. ` +
-                `Pass the props at the call site — slots[${JSON.stringify(label)}]?.(props) — ` +
+                `Pass the props at the call site — slots[${quoted}]?.(props) — ` +
                 `or drop the parameter from the fill.`
             );
         }
