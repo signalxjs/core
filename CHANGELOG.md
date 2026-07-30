@@ -6,6 +6,42 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING (types): a slot fill is now checked against the slot it fills
+  (#536).** A slot declaration described the contract and nothing enforced it,
+  on either side:
+
+  - `children` on a component was `any`, so a fill could expect scoped props the
+    slot never declares. `<Comp>{({ active }) => …}</Comp>` compiled against
+    `Define.Slot<'default'>` — a slot with no scoped props at all.
+  - `SlotsObject` intersected an untyped zero-argument `default?: () =>
+    JSXElement[]` with the declared slot. `DefaultSlot & ((props: P) => …)` is
+    callable **both** ways, so `slots.default?.()` compiled on a slot whose
+    props were declared, and the fill was handed nothing.
+
+  Together those are exactly the bug #534 fixed at runtime: a fill destructuring
+  `{ active }` on an undeclared-props slot, invoked with no argument. Both
+  mistakes are now compile errors, so the crash is unreachable rather than
+  merely survivable.
+
+  What this breaks, and the fix in each case:
+
+  - a fill expecting props the slot does not declare → declare them:
+    `Define.Slot<'default', { active: boolean }>`
+  - `slots.default?.()` on a slot that declares props → pass them:
+    `slots.default?.(props)`
+
+  The payoff for correct code is that an **unannotated fill parameter is now
+  inferred** from the declaration — `<Comp>{(p) => …}</Comp>` types `p` with no
+  annotation and no cast.
+
+  Element and function children still mix freely in one default slot, so the
+  content type admits arrays holding both. A component that declares **no**
+  `default` slot keeps `children?: any`: children are legal without a
+  declaration and there is nothing to check them against, so declaring the slot
+  is what buys the checking.
+
 ### Fixed
 
 - **`@sigx/runtime-core` / `@sigx/server-renderer`: a scoped slot invoked with
@@ -227,8 +263,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   const out = slots.default?.(ctx);
   ```
 
-  Declaring the scoped props makes the accessor's argument required, so
-  TypeScript points at every call site that still needs updating.
+  In 0.14.0 the types could not help you find those call sites: `SlotsObject`
+  intersected an untyped zero-argument `default` accessor with the declared one,
+  so `slots.default?.()` compiled even on a slot whose props were declared. As
+  of the next release it does not — see the `Changed` note for #536 under
+  Unreleased.
 
 - **BREAKING (types): host attributes on a component are now an opt-in
   (#525).** `JSX.IntrinsicAttributes` used to declare `id`, `class`, `style`

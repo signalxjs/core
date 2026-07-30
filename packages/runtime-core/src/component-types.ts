@@ -158,7 +158,18 @@ export namespace Define {
         : never;
 
     /**
-     * Define a slot with optional scoped props.
+     * Define a slot, optionally with scoped props.
+     *
+     * The declaration is enforced on both sides. A fill supplied as children is
+     * checked against it — a fill expecting props the slot does not declare is
+     * an error, and an unannotated fill parameter is inferred from it — and the
+     * accessor requires the props to be passed: once a slot declares
+     * `TProps`, `slots.x?.()` is an error and `slots.x?.(props)` is the call.
+     *
+     * Scoped props are therefore all-or-nothing per slot; there is no "pass them
+     * or don't" form. A slot whose props are genuinely optional declares them as
+     * optional *members* and is called with an object:
+     * `Define.Slot<'item', { index?: number }>` → `slots.item?.({})`.
      *
      * @example
      * ```tsx
@@ -227,7 +238,8 @@ type ExternalModelProps<T> = {
 export type EventDefinition<T> = { __eventDetail: T };
 
 /**
- * Default slot function type
+ * Default slot function type — the shape of `slots.default` for a component
+ * that did NOT declare the slot, where nothing is known about scoped props.
  */
 type DefaultSlot = () => JSXElement[];
 
@@ -236,10 +248,51 @@ type DefaultSlot = () => JSXElement[];
  * callable accessor only when the parent provided content for it; an
  * unprovided slot reads as `undefined`, so check presence with
  * `slots.x?.()` / `slots.x?.() ?? fallback`.
+ *
+ * The untyped `DefaultSlot` fallback applies only when the component did not
+ * declare a `default` slot. Intersecting it unconditionally used to defeat the
+ * declaration: `DefaultSlot & ((props: P) => …)` is callable BOTH ways, so
+ * `slots.default?.()` compiled even on a slot whose props were declared, and
+ * the fill was handed nothing. That is precisely the call site a declaration
+ * exists to flag.
  */
-export type SlotsObject<TSlots = {}> = {
-    default?: DefaultSlot;
-} & TSlots;
+export type SlotsObject<TSlots = {}> =
+    ('default' extends keyof NonNullable<TSlots> ? {} : { default?: DefaultSlot })
+    & TSlots;
+
+/**
+ * Slot content: what the renderer can turn into nodes, plus render-prop fills
+ * of exactly the shape `TFill` describes.
+ *
+ * `TFill` is threaded through the array case rather than applied only at the
+ * top, because the runtime lets a default slot mix element children with
+ * function children freely — and JSX collects multiple children into an array,
+ * so `<C><span/>{(p) => …}</C>` arrives as one array holding both.
+ */
+type SlotContent<TFill> =
+    | JSXElement
+    | undefined
+    | TFill
+    | readonly SlotContent<TFill>[];
+
+/**
+ * The `children` type for a component's JSX props.
+ *
+ * A component that declares a `default` slot gets its children checked against
+ * that declaration: ordinary content, or a render-prop fill matching the
+ * declared scoped props. So a fill destructuring props the slot never declares
+ * is an error, and a fill whose parameter disagrees with the declared props is
+ * an error — while a fill written with no annotation has its parameter type
+ * INFERRED from the declaration, which is the point.
+ *
+ * A component that declares no `default` slot keeps `any`. Narrowing there
+ * would be a guess: children are legal without a declaration (they land in the
+ * default slot at runtime either way), and there is nothing to check them
+ * against.
+ */
+type SlotChildren<TSlots> = 'default' extends keyof NonNullable<TSlots>
+    ? SlotContent<NonNullable<NonNullable<TSlots>['default']>>
+    : any;
 
 /**
  * Extract event names from an event definition
@@ -512,7 +565,7 @@ type SyncProps<TCombined> = 'value' extends keyof TCombined
 // Return type for component - the function IS the component
 export type ComponentFactory<TCombined extends Record<string, any>, TRef, TSlots> = ((props: StripForJSX<Omit<TCombined, EventNames<TCombined>>> & EventHandlers<TCombined> & SlotProps<TSlots> & SyncProps<TCombined> & ExternalModelProps<TCombined> & JSX.IntrinsicAttributes & ComponentAttributeExtensions & {
     ref?: Ref<TRef>;
-    children?: any;
+    children?: SlotChildren<TSlots>;
 }) => JSXElement) & {
     /** @internal Setup function for the renderer */
     __setup: SetupFn<StripInternalMarkers<TCombined>, TCombined, TRef, TSlots>;
