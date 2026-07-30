@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { isPromise, Utils, guid } from '../src/utils/index';
 import { isComponent } from '../src/utils/is-component';
 import { normalizeSubTree } from '../src/utils/normalize';
@@ -329,12 +329,101 @@ describe('createSlots', () => {
         expect(result[0].props.text).toBe('hi');
     });
 
-    it('calls a function child with undefined when the accessor gets no props', () => {
+    it('hands a function child an empty object when the accessor gets no props', () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
         let seen: any = 'untouched';
         const fnChild = (p: any) => { seen = p; return { type: 'span', props: {}, key: null, children: [], dom: null }; };
         const slots = createSlots([fnChild]);
         slots.default!();
-        expect(seen).toBeUndefined();
+        expect(seen).toEqual({});
+        warn.mockRestore();
+    });
+
+    // The two idioms that used to combine into a hard throw: a fill written as
+    // a destructure, and a consumer invoking the accessor with no props (#534).
+    it('does not throw when a destructuring fill is invoked with no scoped props', () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const fnChild = ({ active }: any) => ({ type: 'span', props: { active }, key: null, children: [], dom: null });
+        const slots = createSlots([fnChild]);
+        const result = slots.default!();
+        // Degrades to "the prop was not passed", like every other missing prop.
+        expect(result[0].props.active).toBeUndefined();
+        warn.mockRestore();
+    });
+
+    it('hands a `slots`-prop fill an empty object too, so both provision forms agree', () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        let seen: any = 'untouched';
+        const slots = createSlots(null, {
+            default: (p: any) => { seen = p; return { type: 'span', props: {}, key: null, children: [], dom: null }; },
+        });
+        slots.default!();
+        expect(seen).toEqual({});
+        warn.mockRestore();
+    });
+
+    it('warns in dev when a fill declares a parameter but the accessor got no props', () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+        createSlots([({ active }: any) => ({ type: 'span', props: { active }, key: null, children: [], dom: null })])
+            .default!();
+        expect(warn).toHaveBeenCalledTimes(1);
+        expect(warn.mock.calls[0][0]).toContain('slot "default" was invoked with no scoped props');
+
+        // Props supplied → nothing to warn about.
+        warn.mockClear();
+        createSlots([({ active }: any) => ({ type: 'span', props: { active }, key: null, children: [], dom: null })])
+            .default!({ active: true });
+        expect(warn).not.toHaveBeenCalled();
+
+        // A fill that declares no parameter cannot be surprised by `{}`.
+        warn.mockClear();
+        createSlots([() => ({ type: 'span', props: {}, key: null, children: [], dom: null })]).default!();
+        expect(warn).not.toHaveBeenCalled();
+
+        warn.mockRestore();
+    });
+
+    // The accessor only walks the children when `extract()` recorded a function
+    // among them; these pin that the flag is right in both directions and that
+    // it is re-derived on a version bump rather than sticking.
+    it('returns a fresh copy for element-only children and named slots', () => {
+        const a = { type: 'i', props: {}, key: null, children: [], dom: null };
+        const b = { type: 'em', props: { slot: 'side' }, key: null, children: [], dom: null };
+        const slots = createSlots([a, b]);
+
+        const first = slots.default!();
+        expect(first).toEqual([a]);
+        expect(slots.default!()).not.toBe(first);
+
+        const named = (slots as any).side();
+        expect(named).toEqual([b]);
+        expect((slots as any).side()).not.toBe(named);
+    });
+
+    it('picks up a function child that only appears after a version bump', () => {
+        const el = { type: 'i', props: {}, key: null, children: [], dom: null };
+        const slots = createSlots([el]);
+        expect(slots.default!()).toEqual([el]);
+
+        // The renderer's contract: _children is only reassigned together with a
+        // version bump. The new children DO contain a function.
+        slots._children = [(p: any) => ({ type: 'span', props: { got: p.greeting }, key: null, children: [], dom: null })];
+        slots._version.v++;
+
+        const result = slots.default!({ greeting: 'hi' });
+        expect(result[0].props.got).toBe('hi');
+    });
+
+    it('stops walking once a function child is replaced by element children', () => {
+        const slots = createSlots([(p: any) => ({ type: 'span', props: { got: p.greeting }, key: null, children: [], dom: null })]);
+        expect(slots.default!({ greeting: 'hi' })[0].props.got).toBe('hi');
+
+        const el = { type: 'i', props: {}, key: null, children: [], dom: null };
+        slots._children = [el];
+        slots._version.v++;
+
+        expect(slots.default!()).toEqual([el]);
     });
 
     it('invokes function children and passes element children through, preserving order', () => {

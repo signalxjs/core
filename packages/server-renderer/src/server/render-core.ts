@@ -40,6 +40,7 @@ import {
     ERROR_SCOPE_TOKEN,
     getProvided,
     invokeFunctionChildren,
+    invokeSlotFn,
     splitComponentProps,
     // Moved into @sigx/runtime-core when mergeProps needed the same parser.
     // Re-exported below so this module's surface is unchanged.
@@ -207,6 +208,7 @@ function createComponentState(
     // like the number 0 or '' is valid slot content.
     const defaultChildren: any[] = [];
     const elementNamed: Record<string, any[]> = Object.create(null);
+    let defaultHasFn = false;
     if (children != null && typeof children !== 'boolean') {
         const items = Array.isArray(children) ? children : [children];
         for (const child of items) {
@@ -214,6 +216,11 @@ function createComponentState(
                 const name = child.props.slot;
                 (elementNamed[name] ?? (elementNamed[name] = [])).push(child);
             } else if (child != null && child !== false && child !== true) {
+                // A function is `typeof 'function'`, never `'object'`, so it can
+                // never satisfy the named-slot test above — a render-prop child
+                // always lands here, in `default`. Recording it now keeps the
+                // ordinary element-children slot read a plain copy.
+                if (typeof child === 'function') defaultHasFn = true;
                 defaultChildren.push(child);
             }
         }
@@ -225,7 +232,9 @@ function createComponentState(
     // slot parity).
     const slots: SlotsObject<any> = Object.create(null);
     if (defaultChildren.length > 0) {
-        slots.default = (scopedProps?: any) => invokeFunctionChildren(defaultChildren, scopedProps);
+        slots.default = defaultHasFn
+            ? (scopedProps?: any) => invokeFunctionChildren(defaultChildren, scopedProps, 'default')
+            : () => defaultChildren.slice();
     }
     for (const name in elementNamed) {
         // A child with `slot="default"` is a named slot on the client too,
@@ -236,14 +245,19 @@ function createComponentState(
         // solely by the un-slotted children above (and the `slots` prop below).
         if (name === 'default') continue;
         const list = elementNamed[name];
-        slots[name] = (scopedProps?: any) => invokeFunctionChildren(list, scopedProps);
+        // Element-only by construction (see the scan above), so a named slot is
+        // always just a defensive copy.
+        slots[name] = () => list.slice();
     }
     // Slots provided via the `slots` prop take precedence over element-based
-    // ones of the same name, matching the client extractor.
+    // ones of the same name, matching the client extractor — including the
+    // client's result normalisation and its `{}` scoped-props default, which is
+    // why the fill goes through `invokeSlotFn` instead of being installed raw.
     if (slotsFromProps) {
         for (const name of Object.keys(slotsFromProps)) {
-            if (typeof slotsFromProps[name] === 'function') {
-                slots[name] = slotsFromProps[name];
+            const fill = slotsFromProps[name];
+            if (typeof fill === 'function') {
+                slots[name] = (scopedProps?: any) => invokeSlotFn(fill, scopedProps, name);
             }
         }
     }
