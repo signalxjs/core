@@ -164,6 +164,16 @@
       "consumesSiblings": ["@sigx/cli", "@sigx/terminal"],
       "catalog": "complete",
       "verify": { "unit": "pnpm test", "browser": null, "manual": "native (iOS/Android) — no browser surface" }
+    },
+    {
+      "repo": "mermaid",
+      "tier": 4,
+      "publishes": ["@sigx/mermaid"],
+      "consumesCore": ["sigx", "@sigx/server-renderer", "@sigx/vite"],
+      "consumesSiblings": ["@sigx/router", "@sigx/ssg"],
+      "consumesNote": "the package peers only `sigx` (and `mermaid`, a non-sigx peer). @sigx/server-renderer, @sigx/vite, @sigx/router and @sigx/ssg are examples-only — but examples/basic doubles as the e2e fixture, so a breaking change in any of them fails this repo's build. Hence the tier, not just the pins.",
+      "catalog": "complete",
+      "verify": { "unit": "pnpm test", "browser": "examples/basic — build and serve; diagrams render and the theme toggle re-renders them" }
     }
   ]
 }

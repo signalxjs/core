@@ -69,6 +69,8 @@ Tier 2   cli        ← @sigx/args, @sigx/terminal
 ─────────── barrier: tier 2 live on npm ───────────
 Tier 3   ssg        ← @sigx/router, @sigx/cli, @sigx/args
          lynx       ← @sigx/cli, @sigx/terminal
+─────────── barrier: tier 3 live on npm ───────────
+Tier 4   mermaid    ← @sigx/router, @sigx/ssg
 ```
 
 Everything **within** a tier is independent — align and release them in parallel.
