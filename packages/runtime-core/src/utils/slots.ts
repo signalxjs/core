@@ -6,10 +6,10 @@
 import { signal } from '@sigx/reactivity';
 
 /**
- * Call a slot fill with the scoped props — the ONE place a fill is ever
- * invoked. The client accessor, the function-children path and the server's
- * own slot object all route through here, so the two renderers cannot drift on
- * what a fill receives.
+ * Invoke a slot fill and normalise its result to an array — the ONE place a
+ * fill is ever called. The client accessor, the function-children path and the
+ * server's own slot object all route through here, so the two renderers cannot
+ * drift on what a fill receives or on what its result becomes.
  *
  * A fill invoked with no scoped props gets `{}`, never `undefined`. A scoped
  * fill is written as a destructure — `({ active }) => …` — and destructuring
@@ -19,28 +19,34 @@ import { signal } from '@sigx/reactivity';
  * the parent didn't pass does everywhere else. The object is allocated per
  * invocation rather than shared: a fill is handed it, and one that writes to
  * its props must not be writing into another component's.
+ *
+ * The result is normalised the same way for every provision form:
+ * `null`/`undefined` becomes empty, an array passes through, any other value is
+ * wrapped. The server previously installed a `slots`-prop fill raw and skipped
+ * this, so a fill returning a single vnode handed the component `[vnode]` on
+ * the client and `vnode` on the server.
  */
-function callSlotFn(fn: (scopedProps: any) => any, scopedProps: any, name: string): any {
-    if (scopedProps !== undefined) return fn(scopedProps);
-    if (__DEV__ && fn.length > 0) {
-        console.warn(
-            `[slots] slot "${name}" was invoked with no scoped props, but its fill declares a parameter. ` +
-            `The fill received an empty object, so anything it destructures reads as undefined. ` +
-            `Pass the props at the call site — slots.${name}?.(props) — or drop the parameter from the fill.`
-        );
+export function invokeSlotFn(fn: (scopedProps: any) => any, scopedProps?: any, name?: string): any[] {
+    let result: any;
+    if (scopedProps !== undefined) {
+        result = fn(scopedProps);
+    } else {
+        if (__DEV__ && fn.length > 0) {
+            // `name` is dev-only, so its fallback lives in here rather than as a
+            // default parameter — an initializer would survive into the prod
+            // build for a message that does not. Bracket notation in the
+            // suggestion: a slot name comes from a user-controlled `slot` prop,
+            // so it need not be a valid identifier (`slot="my-thing"`,
+            // `slot="__proto__"`) and dotted access would not parse.
+            const label = name ?? 'default';
+            console.warn(
+                `[slots] slot "${label}" was invoked with no scoped props, but its fill declares a parameter. ` +
+                `The fill received an empty object, so anything it destructures reads as undefined. ` +
+                `Pass the props at the call site — slots['${label}']?.(props) — or drop the parameter from the fill.`
+            );
+        }
+        result = fn({});
     }
-    return fn({});
-}
-
-/**
- * Invoke a slot fill provided via the `slots` prop and normalise its result to
- * an array: `null`/`undefined` becomes empty, an array passes through, any
- * other value is wrapped. Shared by the client accessor and the server, which
- * previously installed such a fill raw — so a fill returning a single vnode
- * handed the component `[vnode]` on the client and `vnode` on the server.
- */
-export function invokeSlotFn(fn: (scopedProps: any) => any, scopedProps?: any, name = 'default'): any[] {
-    const result = callSlotFn(fn, scopedProps, name);
     if (result == null) return [];
     return Array.isArray(result) ? result : [result];
 }
@@ -52,9 +58,10 @@ export function invokeSlotFn(fn: (scopedProps: any) => any, scopedProps?: any, n
  * with the same `scopedProps` the `slots` prop form receives, instead of
  * reaching the renderer as a bare function and being dropped as an empty node.
  *
- * Returns a fresh array, preserving the accessor's defensive-copy contract, and
- * normalises a function's result exactly like the `slots` prop branch does:
- * `null`/`undefined` is dropped, an array is flattened one level.
+ * Returns a fresh array, preserving the accessor's defensive-copy contract.
+ * Each function goes through `invokeSlotFn`, so its result is normalised exactly
+ * as the `slots` prop form's is: `null`/`undefined` contributes nothing and an
+ * array is flattened one level.
  *
  * Only call this for a list that actually CONTAINS a function — a hand loop is
  * roughly 2x `list.slice()` at a handful of children and ~6.5x at a hundred, so
@@ -66,7 +73,7 @@ export function invokeSlotFn(fn: (scopedProps: any) => any, scopedProps?: any, n
  * is found does it truncate to the copied prefix and switch to append-mode for
  * the rest.
  */
-export function invokeFunctionChildren(list: any[], scopedProps?: any, name = 'default'): any[] {
+export function invokeFunctionChildren(list: any[], scopedProps?: any, name?: string): any[] {
     const n = list.length;
     const out: any[] = [];
     for (let i = 0; i < n; i++) {
@@ -78,13 +85,11 @@ export function invokeFunctionChildren(list: any[], scopedProps?: any, name = 'd
             for (let j = i; j < n; j++) {
                 const it = list[j];
                 if (typeof it === 'function') {
-                    const r = callSlotFn(it, scopedProps, name);
-                    if (r == null) continue;
-                    if (Array.isArray(r)) {
-                        for (const x of r) out.push(x);
-                    } else {
-                        out.push(r);
-                    }
+                    // Index loop, not `for…of`/spread: the fill's result is a
+                    // fresh array from `invokeSlotFn` and the iterator protocol
+                    // over it costs more than the copy itself.
+                    const r = invokeSlotFn(it, scopedProps, name);
+                    for (let k = 0; k < r.length; k++) out.push(r[k]);
                 } else {
                     out.push(it);
                 }

@@ -37,13 +37,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   on *every* slot read, testing each item for a function — the right work for
   the rare slot holding one and pure overhead for every other slot read in
   every app. The child scan now records whether a function is present, so the
-  walk happens only when there is something to invoke. Measured on the slot
-  accessor: a default slot of 100 element children goes 317ns → 103ns (3.1x),
-  a named slot of 100 goes 292ns → 114ns (2.6x), and small slots gain 7–13%;
-  the render-prop path is unchanged. A named slot cannot hold a function child
-  at all — a function never satisfies the `slot`-prop test that routes a child
-  there — so that path is now simply a copy. New regression-gated
-  `slots` micro-bench suite, with `list.slice()` as its floor.
+  walk happens only when there is something to invoke. Measured in-process
+  against the walk it replaces (best of 5, arms interleaved): 1.5x a plain copy
+  at one child, 1.8x at three, 2.4x at ten, 8.6x at a hundred. A slot read also
+  pays a fixed cost the walk is not part of — the proxy trap, the presence
+  check, the version-signal read — so the end-to-end gain per read is smaller
+  than those ratios and grows with child count. A named slot cannot hold a
+  function child at all — a function never satisfies the `slot`-prop test that
+  routes a child there — so that path is now simply a copy. New `slots`
+  micro-bench suite, with `list.slice()` as its floor.
+
+  The render-prop path pays slightly for the shared funnel: every fill result
+  now goes through the same normalisation, which allocates one array per
+  function child. That buys a single invocation path for both renderers and
+  both provision forms, which is what keeps them from drifting again.
 
 ## [0.14.0] — 2026-07-29
 
