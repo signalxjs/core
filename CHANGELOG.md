@@ -6,6 +6,62 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING (types): a slot fill is now checked against the slot it fills
+  (#536).** A slot declaration described the contract and nothing enforced it,
+  on either side:
+
+  - `children` on a component was `any`, so a fill could expect scoped props the
+    slot never declares. `<Comp>{({ active }) => …}</Comp>` compiled against
+    `Define.Slot<'default'>` — a slot with no scoped props at all.
+  - `SlotsObject` intersected an untyped zero-argument `default?: () =>
+    JSXElement[]` with the declared slot. `DefaultSlot & ((props: P) => …)` is
+    callable **both** ways, so `slots.default?.()` compiled on a slot whose
+    props were declared, and the fill was handed nothing.
+
+  Together those are exactly the bug #534 fixed at runtime: a fill destructuring
+  `{ active }` on an undeclared-props slot, invoked with no argument. Both
+  mistakes are now compile errors, so the crash is unreachable rather than
+  merely survivable.
+
+  What this breaks, and the fix in each case:
+
+  - a fill expecting props the slot does not declare → declare them:
+    `Define.Slot<'default', { active: boolean }>`
+  - `slots.default?.()` on a slot that declares props → pass them:
+    `slots.default?.(props)`
+
+  The payoff for correct code is that an **unannotated fill parameter is now
+  inferred** from the declaration — `<Comp>{(p) => …}</Comp>` types `p` with no
+  annotation and no cast.
+
+  Element and function children still mix freely in one default slot, so the
+  content type admits arrays holding both. A component that declares **no**
+  `default` slot keeps `children?: any`: children are legal without a
+  declaration and there is nothing to check them against, so declaring the slot
+  is what buys the checking.
+
+- **`@sigx/runtime-core`: reading a slot of ordinary element children is a
+  plain copy again (#534).** #476's render-prop support walked the child array
+  on *every* slot read, testing each item for a function — the right work for
+  the rare slot holding one and pure overhead for every other slot read in
+  every app. The child scan now records whether a function is present, so the
+  walk happens only when there is something to invoke. Measured in-process
+  against the walk it replaces (best of 5, arms interleaved): 1.5x a plain copy
+  at one child, 1.8x at three, 2.4x at ten, 8.6x at a hundred. A slot read also
+  pays a fixed cost the walk is not part of — the proxy trap, the presence
+  check, the version-signal read — so the end-to-end gain per read is smaller
+  than those ratios and grows with child count. A named slot cannot hold a
+  function child at all — a function never satisfies the `slot`-prop test that
+  routes a child there — so that path is now simply a copy. New `slots`
+  micro-bench suite, with `list.slice()` as its floor.
+
+  The render-prop path pays slightly for the shared funnel: every fill result
+  now goes through the same normalisation, which allocates one array per
+  function child. That buys a single invocation path for both renderers and
+  both provision forms, which is what keeps them from drifting again.
+
 ### Fixed
 
 - **`@sigx/runtime-core` / `@sigx/server-renderer`: a scoped slot invoked with
@@ -29,28 +85,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   while the client wrapped its result, so a fill returning a single vnode
   handed the component `[vnode]` on the client and `vnode` on the server —
   observable to any component that inspects what its slot returned.
-
-### Changed
-
-- **`@sigx/runtime-core`: reading a slot of ordinary element children is a
-  plain copy again (#534).** #476's render-prop support walked the child array
-  on *every* slot read, testing each item for a function — the right work for
-  the rare slot holding one and pure overhead for every other slot read in
-  every app. The child scan now records whether a function is present, so the
-  walk happens only when there is something to invoke. Measured in-process
-  against the walk it replaces (best of 5, arms interleaved): 1.5x a plain copy
-  at one child, 1.8x at three, 2.4x at ten, 8.6x at a hundred. A slot read also
-  pays a fixed cost the walk is not part of — the proxy trap, the presence
-  check, the version-signal read — so the end-to-end gain per read is smaller
-  than those ratios and grows with child count. A named slot cannot hold a
-  function child at all — a function never satisfies the `slot`-prop test that
-  routes a child there — so that path is now simply a copy. New `slots`
-  micro-bench suite, with `list.slice()` as its floor.
-
-  The render-prop path pays slightly for the shared funnel: every fill result
-  now goes through the same normalisation, which allocates one array per
-  function child. That buys a single invocation path for both renderers and
-  both provision forms, which is what keeps them from drifting again.
 
 ## [0.14.0] — 2026-07-29
 
@@ -227,8 +261,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   const out = slots.default?.(ctx);
   ```
 
-  Declaring the scoped props makes the accessor's argument required, so
-  TypeScript points at every call site that still needs updating.
+  In 0.14.0 the types could not help you find those call sites: `SlotsObject`
+  intersected an untyped zero-argument `default` accessor with the declared one,
+  so `slots.default?.()` compiled even on a slot whose props were declared. As
+  of the next release it does not — see the `Changed` note for #536 under
+  Unreleased.
 
 - **BREAKING (types): host attributes on a component are now an opt-in
   (#525).** `JSX.IntrinsicAttributes` used to declare `id`, `class`, `style`
@@ -277,7 +314,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   exists to forgive. It now tests `typeof value === 'function'`, which is also
   stricter in the other direction: an `on`-prefixed *data* prop that the
   snapshot cannot carry is correctly still lossy.
-
 
 - **Framework-internal keys no longer reach the DOM when props are forwarded
   by spread (#523).** Forwarding a component's leftover props onto its root

@@ -158,7 +158,18 @@ export namespace Define {
         : never;
 
     /**
-     * Define a slot with optional scoped props.
+     * Define a slot, optionally with scoped props.
+     *
+     * The declaration is enforced on both sides. A fill supplied as children is
+     * checked against it — a fill expecting props the slot does not declare is
+     * an error, and an unannotated fill parameter is inferred from it — and the
+     * accessor requires the props to be passed: once a slot declares
+     * `TProps`, `slots.x?.()` is an error and `slots.x?.(props)` is the call.
+     *
+     * Scoped props are therefore all-or-nothing per slot; there is no "pass them
+     * or don't" form. A slot whose props are genuinely optional declares them as
+     * optional *members* and is called with an object:
+     * `Define.Slot<'item', { index?: number }>` → `slots.item?.({})`.
      *
      * @example
      * ```tsx
@@ -227,19 +238,89 @@ type ExternalModelProps<T> = {
 export type EventDefinition<T> = { __eventDetail: T };
 
 /**
- * Default slot function type
+ * Default slot function type — the shape of `slots.default` for a component
+ * that did NOT declare the slot, where nothing is known about scoped props.
  */
 type DefaultSlot = () => JSXElement[];
 
 /**
- * Slots object passed to components. Every slot — `default` included — is a
- * callable accessor only when the parent provided content for it; an
- * unprovided slot reads as `undefined`, so check presence with
- * `slots.x?.()` / `slots.x?.() ?? fallback`.
+ * The declared `default` fill, or `never` if the component declares no
+ * `default` slot.
+ *
+ * Distributive on purpose. A props type can be a union — a discriminated union
+ * of prop shapes is the ordinary way to write one — and `ExtractSlots`'s
+ * conditional distributes, so `TSlots` arrives as a union too. `keyof (A | B)`
+ * is the INTERSECTION of their keys, so a plain `'default' extends keyof TSlots`
+ * reads as false whenever any member lacks the slot, and everything downstream
+ * silently relaxes: the untyped fallback comes back and `children` widens to
+ * `any`. Distributing first asks the question per member instead.
  */
-export type SlotsObject<TSlots = {}> = {
-    default?: DefaultSlot;
-} & TSlots;
+type DefaultFill<TSlots> = NonNullable<TSlots> extends infer S
+    ? S extends any
+        ? 'default' extends keyof S ? NonNullable<S['default']> : never
+        : never
+    : never;
+
+/**
+ * Slots object passed to components. Every slot — `default` included — is a
+ * callable accessor only when the parent provided content for it, and an
+ * unprovided slot reads as `undefined`. So presence is the accessor's own
+ * truthiness (`if (slots.x)`), and the call supplies whatever the slot
+ * declared: `slots.x?.()` for a slot without scoped props,
+ * `slots.x?.(props) ?? fallback` for one with them — on a scoped slot the bare
+ * `slots.x?.()` is a type error, which is the point.
+ *
+ * The untyped `DefaultSlot` fallback applies only when the component declared
+ * no `default` slot. Intersecting it unconditionally used to defeat the
+ * declaration: `DefaultSlot & ((props: P) => …)` is callable BOTH ways, so
+ * `slots.default?.()` compiled even on a slot whose props were declared, and
+ * the fill was handed nothing. That is precisely the call site a declaration
+ * exists to flag.
+ */
+export type SlotsObject<TSlots = {}> =
+    { default?: [DefaultFill<TSlots>] extends [never] ? DefaultSlot : DefaultFill<TSlots> }
+    & OmitDefault<NonNullable<TSlots>>;
+
+/**
+ * `Omit<T, 'default'>` that survives a union. `Omit` is `Pick<T, Exclude<keyof
+ * T, K>>`, and `keyof` a union is the intersection of its members' keys, so a
+ * bare `Omit` over a union throws away every key the members do not share.
+ */
+type OmitDefault<T> = T extends any ? Omit<T, 'default'> : never;
+
+/**
+ * Slot content: what the renderer can turn into nodes, plus render-prop fills
+ * of exactly the shape `TFill` describes.
+ *
+ * `TFill` is threaded through the array case rather than applied only at the
+ * top, because the runtime lets a default slot mix element children with
+ * function children freely — and JSX collects multiple children into an array,
+ * so `<C><span/>{(p) => …}</C>` arrives as one array holding both.
+ */
+type SlotContent<TFill> =
+    | JSXElement
+    | undefined
+    | TFill
+    | readonly SlotContent<TFill>[];
+
+/**
+ * The `children` type for a component's JSX props.
+ *
+ * A component that declares a `default` slot gets its children checked against
+ * that declaration: ordinary content, or a render-prop fill matching the
+ * declared scoped props. So a fill destructuring props the slot never declares
+ * is an error, and a fill whose parameter disagrees with the declared props is
+ * an error — while a fill written with no annotation has its parameter type
+ * INFERRED from the declaration, which is the point.
+ *
+ * A component that declares no `default` slot keeps `any`. Narrowing there
+ * would be a guess: children are legal without a declaration (they land in the
+ * default slot at runtime either way), and there is nothing to check them
+ * against.
+ */
+type SlotChildren<TSlots> = [DefaultFill<TSlots>] extends [never]
+    ? any
+    : SlotContent<DefaultFill<TSlots>>;
 
 /**
  * Extract event names from an event definition
@@ -512,7 +593,7 @@ type SyncProps<TCombined> = 'value' extends keyof TCombined
 // Return type for component - the function IS the component
 export type ComponentFactory<TCombined extends Record<string, any>, TRef, TSlots> = ((props: StripForJSX<Omit<TCombined, EventNames<TCombined>>> & EventHandlers<TCombined> & SlotProps<TSlots> & SyncProps<TCombined> & ExternalModelProps<TCombined> & JSX.IntrinsicAttributes & ComponentAttributeExtensions & {
     ref?: Ref<TRef>;
-    children?: any;
+    children?: SlotChildren<TSlots>;
 }) => JSXElement) & {
     /** @internal Setup function for the renderer */
     __setup: SetupFn<StripInternalMarkers<TCombined>, TCombined, TRef, TSlots>;
