@@ -8,13 +8,15 @@ import { serverFnSuite } from './serverfn.ts';
 import { keyMatchSuite } from './keymatch.ts';
 import { refreshSuite } from './refresh.ts';
 import { packsSuite } from './packs.ts';
+import { slotsSuite } from './slots.ts';
 
 export const SUITES: MicroSuite[] = [
     codecSuite,
     serverFnSuite,
     keyMatchSuite,
     refreshSuite,
-    packsSuite
+    packsSuite,
+    slotsSuite
 ];
 
 export type { MicroBench, MicroSuite, ByteMetric, SuiteName } from './types.ts';

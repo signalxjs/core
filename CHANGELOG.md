@@ -6,6 +6,52 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- **`@sigx/runtime-core` / `@sigx/server-renderer`: a scoped slot invoked with
+  no props hands its fill `{}`, not `undefined` (#534).** `slots.default?.()`
+  used to invoke a function child with `undefined`, so the idiomatic fill —
+  `({ active }) => …`, the shape every scoped-slot example uses — threw
+  `Cannot destructure property 'active' of 'undefined'`. And invoking the
+  accessor with no argument is the shape of every consumer written before
+  0.14.0, when there were no scoped props to pass, so the two idioms combined
+  into a hard crash. A fill now receives an empty object and each declared prop
+  reads as `undefined` — what a prop the parent didn't pass does everywhere
+  else. Applies to both provision forms (a function child and a `slots`-prop
+  fill) and both renderers, which now share one invocation funnel so they
+  cannot drift.
+
+  In dev, a fill that declares a parameter while the accessor was invoked
+  without props warns and names the slot, instead of failing silently.
+
+- **`@sigx/server-renderer`: a `slots`-prop fill's result is normalised on the
+  server as it is on the client (#534).** The server installed the fill raw
+  while the client wrapped its result, so a fill returning a single vnode
+  handed the component `[vnode]` on the client and `vnode` on the server —
+  observable to any component that inspects what its slot returned.
+
+### Changed
+
+- **`@sigx/runtime-core`: reading a slot of ordinary element children is a
+  plain copy again (#534).** #476's render-prop support walked the child array
+  on *every* slot read, testing each item for a function — the right work for
+  the rare slot holding one and pure overhead for every other slot read in
+  every app. The child scan now records whether a function is present, so the
+  walk happens only when there is something to invoke. Measured in-process
+  against the walk it replaces (best of 5, arms interleaved): 1.5x a plain copy
+  at one child, 1.8x at three, 2.4x at ten, 8.6x at a hundred. A slot read also
+  pays a fixed cost the walk is not part of — the proxy trap, the presence
+  check, the version-signal read — so the end-to-end gain per read is smaller
+  than those ratios and grows with child count. A named slot cannot hold a
+  function child at all — a function never satisfies the `slot`-prop test that
+  routes a child there — so that path is now simply a copy. New `slots`
+  micro-bench suite, with `list.slice()` as its floor.
+
+  The render-prop path pays slightly for the shared funnel: every fill result
+  now goes through the same normalisation, which allocates one array per
+  function child. That buys a single invocation path for both renderers and
+  both provision forms, which is what keeps them from drifting again.
+
 ## [0.14.0] — 2026-07-29
 
 ### Added
@@ -152,9 +198,37 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   so every existing import is unchanged. A test pins the entry's import list —
   in the source *and* in the built dist — to empty.
 
-- **`@sigx/runtime-core` / `@sigx/server-renderer`**: a **function passed as children** is now invoked as a scoped slot — `<Comp>{(p) => <span>{p.greeting}</span>}</Comp>` calls the function with the slot's scoped props (Vue scoped-slots / Solid render-prop semantics), identical output to the `slots={{ default: (p) => … }}` prop form (#476). Previously a bare function child was dropped as an empty node; only functions provided via the `slots` prop received scoped props. Function items in the extracted default/named children arrays are invoked once per accessor call, so reactivity is preserved — the call happens inside the consumer's render — on both the client (`createSlots`) and SSR (`renderToString`), keeping hydration in agreement. A function returning `null`/`undefined` is dropped and an array is flattened one level, matching the `slots`-prop branch; named element-based slots (`slot="x"` children) are unaffected. Enables the `asChild` render-prop pattern without a userland workaround.
+- **`@sigx/runtime-core` / `@sigx/server-renderer`**: a **function passed as children** is now invoked as a scoped slot — `<Comp>{(p) => <span>{p.greeting}</span>}</Comp>` calls the function with the slot's scoped props, identical output to the `slots={{ default: (p) => … }}` prop form (#476). Previously a bare function child was dropped as an empty node; only functions provided via the `slots` prop received scoped props. **This also changes what an existing consumer of the slot accessor observes — see the breaking note under Changed below (#534).** Function items in the extracted default/named children arrays are invoked once per accessor call, so reactivity is preserved — the call happens inside the consumer's render — on both the client (`createSlots`) and SSR (`renderToString`), keeping hydration in agreement. A function returning `null`/`undefined` is dropped and an array is flattened one level, matching the `slots`-prop branch; named element-based slots (`slot="x"` children) are unaffected. Enables the `asChild` render-prop pattern without a userland workaround.
 
 ### Changed
+
+- **BREAKING: a component that read a raw function out of its own default slot
+  no longer receives the function (#476, documented in #534).** The Added note
+  above describes the new capability; this is the same change seen from the
+  other side. Before 0.14.0 a function child was collected verbatim, so a
+  component could pull it out of `slots.default?.()` and call it itself — the
+  manual render-prop workaround, which is precisely what people wrote *because*
+  core did not invoke function children. The accessor now returns the
+  function's **already-invoked result**, so that code silently stops working:
+  the `typeof out === 'function'` branch is never taken, and if the fill
+  destructures its argument the call throws before the branch is reached.
+
+  The migration is small — declare the scoped props and pass them at the call
+  site, which is what the pattern was emulating:
+
+  ```tsx
+  // before: core did not invoke the function, so the component did
+  type Props = Define.Slot<'default'>;
+  const out = slots.default?.();
+  if (typeof out === 'function') return out(ctx);
+
+  // after: declare the real scoped type and hand the context to the slot
+  type Props = Define.Slot<'default', { active: boolean }>;
+  const out = slots.default?.(ctx);
+  ```
+
+  Declaring the scoped props makes the accessor's argument required, so
+  TypeScript points at every call site that still needs updating.
 
 - **BREAKING (types): host attributes on a component are now an opt-in
   (#525).** `JSX.IntrinsicAttributes` used to declare `id`, `class`, `style`

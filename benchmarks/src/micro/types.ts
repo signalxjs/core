@@ -7,7 +7,7 @@
  * measuring something subtly different.
  */
 
-export type SuiteName = 'codec' | 'serverfn' | 'keymatch' | 'refresh' | 'packs';
+export type SuiteName = 'codec' | 'serverfn' | 'keymatch' | 'refresh' | 'packs' | 'slots';
 
 export interface MicroBench {
     suite: SuiteName;

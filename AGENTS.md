@@ -356,6 +356,18 @@ the queue, in two moments:
 
 - **Plan first for non-trivial work.** Both Claude Code and Copilot CLI have a built-in plan mode; use it and let the CLI manage the plan file.
 - **Verify before declaring done.** Run typecheck/tests for code changes; show evidence the change works.
+- **A change to what an existing API RETURNS is `Changed`, not `Added`.**
+  Teaching an existing accessor a new capability almost always also changes
+  what an existing caller observes for an input that already worked — and a
+  checklist enumerating only the *new* shapes will not notice. Before writing
+  the changelog entry, tabulate the old and new observable value for every
+  input shape that already existed, and name in the entry the userland pattern
+  that breaks. Pay particular attention to patterns that exist *because* the
+  feature was missing: a workaround is written against the old return value, so
+  it is the first thing a new capability breaks. (#476 added render-prop
+  children, shipped as "Added", and silently broke every component that pulled
+  a raw function out of its own slot and called it — found only when a
+  downstream repo's test suite failed during the release rollout, #534.)
 - **Dev-only code goes behind `__DEV__`.** Warnings, validation, devtools
   plumbing: guard with `if (__DEV__)` (not literal `process.env.NODE_ENV`
   checks). It's a compile-time flag — `false` in the prod dist (blocks are

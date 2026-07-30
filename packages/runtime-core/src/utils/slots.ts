@@ -6,25 +6,80 @@
 import { signal } from '@sigx/reactivity';
 
 /**
- * Map a slot's extracted children, invoking any *function* items with the
- * scoped props (render-prop / scoped-slot semantics) and passing element
- * children through untouched. A function child — `<Comp>{(p) => …}</Comp>` —
- * is thereby called with the same `scopedProps` the `slots` prop form receives,
- * instead of reaching the renderer as a bare function and being dropped as an
- * empty node.
+ * Invoke a slot fill and normalise its result to an array — the ONE place a
+ * fill is ever called. The client accessor, the function-children path and the
+ * server's own slot object all route through here, so the two renderers cannot
+ * drift on what a fill receives or on what its result becomes.
  *
- * Returns a fresh array, preserving the accessor's defensive-copy contract, and
- * normalises a function's result exactly like the `slots` prop branch does:
- * `null`/`undefined` is dropped, an array is flattened one level.
+ * A fill invoked with no scoped props gets `{}`, never `undefined`. A scoped
+ * fill is written as a destructure — `({ active }) => …` — and destructuring
+ * `undefined` throws, so the two idioms `({ active }) => …` and
+ * `slots.default?.()` would otherwise combine into a hard crash. With an empty
+ * object each declared prop reads as `undefined` instead, which is what a prop
+ * the parent didn't pass does everywhere else. The object is allocated per
+ * invocation rather than shared: a fill is handed it, and one that writes to
+ * its props must not be writing into another component's.
+ *
+ * The result is normalised the same way for every provision form:
+ * `null`/`undefined` becomes empty, an array passes through, any other value is
+ * wrapped. The server previously installed a `slots`-prop fill raw and skipped
+ * this, so a fill returning a single vnode handed the component `[vnode]` on
+ * the client and `vnode` on the server.
+ */
+export function invokeSlotFn(fn: (scopedProps: any) => any, scopedProps?: any, name?: string): any[] {
+    let result: any;
+    if (scopedProps !== undefined) {
+        result = fn(scopedProps);
+    } else {
+        if (__DEV__ && fn.length > 0) {
+            // `name` is dev-only, so its fallback lives in here rather than as a
+            // default parameter — an initializer would survive into the prod
+            // build for a message that does not.
+            const label = name ?? 'default';
+            // The name is JSON-quoted in both places it appears — it comes from
+            // a user-controlled `slot` prop, so besides not being a valid
+            // identifier (`slot="my-thing"`, `slot="__proto__"`) it may contain
+            // quotes, backslashes or newlines. That keeps the message readable
+            // and makes the suggested bracket-access call site parse for any
+            // name. For an ordinary name the output is unchanged, since
+            // `JSON.stringify` supplies the same double quotes.
+            const quoted = JSON.stringify(label);
+            console.warn(
+                `[slots] slot ${quoted} was invoked with no scoped props, but its fill declares a parameter. ` +
+                `The fill received an empty object, so anything it destructures reads as undefined. ` +
+                `Pass the props at the call site — slots[${quoted}]?.(props) — ` +
+                `or drop the parameter from the fill.`
+            );
+        }
+        result = fn({});
+    }
+    if (result == null) return [];
+    return Array.isArray(result) ? result : [result];
+}
+
+/**
+ * Map a slot's extracted children, invoking any *function* items with the
+ * scoped props (render-prop semantics) and passing element children through
+ * untouched. A function child — `<Comp>{(p) => …}</Comp>` — is thereby called
+ * with the same `scopedProps` the `slots` prop form receives, instead of
+ * reaching the renderer as a bare function and being dropped as an empty node.
+ *
+ * Returns a fresh array, preserving the accessor's defensive-copy contract.
+ * Each function goes through `invokeSlotFn`, so its result is normalised exactly
+ * as the `slots` prop form's is: `null`/`undefined` contributes nothing and an
+ * array is flattened one level.
+ *
+ * Only call this for a list that actually CONTAINS a function — a hand loop is
+ * roughly 2x `list.slice()` at a handful of children and ~6.5x at a hundred, so
+ * the callers gate on a flag recorded while the children were collected rather
+ * than paying the scan on every slot read.
  *
  * Single pass: element children are copied into a fresh array (by sequential
  * index, which stays dense) as they are scanned; only once the first function
  * is found does it truncate to the copied prefix and switch to append-mode for
- * the rest. The common case (no function children — every element-based named
- * slot, and any default slot without a render-prop child) never allocates a
- * second traversal.
+ * the rest.
  */
-export function invokeFunctionChildren(list: any[], scopedProps?: any): any[] {
+export function invokeFunctionChildren(list: any[], scopedProps?: any, name?: string): any[] {
     const n = list.length;
     const out: any[] = [];
     for (let i = 0; i < n; i++) {
@@ -36,13 +91,11 @@ export function invokeFunctionChildren(list: any[], scopedProps?: any): any[] {
             for (let j = i; j < n; j++) {
                 const it = list[j];
                 if (typeof it === 'function') {
-                    const r = it(scopedProps);
-                    if (r == null) continue;
-                    if (Array.isArray(r)) {
-                        for (const x of r) out.push(x);
-                    } else {
-                        out.push(r);
-                    }
+                    // Index loop, not `for…of`/spread: the fill's result is a
+                    // fresh array from `invokeSlotFn` and the iterator protocol
+                    // over it costs more than the copy itself.
+                    const r = invokeSlotFn(it, scopedProps, name);
+                    for (let k = 0; k < r.length; k++) out.push(r[k]);
                 } else {
                     out.push(it);
                 }
@@ -84,6 +137,15 @@ export interface InternalSlotsObject {
  * - `slots` prop object (e.g., `slots={{ header: () => <div>...</div> }}`)
  * - `slot` prop on children (e.g., `<div slot="header">...</div>`)
  *
+ * A **function child** is a render-prop fill: it is invoked with the scoped
+ * props the consumer passed to the accessor, and its result takes its place.
+ * Function and element children may be mixed freely in one default slot —
+ * every function is invoked with the same scoped props and element children
+ * pass through, in source order — so a slot is not all-or-nothing about the
+ * form its content takes. A function only ever fills the DEFAULT slot: routing
+ * a child to a named slot requires a `slot` prop on it, and a function is not
+ * an object, so it can never be routed there.
+ *
  * @example
  * ```tsx
  * // Parent component
@@ -118,6 +180,10 @@ export function createSlots(children: any, slotsFromProps?: Record<string, any>)
     // a prototype mutation.
     let cachedVersion = -1;
     let cachedDefault: any[] = [];
+    // Whether any default child is a function, recorded by the scan that
+    // collects them. Without it every slot read of ordinary element children
+    // would pay a hand loop looking for a function that is almost never there.
+    let cachedDefaultHasFn = false;
     let cachedNamed: Record<string, any[]> = Object.create(null);
 
     // Extract default children (filtered of null/boolean conditional
@@ -126,6 +192,7 @@ export function createSlots(children: any, slotsFromProps?: Record<string, any>)
         if (version === cachedVersion) return;
         const defaultChildren: any[] = [];
         const namedSlots: Record<string, any[]> = Object.create(null);
+        let defaultHasFn = false;
         const c = target._children;
         if (c != null) {
             const items = Array.isArray(c) ? c : [c];
@@ -137,12 +204,17 @@ export function createSlots(children: any, slotsFromProps?: Record<string, any>)
                     }
                     namedSlots[slotName].push(child);
                 } else if (child != null && child !== false && child !== true) {
+                    // A function is `typeof 'function'`, never `'object'`, so it
+                    // can never satisfy the named-slot test above — a function
+                    // child always lands here, in `default`.
+                    if (typeof child === 'function') defaultHasFn = true;
                     defaultChildren.push(child);
                 }
             }
         }
         cachedVersion = version;
         cachedDefault = defaultChildren;
+        cachedDefaultHasFn = defaultHasFn;
         cachedNamed = namedSlots;
     }
 
@@ -174,21 +246,30 @@ export function createSlots(children: any, slotsFromProps?: Record<string, any>)
                 // First check for slots from the `slots` prop
                 const fromProps = slotsObj._slotsFromProps;
                 if (fromProps && hasOwn.call(fromProps, name) && typeof fromProps[name] === 'function') {
-                    const result = fromProps[name](scopedProps);
-                    if (result == null) return [];
-                    return Array.isArray(result) ? result : [result];
+                    return invokeSlotFn(fromProps[name], scopedProps, name);
                 }
 
                 // Then fall back to element-based slots: `default` collects
                 // the un-slotted children, named slots collect children with
                 // a matching `slot` prop. Function items among them are
-                // invoked with `scopedProps` (render-prop / scoped-slot form)
-                // — the mapping happens on return so the extraction cache keeps
-                // caching the RAW children.
+                // invoked with `scopedProps` (render-prop form) — the mapping
+                // happens on return so the extraction cache keeps caching the
+                // RAW children.
                 extract(slotsObj, version);
-                if (name === 'default') return invokeFunctionChildren(cachedDefault, scopedProps);
+                if (name === 'default') {
+                    // Only the default slot can hold a function child, and only
+                    // then is the walk worth its cost — `extract()` recorded the
+                    // answer while collecting the children, so the ordinary case
+                    // is the plain copy it was before render-prop children
+                    // existed.
+                    return cachedDefaultHasFn
+                        ? invokeFunctionChildren(cachedDefault, scopedProps, name)
+                        : cachedDefault.slice();
+                }
+                // A named slot is element-only by construction (see `extract`),
+                // so it is always just a defensive copy.
                 const list = cachedNamed[name];
-                return list ? invokeFunctionChildren(list, scopedProps) : [];
+                return list ? list.slice() : [];
             };
             slotFns.set(name, fn);
         }

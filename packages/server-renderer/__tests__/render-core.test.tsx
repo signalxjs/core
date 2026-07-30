@@ -322,6 +322,42 @@ describe('renderToString — slot presence parity', () => {
         );
         expect(childForm).toBe(slotsForm);
     });
+
+    // #534: a consumer that invokes the accessor with no scoped props — the
+    // shape of every consumer written before scoped props existed.
+    it('renders a destructuring fill invoked with no scoped props instead of throwing', async () => {
+        const NoProps = component<Define.Slot<'default'>>((ctx) => {
+            return () => <div class="np">{ctx.slots.default?.()}</div>;
+        }, { name: 'NoProps' });
+        const N = NoProps as any;
+
+        const childForm = await renderToString(<N>{({ active }: any) => <span class="g">{String(active)}</span>}</N>);
+        expect(childForm).toContain('class="g"');
+        // The declared prop reads as undefined rather than crashing the render.
+        expect(childForm).toContain('>undefined<');
+
+        const slotsForm = await renderToString(
+            <N slots={{ default: ({ active }: any) => <span class="g">{String(active)}</span> }} />
+        );
+        expect(childForm).toBe(slotsForm);
+    });
+
+    // The server used to install a `slots`-prop fill raw while the client
+    // normalised its result, so a fill returning a single vnode handed the
+    // component `[vnode]` on the client and `vnode` on the server.
+    it('normalises a slots-prop fill result to an array, as the client does', async () => {
+        const Observer = component<Define.Slot<'default'>>((ctx) => {
+            return () => {
+                const out: any = ctx.slots.default?.();
+                return <div class="obs">{Array.isArray(out) ? `array:${out.length}` : typeof out}</div>;
+            };
+        }, { name: 'Observer' });
+        const O = Observer as any;
+
+        // A fill returning ONE vnode, and one returning null.
+        expect(await renderToString(<O slots={{ default: () => <span /> }} />)).toContain('array:1');
+        expect(await renderToString(<O slots={{ default: () => null }} />)).toContain('array:0');
+    });
 });
 
 describe('renderToString — component error handling', () => {
