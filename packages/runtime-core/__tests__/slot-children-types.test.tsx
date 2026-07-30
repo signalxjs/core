@@ -125,3 +125,36 @@ describe('optional scoped props', () => {
         expect(el).toBeDefined();
     });
 });
+
+// A props type can be a union — a discriminated union of prop shapes is the
+// ordinary way to write one — and `ExtractSlots` distributes, so `TSlots`
+// arrives as a union too. `keyof (A | B)` is the INTERSECTION of their keys, so
+// asking `'default' extends keyof TSlots` directly reads as false whenever any
+// member lacks the slot, and the checking silently switches itself off.
+describe('a union props type still gets its slot checked', () => {
+    type UnionProps =
+        | (Define.Prop<'kind', 'scoped'> & Define.Slot<'default', { active: boolean }>)
+        | Define.Prop<'kind', 'bare'>;
+
+    const Union = component<UnionProps>((ctx) => () => ctx.slots.default?.({ active: true }));
+
+    it('checks a fill against the member that declares the slot', () => {
+        // @ts-expect-error the declared slot props are `{ active: boolean }`
+        const el = <Union kind="scoped">{(p: { nope: string }) => <span>{p.nope}</span>}</Union>;
+        expect(el).toBeDefined();
+    });
+
+    it('still requires the props at the accessor', () => {
+        component<UnionProps>((ctx) => {
+            // @ts-expect-error `{ active: boolean }` is declared on a union member
+            const out = ctx.slots.default?.();
+            return () => out;
+        });
+        expect(true).toBe(true);
+    });
+
+    it('accepts a correct fill', () => {
+        const el = <Union kind="scoped">{(p) => <span>{String(p.active)}</span>}</Union>;
+        expect(el).toBeDefined();
+    });
+});

@@ -244,21 +244,49 @@ export type EventDefinition<T> = { __eventDetail: T };
 type DefaultSlot = () => JSXElement[];
 
 /**
- * Slots object passed to components. Every slot — `default` included — is a
- * callable accessor only when the parent provided content for it; an
- * unprovided slot reads as `undefined`, so check presence with
- * `slots.x?.()` / `slots.x?.() ?? fallback`.
+ * The declared `default` fill, or `never` if the component declares no
+ * `default` slot.
  *
- * The untyped `DefaultSlot` fallback applies only when the component did not
- * declare a `default` slot. Intersecting it unconditionally used to defeat the
+ * Distributive on purpose. A props type can be a union — a discriminated union
+ * of prop shapes is the ordinary way to write one — and `ExtractSlots`'s
+ * conditional distributes, so `TSlots` arrives as a union too. `keyof (A | B)`
+ * is the INTERSECTION of their keys, so a plain `'default' extends keyof TSlots`
+ * reads as false whenever any member lacks the slot, and everything downstream
+ * silently relaxes: the untyped fallback comes back and `children` widens to
+ * `any`. Distributing first asks the question per member instead.
+ */
+type DefaultFill<TSlots> = NonNullable<TSlots> extends infer S
+    ? S extends any
+        ? 'default' extends keyof S ? NonNullable<S['default']> : never
+        : never
+    : never;
+
+/**
+ * Slots object passed to components. Every slot — `default` included — is a
+ * callable accessor only when the parent provided content for it, and an
+ * unprovided slot reads as `undefined`. So presence is the accessor's own
+ * truthiness (`if (slots.x)`), and the call supplies whatever the slot
+ * declared: `slots.x?.()` for a slot without scoped props,
+ * `slots.x?.(props) ?? fallback` for one with them — on a scoped slot the bare
+ * `slots.x?.()` is a type error, which is the point.
+ *
+ * The untyped `DefaultSlot` fallback applies only when the component declared
+ * no `default` slot. Intersecting it unconditionally used to defeat the
  * declaration: `DefaultSlot & ((props: P) => …)` is callable BOTH ways, so
  * `slots.default?.()` compiled even on a slot whose props were declared, and
  * the fill was handed nothing. That is precisely the call site a declaration
  * exists to flag.
  */
 export type SlotsObject<TSlots = {}> =
-    ('default' extends keyof NonNullable<TSlots> ? {} : { default?: DefaultSlot })
-    & TSlots;
+    { default?: [DefaultFill<TSlots>] extends [never] ? DefaultSlot : DefaultFill<TSlots> }
+    & OmitDefault<NonNullable<TSlots>>;
+
+/**
+ * `Omit<T, 'default'>` that survives a union. `Omit` is `Pick<T, Exclude<keyof
+ * T, K>>`, and `keyof` a union is the intersection of its members' keys, so a
+ * bare `Omit` over a union throws away every key the members do not share.
+ */
+type OmitDefault<T> = T extends any ? Omit<T, 'default'> : never;
 
 /**
  * Slot content: what the renderer can turn into nodes, plus render-prop fills
@@ -290,9 +318,9 @@ type SlotContent<TFill> =
  * default slot at runtime either way), and there is nothing to check them
  * against.
  */
-type SlotChildren<TSlots> = 'default' extends keyof NonNullable<TSlots>
-    ? SlotContent<NonNullable<NonNullable<TSlots>['default']>>
-    : any;
+type SlotChildren<TSlots> = [DefaultFill<TSlots>] extends [never]
+    ? any
+    : SlotContent<DefaultFill<TSlots>>;
 
 /**
  * Extract event names from an event definition
