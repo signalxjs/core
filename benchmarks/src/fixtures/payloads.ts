@@ -62,6 +62,20 @@ export const deepPayload: DeepNode = (() => {
 /** The mutation-argument shape: tiny, so fixed per-call overhead dominates. */
 export const smallArgs: [{ id: number; qty: number }] = [{ id: 42, qty: 3 }];
 
+/** How many keys `wideArgs` carries. Asserted end to end, so a body that
+ *  silently loses keys fails the bench instead of running faster. */
+export const WIDE_ARG_KEYS = 400;
+
+/**
+ * A wide, shallow argument — same order of bytes as a 1 000-row read, but the
+ * weight is in the KEY COUNT (#544). Anything that runs per key rather than
+ * per byte (a `JSON.parse` reviver, a codec tree walk) separates from the
+ * per-byte floor here and nowhere else in this suite.
+ */
+export const wideArgs: [Record<string, number>] = [
+    Object.fromEntries(Array.from({ length: WIDE_ARG_KEYS }, (_, i) => [`k${i}`, i]))
+];
+
 /**
  * A custom type, for the "one registered handler" codec variants (H2).
  * Plain field assignment, not a parameter property — these files run through

@@ -17,11 +17,19 @@
  * H3: the endpoint walks every result twice — `encodeWire`'s tree walk, then
  * `JSON.stringify`. The `plainList` read against its floor is where that
  * shows up.
+ *
+ * H4 (#544): the endpoint's cost is per-KEY, not per-byte. `POST read 1k rows`
+ * cannot see it — it posts `args: []` and spends almost everything in the
+ * response codec — and a `noop` cannot either. The two axes need their own
+ * benches: `POST noop` isolates the FIXED per-request overhead (what a profile
+ * of a trivial call is actually made of), and `POST wide args, 400 keys` puts
+ * the weight in key count at a byte size the floor pays too. Anything running
+ * per key — a `JSON.parse` reviver, a codec walk — separates there.
  */
 import { serverFn, serverStream, ServerFnError } from '@sigx/server';
 import { handleServerFnRequest } from '@sigx/server/server';
 import { assert, type MicroBench, type MicroSuite } from './types.ts';
-import { plainList, richPayload, smallArgs } from '../fixtures/payloads.ts';
+import { WIDE_ARG_KEYS, plainList, richPayload, smallArgs, wideArgs } from '../fixtures/payloads.ts';
 
 const ORIGIN = 'http://localhost';
 const BASE = `${ORIGIN}/_sigx/fn`;
@@ -42,6 +50,13 @@ const cachedRead = serverFn({
 const failing = serverFn(async () => {
     throw new ServerFnError(422, 'nope', { field: 'qty' });
 });
+/** No arguments, no payload — the call is nothing but request plumbing. */
+const noop = serverFn(async () => ({ ok: true }));
+/** Echoes a COUNT, not the object: the response stays tiny, so the bench
+ *  measures the request half, and a body that lost keys fails the guard. */
+const countKeys = serverFn(async (_rq, input: Record<string, number>) => ({
+    keys: Object.keys(input).length
+}));
 const streamRows = serverStream(async function* () {
     for (let i = 0; i < 1000; i++) yield { i, name: plainList[i % plainList.length].name };
 });
@@ -52,7 +67,9 @@ const REGISTRY: Record<string, unknown> = {
     mutate_fn_00000003: mutate,
     cachedRead_fn_00000004: cachedRead,
     failing_fn_00000005: failing,
-    streamRows_fn_00000006: streamRows
+    streamRows_fn_00000006: streamRows,
+    noop_fn_00000007: noop,
+    countKeys_fn_00000008: countKeys
 };
 
 const options = { resolve: (symbol: string) => REGISTRY[symbol] ?? null };
@@ -161,6 +178,70 @@ export const serverFnSuite: MicroSuite = {
                     assert(envelope.data?.id === 42, 'mutation did not echo its input');
                 },
                 run: () => handleServerFnRequest(post('mutate_fn_00000003', smallArgs), options)
+            },
+
+            // --- #544: the two axes the benches above cannot see ------------
+            // Fixed per-request overhead. No arguments, a two-field result:
+            // whatever is left IS the plumbing.
+            {
+                suite: 'serverfn',
+                name: 'POST noop (floor)',
+                isFloor: true,
+                check: async () => {
+                    const res = await floorHandler(post('noop_fn_00000007', []), { ok: true });
+                    assert(res.status === 200, `expected 200, got ${res.status}`);
+                },
+                run: () => floorHandler(post('noop_fn_00000007', []), { ok: true })
+            },
+            {
+                suite: 'serverfn',
+                name: 'POST noop',
+                floorOf: 'POST noop (floor)',
+                quick: true,
+                check: async () => {
+                    const res = await handleServerFnRequest(post('noop_fn_00000007', []), options);
+                    assert(res.status === 200, `expected 200, got ${res.status}`);
+                    const envelope = (await res.json()) as { data?: { ok?: boolean } };
+                    assert(envelope.data?.ok === true, 'noop did not answer { ok: true }');
+                },
+                run: () => handleServerFnRequest(post('noop_fn_00000007', []), options)
+            },
+            // Per-KEY overhead. Same order of bytes as the 1k-row read, but the
+            // weight is in key count — the axis a reviver or a tree walk is
+            // priced on. The floor pays the identical byte cost, so the ratio
+            // is what running per key costs us.
+            {
+                suite: 'serverfn',
+                name: 'POST wide args, 400 keys (floor)',
+                isFloor: true,
+                check: async () => {
+                    const res = await floorHandler(post('countKeys_fn_00000008', wideArgs), {
+                        keys: WIDE_ARG_KEYS
+                    });
+                    assert(res.status === 200, `expected 200, got ${res.status}`);
+                },
+                run: () =>
+                    floorHandler(post('countKeys_fn_00000008', wideArgs), { keys: WIDE_ARG_KEYS })
+            },
+            {
+                suite: 'serverfn',
+                name: 'POST wide args, 400 keys',
+                floorOf: 'POST wide args, 400 keys (floor)',
+                quick: true,
+                check: async () => {
+                    const res = await handleServerFnRequest(
+                        post('countKeys_fn_00000008', wideArgs),
+                        options
+                    );
+                    assert(res.status === 200, `expected 200, got ${res.status}`);
+                    const envelope = (await res.json()) as { data?: { keys?: number } };
+                    // A body that silently lost keys would benchmark FASTER.
+                    assert(
+                        envelope.data?.keys === WIDE_ARG_KEYS,
+                        `expected ${WIDE_ARG_KEYS} keys through, got ${envelope.data?.keys}`
+                    );
+                },
+                run: () => handleServerFnRequest(post('countKeys_fn_00000008', wideArgs), options)
             },
 
             // --- the §4.1 GET read path -------------------------------------

@@ -276,6 +276,26 @@ const DANGEROUS_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 const reviver = (key: string, value: unknown): unknown =>
     DANGEROUS_KEYS.has(key) ? undefined : value;
 
+/**
+ * Could this source text SPELL a dangerous key? Only two ways: as a literal,
+ * or through a `\u` escape — the one JSON escape that yields letters (`\n`,
+ * `\t`, `\r`, `\b`, `\f`, `\"`, `\\`, `\/` cannot). Neither present ⇒
+ * `JSON.parse` provably cannot produce one, and the reviver is dead weight.
+ *
+ * It is not free weight: the reviver is a per-KEY callback over the whole
+ * document, and on a key-dense body it costs ~4x the parse itself (a 400-key
+ * 4 KB body: 66.9us parsed plain, 294.6us with the reviver, 72.3us prescanned
+ * — #544). Wrong in one direction only: a body that merely MENTIONS
+ * "constructor" in a value, or carries any `\u` escape, takes the slow path
+ * it takes today.
+ */
+const SUSPECT_KEYS = /__proto__|constructor|prototype|\\u/;
+
+/** `JSON.parse`, dropping dangerous keys — skipping the reviver when the
+ *  source cannot contain one. Identical output, both branches. */
+const parseGuarded = (text: string): unknown =>
+    SUSPECT_KEYS.test(text) ? JSON.parse(text, reviver) : JSON.parse(text);
+
 const DEFAULT_MAX_BODY = 1_048_576;
 const DEFAULT_MAX_URL = 8_192;
 
@@ -609,7 +629,7 @@ export async function handleServerFnRequest(
         } else {
             const raw = url.searchParams.get('args');
             try {
-                parsed = raw ? JSON.parse(raw, reviver) : [];
+                parsed = raw ? parseGuarded(raw) : [];
             } catch {
                 return errorResponse(
                     400,
@@ -663,7 +683,7 @@ export async function handleServerFnRequest(
         }
         try {
             const parsedBody = body
-                ? (JSON.parse(body, reviver) as { args?: unknown; $boundaries?: unknown })
+                ? (parseGuarded(body) as { args?: unknown; $boundaries?: unknown })
                 : undefined;
             parsed = parsedBody?.args;
             boundarySidecar = parsedBody?.$boundaries;
@@ -856,8 +876,10 @@ export async function handleServerFnRequest(
     } catch (error) {
         if (timeoutError !== undefined && error === timeoutError) {
             // The losing work promise must never become an unhandled
-            // rejection when it eventually settles.
-            void work.catch(() => {});
+            // rejection when it eventually settles. `Promise.resolve` because
+            // a scope entered synchronously hands back a bare value (#544);
+            // for a native promise it returns that same promise, not a wrapper.
+            void Promise.resolve(work).catch(() => {});
             await reportMasked(options, timeoutError, info, ctx);
             return isForm
                 ? formErrorResponse(504, 'Server function timed out')
