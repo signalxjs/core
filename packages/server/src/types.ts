@@ -120,7 +120,7 @@ export type ServerFnCallable<A extends unknown[], R> = ((...args: A) => Promise<
     /** Bind per-call options; returns the same callable signature. */
     with(options?: ServerFnCallOptions): (...args: A) => Promise<R>;
     /**
-     * The stable data key (`<stableId>#<name>`) behind `useData(fn)` and
+     * The stable data key (`<stableId>/<name>`) behind `useData(fn)` and
      * fn-ref `invalidates` patterns. Declared REQUIRED for keying DX — the
      * property is what lets `useData(getVotes)` type-check while a plain
      * function does not. At runtime it is BUILD-stamped (the Vite transform
@@ -176,7 +176,7 @@ export interface WrappedServerFn {
      */
     __sigxForm?: boolean;
     /**
-     * The build-stamped stable data key (`<stableId>#<name>`) — see
+     * The build-stamped stable data key (`<stableId>/<name>`) — see
      * `ServerFnCallable.__sigxKey`. Optional here because it exists only
      * under the Vite transform; registries and transports never require it.
      */

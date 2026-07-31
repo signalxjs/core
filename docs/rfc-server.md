@@ -599,11 +599,14 @@ export interface ServerFnExtraction {
   package.json exists). The `\0` remains purely a hash-seed FIELD separator
   between id, name, and impl source (as in v1) and never appears in the
   stable id itself — the id must survive URL routing in the stable symbol
-  below. This makes every app build of one solution mint the SAME symbol
+  below, and is normalized for that (`routeSafeId`, #355): `..` segments
+  become `_up` (a URL would resolve them away and retarget the route),
+  empty segments collapse, and anything outside RFC 3986's `pchar` is
+  percent-encoded per segment. This makes every app build of one solution mint the SAME symbol
   for a shared server module. All symbols regenerate once at the
   seed change; client+server deploy together, so nothing at rest breaks.
   Alongside the hashed symbol, every function also gets a hash-free
-  **stable symbol** (`<stableId>#<name>`) for long-lived clients — see
+  **stable symbol** (`<stableId>/<name>`) for long-lived clients — see
   "Native clients" below.
 - `*.server.ts` files: client environment → `stubModule`; SSR environment →
   untouched (the `serverFn` wrapper is pure runtime there).
@@ -664,7 +667,9 @@ app.use(createRequestHandler({ /* unchanged */ }));
 ## §4 Wire format & endpoint
 
 ```
-POST {base=/_sigx/fn}/{symbol}
+POST {base=/_sigx/fn}/{symbol}        ← the symbol is EVERY segment after
+                                        base; its own slashes are real path
+                                        separators, encoded per segment (#355)
 content-type: application/json        ← REQUIRED media type (415 otherwise);
                                         parameters tolerated, e.g.
                                         "application/json; charset=utf-8".
@@ -824,25 +829,43 @@ export interface ServerFnReadCache {
 **The wire:**
 
 ```
+GET {base=/_sigx/fn}/{symbol}?a0=<scalar>&a1=<scalar>…      ← all-scalar calls
 GET {base=/_sigx/fn}/{symbol}?args=<encodeURIComponent(JSON.stringify(encode(args)))>
 ```
 
-After percent-decoding, the query value is the same JSON text the POST
-body carries as its `args` array — one `JSON.stringify(encode(args))`
-feeds both transports (the body wraps it in `{"args": …}`, the URL wraps
-it in `encodeURIComponent`), so
-every tag (`$date`, `$map`, `$bigint`, `$esc`, …) survives with no second
-serialization format to drift. Arguments ride the *query string*, never
-the path — proxies and CDNs path-normalize `%2F` but do not touch query
-values, so the #355 stable-symbol hazard is not worsened, and whatever
-resolution #355 picks composes untouched. Encoding is deterministic
-(objects walk in insertion order), so a call site with equal inputs mints
-the identical URL — which is all an HTTP cache key needs. Two call sites
-spelling `{b, a}` vs `{a, b}` fragment the cache (a miss), never alias it
-(a wrong hit); canonical key-sorted encoding is rejected for v1 as bytes
-in the size-limited stub with zero correctness benefit. The stub always
-appends `?args=…` (one code path); the endpoint tolerates its absence as
-`[]` for curl ergonomics. Oversized URLs are a **414** over `maxUrlBytes`
+**Named params (#355).** When every argument is a simple scalar — string,
+finite number, boolean, `null` — they ride as `a0, a1, …`, because
+`?args=%5B%22shoes%22%5D` is line noise for the shape almost every read
+actually has. Types survive on a deliberately lopsided rule: a param is
+read back as a number/`true`/`false`/`null` only when its raw text says
+so, and the one ambiguous case — a *string* that would be misread that way
+— is JSON-quoted by the encoder (`?a0="42"`). The numeric grammar is
+strict (`007`, `+1`, `1_000` are strings), so the quoting stays rare and
+`%22` is the only escape a scalar read can produce. In practice a read
+carries exactly ONE argument anyway: `cache` is an options-form field and
+the options form takes a single input. Mixing `args=` with any `aN`, or
+leaving a gap in the sequence, is a **400** — shifting the remaining
+arguments down would call the handler with plausible-looking nonsense.
+
+**The blob fallback.** Anything richer than a scalar — objects, arrays,
+`Date`, `Map`, `Set`, `BigInt`, `undefined`, non-finite numbers — sends
+the whole call as `?args=…`, never a mix. After percent-decoding, that
+query value is the same JSON text the POST body carries as its `args`
+array — one `JSON.stringify(encode(args))` feeds both transports (the body
+wraps it in `{"args": …}`, the URL in a query value), so every tag
+(`$date`, `$map`, `$bigint`, `$esc`, …) survives with no second
+serialization format to drift. All-or-nothing is what keeps the cache key
+a pure function of the arguments.
+
+Arguments ride the *query string*, never the path. Encoding is
+deterministic (objects walk in insertion order, params ascend by index),
+so a call site with equal inputs mints the identical URL — which is all an
+HTTP cache key needs. Two call sites spelling `{b, a}` vs `{a, b}`
+fragment the cache (a miss), never alias it (a wrong hit); canonical
+key-sorted encoding is rejected for v1 as bytes in the size-limited stub
+with zero correctness benefit. A no-argument read sends a bare path (no
+trailing `?`), and the endpoint reads an absent query as `[]` for curl
+ergonomics. Oversized URLs are a **414** over `maxUrlBytes`
 (default 8 KiB — under mainstream proxy request-line caps; the GET analog
 of `maxBodyBytes`), and the stub warns in `__DEV__` above ~2 KiB that the
 arguments are too large to make a good cache key.
@@ -1255,13 +1278,13 @@ from source.
 `submit` handler on a host `<form>` element whose captured imports
 include **exactly one** form-marked serverFn — and whose element carries
 no author-written `action` or `method` — gets
-`action="{endpoint}/{encodeURIComponent(stableSymbol)}" method="post"`
+`action="{endpoint}/{encodeFnPath(stableSymbol)}" method="post"`
 spliced beside its `data-sigx-on:submit`, plus a **forced**
 `data-sigx-pd:submit` when the handler body didn't call
 `preventDefault()` itself: the loader cancels the native submit
 synchronously only when that attribute is present, and without it a
 JS-loaded page would double-submit (RPC *and* native POST). The
-**stable** symbol (`<stableId>#<name>`) is used because a printed or
+**stable** symbol (`<stableId>/<name>`) is used because a printed or
 long-cached page must survive redeploys — the endpoint's dual registry
 already resolves it. Ambiguity (multiple form-marked captures) and
 author-provided `action`/`method` warn at build time and skip the stamp;
@@ -1387,9 +1410,9 @@ CLI **cannot reload** — under hashed-only symbols, every backend deploy that
 touches a function body would break every installed client until its user
 updates. Native clients need API-stable routes:
 
-- Every function gets a hash-free **stable symbol** — `<stableId>#<name>`
-  (URL-encoded path segment), where `stableId` is the §3 package-qualified
-  id. The `serverFn` options form gains **`id?: string`** (read statically
+- Every function gets a hash-free **stable symbol** — `<stableId>/<name>`,
+  spent as REAL path segments (#355), where `stableId` is the §3
+  package-qualified id. The `serverFn` options form gains **`id?: string`** (read statically
   by the extractor, string literal only) for published APIs that must
   survive file moves: `serverFn({ id: 'cart/add', handler })`. Moving or
   renaming a server module WITHOUT an explicit `id` is a breaking API
@@ -1404,6 +1427,20 @@ updates. Native clients need API-stable routes:
   versioning (a new export or a new `id`) — standard API evolution. The
   trade, stated plainly: hashed = wrong-call-proof but deploy-coupled
   (web); stable = deploy-durable but contract-governed (native).
+
+**Amended by #355 — the route format changed once.** Stable symbols were
+originally `<stableId>#<name>` squeezed into a single `encodeURIComponent`d
+path segment, which made the route unreadable (`%40acme%2Fapi%2F…%23add`)
+and depended on every proxy and CDN in front of the app passing encoded
+slashes through untouched. The separator is now `/` and encoding is per
+segment, so the route reads as the id does and needs nothing from the
+infrastructure. Deliberately shipped with NO compatibility path: no legacy
+registry key, no dual-format parsing. A `role: 'client'` build against the
+old format 404s until rebuilt, and a long-cached page carrying a stamped
+`<form action>` 404s on submit until re-rendered — which is precisely the
+durability this section promises, spent once, knowingly, to stop promising
+a URL nobody wants to keep. A test asserts the old form 404s so the break
+stays explicit rather than incidental.
 
 ### N.4 One solution, shared server modules
 

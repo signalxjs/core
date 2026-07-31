@@ -215,7 +215,7 @@ export const Widget = component(() => {
 
 describe('sigxServer end-to-end — rev 2: role:client + shared package (#320)', () => {
     let solution: string;
-    const STABLE = '@acme/shared/src/cart.server.ts#addToCart';
+    const STABLE = '@acme/shared/src/cart.server.ts/addToCart';
     const ENDPOINT = 'https://api.example.com/_sigx/fn';
 
     const outputFiles = (dir: string): string[] => {

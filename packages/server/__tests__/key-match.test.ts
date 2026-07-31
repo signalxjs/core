@@ -29,11 +29,11 @@ const CASES: Array<[entryKey: string, pattern: string | readonly unknown[], expe
     ['["posts","u1",2]', ['posts', 'u1'], true],
     ['["postscript"]', ['posts'], false],
     ['["posts2"]', ['posts'], false],
-    // fn-derived keys: ["<stableId>#<name>", ...args]
-    ['["src/api.server.ts#getVotes"]', ['src/api.server.ts#getVotes'], true],
-    ['["src/api.server.ts#getVotes",7]', ['src/api.server.ts#getVotes'], true],
-    ['["src/api.server.ts#getVotesX"]', ['src/api.server.ts#getVotes'], false],
-    ['["src/api.server.ts#getUser"]', ['src/api.server.ts#getVotes'], false],
+    // fn-derived keys: ["<stableId>/<name>", ...args]
+    ['["src/api.server.ts/getVotes"]', ['src/api.server.ts/getVotes'], true],
+    ['["src/api.server.ts/getVotes",7]', ['src/api.server.ts/getVotes'], true],
+    ['["src/api.server.ts/getVotesX"]', ['src/api.server.ts/getVotes'], false],
+    ['["src/api.server.ts/getUser"]', ['src/api.server.ts/getVotes'], false],
     // a string pattern never prefix-matches a tuple canon
     ['["posts","u1"]', 'posts', false],
     // numbers / null elements

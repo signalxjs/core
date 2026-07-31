@@ -56,7 +56,7 @@ describe('sigxServer — transform', () => {
         );
         expect(result.code).toContain(`from '@sigx/server/client'`);
         expect(result.code).toMatch(
-            /__serverFnStub\("addToCart_fn_[0-9a-f]{8}", "addToCart", "\/_sigx\/fn", "src\/cart\.server\.ts#addToCart"\)/
+            /__serverFnStub\("addToCart_fn_[0-9a-f]{8}", "addToCart", "\/_sigx\/fn", "src\/cart\.server\.ts\/addToCart"\)/
         );
         expect(result.code).toContain('__serverOnly("auditLog"');
         expect(result.code).not.toContain('db.cart.add');
@@ -70,7 +70,7 @@ describe('sigxServer — transform', () => {
         );
         // Body kept verbatim; the wrapper gains the stub's stable key.
         expect(result.code.startsWith(CART)).toBe(true);
-        expect(result.code).toContain('addToCart.__sigxKey = "src/cart.server.ts#addToCart";');
+        expect(result.code).toContain('addToCart.__sigxKey = "src/cart.server.ts/addToCart";');
         // Re-running over stamped output must not double-stamp.
         const again = plugin.transform.call(
             { environment: { name: 'ssr' }, warn: () => {} },
@@ -388,7 +388,7 @@ describe('sigxServer — rev 2: role, endpoint, stable symbols, scan (#320)', ()
             const registry = plugin.load(plugin.resolveId('virtual:sigx-server-fns'));
             expect(registry).toMatch(/"addToCart_fn_[0-9a-f]{8}": \(\) => import\("\/src\/cart\.server\.ts"\)/);
             expect(registry).toContain(
-                `"@test/app/src/cart.server.ts#addToCart": () => import("/src/cart.server.ts").then(m => m["addToCart"])`
+                `"@test/app/src/cart.server.ts/addToCart": () => import("/src/cart.server.ts").then(m => m["addToCart"])`
             );
         } finally {
             rmSync(root, { recursive: true, force: true });
@@ -408,8 +408,8 @@ describe('sigxServer — rev 2: role, endpoint, stable symbols, scan (#320)', ()
                     join(root, 'src/cart.server.ts')
                 );
                 expect(result.code).toContain(
-                    `__serverFnStub("@test/app/src/cart.server.ts#addToCart", "addToCart", ` +
-                    `"https://api.example.com/_sigx/fn", "@test/app/src/cart.server.ts#addToCart")`
+                    `__serverFnStub("@test/app/src/cart.server.ts/addToCart", "addToCart", ` +
+                    `"https://api.example.com/_sigx/fn", "@test/app/src/cart.server.ts/addToCart")`
                 );
                 expect(result.code).not.toContain('db.cart.add');
             }
@@ -532,7 +532,7 @@ describe('sigxServer — rev 2: role, endpoint, stable symbols, scan (#320)', ()
                 join(root, 'src/cart.server.ts')
             );
             expect(result.code).toMatch(
-                /__serverFnStub\("addToCart_fn_[0-9a-f]{8}", "addToCart", "https:\/\/api\.example\.com\/_sigx\/fn", "@test\/app\/src\/cart\.server\.ts#addToCart"\)/
+                /__serverFnStub\("addToCart_fn_[0-9a-f]{8}", "addToCart", "https:\/\/api\.example\.com\/_sigx\/fn", "@test\/app\/src\/cart\.server\.ts\/addToCart"\)/
             );
         } finally {
             rmSync(root, { recursive: true, force: true });
@@ -557,10 +557,10 @@ describe('sigxServer — rev 2: role, endpoint, stable symbols, scan (#320)', ()
             const a = load();
             const b = load();
 
-            const stableKey = '"@acme/shared/src/cart.server.ts#addToCart"';
+            const stableKey = '"@acme/shared/src/cart.server.ts/addToCart"';
             expect(a).toContain(stableKey);
             // Out-of-root module ⇒ absolute-path import spec, not '/src/…'.
-            const spec = /"@acme\/shared\/src\/cart\.server\.ts#addToCart": \(\) => import\("([^"]+)"\)/.exec(a)![1];
+            const spec = /"@acme\/shared\/src\/cart\.server\.ts\/addToCart": \(\) => import\("([^"]+)"\)/.exec(a)![1];
             expect(spec).toContain('sigx-shared-');
             expect(spec).not.toBe('/src/cart.server.ts');
             // Two app builds (different roots) mint IDENTICAL registry keys
@@ -596,7 +596,7 @@ describe('sigxServer — rev 2: role, endpoint, stable symbols, scan (#320)', ()
             expect(result.code).toMatch(/__serverFnStub\("addToCart_fn_[0-9a-f]{8}"/);
             const registry = plugin.load(plugin.resolveId('virtual:sigx-server-fns'));
             expect(registry.match(/"addToCart_fn_[0-9a-f]{8}":/g)).toHaveLength(1);
-            expect(registry).toContain('"@acme/fs-pkg/src/cart.server.ts#addToCart"');
+            expect(registry).toContain('"@acme/fs-pkg/src/cart.server.ts/addToCart"');
         } finally {
             for (const dir of roots) rmSync(dir, { recursive: true, force: true });
         }
@@ -618,7 +618,7 @@ describe('sigxServer — rev 2: role, endpoint, stable symbols, scan (#320)', ()
                 plugin.resolveId('virtual:sigx-server-fns')
             );
             expect(warnings).toHaveLength(1);
-            expect(warnings[0]).toContain('cart/add#add');
+            expect(warnings[0]).toContain('cart/add/add');
             expect(warnings[0]).toContain('duplicate explicit `id`');
         } finally {
             rmSync(root, { recursive: true, force: true });
@@ -641,10 +641,10 @@ export const getQuote = serverFn(async (rq, i) => i);
         const importer = join(root, 'src/Feedback.tsx');
         for (const spec of ['./api.server', './api.server.ts']) {
             const hit = plugin.api.resolveServerFn(importer, spec, 'submitFeedback');
-            expect(hit).toEqual({ stableSymbol: 'src/api.server.ts#submitFeedback', form: true });
+            expect(hit).toEqual({ stableSymbol: 'src/api.server.ts/submitFeedback', form: true });
         }
         expect(plugin.api.resolveServerFn(importer, './api.server', 'getQuote')).toEqual({
-            stableSymbol: 'src/api.server.ts#getQuote',
+            stableSymbol: 'src/api.server.ts/getQuote',
             form: false
         });
     });
@@ -665,7 +665,7 @@ export const use = () => save;
             file
         );
         const hit = plugin.api.resolveServerFn(join(root, 'src/App.tsx'), './widget', 'save');
-        expect(hit).toEqual({ stableSymbol: 'src/widget.ts#save', form: true });
+        expect(hit).toEqual({ stableSymbol: 'src/widget.ts/save', form: true });
     });
 
     it('returns null for unknown exports, unknown files, and bare specifiers', () => {

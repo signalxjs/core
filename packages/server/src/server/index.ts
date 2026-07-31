@@ -24,6 +24,7 @@ import { runInScope } from '../scope';
 import { isServerFnError } from '../errors';
 import type { ServerFnGuard, ServerFnInfo, WrappedServerFn } from '../types';
 import { encodeWire, reviveWire } from '../wire-codec';
+import { decodeFnPath, decodeReadQuery, type ReadQueryError } from '../fn-url-decode';
 import { preparePattern } from './key-match';
 
 export interface ServerFnRequestOptions {
@@ -33,6 +34,18 @@ export interface ServerFnRequestOptions {
      * a structured 404 the stub surfaces as a version-skew error.
      */
     resolve(symbol: string): unknown | Promise<unknown>;
+    /**
+     * The URL prefix this handler is mounted at — how much of the pathname to
+     * strip before the rest IS the symbol. Default `/_sigx/fn`, matching
+     * `matchesServerFn`.
+     *
+     * It became load-bearing with #355: a stable symbol's slashes are real
+     * path separators now, so the symbol is every segment after the base
+     * rather than just the last one. A handler mounted somewhere its `base`
+     * does not describe answers 404 — pass the same value here as to
+     * `matchesServerFn`.
+     */
+    base?: string;
     /**
      * Runs before every function reached through THIS ENDPOINT — the wire
      * transports (POST, GET reads, form posts, streams).
@@ -266,6 +279,13 @@ const reviver = (key: string, value: unknown): unknown =>
 const DEFAULT_MAX_BODY = 1_048_576;
 const DEFAULT_MAX_URL = 8_192;
 
+/** 400 text for a rejected named-argument query (§4.1, #355). */
+const READ_QUERY_ERRORS: Record<ReadQueryError, string> = {
+    both: 'Read arguments must use either named params or `args`, not both',
+    sparse: 'Named read arguments must be a gapless a0, a1, … sequence',
+    malformed: 'Malformed named read argument'
+};
+
 /** Every non-2xx GET response carries this (rfc-server §4.1): errors, 404s,
  *  and 405s must never be pinned into a shared cache — a CDN-cached 404
  *  would shadow a redeploy's fresh symbols. */
@@ -440,8 +460,9 @@ async function readBody(request: Request, maxBytes: number): Promise<string | nu
 }
 
 /**
- * Handle one server-function request. The symbol is the last path segment
- * (`POST {base}/{symbol}` — prefix routing is the mounting adapter's job).
+ * Handle one server-function request. The symbol is every path segment after
+ * `options.base` (`POST {base}/{symbol}` — prefix routing is still the
+ * mounting adapter's job; `base` here is only how much to strip).
  */
 export async function handleServerFnRequest(
     request: Request,
@@ -480,7 +501,44 @@ export async function handleServerFnRequest(
 
     const url = new URL(request.url);
     const pathname = url.pathname;
-    const symbol = decodeURIComponent(pathname.slice(pathname.lastIndexOf('/') + 1));
+    // Everything after the base IS the symbol (#355) — a stable symbol
+    // (`<stableId>/<name>`) spans several segments now that its slashes are
+    // real separators instead of `%2F`. Hashed symbols are one segment and
+    // are unaffected.
+    const basePrefix = (() => {
+        const base = options.base ?? '/_sigx/fn';
+        return base.endsWith('/') ? base : base + '/';
+    })();
+    if (!pathname.startsWith(basePrefix)) {
+        // `matchesServerFn` is the routing gate; reaching here means the
+        // handler is mounted somewhere its `base` does not describe, and
+        // guessing a symbol out of the tail would route by accident.
+        return isForm
+            ? formErrorResponse(404, 'Not a server-function request')
+            : errorResponse(
+                  404,
+                  'Not a server-function request',
+                  undefined,
+                  undefined,
+                  isGet ? NO_STORE : undefined
+              );
+    }
+    let symbol: string;
+    try {
+        symbol = decodeFnPath(pathname.slice(basePrefix.length));
+    } catch {
+        // A malformed escape (`/%FF`) throws out of decodeURIComponent — it
+        // used to escape this handler entirely and surface as a masked 500.
+        return isForm
+            ? formErrorResponse(400, 'Malformed server-function path')
+            : errorResponse(
+                  400,
+                  'Malformed server-function path',
+                  undefined,
+                  undefined,
+                  isGet ? NO_STORE : undefined
+              );
+    }
     const fn = (await options.resolve(symbol)) as Partial<WrappedServerFn> | null | undefined;
     if (!fn || typeof fn.__sigxFn !== 'function') {
         // GET 404s are no-store like every non-2xx: a CDN-cached miss must
@@ -517,34 +575,50 @@ export async function handleServerFnRequest(
     }
     // Captured: TS narrowing does not cross into the work closure below.
     const invoke = fn.__sigxFn;
-    // The export name is encoded in the symbol — after the '#' for stable
-    // symbols (`<stableId>#<name>`, checked FIRST: a stable id may itself
-    // contain a hashed-looking `_fn_<hex8>` tail), `<name>_fn_<hash8>` for
-    // hashed ones. The impl's own name (`__sigxName`) is often '' for arrows.
-    const hashPos = symbol.lastIndexOf('#');
+    // The export name is encoded in the symbol — the last segment of a stable
+    // symbol (`<stableId>/<name>`, checked FIRST: a stable id may itself end
+    // in a hashed-looking `_fn_<hex8>` tail), `<name>_fn_<hash8>` for hashed
+    // ones. A hashed symbol never contains '/', so the two cannot be
+    // confused. The impl's own name (`__sigxName`) is often '' for arrows.
+    const lastSlash = symbol.lastIndexOf('/');
     const info = {
         symbol,
         name:
-            hashPos >= 0
-                ? symbol.slice(hashPos + 1)
+            lastSlash >= 0
+                ? symbol.slice(lastSlash + 1)
                 : /^(.+)_fn_[0-9a-f]{8}$/.exec(symbol)?.[1] ?? fn.__sigxName ?? ''
     };
 
     let parsed: unknown;
     let boundarySidecar: unknown;
     if (isGet) {
-        // §4.1: the arguments ride the query string — the same JSON text a
-        // POST body carries as `args`, percent-encoded. Capped like a body
-        // (414, the request-line analog of 413); an absent `args` reads as
-        // [] for curl ergonomics.
+        // §4.1: the arguments ride the query string. All-scalar calls carry
+        // readable named params (`?a0=shoes&a1=42`, #355); anything richer
+        // falls back to `args=<JSON>`, the same text a POST body carries.
+        // Capped like a body (414, the request-line analog of 413); no
+        // arguments at all reads as [] for curl ergonomics.
         if (url.search.length > (options.maxUrlBytes ?? DEFAULT_MAX_URL)) {
             return errorResponse(414, 'Query string too large', undefined, undefined, NO_STORE);
         }
-        const raw = url.searchParams.get('args');
-        try {
-            parsed = raw ? JSON.parse(raw, reviver) : [];
-        } catch {
-            return errorResponse(400, 'Malformed args query value', undefined, undefined, NO_STORE);
+        const named = decodeReadQuery(url.searchParams);
+        if (typeof named === 'string') {
+            return errorResponse(400, READ_QUERY_ERRORS[named], undefined, undefined, NO_STORE);
+        }
+        if (named !== null) {
+            parsed = named;
+        } else {
+            const raw = url.searchParams.get('args');
+            try {
+                parsed = raw ? JSON.parse(raw, reviver) : [];
+            } catch {
+                return errorResponse(
+                    400,
+                    'Malformed args query value',
+                    undefined,
+                    undefined,
+                    NO_STORE
+                );
+            }
         }
     } else if (isForm) {
         // §6.4: FormData → the options form's single input. The body is

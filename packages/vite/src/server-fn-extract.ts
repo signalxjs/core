@@ -28,7 +28,7 @@
  * ROOT-INDEPENDENT stable id (rfc-server rev 2, §3/N.4) — package-qualified
  * (`@acme/api/src/cart.server.ts`), so every app build of one solution mints
  * the SAME symbol for a shared server module. Alongside it every function
- * gets a hash-free STABLE symbol (`<stableId>#<name>`, N.3) so backend
+ * gets a hash-free STABLE symbol (`<stableId>/<name>`, N.3) so backend
  * redeploys never break installed native clients; the options form's
  * `id: 'cart/add'` (string literal, read statically) replaces the file-derived
  * id for published APIs that must survive file moves.
@@ -65,7 +65,7 @@ export interface ExtractedServerFn {
     local?: string;
     /** Content-hashed transport symbol: `<name>_fn_<hash8>`. */
     symbol: string;
-    /** Hash-free stable symbol: `<stableId>#<name>` (decoded form). */
+    /** Hash-free stable symbol: `<stableId>/<name>` (decoded form). */
     stableSymbol: string;
     /** True for `serverStream` (NDJSON transport, AsyncIterable stub). */
     stream: boolean;
@@ -339,13 +339,66 @@ export function readServerFnFormOption(call: Node): boolean {
 }
 
 /**
+ * Make a stable id safe to spend as REAL URL path segments (#355).
+ *
+ * The stable symbol is no longer squeezed into one percent-encoded segment,
+ * so the id's own slashes are now structural — which means two hazards it
+ * never had to care about while everything was `%2F`:
+ *
+ * - **`.` / `..` segments.** `computeStableId`'s build-root-relative fallback
+ *   emits `../` for out-of-root files, and `new URL()` RESOLVES those away
+ *   before the endpoint ever sees the path — a route that silently points
+ *   somewhere else. They become `_up` / `_here`.
+ * - **Characters outside RFC 3986's `pchar`.** Percent-encoded per segment,
+ *   a rare escape valve: `@` and `-._~!*'()` stay literal, so a normal
+ *   package-qualified id (`@acme/api/src/cart.server.ts`) survives with no
+ *   `%` at all — which is the whole point of the change.
+ *
+ * Empty segments are dropped: `a//b` carries one separator's worth of
+ * meaning but two segments of URL, and the endpoint rejoins on `/`.
+ */
+export function routeSafeId(id: string): string {
+    return id
+        .split('/')
+        .map((segment) =>
+            segment === '..' ? '_up'
+            : segment === '.' ? '_here'
+            // encodeURIComponent already leaves `-._~!*'()` alone; `@` is
+            // `pchar` too, and un-escaping it is what keeps scoped package
+            // names readable.
+            : encodeURIComponent(segment).replace(/%40/g, '@')
+        )
+        .filter((segment) => segment !== '')
+        .join('/');
+}
+
+/**
+ * An explicit `id` is a PUBLISHED route — the author wrote the URL they
+ * meant. If `routeSafeId` had to rewrite it, say so rather than serving a
+ * different route than the source reads (shared with the inline extractor).
+ */
+export function warnIfIdRewritten(warnings: string[], local: string, id: string): void {
+    const safe = routeSafeId(id);
+    if (safe === id) return;
+    warnings.push(
+        `serverFn "${local}": \`id: ${JSON.stringify(id)}\` is not URL-path-safe and ` +
+        `routes as ${JSON.stringify(safe)} — write the id you want in the URL ` +
+        `(rfc-server N.3, #355).`
+    );
+}
+
+/**
  * Mint both transport symbols for one function (rfc-server rev 2, §3/N.3):
  * hashed — `<name>_fn_<hash8(id\0name\0implSource)>` (`\0` is only ever a
  * hash-seed FIELD separator; never part of the id) — and stable —
- * `<id>#<name>`, stored DECODED (URL-encoding is the stub's request-time
- * job; the endpoint decodes). An explicit options-form `id` replaces the
- * file-derived stable id in BOTH, so id'd functions survive file moves with
- * hashed and stable routes alike.
+ * `<id>/<name>`, stored DECODED (per-segment URL-encoding is the stub's
+ * request-time job; the endpoint decodes the same way). An explicit
+ * options-form `id` replaces the file-derived stable id in BOTH, so id'd
+ * functions survive file moves with hashed and stable routes alike.
+ *
+ * The id is `routeSafeId`-normalized FIRST, so the hash seed and the stable
+ * symbol agree on one spelling — an id that normalizes cannot mint a symbol
+ * pair the endpoint would resolve differently.
  */
 export function mintSymbols(
     name: string,
@@ -357,11 +410,11 @@ export function mintSymbols(
     invalidates = false,
     form = false
 ): ExtractedServerFn {
-    const fnStableId = explicitId ?? stableId;
+    const fnStableId = routeSafeId(explicitId ?? stableId);
     return {
         name,
         symbol: `${name}_fn_${hash8(`${fnStableId}\0${name}\0${implSource}`)}`,
-        stableSymbol: `${fnStableId}#${name}`,
+        stableSymbol: `${fnStableId}/${name}`,
         stream,
         get,
         invalidates,
@@ -602,6 +655,7 @@ export function extractServerFns(
                     `file-derived stable id.`
                 );
             }
+            if (idOption.id !== undefined) warnIfIdRewritten(warnings, local, idOption.id);
             if (call.kind === 'fn' && hasServerFnOptionsSpread(init)) {
                 warnings.push(optionsSpreadWarning(local));
             }

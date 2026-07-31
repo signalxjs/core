@@ -31,7 +31,7 @@
  * rev 2 (native clients, #320): hash seeds use ROOT-INDEPENDENT stable ids
  * (package-qualified — every app build of one solution mints identical
  * symbols for shared server modules); the registry dual-registers hashed +
- * hash-free STABLE symbols (`<stableId>#<name>`) so backend redeploys never
+ * hash-free STABLE symbols (`<stableId>/<name>`) so backend redeploys never
  * break installed apps; `endpoint` (stub fetch target) splits from `base`
  * (server mount path); `role: 'client'` stubs EVERY environment and emits
  * no registry; `scan` discovers shared packages outside the Vite root.

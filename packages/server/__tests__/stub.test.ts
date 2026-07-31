@@ -96,6 +96,46 @@ describe('__serverFnStub', () => {
         });
     });
 
+    it('a GET stub spends all-scalar args as named params (#355)', async () => {
+        const mock = stubFetch(200, { data: 'ok' });
+        const read = __serverFnStub('read_fn_00000012', 'read', '/_sigx/fn', undefined, 1);
+        await read('shoes', 42, true, null);
+
+        const url = mock.mock.calls[0][0] as string;
+        expect(url).toBe('/_sigx/fn/read_fn_00000012?a0=shoes&a1=42&a2=true&a3=null');
+        expect(url).not.toContain('%');
+    });
+
+    it('a GET stub quotes only a string that would read back as a non-string', async () => {
+        const mock = stubFetch(200, {});
+        const read = __serverFnStub('read_fn_00000013', 'read', '/_sigx/fn', undefined, 1);
+        await read('42', 'true', 'plain');
+
+        const url = mock.mock.calls[0][0] as string;
+        // Round-trip is what matters: the quoted forms come back as strings.
+        const params = new URLSearchParams(url.split('?')[1]);
+        expect(params.get('a0')).toBe('"42"');
+        expect(params.get('a1')).toBe('"true"');
+        expect(params.get('a2')).toBe('plain');
+    });
+
+    it('a GET stub with no args sends a bare path, no trailing "?"', async () => {
+        const mock = stubFetch(200, {});
+        const read = __serverFnStub('read_fn_00000014', 'read', '/_sigx/fn', undefined, 1);
+        await read();
+        expect(mock.mock.calls[0][0]).toBe('/_sigx/fn/read_fn_00000014');
+    });
+
+    it('a GET stub falls back to the args blob as soon as one arg is not a scalar', async () => {
+        const mock = stubFetch(200, {});
+        const read = __serverFnStub('read_fn_00000015', 'read', '/_sigx/fn', undefined, 1);
+        await read('shoes', { page: 2 });
+
+        const url = mock.mock.calls[0][0] as string;
+        expect(url).toContain('?args=');
+        expect(url).not.toContain('a0=');
+    });
+
     it('a GET stub percent-encodes codec tags into the query value', async () => {
         const mock = stubFetch(200, {});
         const read = __serverFnStub('read_fn_00000011', 'read', '/_sigx/fn', undefined, 1);
@@ -274,13 +314,20 @@ describe('configureServerFn (rfc-server rev 2, N.1)', () => {
         expect(globalMock).not.toHaveBeenCalled();
     });
 
-    it('URL-encodes the symbol into a single path segment (stable symbols)', async () => {
+    it('spends a stable symbol as REAL path segments — no percent-encoding (#355)', async () => {
         const mock = stubFetch(200, { data: 1 });
-        const fn = __serverFnStub('@acme/api/src/cart.server.ts#add', 'add', '/_sigx/fn');
+        const fn = __serverFnStub('@acme/api/src/cart.server.ts/add', 'add', '/_sigx/fn');
         await fn();
-        expect(mock.mock.calls[0][0]).toBe(
-            '/_sigx/fn/%40acme%2Fapi%2Fsrc%2Fcart.server.ts%23add'
-        );
+        expect(mock.mock.calls[0][0]).toBe('/_sigx/fn/@acme/api/src/cart.server.ts/add');
+        expect(mock.mock.calls[0][0]).not.toContain('%');
+    });
+
+    it('still percent-encodes a segment that is not URL-path-safe', async () => {
+        const mock = stubFetch(200, { data: 1 });
+        // A space and a `?` cannot ride literally; `@` and `.` can.
+        const fn = __serverFnStub('@acme/a b?c/add', 'add', '/_sigx/fn');
+        await fn();
+        expect(mock.mock.calls[0][0]).toBe('/_sigx/fn/@acme/a%20b%3Fc/add');
     });
 });
 
@@ -425,8 +472,8 @@ describe('__serverFnStub — codec robustness on payloads it did not produce', (
 
 describe('__serverFnStub — stable data key (#452)', () => {
     it('stamps __sigxKey from the 4th positional', () => {
-        const fn = __serverFnStub('add_fn_00000001', 'add', '/_sigx/fn', 'src/cart.server.ts#add');
-        expect(fn.__sigxKey).toBe('src/cart.server.ts#add');
+        const fn = __serverFnStub('add_fn_00000001', 'add', '/_sigx/fn', 'src/cart.server.ts/add');
+        expect(fn.__sigxKey).toBe('src/cart.server.ts/add');
     });
 
     it('leaves __sigxKey undefined when the build emitted no key', () => {

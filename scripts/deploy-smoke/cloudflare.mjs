@@ -106,7 +106,7 @@ try {
             origin: 'http://localhost',
             // The deterministic stable symbol (rev 2): package name +
             // package-relative path + '#' + export.
-            symbol: '@sigx/resume-example/src/api.server.ts#getQuote',
+            symbol: '@sigx/resume-example/src/api.server.ts/getQuote',
             args: [1],
             expectInData: 'Named = transferred.'
         });

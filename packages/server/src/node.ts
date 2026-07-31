@@ -72,6 +72,7 @@ export function createServerFnHandler(options: ServerFnHandlerOptions): NodeRequ
             const request = toWebRequest(req, res);
             const response = await handleServerFnRequest(request, {
                 resolve,
+                base,
                 guard: options.guard,
                 origin: options.origin,
                 maxBodyBytes: options.maxBodyBytes,

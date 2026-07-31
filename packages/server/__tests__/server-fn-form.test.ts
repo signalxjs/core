@@ -74,7 +74,7 @@ const stream = serverStream(async function* (): AsyncGenerator<string> {
 });
 
 const FNS: Record<string, unknown> = {
-    'app/contact.server.ts#submit': submit,
+    'app/contact.server.ts/submit': submit,
     json_fn_00000002: jsonOnly,
     redir_fn_00000003: withRedirect,
     own_fn_00000004: ownStatus,
@@ -94,7 +94,12 @@ function formPost(
     if (typeof body === 'string' && headers['content-type'] === undefined) {
         headers['content-type'] = 'application/x-www-form-urlencoded';
     }
-    const request = new Request(`${ORIGIN}/_sigx/fn/${encodeURIComponent(symbol)}`, {
+    // Per-segment encoding, exactly like the stamped action (#355).
+    const path = symbol
+        .split('/')
+        .map((segment) => encodeURIComponent(segment).replace(/%40/g, '@'))
+        .join('/');
+    const request = new Request(`${ORIGIN}/_sigx/fn/${path}`, {
         method: 'POST',
         headers,
         body
@@ -111,14 +116,14 @@ afterEach(() => {
 
 describe('form-mode success — 303 PRG (§6.4)', () => {
     it('urlencoded POST to a form-marked fn redirects back to the same-origin Referer', async () => {
-        const res = await formPost('app/contact.server.ts#submit', new URLSearchParams({ message: 'hi' }));
+        const res = await formPost('app/contact.server.ts/submit', new URLSearchParams({ message: 'hi' }));
         expect(res.status).toBe(303);
         expect(res.headers.get('location')).toBe('/contact?tab=support');
         expect(res.body).toBeNull();
     });
 
     it('a cross-origin Referer is not trusted — falls back to /', async () => {
-        const res = await formPost('app/contact.server.ts#submit', new URLSearchParams({ message: 'hi' }), {
+        const res = await formPost('app/contact.server.ts/submit', new URLSearchParams({ message: 'hi' }), {
             headers: { referer: 'https://evil.example/phish' },
             noReferer: true
         });
@@ -127,7 +132,7 @@ describe('form-mode success — 303 PRG (§6.4)', () => {
     });
 
     it('no Referer falls back to /', async () => {
-        const res = await formPost('app/contact.server.ts#submit', new URLSearchParams({ message: 'hi' }), {
+        const res = await formPost('app/contact.server.ts/submit', new URLSearchParams({ message: 'hi' }), {
             noReferer: true
         });
         expect(res.status).toBe(303);
@@ -224,7 +229,7 @@ describe('gating (§6.4/§5.2b)', () => {
 
     it('a JSON POST to a form-marked fn keeps the envelope byte-for-byte', async () => {
         const res = await handleServerFnRequest(
-            new Request(`${ORIGIN}/_sigx/fn/app%2Fcontact.server.ts%23submit`, {
+            new Request(`${ORIGIN}/_sigx/fn/app/contact.server.ts/submit`, {
                 method: 'POST',
                 headers: { 'content-type': 'application/json', origin: ORIGIN },
                 body: JSON.stringify({ args: [{ message: 'hi' }] })
@@ -237,7 +242,7 @@ describe('gating (§6.4/§5.2b)', () => {
     });
 
     it('an absent Origin on a form POST is 403 under the default policy — no GET-style relaxation', async () => {
-        const res = await formPost('app/contact.server.ts#submit', new URLSearchParams({ message: 'hi' }), {
+        const res = await formPost('app/contact.server.ts/submit', new URLSearchParams({ message: 'hi' }), {
             noOrigin: true
         });
         expect(res.status).toBe(403);
@@ -246,7 +251,7 @@ describe('gating (§6.4/§5.2b)', () => {
 
     it('verify-when-present admits an Origin-less form POST (the documented §5.2b risk)', async () => {
         const res = await formPost(
-            'app/contact.server.ts#submit',
+            'app/contact.server.ts/submit',
             new URLSearchParams({ message: 'hi' }),
             { noOrigin: true },
             { origin: 'verify-when-present' }
@@ -255,7 +260,7 @@ describe('gating (§6.4/§5.2b)', () => {
     });
 
     it('a mismatching Origin is 403', async () => {
-        const res = await formPost('app/contact.server.ts#submit', new URLSearchParams({ message: 'hi' }), {
+        const res = await formPost('app/contact.server.ts/submit', new URLSearchParams({ message: 'hi' }), {
             headers: { origin: 'https://evil.example' },
             noOrigin: true
         });
@@ -272,7 +277,7 @@ describe('gating (§6.4/§5.2b)', () => {
 describe('errors fork on request content-type, never on the fn (§6.4)', () => {
     it('validation failure: form POST → 400 HTML with the issues listed (dev), escaped', async () => {
         const res = await formPost(
-            'app/contact.server.ts#submit',
+            'app/contact.server.ts/submit',
             new URLSearchParams({ message: '', '<script>': 'x' })
         );
         expect(res.status).toBe(400);
@@ -314,7 +319,7 @@ describe('errors fork on request content-type, never on the fn (§6.4)', () => {
 
     it('a declared content-length over maxBodyBytes is 413 HTML', async () => {
         const res = await formPost(
-            'app/contact.server.ts#submit',
+            'app/contact.server.ts/submit',
             'message=hi',
             { headers: { 'content-length': '99999', 'content-type': 'application/x-www-form-urlencoded' } },
             { maxBodyBytes: 1024 }
@@ -326,7 +331,7 @@ describe('errors fork on request content-type, never on the fn (§6.4)', () => {
     it('a malformed Content-Length is a 400, not a bypassed cap', async () => {
         for (const bad of ['abc', '-5']) {
             const res = await formPost(
-                'app/contact.server.ts#submit',
+                'app/contact.server.ts/submit',
                 'message=hi',
                 { headers: { 'content-length': bad, 'content-type': 'application/x-www-form-urlencoded' } },
                 { maxBodyBytes: 1024 }
@@ -357,7 +362,7 @@ describe('errors fork on request content-type, never on the fn (§6.4)', () => {
         const guard = vi.fn(() => {
             throw new ServerFnError(401, 'sign in first');
         });
-        const res = await formPost('app/contact.server.ts#submit', new URLSearchParams({ message: 'hi' }), {}, { guard });
+        const res = await formPost('app/contact.server.ts/submit', new URLSearchParams({ message: 'hi' }), {}, { guard });
         expect(res.status).toBe(401);
         expect(res.headers.get('content-type')).toContain('text/html');
         expect(guard).toHaveBeenCalledOnce();

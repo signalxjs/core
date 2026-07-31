@@ -79,7 +79,7 @@ describe('extractServerFns — basics', () => {
     it('pins a plain function’s hashed symbol byte-for-byte', () => {
         const result = extractServerFns(CART, '/src/cart.server.ts', opts('src/cart.server.ts'));
         expect(result.fns[0].symbol).toBe('addToCart_fn_5b3c4824');
-        expect(result.fns[0].stableSymbol).toBe('src/cart.server.ts#addToCart');
+        expect(result.fns[0].stableSymbol).toBe('src/cart.server.ts/addToCart');
     });
 
     it('recognizes aliased serverFn imports and export { x } forms', () => {
@@ -286,7 +286,7 @@ export const explain = serverStream(async function* (rq, id: string) {
             ['explain', true]
         ]);
         expect(result.fns[1].symbol).toMatch(/^explain_fn_[0-9a-f]{8}$/);
-        expect(result.fns[1].stableSymbol).toBe('src/cart.server.ts#explain');
+        expect(result.fns[1].stableSymbol).toBe('src/cart.server.ts/explain');
         // Mixed module imports BOTH stub factories, each used for its kind.
         expect(result.stubModule).toContain(
             `import { __serverFnStub, __serverStreamStub } from '@sigx/server/client';`
@@ -356,9 +356,9 @@ describe('extractServerFns — rev 2 (stable ids, stable symbols, endpoint)', ()
         expect(c.fns[0].symbol).not.toBe(a.fns[0].symbol);
     });
 
-    it('shapes the stable symbol as <stableId>#<name> (decoded form)', () => {
+    it('shapes the stable symbol as <stableId>/<name> (decoded form)', () => {
         const result = extractServerFns(CART, '/x.ts', opts('@acme/api/src/cart.server.ts'));
-        expect(result.fns[0].stableSymbol).toBe('@acme/api/src/cart.server.ts#addToCart');
+        expect(result.fns[0].stableSymbol).toBe('@acme/api/src/cart.server.ts/addToCart');
     });
 
     it('an explicit string-literal `id` replaces the stableId in BOTH symbols', () => {
@@ -368,11 +368,43 @@ export const add = serverFn({ id: 'cart/add', handler: async (rq, input) => inpu
 `;
         const here = extractServerFns(code, '/a/x.server.ts', opts('@acme/api/src/x.server.ts'));
         const moved = extractServerFns(code, '/b/y.server.ts', opts('@acme/api/lib/y.server.ts'));
-        expect(here.fns[0].stableSymbol).toBe('cart/add#add');
+        expect(here.fns[0].stableSymbol).toBe('cart/add/add');
         // File moves don't touch an id'd function's routes — hashed included.
         expect(moved.fns[0].symbol).toBe(here.fns[0].symbol);
         expect(moved.fns[0].stableSymbol).toBe(here.fns[0].stableSymbol);
         expect(here.warnings).toHaveLength(0);
+    });
+
+    it('normalizes a stable id into something a URL PATH can carry (#355)', () => {
+        // The build-root-relative fallback emits `../` for out-of-root files.
+        // Left alone, `new URL()` would resolve those away and the route
+        // would silently point somewhere else.
+        const up = extractServerFns(CART, '/x.ts', opts('../shared/src/cart.server.ts'));
+        expect(up.fns[0].stableSymbol).toBe('_up/shared/src/cart.server.ts/addToCart');
+
+        // A scoped package name survives literally — that is the whole point.
+        const scoped = extractServerFns(CART, '/x.ts', opts('@acme/api/src/cart.server.ts'));
+        expect(scoped.fns[0].stableSymbol).not.toContain('%');
+
+        // Anything outside `pchar` still escapes, per segment.
+        const odd = extractServerFns(CART, '/x.ts', opts('a b/c?d/cart.server.ts'));
+        expect(odd.fns[0].stableSymbol).toBe('a%20b/c%3Fd/cart.server.ts/addToCart');
+
+        // Empty segments collapse rather than becoming `//` in the path.
+        const empty = extractServerFns(CART, '/x.ts', opts('pkg//src/cart.server.ts'));
+        expect(empty.fns[0].stableSymbol).toBe('pkg/src/cart.server.ts/addToCart');
+    });
+
+    it('warns when an explicit `id` is not URL-path-safe, naming the route it gets', () => {
+        const code = `
+import { serverFn } from '@sigx/server';
+export const add = serverFn({ id: 'cart/../add item', handler: async (rq, input) => input });
+`;
+        const result = extractServerFns(code, '/x.server.ts', opts('src/x.server.ts'));
+        expect(result.fns[0].stableSymbol).toBe('cart/_up/add%20item/add');
+        expect(result.warnings).toHaveLength(1);
+        expect(result.warnings[0]).toContain('not URL-path-safe');
+        expect(result.warnings[0]).toContain('cart/_up/add%20item');
     });
 
     it('warns on a non-literal `id` and falls back to the file-derived stable id', () => {
@@ -384,7 +416,7 @@ export const add = serverFn({ id: routeId, handler: async (rq, input) => input }
         const result = extractServerFns(code, '/x.server.ts', opts('src/x.server.ts'));
         expect(result.warnings).toHaveLength(1);
         expect(result.warnings[0]).toContain('string literal');
-        expect(result.fns[0].stableSymbol).toBe('src/x.server.ts#add');
+        expect(result.fns[0].stableSymbol).toBe('src/x.server.ts/add');
     });
 
     it("stubSymbols: 'stable' bakes stable symbols and `endpoint` bakes the fetch target", () => {
@@ -393,9 +425,9 @@ export const add = serverFn({ id: routeId, handler: async (rq, input) => input }
             endpoint: 'https://api.example.com/_sigx/fn'
         }));
         expect(result.stubModule).toContain(
-            `export const addToCart = __serverFnStub("@acme/api/src/cart.server.ts#addToCart", ` +
+            `export const addToCart = __serverFnStub("@acme/api/src/cart.server.ts/addToCart", ` +
             `"addToCart", "https://api.example.com/_sigx/fn", ` +
-            `"@acme/api/src/cart.server.ts#addToCart");`
+            `"@acme/api/src/cart.server.ts/addToCart");`
         );
         // Hashed mode (the default) keeps the hashed symbol in stubs.
         const hashed = extractServerFns(CART, '/x.ts', opts('@acme/api/src/cart.server.ts'));
@@ -452,7 +484,7 @@ describe('serverFnKeyStamps — SSR-side __sigxKey stamps (#452)', () => {
         const result = extractServerFns(CART, '/src/cart.server.ts', opts('src/cart.server.ts'));
         const stamps = serverFnKeyStamps(result.fns);
         expect(stamps).toContain(KEY_STAMP_MARKER);
-        expect(stamps).toContain('addToCart.__sigxKey = "src/cart.server.ts#addToCart";');
+        expect(stamps).toContain('addToCart.__sigxKey = "src/cart.server.ts/addToCart";');
     });
 
     it('aliased exports stamp the LOCAL binding; first export wins per local', () => {
@@ -463,7 +495,7 @@ export { impl as ping, impl as alias };
 `;
         const result = extractServerFns(code, '/src/x.server.ts', opts('src/x.server.ts'));
         const stamps = serverFnKeyStamps(result.fns);
-        expect(stamps).toContain('impl.__sigxKey = "src/x.server.ts#ping";');
+        expect(stamps).toContain('impl.__sigxKey = "src/x.server.ts/ping";');
         expect(stamps).not.toContain('#alias');
     });
 
@@ -473,8 +505,8 @@ import { serverFn } from '@sigx/server';
 export const add = serverFn({ id: 'cart/add', handler: async (rq, input) => input });
 `;
         const result = extractServerFns(code, '/src/cart.server.ts', opts('src/cart.server.ts'));
-        expect(serverFnKeyStamps(result.fns)).toContain('add.__sigxKey = "cart/add#add";');
-        expect(result.stubModule).toContain('"cart/add#add"');
+        expect(serverFnKeyStamps(result.fns)).toContain('add.__sigxKey = "cart/add/add";');
+        expect(result.stubModule).toContain('"cart/add/add"');
     });
 
     it('streams are skipped — no stamp block for a stream-only module', () => {
@@ -558,7 +590,7 @@ export const action = authed({ form: true, input: S, handler: async () => 1 });
         const result = extractServerFns(code, '/src/board.server.ts', opts('src/board.server.ts'));
         const byName = Object.fromEntries(result.fns.map((f) => [f.name, f]));
         expect(byName.read.get).toBe(true);
-        expect(byName.read.stableSymbol).toBe('board/read#read');
+        expect(byName.read.stableSymbol).toBe('board/read/read');
         expect(byName.write.invalidates).toBe(true);
         expect(byName.action.form).toBe(true);
     });

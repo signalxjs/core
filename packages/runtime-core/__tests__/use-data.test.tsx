@@ -870,7 +870,7 @@ describe('useData', () => {
     }
 
     it('useData(fn): default fetcher calls the fn; value lands', async () => {
-        const getVotes = stamped('src/api.server.ts#getVotes', async () => 3);
+        const getVotes = stamped('src/api.server.ts/getVotes', async () => 3);
         let cell!: AsyncState<number>;
         const App = component(() => {
             cell = useData(getVotes);
@@ -883,9 +883,9 @@ describe('useData', () => {
     });
 
     it('useData(fn) keys as the stable-key TUPLE — restores from __SIGX_ASYNC__ without fetching', async () => {
-        (globalThis as any).__SIGX_ASYNC__ = { '["src/api.server.ts#getVotes"]': 42 };
+        (globalThis as any).__SIGX_ASYNC__ = { '["src/api.server.ts/getVotes"]': 42 };
         const impl = vi.fn(async () => 3);
-        const getVotes = stamped('src/api.server.ts#getVotes', impl);
+        const getVotes = stamped('src/api.server.ts/getVotes', impl);
         let cell!: AsyncState<number>;
         const App = component(() => {
             cell = useData(getVotes);
@@ -898,7 +898,7 @@ describe('useData', () => {
     });
 
     it('useData(() => [fn, ...args]): args key the read and feed the default fetcher', async () => {
-        const getItem = stamped('src/api.server.ts#getItem', async (id: number) => `item-${id}`);
+        const getItem = stamped('src/api.server.ts/getItem', async (id: number) => `item-${id}`);
         const id = signal(7);
         let cell!: AsyncState<string>;
         const App = component(() => {
@@ -915,9 +915,9 @@ describe('useData', () => {
     });
 
     it('fn-headed tuple restores under the canonical `["<key>",...args]` identity', async () => {
-        (globalThis as any).__SIGX_ASYNC__ = { '["src/api.server.ts#getItem",7]': 'ssr-item' };
+        (globalThis as any).__SIGX_ASYNC__ = { '["src/api.server.ts/getItem",7]': 'ssr-item' };
         const impl = vi.fn(async (id: number) => `item-${id}`);
-        const getItem = stamped('src/api.server.ts#getItem', impl);
+        const getItem = stamped('src/api.server.ts/getItem', impl);
         let cell!: AsyncState<string>;
         const App = component(() => {
             cell = useData(() => [getItem, 7] as const);
@@ -930,7 +930,7 @@ describe('useData', () => {
     });
 
     it('an explicit fetcher overrides the default for a fn-headed tuple key', async () => {
-        const getItem = stamped('src/api.server.ts#getItem', async (id: number) => `rpc-${id}`);
+        const getItem = stamped('src/api.server.ts/getItem', async (id: number) => `rpc-${id}`);
         let cell!: AsyncState<string>;
         const App = component(() => {
             cell = (useData as any)(
@@ -956,7 +956,7 @@ describe('useData', () => {
     });
 
     it('a falsy getter result still idles with a fn-headed tuple form', async () => {
-        const getItem = stamped('src/api.server.ts#getItem', async (id: number) => `item-${id}`);
+        const getItem = stamped('src/api.server.ts/getItem', async (id: number) => `item-${id}`);
         const on = signal(false);
         let cell!: AsyncState<string>;
         const App = component(() => {
