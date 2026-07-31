@@ -18,15 +18,15 @@ export type KeyValue = string | KeyTuple;
 
 /**
  * A server-fn reference usable AS a key (rfc-server §6.2, #452): any
- * callable carrying the build-stamped stable key (`<stableId>#<name>`).
+ * callable carrying the build-stamped stable key (`<stableId>/<name>`).
  * Structural — runtime-core never imports `@sigx/server`; the brand is the
  * stamped property. As a key it canonicalizes to the key STRING in place
- * (`useData(getVotes)` → `'["<stableId>#getVotes"]'`), so a mutation's
+ * (`useData(getVotes)` → `'["<stableId>/getVotes"]'`), so a mutation's
  * fn-ref `invalidates` pattern matches by tuple prefix.
  */
 export interface ServerFnDataRef<A extends KeyTuple = KeyTuple, R = unknown> {
     (...args: A): R | Promise<R>;
-    /** Build-stamped stable key (`<stableId>#<name>`). */
+    /** Build-stamped stable key (`<stableId>/<name>`). */
     __sigxKey: string;
 }
 

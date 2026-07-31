@@ -65,7 +65,7 @@ describe('matchesServerFn (rfc-deploy §2)', () => {
 
     it('matches requests under the default base, any method', () => {
         expect(matchesServerFn(req('/_sigx/fn/add_fn_00000001'))).toBe(true);
-        expect(matchesServerFn(req('/_sigx/fn/%40acme%2Fapi%23add'))).toBe(true);
+        expect(matchesServerFn(req('/_sigx/fn/@acme/api/add'))).toBe(true);
         // Method deliberately unchecked — a GET should reach the 405, not
         // fall through to the document handler.
         expect(matchesServerFn(req('/_sigx/fn/add_fn_00000001', 'GET'))).toBe(true);
@@ -200,11 +200,13 @@ describe('handleServerFnRequest — status matrix', () => {
 });
 
 describe('handleServerFnRequest — stable symbols (rfc-server rev 2, N.3)', () => {
-    it('resolves an encoded stable symbol and derives the name after the "#"', async () => {
-        const stable = '@acme/api/src/cart.server.ts#addToCart';
+    it('reads a multi-segment stable symbol off the path and derives the last segment as the name', async () => {
+        const stable = '@acme/api/src/cart.server.ts/addToCart';
         const seen: { symbol: string; name: string }[] = [];
+        const url = `${ORIGIN}/_sigx/fn/${stable}`;
+        expect(url).not.toContain('%'); // #355: the whole point
         const res = await handleServerFnRequest(
-            new Request(`${ORIGIN}/_sigx/fn/${encodeURIComponent(stable)}`, {
+            new Request(url, {
                 method: 'POST',
                 headers: { 'content-type': 'application/json', origin: ORIGIN },
                 body: '{"args":[2,3]}'
@@ -218,16 +220,17 @@ describe('handleServerFnRequest — stable symbols (rfc-server rev 2, N.3)', () 
         );
         expect(res.status).toBe(200);
         await expect(res.json()).resolves.toEqual({ data: 5 });
-        // resolve received the DECODED symbol; the guard's info.name is the
-        // after-# segment, even though the id contains no hashed tail.
+        // resolve received every segment after the base, rejoined; the
+        // guard's info.name is the last one, even though the id carries no
+        // hashed tail.
         expect(seen).toEqual([{ symbol: stable, name: 'addToCart' }]);
     });
 
     it('a stable id containing a hashed-looking tail cannot misparse the name', async () => {
-        const tricky = 'legacy_fn_00000001/api.server.ts#run';
+        const tricky = 'legacy_fn_00000001/api.server.ts/run';
         const seen: string[] = [];
         const res = await handleServerFnRequest(
-            new Request(`${ORIGIN}/_sigx/fn/${encodeURIComponent(tricky)}`, {
+            new Request(`${ORIGIN}/_sigx/fn/${tricky}`, {
                 method: 'POST',
                 headers: { 'content-type': 'application/json', origin: ORIGIN },
                 body: '{"args":[]}'
@@ -240,7 +243,86 @@ describe('handleServerFnRequest — stable symbols (rfc-server rev 2, N.3)', () 
             }
         );
         expect(res.status).toBe(200);
-        expect(seen).toEqual(['run']); // '#' wins over the _fn_<hex8> pattern
+        expect(seen).toEqual(['run']); // the last '/' wins over the _fn_<hex8> pattern
+    });
+
+    it('decodes a segment that HAD to be escaped', async () => {
+        const stable = '@acme/a b/add';
+        let got = '';
+        const res = await handleServerFnRequest(
+            new Request(`${ORIGIN}/_sigx/fn/@acme/a%20b/add`, {
+                method: 'POST',
+                headers: { 'content-type': 'application/json', origin: ORIGIN },
+                body: '{"args":[]}'
+            }),
+            {
+                resolve: (sym) => {
+                    got = sym;
+                    return echo;
+                }
+            }
+        );
+        expect(res.status).toBe(200);
+        expect(got).toBe(stable);
+    });
+
+    it('the pre-#355 percent-encoded stable route is GONE, not silently aliased', async () => {
+        // `<stableId>#<name>` squeezed into one segment. It decodes cleanly —
+        // it is simply not a symbol anything registers any more, so a stale
+        // native client gets the structured 404 its stub reads as skew.
+        const res = await handleServerFnRequest(
+            new Request(`${ORIGIN}/_sigx/fn/%40acme%2Fapi%2Fsrc%2Fcart.server.ts%23addToCart`, {
+                method: 'POST',
+                headers: { 'content-type': 'application/json', origin: ORIGIN },
+                body: '{"args":[2,3]}'
+            }),
+            { resolve: (sym) => (sym === '@acme/api/src/cart.server.ts/addToCart' ? add : null) }
+        );
+        expect(res.status).toBe(404);
+    });
+
+    it('400s a malformed escape instead of throwing into a masked 500', async () => {
+        const res = await handleServerFnRequest(
+            new Request(`${ORIGIN}/_sigx/fn/%FF`, {
+                method: 'POST',
+                headers: { 'content-type': 'application/json', origin: ORIGIN },
+                body: '{"args":[]}'
+            }),
+            { resolve: () => echo }
+        );
+        expect(res.status).toBe(400);
+    });
+
+    it('404s a path outside the configured base rather than guessing a symbol', async () => {
+        const res = await handleServerFnRequest(
+            new Request(`${ORIGIN}/elsewhere/add_fn_00000001`, {
+                method: 'POST',
+                headers: { 'content-type': 'application/json', origin: ORIGIN },
+                body: '{"args":[1,2]}'
+            }),
+            { resolve: () => add }
+        );
+        expect(res.status).toBe(404);
+    });
+
+    it('honors a custom base', async () => {
+        let got = '';
+        const res = await handleServerFnRequest(
+            new Request(`${ORIGIN}/api/rpc/@acme/api/add`, {
+                method: 'POST',
+                headers: { 'content-type': 'application/json', origin: ORIGIN },
+                body: '{"args":[]}'
+            }),
+            {
+                base: '/api/rpc',
+                resolve: (sym) => {
+                    got = sym;
+                    return echo;
+                }
+            }
+        );
+        expect(res.status).toBe(200);
+        expect(got).toBe('@acme/api/add');
     });
 
     it('hashed-symbol name derivation is unregressed', async () => {

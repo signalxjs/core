@@ -191,9 +191,18 @@ export default [
     // (collect/apply through the __SIGX_SERVERFN_BOUNDARIES__ seam + the
     // body merge + dispatch seq) landed at 2.01 KB — pure seam calls, no
     // dependencies; the patch logic itself lives in @sigx/resume/client.
+    // 2.1 KB → 2.4 KB with #355: percent-free request URLs. Two additions,
+    // both semantics: per-segment path encoding (+36 B — a stable symbol's
+    // slashes are real separators now, which is what retires the `%2F`
+    // proxy/CDN hazard), and the GET read's named-argument query
+    // (+180 B — `?a0=shoes` instead of `?args=%5B%22shoes%22%5D`, with the
+    // scalar grammar that keeps types intact). The entry was sitting at
+    // EXACTLY 2.1 KB beforehand, so this bump covers the change plus the
+    // headroom that was already gone. The decode half deliberately lives in
+    // its own module (`fn-url-decode`) so the stubs never bundle it.
     name: '@sigx/server/client (fetch stubs)',
     path: 'packages/server/dist/client/index.prod.js',
-    limit: '2.1 KB',
+    limit: '2.4 KB',
   },
   {
     // The app-plugin face (#413): serverPlugin (transport + one-registration

@@ -73,9 +73,23 @@ export async function assertStaticAsset(fetchFn, { label, clientDir }) {
     assert(body === disk, `${label}: asset body matches the file on disk`);
 }
 
+/**
+ * Symbol → path (#355): per-segment encoding, so a stable symbol's own
+ * slashes stay real separators. Mirrors `encodeFnPath` in `@sigx/server`.
+ */
+function fnPath(symbol) {
+    return (
+        '/_sigx/fn/' +
+        symbol
+            .split('/')
+            .map((segment) => encodeURIComponent(segment).replace(/%40/g, '@'))
+            .join('/')
+    );
+}
+
 /** POST {base}/{symbol} with {"args":[...]} → {data} (rfc-server wire). */
 export async function assertServerFn(fetchFn, { label, origin, symbol, args, expectInData }) {
-    const res = await fetchFn('/_sigx/fn/' + encodeURIComponent(symbol), {
+    const res = await fetchFn(fnPath(symbol), {
         method: 'POST',
         headers: { 'content-type': 'application/json', origin },
         body: JSON.stringify({ args })
@@ -100,9 +114,12 @@ export async function assertServerFn(fetchFn, { label, origin, symbol, args, exp
  * component, which runs the real stub in the browser.
  */
 export async function assertCatalogGet(fetchFn, { label }) {
-    const symbol = '@sigx/resume-example/src/api.server.ts#getCatalog';
-    const args = encodeURIComponent(JSON.stringify(['quotes']));
-    const res = await fetchFn(`/_sigx/fn/${encodeURIComponent(symbol)}?args=${args}`, {});
+    const symbol = '@sigx/resume-example/src/api.server.ts/getCatalog';
+    // A single string argument rides as a named param (#355) — this is the
+    // exact URL the browser stub builds.
+    const path = `${fnPath(symbol)}?a0=quotes`;
+    assert(!path.includes('%'), `${label}: the GET read URL is percent-free (got ${path})`);
+    const res = await fetchFn(path, {});
     assert(res.status === 200, `${label}: GET read 200 (got ${res.status})`);
     assert(
         res.headers.get('cache-control') === 'private, max-age=60, stale-while-revalidate=300',
@@ -134,8 +151,8 @@ export async function assertCatalogGet(fetchFn, { label }) {
  * Also asserts the stamped attributes actually rendered into the document.
  */
 export async function assertFormPost(fetchFn, { label, origin, html }) {
-    const symbol = '@sigx/resume-example/src/api.server.ts#submitFeedback';
-    const path = `/_sigx/fn/${encodeURIComponent(symbol)}`;
+    const symbol = '@sigx/resume-example/src/api.server.ts/submitFeedback';
+    const path = fnPath(symbol);
     if (html) {
         assert(
             html.includes(`action="${path}"`) && html.includes('method="post"'),

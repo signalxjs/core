@@ -18,6 +18,7 @@ export {
     extractServerFns,
     mintSymbols,
     readServerFnIdOption,
+    routeSafeId,
     type ExtractedServerFn,
     type ServerFnExtraction,
     type ServerFnExtractOptions
@@ -43,6 +44,9 @@ export type PackageProbe = { name: string; dir: string } | null;
  * exists: the build-root-relative path (root-dependent — and containing
  * `../` segments for out-of-root files — so shared modules should live in
  * named packages).
+ *
+ * The result is raw: `mintSymbols` runs it through `routeSafeId`, which is
+ * what turns those `../` segments into something a URL path can carry (#355).
  *
  * `cache` maps directory → probe result, hits AND misses, so sibling files
  * short-circuit; the caller owns it (per plugin instance, cleared on config

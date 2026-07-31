@@ -46,6 +46,7 @@ import {
     readServerFnIdOption,
     readServerFnInvalidatesOption,
     stubFlags,
+    warnIfIdRewritten,
     type ServerFnExtractOptions
 } from './server-fn-extract.js';
 
@@ -65,7 +66,7 @@ export interface InlineServerFn {
     name: string;
     /** Content-hashed transport symbol: `<name>_fn_<hash8>`. */
     symbol: string;
-    /** Hash-free stable symbol: `<stableId>#<name>` (decoded form). */
+    /** Hash-free stable symbol: `<stableId>/<name>` (decoded form). */
     stableSymbol: string;
     /** True for `serverStream` (NDJSON transport, AsyncIterable stub). */
     stream: boolean;
@@ -568,6 +569,7 @@ export function extractInlineServerFns(
                     `statically) — falling back to the file-derived stable id.`
                 );
             }
+            if (idOption.id !== undefined) warnIfIdRewritten(warnings, name, idOption.id);
             if (!stream && hasServerFnOptionsSpread(call)) warnings.push(optionsSpreadWarning(name));
             // The guard gate (#489). An inline server function is extracted and
             // is a public endpoint like any other, so it is held to the same

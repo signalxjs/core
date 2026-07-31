@@ -83,7 +83,7 @@ const refTupleFetcher = (raw: KeyValue, _ctx: AsyncFetcherContext): Promise<unkn
 };
 
 /** Server-fn key (#452): data identity IS the fn — canonical key
- *  `'["<stableId>#<name>"]'`, default fetcher `() => fn()`. */
+ *  `'["<stableId>/<name>"]'`, default fetcher `() => fn()`. */
 export function useData<R>(fn: ServerFnDataRef<[], R>, opts?: AsyncOptions): AsyncState<Awaited<R>>;
 /** Reactive server-fn tuple key: `() => [fn, ...args]`; falsy ⇒ idle.
  *  Default fetcher `fn(...args)`; args are the fn's own parameters. */

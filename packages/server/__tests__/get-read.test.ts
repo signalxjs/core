@@ -213,6 +213,67 @@ describe('query-string arguments (§4.1)', () => {
         await expect(res.json()).resolves.toEqual({ data: { ok: 2 } });
     });
 
+    it('reads named scalar params (#355) — the percent-free common case', async () => {
+        const res = await get('echo_fn_00000004', undefined, {
+            url: `${ORIGIN}/_sigx/fn/echo_fn_00000004?a0=shoes`
+        });
+        expect(res.status).toBe(200);
+        await expect(res.json()).resolves.toEqual({ data: 'shoes' });
+    });
+
+    it('types survive the named-param round trip', async () => {
+        const cases: [string, unknown][] = [
+            ['a0=42', 42],
+            ['a0=-1.5e3', -1500],
+            ['a0=true', true],
+            ['a0=null', null],
+            ['a0=%2242%22', '42'], // a STRING that reads as a number is quoted
+            ['a0=%22true%22', 'true'],
+            ['a0=007', '007'], // a leading zero is not a number here
+            ['a0=', ''],
+            ['a0=hello+world', 'hello world']
+        ];
+        for (const [query, expected] of cases) {
+            const res = await get('echo_fn_00000004', undefined, {
+                url: `${ORIGIN}/_sigx/fn/echo_fn_00000004?${query}`
+            });
+            expect(res.status, query).toBe(200);
+            await expect(res.json(), query).resolves.toEqual({ data: expected });
+        }
+    });
+
+    it('several named params still hit the options form’s single-input rule', async () => {
+        // `cache` is an OPTIONS-form field and the options form takes exactly
+        // one input, so a real cache-marked read is single-argument by
+        // construction — `a0` is the whole story in practice. The named-param
+        // grammar is positional anyway (see fn-url.test.ts), and the arity
+        // rule is what rejects the extra one — not a parse failure.
+        const res = await get('read_fn_00000001', undefined, {
+            url: `${ORIGIN}/_sigx/fn/read_fn_00000001?a0=1&a1=2`
+        });
+        expect(res.status).toBe(400);
+        await expect(res.json()).resolves.toMatchObject({
+            error: { message: 'options-form server functions take a single input argument' }
+        });
+    });
+
+    it('named params and `args` together is a 400 — one encoding per call', async () => {
+        const res = await get('echo_fn_00000004', undefined, {
+            url: `${ORIGIN}/_sigx/fn/echo_fn_00000004?a0=1&args=%5B1%5D`
+        });
+        expect(res.status).toBe(400);
+        expect(res.headers.get('cache-control')).toBe('no-store');
+    });
+
+    it('a gap in the named-param sequence is a 400, not a shifted call', async () => {
+        for (const query of ['a1=2', 'a0=1&a2=3']) {
+            const res = await get('echo_fn_00000004', undefined, {
+                url: `${ORIGIN}/_sigx/fn/echo_fn_00000004?${query}`
+            });
+            expect(res.status, query).toBe(400);
+        }
+    });
+
     it('an oversized query string is a 414 + no-store', async () => {
         const res = await get('read_fn_00000001', [{ id: 'x'.repeat(10_000) }]);
         expect(res.status).toBe(414);

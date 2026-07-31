@@ -85,7 +85,7 @@ export interface ServerFnOptions<S, R> {
      * Explicit stable id (rfc-server rev 2, N.3) — a NON-EMPTY string
      * literal, read statically by the build; the runtime ignores it, and
      * anything else (a variable, a template, `''`) is warned about and falls
-     * back to the file-derived id. Pins the function's routes (`<id>#<name>`
+     * back to the file-derived id. Pins the function's routes (`<id>/<name>`
      * and the hashed twin) across file moves — for published APIs
      * long-lived native clients call.
      */

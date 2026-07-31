@@ -5,7 +5,8 @@
  * to a generated stub module importing this entry — it must not drag any
  * runtime along (size-limit checks it with no ignore list).
  *
- * Wire format (rfc-server §4): `POST {base}/{symbol}` with
+ * Wire format (rfc-server §4): `POST {base}/{symbol}` — the symbol's own
+ * slashes stay real path separators (`encodeFnPath`, #355) — with
  * `{"args": [...]}`; `200 {"data": ...}` back, or
  * `{status} {"error": {message, status, data?}}`. Errors are re-created with
  * the `__sigxServerFnError` brand so `isServerFnError` matches them.
@@ -17,6 +18,9 @@ import type { ServerFnCallOptions, ServerStreamCallOptions } from '../types';
 // shared with the `/server` entry. size-limit's esbuild pass follows the
 // import, so its bytes still count against this entry's ceiling.
 import { encodeWire, reviveWire } from '../wire-codec';
+// Ditto: the §4/§4.1 URL grammar (path + read query), shared with the
+// `/server` entry (#355).
+import { encodeFnPath, encodeReadQuery } from '../fn-url';
 
 /** Same three keys as the boundary serializer's DANGEROUS_KEYS — duplicated
  *  here (a 3-entry set) to keep this entry dependency-free. */
@@ -85,11 +89,11 @@ async function send(
         }
     }
     const signal = options?.signal;
-    const base = `${prefix}/${encodeURIComponent(symbol)}`;
+    const base = `${prefix}/${encodeFnPath(symbol)}`;
     let url = base;
     let init: RequestInit;
     if (get) {
-        const query = encodeURIComponent(JSON.stringify(encodeWire(args)));
+        const query = encodeReadQuery(args, (blob) => JSON.stringify(encodeWire(blob)));
         if (__DEV__ && query.length > 2048) {
             console.warn(
                 `[sigx server] GET read "${symbol}" encodes ~${query.length} bytes of ` +
@@ -97,7 +101,7 @@ async function send(
                 `smaller input, or keep this read on POST (drop \`cache\`).`
             );
         }
-        url = `${base}?args=${query}`;
+        url = query ? `${base}?${query}` : base;
         init = {
             method: 'GET',
             headers,
@@ -206,7 +210,7 @@ function refreshSeam(): BoundaryRefreshSeam | undefined {
 }
 
 /** Create the typed client stub for one extracted server function. The 4th
- *  positional is the fn's STABLE data key (`<stableId>#<name>`), stamped as
+ *  positional is the fn's STABLE data key (`<stableId>/<name>`), stamped as
  *  `__sigxKey` for `useData(fn)` keying. The 5th flag marks a cache-marked
  *  read (rfc-server §4.1): the stub issues GET so browser/edge caches can
  *  serve it; absent means POST. The 6th marks an `invalidates`-declaring

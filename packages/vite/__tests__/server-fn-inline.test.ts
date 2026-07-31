@@ -474,7 +474,7 @@ describe('extractInlineServerFns — rev 2 (stable symbols, id, endpoint)', () =
         const a = extract(SEARCH, '/appA/Search.tsx', { stableId: '@acme/web/src/Search.tsx' });
         const b = extract(SEARCH, '/appB/Search.tsx', { stableId: '@acme/web/src/Search.tsx' });
         expect(a.fns[0].symbol).toBe(b.fns[0].symbol);
-        expect(a.fns[0].stableSymbol).toBe('@acme/web/src/Search.tsx#search');
+        expect(a.fns[0].stableSymbol).toBe('@acme/web/src/Search.tsx/search');
     });
 
     it('honors an explicit string-literal `id` and warns on a non-literal one', () => {
@@ -486,13 +486,13 @@ export const use = () => search('x');
         const result = extract(withId, '/src/api.ts');
         expect(result.errors).toHaveLength(0);
         expect(result.warnings).toHaveLength(0);
-        expect(result.fns[0].stableSymbol).toBe('search/query#search');
+        expect(result.fns[0].stableSymbol).toBe('search/query/search');
 
         const dynamic = withId.replace(`'search/query'`, '`search/query`');
         const warned = extract(dynamic, '/src/api.ts');
         expect(warned.warnings).toHaveLength(1);
         expect(warned.warnings[0]).toContain('string literal');
-        expect(warned.fns[0].stableSymbol).toBe('src/api.ts#search');
+        expect(warned.fns[0].stableSymbol).toBe('src/api.ts/search');
     });
 
     it("stubSymbols: 'stable' + endpoint bake into the client splice", () => {
@@ -502,8 +502,8 @@ export const use = () => search('x');
             endpoint: 'https://api.example.com/_sigx/fn'
         });
         expect(result.clientModule).toContain(
-            `__serverFnStub("@acme/web/src/Search.tsx#search", "search", ` +
-            `"https://api.example.com/_sigx/fn", "@acme/web/src/Search.tsx#search")`
+            `__serverFnStub("@acme/web/src/Search.tsx/search", "search", ` +
+            `"https://api.example.com/_sigx/fn", "@acme/web/src/Search.tsx/search")`
         );
     });
 });

@@ -8,6 +8,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- **BREAKING (wire): server-function request URLs no longer percent-encode
+  (#355).** `%40acme%2Fapi%2Fsrc%2Fcart.server.ts%23addToCart` was the route you
+  saw in a network tab; it is now `@acme/api/src/cart.server.ts/addToCart`. A
+  stable symbol's separator changed from `#` to `/` and encoding is per segment,
+  so the path reads as the id does — `serverFn({ id: 'cart/add' })` finally
+  serves `/_sigx/fn/cart/add`. Cache-marked GET reads carry scalar arguments as
+  named params too (`?a0=shoes`, not `?args=%5B%22shoes%22%5D`). Shipped with no
+  compatibility path: `role: 'client'` native builds and long-cached pages with
+  a stamped `<form action>` 404 until rebuilt or re-rendered. Details, and the
+  `ServerFnRequestOptions.base` addition a custom-base deployment now needs, in
+  `packages/server/CHANGELOG.md`.
+
 - **BREAKING (types): a slot fill is now checked against the slot it fills
   (#536).** A slot declaration described the contract and nothing enforced it,
   on either side:

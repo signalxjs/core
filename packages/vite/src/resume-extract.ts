@@ -739,6 +739,24 @@ function applySplices(code: string, splices: Splice[]): string {
     return out;
 }
 
+/**
+ * Symbol → URL path for the stamped `<form action>` (rfc-server §6.4, #355):
+ * per-segment encoding, so a stable symbol's own slashes stay real path
+ * separators and `@`/`.`/`-`/`_`/`~` survive literally.
+ *
+ * A DELIBERATE copy of `encodeFnPath` in `@sigx/server/src/fn-url.ts` — the
+ * two must stay in step, and cannot be one import: `@sigx/server` is an
+ * OPTIONAL peer dependency of this package (`package.json`
+ * `peerDependenciesMeta`), so an app that only uses resume must still be able
+ * to build. Six lines is the cheaper half of that trade.
+ */
+function encodeFnPath(symbol: string): string {
+    return symbol
+        .split('/')
+        .map((segment) => encodeURIComponent(segment).replace(/%40/g, '@'))
+        .join('/');
+}
+
 /** FNV-1a, 8 hex chars — deterministic across environments and builds.
  *  Exported for the server-function transform's symbol minting (rfc-server §3). */
 export function hash8(text: string): string {
@@ -894,7 +912,7 @@ export function extractResumeHandlers(
         }
         const symbol: string = seen.values().next().value!;
         const endpoint = opts.endpoint ?? '/_sigx/fn';
-        return ` action="${endpoint}/${encodeURIComponent(symbol)}" method="post"`;
+        return ` action="${endpoint}/${encodeFnPath(symbol)}" method="post"`;
     };
 
     for (const comp of components) {

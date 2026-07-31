@@ -606,8 +606,10 @@ export const Toasty = component((ctx) => {
 });
 
 describe('zero-JS form actions — action/method stamping (rfc-server §6.4, #312)', () => {
-    const SYMBOL = 'app/api.server.ts#submitFeedback';
-    const ENCODED = encodeURIComponent(SYMBOL);
+    const SYMBOL = 'app/api.server.ts/submitFeedback';
+    // #355: the stable symbol's slashes are REAL path separators, so the
+    // stamped action carries the symbol verbatim — no `%2F`, no `%23`.
+    const ENCODED = SYMBOL;
     const resolveServerFn = (specifier: string, exportName: string) =>
         specifier === './api.server' && exportName === 'submitFeedback'
             ? { stableSymbol: SYMBOL, form: true }
@@ -626,7 +628,7 @@ export const Feedback = component((ctx) => {
 });
 `;
 
-    it('stamps action (percent-encoded stable symbol) + method on the form', () => {
+    it('stamps action (stable symbol as real path segments) + method on the form', () => {
         const result = extractResumeHandlers(
             FEEDBACK(`async (e) => { e.preventDefault(); await submitFeedback({}); sent.value = true; }`),
             '/src/Feedback.tsx',

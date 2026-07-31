@@ -322,8 +322,10 @@ export const Feedback = component((ctx) => {
             FEEDBACK,
             file
         );
-        const encoded = encodeURIComponent('src/api.server.ts#submitFeedback');
-        expect(result.code).toContain(` action="/_sigx/fn/${encoded}" method="post"`);
+        // #355: real path segments, so the action reads as the symbol does.
+        expect(result.code).toContain(
+            ` action="/_sigx/fn/src/api.server.ts/submitFeedback" method="post"`
+        );
         expect(result.code).toContain('data-sigx-pd:submit=""');
     });
 

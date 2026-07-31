@@ -166,7 +166,7 @@ Preset guards run **first**, then the function's own `use:` chain.
   is a build error naming the remedy.
 - **Editing the shared chain re-mints the hashed symbols** of every function
   derived from it (the preset's source is part of their content hash), the
-  way editing a function body already does. Stable symbols (`<id>#<name>`)
+  way editing a function body already does. Stable symbols (`<id>/<name>`)
   never move, so installed clients keep their routes.
 
 ### The guard gate — `requireGuards` and `unguarded`
@@ -331,7 +331,7 @@ export const submitFeedback = serverFn({
 
 The read-side twin of `invalidates` (rfc-server §4.1): declaring `cache`
 marks a function as a **side-effect-free idempotent read**. The stub then
-calls it with `GET {endpoint}/{symbol}?args=…` and the endpoint emits
+calls it with `GET {endpoint}/{symbol}?a0=…` and the endpoint emits
 `Cache-Control` from the declaration — the browser and any edge cache can
 absorb repeats without touching the origin:
 
@@ -359,6 +359,24 @@ export const getProduct = serverFn({
   `max-age` decides whether the refetch reaches the origin. For private
   reads keep `maxAge ≤ staleTime`; for public reads put the real budget in
   `sMaxAge` and keep the browser `max-age` short.
+
+**The read URL is meant to be read.** A scalar argument rides as a named
+param, so a cache key you can recognize in a network tab or a CDN log:
+
+```
+GET /_sigx/fn/getProduct_fn_9f3a01cc?a0=sku-42
+```
+
+Types survive because the grammar is lopsided: a param comes back as a
+number, `true`, `false` or `null` only when its raw text says so, and the
+one case that needs help is a *string* that would be misread that way — it
+is JSON-quoted (`?a0="42"` → the string `"42"`). `007` and `+1` are not
+numbers by this grammar, so they stay the strings they almost certainly
+were. An argument richer than a scalar — an object, `Date`, `Map`, `Set`,
+`BigInt` — falls back to the encoded `?args=` blob for the whole call, so
+one request never mixes the two and the cache key stays a pure function of
+the arguments. Mixing them explicitly, or leaving a gap in the `a0, a1, …`
+sequence, is a 400 rather than a call with quietly shifted arguments.
 
 ### Streaming (`serverStream`)
 
@@ -770,7 +788,7 @@ Vite root are discovered with `scan: ['../packages/api']`.
 Every function is registered under TWO symbols. The content-hashed one
 (`addToCart_fn_9f3a01cc`) is what web builds fetch — version skew is a
 typed 404 and a reload fixes it. The hash-free **stable symbol**
-(`@acme/api/src/cart.server.ts#addToCart`) is what `role: 'client'` builds
+(`@acme/api/src/cart.server.ts/addToCart`) is what `role: 'client'` builds
 fetch — an installed lynx app or terminal CLI cannot reload, so its routes
 survive every backend redeploy. Symbol seeds are package-qualified, so
 every app build of one solution mints identical symbols for a shared
@@ -784,10 +802,19 @@ across file moves. Contract safety lives in the `input` validator (argument
 changes surface as a 400 the client can show as "update the app"), and
 semantic changes are explicit versioning — a new export or a new `id`.
 
-Deploy note: stable symbols URL-encode into one path segment
-(`%2F`-encoded slashes). A proxy or CDN that decodes or merges encoded
-slashes will mangle them — hashed symbols are immune; configure the proxy
-to pass encoded paths through untouched.
+A stable symbol's slashes are REAL path separators, so the route reads as
+the id does and needs nothing special from your infrastructure:
+
+```
+POST /_sigx/fn/@acme/api/src/cart.server.ts/addToCart
+POST /_sigx/fn/cart/add          # with id: 'cart/add'
+```
+
+Only a character a URL path genuinely cannot carry is percent-encoded, and
+per segment. An id is normalized to fit: `..` segments become `_up` (a URL
+would otherwise resolve them away and silently retarget the route), and an
+explicit `id` that had to be rewritten warns at build time naming the route
+it actually gets.
 
 ## Security defaults
 

@@ -322,6 +322,6 @@ describe('bundled build + server functions — registry inlined, no chunk (real 
             .map((f) => readFileSync(join(serverDir, f), 'utf-8'))
             .join('\n');
         // Dual registration inlined: the deterministic stable symbol.
-        expect(code).toContain('fixture-fns/src/api.server.ts#ping');
+        expect(code).toContain('fixture-fns/src/api.server.ts/ping');
     }, 120_000);
 });

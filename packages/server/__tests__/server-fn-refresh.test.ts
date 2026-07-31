@@ -92,15 +92,15 @@ describe('endpoint — $boundaries envelope (rfc-server §6.3)', () => {
 
     it('a bare fn-ref pattern prefix-matches useData(fn) AND useData(() => [fn, args]) deps', async () => {
         const getVotes = Object.assign(serverFn(async () => 3), {
-            __sigxKey: 'src/api.server.ts#getVotes'
+            __sigxKey: 'src/api.server.ts/getVotes'
         });
         const vote = serverFn({ handler: async () => 'ok', invalidates: () => [getVotes] });
         const sidecar = {
             base: BASE,
             refresh: [
-                { id: 3, component: 'Poll', deps: ['["src/api.server.ts#getVotes"]'] },
-                { id: 5, component: 'PollDetail', deps: ['["src/api.server.ts#getVotes",7]'] },
-                { id: 7, component: 'Unrelated', deps: ['["src/api.server.ts#getUser"]'] }
+                { id: 3, component: 'Poll', deps: ['["src/api.server.ts/getVotes"]'] },
+                { id: 5, component: 'PollDetail', deps: ['["src/api.server.ts/getVotes",7]'] },
+                { id: 7, component: 'Unrelated', deps: ['["src/api.server.ts/getUser"]'] }
             ]
         };
         let admitted: ReadonlyArray<BoundaryRefreshDescriptor> = [];
@@ -376,7 +376,7 @@ describe('stub — collect/apply through __SIGX_SERVERFN_BOUNDARIES__', () => {
 describe('endpoint — fn-ref invalidates patterns (#452)', () => {
     it('resolves bare refs and tuple-embedded refs to stable-key patterns on the wire', async () => {
         const getVotes = Object.assign(serverFn(async () => 3), {
-            __sigxKey: 'src/api.server.ts#getVotes'
+            __sigxKey: 'src/api.server.ts/getVotes'
         });
         const vote = serverFn({
             handler: async () => 'ok',
@@ -387,8 +387,8 @@ describe('endpoint — fn-ref invalidates patterns (#452)', () => {
             data: 'ok',
             $cache: {
                 invalidates: [
-                    ['src/api.server.ts#getVotes'],
-                    ['src/api.server.ts#getVotes', 7],
+                    ['src/api.server.ts/getVotes'],
+                    ['src/api.server.ts/getVotes', 7],
                     ['custom', 1],
                     'plain'
                 ]

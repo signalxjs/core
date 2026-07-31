@@ -2,6 +2,65 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING (wire): server-function request URLs no longer percent-encode
+  (#355).** Inspecting a request meant reading `%40`/`%2F`/`%23` soup. Two
+  independent causes, both fixed:
+
+  - A stable symbol was `<stableId>#<name>` squeezed into ONE
+    `encodeURIComponent`d path segment. It is now `<stableId>/<name>` spent as
+    REAL path segments, encoded per segment, so `@`, `.`, `-`, `_`, `~` survive
+    literally:
+
+    ```
+    - POST /_sigx/fn/%40acme%2Fapi%2Fsrc%2Fcart.server.ts%23addToCart
+    + POST /_sigx/fn/@acme/api/src/cart.server.ts/addToCart
+    - POST /_sigx/fn/cart%2Fadd            # serverFn({ id: 'cart/add' })
+    + POST /_sigx/fn/cart/add              # the URL you wrote
+    ```
+
+    This also retires a documented deploy hazard: the README used to warn that a
+    proxy or CDN which decodes or merges encoded slashes would mangle these
+    routes. Nothing in front of the app has to cooperate any more.
+
+  - A cache-marked GET read encoded its whole argument array into the query.
+    When every argument is a simple scalar it now rides as named params —
+    `?a0=shoes` instead of `?args=%5B%22shoes%22%5D`. Types survive because a
+    param reads back as a number/`true`/`false`/`null` only when its raw text
+    says so; a *string* that would be misread that way is JSON-quoted
+    (`?a0="42"`), which is the only escape a scalar read can still produce.
+    Anything richer (objects, `Date`, `Map`, `Set`, `BigInt`) falls back to the
+    unchanged `?args=` blob for the whole call — never a mix, so the cache key
+    stays a pure function of the arguments. Mixing the two explicitly, or a gap
+    in the `a0, a1, …` sequence, is a 400 instead of a call with silently
+    shifted arguments.
+
+  **There is no compatibility path — deliberately.** No legacy registry key, no
+  dual-format parsing. What breaks, and the fix:
+
+  - a `role: 'client'` native build (lynx, terminal, installed app) posts the
+    old stable route and gets the structured 404 its stub reads as version skew
+    → rebuild and redeploy the client;
+  - a long-cached page carrying a build-stamped `<form action>` 404s on submit
+    → re-render it.
+
+  Both were rfc-server N.3's deploy-durability promise; the section is amended
+  to say the format changed once rather than that it never will. A test asserts
+  the old form 404s, so the break is explicit rather than incidental.
+
+- **`ServerFnRequestOptions.base`** (default `/_sigx/fn`) — the symbol is every
+  path segment after the base now, so the handler has to know how much to strip.
+  `createServerFnHandler` forwards its existing `base`; a deployment mounting
+  `handleServerFnRequest` directly at a CUSTOM base must pass it, or
+  multi-segment stable routes 404. A path outside the base is a 404 rather than
+  a guess at the tail, and a malformed escape (`/%FF`) is now a 400 instead of
+  throwing out of the handler into a masked 500.
+
+- `__sigxKey` — the `useData`/`invalidates` cache key is the stable symbol, so
+  it changes shape with it (`src/api.server.ts/getVotes`). Client and server
+  deploy together, so nothing at rest breaks.
+
 ### Added
 
 - **`requireGuards` + `unguarded: true` — forgetting a guard is now a build

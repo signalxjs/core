@@ -77,7 +77,7 @@ try {
     const data = await assertServerFn(fetchFn, {
         label,
         origin: ORIGIN,
-        symbol: '@sigx/resume-example/src/api.server.ts#getQuote',
+        symbol: '@sigx/resume-example/src/api.server.ts/getQuote',
         args: [1],
         expectInData: 'Named = transferred.'
     });
