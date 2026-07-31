@@ -495,6 +495,62 @@ describe('handleServerFnRequest — pollution reviver', () => {
         expect(body.data).toEqual({ ok: 1 });
         expect(({} as { polluted?: boolean }).polluted).toBeUndefined();
     });
+
+    // The parse skips the reviver when the source cannot SPELL a dangerous
+    // key (#544). A `\u` escape spells one without the literal ever appearing,
+    // so a substring-only prescan would wave it through.
+    //
+    // Asserting on the RESPONSE would not catch that. `reviveWire` rebuilds
+    // objects with plain assignment, and `out.__proto__ = value` sets the
+    // prototype instead of creating an own property — the key vanishes from
+    // the response while the argument object the handler receives carries an
+    // attacker-supplied prototype. So these assert on what the FUNCTION SEES.
+    const captor = (): { fn: unknown; seen: () => Record<string, unknown> } => {
+        let captured: Record<string, unknown> = {};
+        return {
+            fn: serverFn(async (_rq, value: Record<string, unknown>) => {
+                captured = value;
+                return 'ok';
+            }),
+            seen: () => captured
+        };
+    };
+
+    it('drops __proto__ spelled with \\u escapes, before it reaches the handler', async () => {
+        const { fn, seen } = captor();
+        const res = await call('capture_fn_00000006', undefined, {
+            body: '{"args":[{"\\u005f\\u005fproto\\u005f\\u005f":{"polluted":true},"ok":1}]}'
+        }, { resolve: () => fn });
+
+        expect(res.status).toBe(200);
+        const input = seen();
+        expect(input).toEqual({ ok: 1 });
+        // The load-bearing one: a naive prescan leaves this pointing at
+        // {"polluted": true} rather than Object.prototype.
+        expect(Object.getPrototypeOf(input)).toBe(Object.prototype);
+        expect((input as { polluted?: boolean }).polluted).toBeUndefined();
+    });
+
+    it('drops "constructor"/"prototype" spelled with \\u escapes', async () => {
+        const { fn, seen } = captor();
+        const res = await call('capture_fn_00000006', undefined, {
+            body:
+                '{"args":[{"\\u0063onstructor":{"bad":1},' +
+                '"\\u0070rototype":{"bad":2},"ok":1}]}'
+        }, { resolve: () => fn });
+
+        expect(res.status).toBe(200);
+        expect(seen()).toEqual({ ok: 1 });
+    });
+
+    it('leaves a body that merely MENTIONS a dangerous name in a value alone', async () => {
+        const { fn, seen } = captor();
+        await call('capture_fn_00000006', undefined, {
+            body: '{"args":[{"note":"see the constructor docs","ok":1}]}'
+        }, { resolve: () => fn });
+
+        expect(seen()).toEqual({ note: 'see the constructor docs', ok: 1 });
+    });
 });
 
 describe('handleServerFnRequest — onError observability seam (#349)', () => {

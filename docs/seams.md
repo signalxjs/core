@@ -222,7 +222,7 @@ can hold two copies of the same module — the same hazard that makes
 |---|---|
 | **Stamped by** | `server/src/scope.ts`, at IMPORT (every server entry pulls it) |
 | **Called by** | `server-renderer/src/server/serverfn-scope.ts` — both document handlers |
-| **Contract** | `{ run<T>(source: Request \| IncomingMessage \| Partial<ServerFnContext>, fn: () => T \| Promise<T>): Promise<T> }` |
+| **Contract** | `{ run<T>(source: Request \| IncomingMessage \| Partial<ServerFnContext>, fn: () => T \| Promise<T>): T \| Promise<T> }` |
 
 The other half of the pair above: `__SIGX_SERVERFN_CONTEXT__` says what the
 ambient request IS, this one OPENS the scope that sets it. The handlers wrap
@@ -247,6 +247,13 @@ delete a global, and a store nothing can read is a worse failure than a
 redundant assignment. A throwing resolver is swallowed — the detached
 context's descriptive error is more actionable than a leaked internal one.
 `fn.with({ context })` wins over whatever is ambient.
+
+`run` returns `T | Promise<T>`, not `Promise<T>`: the store is resolved through
+a dynamic `import('node:async_hooks')`, so only the FIRST entry is
+asynchronous — every one after it enters the scope synchronously and hands
+back whatever `fn` returned (#544). Await the result, as all three call sites
+do; treating it as a thenable without awaiting (`.then(…)` straight on it) is
+what breaks.
 
 ### `__SIGX_GUARDS_CHECKED__`
 

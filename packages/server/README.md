@@ -842,7 +842,10 @@ Every server function is a public HTTP endpoint; the defaults assume that:
   throws become a generic 500 in production.
 - **Prototype-pollution keys dropped** from parsed values on both parse
   sites (a reviver removes `__proto__`/`constructor`/`prototype`; the
-  request itself is not rejected).
+  request itself is not rejected). The reviver is skipped when the source
+  text provably cannot spell one — no literal and no `\u` escape — which is
+  a pure speed-up, not a relaxation: the parsed value is identical either
+  way, escape-spelled keys included (#544).
 - **Argument validation is opt-in** — the options form's `input` is the
   validation seam; direct-form arguments are not validated at runtime (a
   `__DEV__` warning fires once per function when one receives wire
@@ -860,3 +863,25 @@ Every server function is a public HTTP endpoint; the defaults assume that:
 
 The runnable example is `examples/resume` (the "server function from a
 resumed handler" card).
+
+## A note on AsyncLocalStorage, if you are tuning a Node deployment
+
+The ambient request scope (#309 — what lets an SSR-time `serverFn` call see
+the real request) is an `AsyncLocalStorage`. On Node's default
+implementation, the first `.run()` installs promise hooks **process-wide and
+permanently**: from then on every `await` in the process pays for them, not
+just the ones inside a scope. Measured here on Node 22, five awaits cost
+367 ns before the first scope and 861 ns after.
+
+`node --experimental-async-context-frame` switches `AsyncLocalStorage` to
+async context frames and removes that: the same five awaits go back to 322 ns
+outside a scope, and cost 637 ns instead of 887 ns inside one. Nothing in this
+package needs the flag and nothing behaves differently with it — it is purely
+how the runtime implements the storage. Check whether your Node version has
+already made it the default before adding it, and measure your own workload;
+the win is proportional to how many awaits per request your app does, not to
+anything sigx controls.
+
+Where `node:async_hooks` is unavailable altogether (workerd without
+`nodejs_compat`), the scope degrades to running unscoped — a supported state,
+not an error. `fn.with({ context })` works on every runtime and needs no ALS.

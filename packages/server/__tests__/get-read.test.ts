@@ -213,6 +213,34 @@ describe('query-string arguments (§4.1)', () => {
         await expect(res.json()).resolves.toEqual({ data: { ok: 2 } });
     });
 
+    // Same prescan as the POST body (#544): a `\u`-escaped key spells a
+    // dangerous name without the literal appearing in the source. Asserted on
+    // the ARGUMENT, not the response — `reviveWire`'s plain assignment turns a
+    // surviving `__proto__` into a prototype swap, which the response cannot
+    // show. See the matching cases in handler.test.ts.
+    it('drops query-arg keys spelled with \\u escapes, before the handler', async () => {
+        let seen: Record<string, unknown> = {};
+        const capture = serverFn({
+            cache: { maxAge: 60 },
+            handler: async (_rq, value: Record<string, unknown>) => {
+                seen = value;
+                return 'ok';
+            }
+        });
+        const raw = encodeURIComponent(
+            '[{"\\u005f\\u005fproto\\u005f\\u005f": {"polluted": 1}, "ok": 2}]'
+        );
+        const res = await get(
+            'capture_fn_00000009',
+            undefined,
+            { url: `${ORIGIN}/_sigx/fn/capture_fn_00000009?args=${raw}` },
+            { resolve: () => capture }
+        );
+        expect(res.status).toBe(200);
+        expect(seen).toEqual({ ok: 2 });
+        expect(Object.getPrototypeOf(seen)).toBe(Object.prototype);
+    });
+
     it('reads named scalar params (#355) — the percent-free common case', async () => {
         const res = await get('echo_fn_00000004', undefined, {
             url: `${ORIGIN}/_sigx/fn/echo_fn_00000004?a0=shoes`

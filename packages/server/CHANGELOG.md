@@ -22,6 +22,37 @@
 
 ### Changed
 
+- **`runInScope` / `__SIGX_SERVERFN_SCOPE__.run` may return a non-promise
+  (#544).** The request scope resolves its `AsyncLocalStorage` through a
+  dynamic `import('node:async_hooks')`, and used to `await` that memoized
+  promise on every single request — for a value that never changes after the
+  first one. Only the first entry is asynchronous now; every one after it
+  enters the scope synchronously, so the declared return type widened from
+  `Promise<T>` to `T | Promise<T>`.
+
+  Awaiting the result is unaffected, and that is what all three call sites in
+  this repo do. **What breaks is treating the result as a thenable without
+  awaiting it** — `runInScope(rq, fn).then(…)`, `.catch(…)`, `.finally(…)`, or
+  passing it somewhere that requires a real `Promise` (`promise.then` feature
+  detection, a `Promise<T>`-typed field). Wrap it: `Promise.resolve(runInScope(…))`,
+  or just `await` it. One such call site existed in this package (the
+  `timeoutMs` race's unhandled-rejection guard) and is fixed.
+
+  Measured at 1.065 µs → 0.273 µs per scope entry.
+
+- **The endpoint skips the prototype-pollution reviver when the request body
+  provably cannot contain a dangerous key (#544).** `JSON.parse(body, reviver)`
+  runs a per-key callback across the whole document; on a key-dense body that
+  costs about 4× the parse itself. The reviver now runs only when the source
+  text could actually SPELL `__proto__` / `constructor` / `prototype` — as a
+  literal, or through a `\u` escape. Parsed output is identical in both
+  branches, including for escape-spelled keys; the prescan is conservative in
+  one direction only, so a body that merely mentions one of those words in a
+  value takes the same path it always did.
+
+  A POST whose arguments carry 400 keys got 2.2× faster end to end
+  (417 µs → 186 µs); a trivial call with no arguments, 1.15× (23.6 µs → 20.1 µs).
+
 - **BREAKING (wire): server-function request URLs no longer percent-encode
   (#355).** Inspecting a request meant reading `%40`/`%2F`/`%23` soup. Two
   independent causes, both fixed:

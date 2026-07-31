@@ -36,9 +36,16 @@ export interface NodeRequestLike {
     socket?: { encrypted?: boolean };
 }
 
-/** The capability `@sigx/server-renderer` reaches through the seam. */
+/**
+ * The capability `@sigx/server-renderer` reaches through the seam.
+ *
+ * `run` returns `T | Promise<T>`, not `Promise<T>`: once the store has
+ * resolved, a scope is entered SYNCHRONOUSLY and hands back whatever `fn`
+ * returned. Callers await it either way; only code that treated the result as
+ * a thenable WITHOUT awaiting (`.then(…)` straight on it) would notice.
+ */
 export interface ServerFnScope {
-    run<T>(source: ScopeSource, fn: () => T | Promise<T>): Promise<T>;
+    run<T>(source: ScopeSource, fn: () => T | Promise<T>): T | Promise<T>;
 }
 
 /**
@@ -242,6 +249,19 @@ let _storePromise: Promise<ContextStore | null> | undefined;
 let _warnedNoStore = false;
 
 /**
+ * The settled store, or `null` for "this runtime has none". `undefined` means
+ * not resolved yet — the only state that has to go through the promise.
+ *
+ * Every request used to await `_storePromise` and allocate a fresh `.then()`
+ * plus a fresh resolver closure, for a value that never changes after the
+ * first request. Reading it from a plain slot lets a resolved scope be entered
+ * with no microtask hop at all (#544: 1.065us -> 0.273us per entry).
+ */
+let _store: ContextStore | null | undefined;
+/** Hoisted so the re-stamp below assigns a REFERENCE, not a new closure. */
+let _resolver: (() => ServerFnContextInit | undefined) | undefined;
+
+/**
  * Create the ALS once per process and (re-)stamp the resolver seam on every
  * scope entry.
  *
@@ -272,28 +292,55 @@ function ensureContextStore(): Promise<ContextStore | null> {
                     'compatibility_flags: ["nodejs_compat"]). fn.with({ context }) still works.'
                 );
             }
+            _store = null;
             return null;
         }
-        (
-            globalThis as {
-                __SIGX_SERVERFN_CONTEXT__?: () => ServerFnContextInit | undefined;
-            }
-        ).__SIGX_SERVERFN_CONTEXT__ = () => als.getStore();
-        return als as unknown as ContextStore;
+        const store = als as unknown as ContextStore;
+        _resolver ??= () => store.getStore();
+        _store = store;
+        stampResolver();
+        return store;
     });
 }
 
-/** Open a scope, or run `fn` unscoped when the runtime has no ALS. */
-export async function runInScope<T>(source: ScopeSource, fn: () => T | Promise<T>): Promise<T> {
-    const store = await ensureContextStore();
-    // No ALS: nothing encloses anything, so there is nothing to merge and no
-    // notice to give — this runtime never had a scope to nest in.
-    if (!store) return fn();
-    // `getStore()` AFTER the await deliberately: AsyncLocalStorage follows
-    // async continuations, so this still reads the scope of whoever called.
-    // No cast: `run` hands back exactly what `fn` returned — a value or a
-    // promise — and this function being async settles either into Promise<T>.
-    return store.run(toScopeInit(source, store.getStore()), fn);
+/** Re-assert the read seam. See the note above on why this happens on every
+ *  entry and not just the first. */
+function stampResolver(): void {
+    (
+        globalThis as {
+            __SIGX_SERVERFN_CONTEXT__?: () => ServerFnContextInit | undefined;
+        }
+    ).__SIGX_SERVERFN_CONTEXT__ = _resolver;
+}
+
+/**
+ * Open a scope, or run `fn` unscoped when the runtime has no ALS.
+ *
+ * Synchronous once the store has settled — which is every request after the
+ * first. Returns `T | Promise<T>`: `run` hands back exactly what `fn`
+ * returned, and there is no longer an `async` wrapper to settle it into a
+ * promise. Every caller awaits, so this reads the same at every call site.
+ */
+export function runInScope<T>(source: ScopeSource, fn: () => T | Promise<T>): T | Promise<T> {
+    // Not resolved yet: the one path that must go through the promise.
+    if (_store === undefined) {
+        return ensureContextStore().then((store) => {
+            // No ALS: nothing encloses anything, so there is nothing to merge
+            // and no notice to give — this runtime never had a scope to nest in.
+            if (!store) return fn();
+            return store.run(toScopeInit(source, store.getStore()), fn);
+        });
+    }
+    // Only with a store: stamping in the `null` case would write `undefined`
+    // over a seam some other copy of this module may legitimately own.
+    if (_store === null) return fn();
+    stampResolver();
+    // `getStore()` reads the CALLER's scope, which is what makes the nested
+    // merge in `toScopeInit` work. Reading it synchronously is strictly more
+    // faithful than the await this used to sit behind: AsyncLocalStorage
+    // follows async continuations, so the value was the same either way, but
+    // now there is no continuation between the caller and the read.
+    return _store.run(toScopeInit(source, _store.getStore()), fn);
 }
 
 // The seam. Stamped at IMPORT, unlike `__SIGX_SERVERFN_CONTEXT__` (which
