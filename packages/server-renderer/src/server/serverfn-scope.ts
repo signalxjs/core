@@ -16,15 +16,31 @@
  * **AsyncLocalStorage is never required** (rfc-ssr-platform §2.3).
  */
 
+/**
+ * Structurally mirrors `@sigx/server`'s own declaration — this package cannot
+ * import it, so the two are kept in step by hand (docs/seams.md is the
+ * contract of record).
+ *
+ * `run` returns `T | Promise<T>`, not `Promise<T>`: only the FIRST scope entry
+ * is asynchronous (that side resolves its AsyncLocalStorage through a dynamic
+ * import); every one after it enters synchronously and hands back whatever
+ * `fn` returned (#544). Await the result — never call `.then()` on it.
+ *
+ * Deliberately phrased without spelling that import as a call: the
+ * WinterCG-purity guard in `__tests__/dependency-direction.test.ts` text-scans
+ * these sources and cannot tell a comment from code.
+ */
 interface ServerFnScope {
-    run<T>(source: unknown, fn: () => T | Promise<T>): Promise<T>;
+    run<T>(source: unknown, fn: () => T | Promise<T>): T | Promise<T>;
 }
 
 /**
  * Run `fn` with `source` (a WinterCG `Request` or a Node `IncomingMessage`) as
  * the ambient request for in-process server-function calls.
  *
- * Always returns a promise, even unscoped, so callers have one shape to await.
+ * THIS function always returns a promise, even unscoped and even when the
+ * underlying `scope.run` answers synchronously, so callers have one shape to
+ * await. That normalisation is the point of the wrapper.
  *
  * A scope that fails to open must not fail the document — ambient context is
  * an enhancement, and `createFetchHandler` owes its caller a Response either
