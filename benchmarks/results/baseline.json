@@ -4,125 +4,125 @@
       "scenario": "small-page",
       "framework": "sigx",
       "stats": {
-        "avgNs": 19671.625685476738,
-        "minNs": 8800,
-        "maxNs": 2513600,
-        "p25Ns": 10900,
-        "p50Ns": 12700,
-        "p75Ns": 19600,
-        "p99Ns": 82400,
-        "samples": 33918
+        "avgNs": 14880.749476468643,
+        "minNs": 9600,
+        "maxNs": 2604800,
+        "p25Ns": 10800,
+        "p50Ns": 11400,
+        "p75Ns": 12400,
+        "p99Ns": 36700,
+        "samples": 45365
       }
     },
     {
       "scenario": "small-page",
       "framework": "vue",
       "stats": {
-        "avgNs": 31183.37523122895,
-        "minNs": 11400,
-        "maxNs": 9261000,
-        "p25Ns": 13700,
-        "p50Ns": 14700,
-        "p75Ns": 25400,
-        "p99Ns": 131800,
-        "samples": 21083
-      }
-    },
-    {
-      "scenario": "small-page",
-      "framework": "react",
-      "stats": {
-        "avgNs": 14434.98747200603,
-        "minNs": 7000,
-        "maxNs": 546700,
-        "p25Ns": 9100,
-        "p50Ns": 10200,
-        "p75Ns": 16500,
+        "avgNs": 25036.0120598526,
+        "minNs": 12400,
+        "maxNs": 6246100,
+        "p25Ns": 13800,
+        "p50Ns": 14500,
+        "p75Ns": 15400,
         "p99Ns": 63500,
-        "samples": 45099
+        "samples": 26866
+      }
+    },
+    {
+      "scenario": "small-page",
+      "framework": "react",
+      "stats": {
+        "avgNs": 10816.319812069878,
+        "minNs": 8000,
+        "maxNs": 422400,
+        "p25Ns": 9200,
+        "p50Ns": 9700,
+        "p75Ns": 10200,
+        "p99Ns": 27100,
+        "samples": 60448
       }
     },
     {
       "scenario": "small-page",
       "framework": "preact",
       "stats": {
-        "avgNs": 13882.043563334551,
-        "minNs": 5900,
-        "maxNs": 2015300,
-        "p25Ns": 7300,
-        "p50Ns": 12000,
-        "p75Ns": 13600,
-        "p99Ns": 51000,
-        "samples": 46507
+        "avgNs": 8733.566396664995,
+        "minNs": 6000,
+        "maxNs": 2380800,
+        "p25Ns": 6600,
+        "p50Ns": 6900,
+        "p75Ns": 7200,
+        "p99Ns": 19000,
+        "samples": 75802
       }
     },
     {
       "scenario": "large-table-1k",
       "framework": "sigx",
       "stats": {
-        "avgNs": 6655763.999999981,
-        "minNs": 3745400,
-        "maxNs": 12828200,
-        "p25Ns": 5159800,
-        "p50Ns": 6359800,
-        "p75Ns": 7774800,
-        "p99Ns": 11975600,
-        "samples": 100
+        "avgNs": 4721722.377622431,
+        "minNs": 3555600,
+        "maxNs": 8129900,
+        "p25Ns": 3860200.0000019073,
+        "p50Ns": 4257000,
+        "p75Ns": 5470100,
+        "p99Ns": 6851300,
+        "samples": 143
       }
     },
     {
       "scenario": "large-table-1k",
       "framework": "vue",
       "stats": {
-        "avgNs": 7501524.719101199,
-        "minNs": 3413300,
-        "maxNs": 12150200,
-        "p25Ns": 5669600,
-        "p50Ns": 7390400,
-        "p75Ns": 9701100,
-        "p99Ns": 11832000,
-        "samples": 89
+        "avgNs": 4662197.902097902,
+        "minNs": 3106800,
+        "maxNs": 8682400,
+        "p25Ns": 3411800,
+        "p50Ns": 3856100,
+        "p75Ns": 5797800,
+        "p99Ns": 8121000,
+        "samples": 143
       }
     },
     {
       "scenario": "large-table-1k",
       "framework": "react",
       "stats": {
-        "avgNs": 4230220,
-        "minNs": 2318700,
-        "maxNs": 7205800,
-        "p25Ns": 3450100,
-        "p50Ns": 4178800,
-        "p75Ns": 4963100,
-        "p99Ns": 6714900,
-        "samples": 160
+        "avgNs": 2613173.282442748,
+        "minNs": 2084100,
+        "maxNs": 4173400,
+        "p25Ns": 2260000,
+        "p50Ns": 2394400,
+        "p75Ns": 3052100,
+        "p99Ns": 3632700,
+        "samples": 262
       }
     },
     {
       "scenario": "large-table-1k",
       "framework": "preact",
       "stats": {
-        "avgNs": 4025290.9638554216,
-        "minNs": 1899100,
-        "maxNs": 10196700,
-        "p25Ns": 2801400,
-        "p50Ns": 4008500,
-        "p75Ns": 4735500,
-        "p99Ns": 9041500,
-        "samples": 166
+        "avgNs": 2474804.727272727,
+        "minNs": 1809600,
+        "maxNs": 7920700,
+        "p25Ns": 1976300,
+        "p50Ns": 2079100,
+        "p75Ns": 3016700,
+        "p99Ns": 5661200,
+        "samples": 275
       }
     },
     {
       "scenario": "large-table",
       "framework": "sigx",
       "stats": {
-        "avgNs": 86115550,
-        "minNs": 71339300,
-        "maxNs": 102648100,
-        "p25Ns": 76450000,
-        "p50Ns": 86628300,
-        "p75Ns": 91978900,
-        "p99Ns": 102421300,
+        "avgNs": 59544133.333333336,
+        "minNs": 56208300,
+        "maxNs": 66296400,
+        "p25Ns": 56869100,
+        "p50Ns": 58463900,
+        "p75Ns": 59293200,
+        "p99Ns": 66167800,
         "samples": 12
       }
     },
@@ -130,13 +130,13 @@
       "scenario": "large-table",
       "framework": "vue",
       "stats": {
-        "avgNs": 80781266.66666667,
-        "minNs": 59144300,
-        "maxNs": 93506300,
-        "p25Ns": 70136300,
-        "p50Ns": 84476300,
-        "p75Ns": 86262800,
-        "p99Ns": 92819300,
+        "avgNs": 61181483.333333336,
+        "minNs": 51907000,
+        "maxNs": 80996500,
+        "p25Ns": 52128400,
+        "p50Ns": 59957400,
+        "p75Ns": 61030700,
+        "p99Ns": 69244800,
         "samples": 12
       }
     },
@@ -144,41 +144,41 @@
       "scenario": "large-table",
       "framework": "react",
       "stats": {
-        "avgNs": 57800544.44444445,
-        "minNs": 50453500,
-        "maxNs": 69078400,
-        "p25Ns": 53901100,
-        "p50Ns": 56655200,
-        "p75Ns": 60659100,
-        "p99Ns": 64547500,
-        "samples": 9
+        "avgNs": 53561630,
+        "minNs": 50820700,
+        "maxNs": 56059800,
+        "p25Ns": 52018400,
+        "p50Ns": 53477000,
+        "p75Ns": 54389500,
+        "p99Ns": 55534000,
+        "samples": 10
       }
     },
     {
       "scenario": "large-table",
       "framework": "preact",
       "stats": {
-        "avgNs": 53472788.88888889,
-        "minNs": 45733100,
-        "maxNs": 66770900,
-        "p25Ns": 48350400,
-        "p50Ns": 52589800,
-        "p75Ns": 54378800,
-        "p99Ns": 61296300,
-        "samples": 9
+        "avgNs": 46957709.09090909,
+        "minNs": 42425700,
+        "maxNs": 55109600,
+        "p25Ns": 42986400,
+        "p50Ns": 47596900,
+        "p75Ns": 47768400,
+        "p99Ns": 53910500,
+        "samples": 11
       }
     },
     {
       "scenario": "deep-tree",
       "framework": "sigx",
       "stats": {
-        "avgNs": 667512075.0000004,
-        "minNs": 521909700.0000019,
-        "maxNs": 753309100,
-        "p25Ns": 615412500,
-        "p50Ns": 666252800,
-        "p75Ns": 695884000,
-        "p99Ns": 736347700,
+        "avgNs": 513410475.0000002,
+        "minNs": 455171900,
+        "maxNs": 575878399.9999981,
+        "p25Ns": 487331400,
+        "p50Ns": 514512800,
+        "p75Ns": 522976900,
+        "p99Ns": 554101500,
         "samples": 12
       }
     },
@@ -186,13 +186,13 @@
       "scenario": "deep-tree",
       "framework": "vue",
       "stats": {
-        "avgNs": 1047839833.3333336,
-        "minNs": 839035600,
-        "maxNs": 1479911800,
-        "p25Ns": 913004300,
-        "p50Ns": 952927800,
-        "p75Ns": 1048730100,
-        "p99Ns": 1433978700,
+        "avgNs": 841096433.3333334,
+        "minNs": 657838200,
+        "maxNs": 1172410200,
+        "p25Ns": 703630200,
+        "p50Ns": 795998100,
+        "p75Ns": 852781600,
+        "p99Ns": 1058002800,
         "samples": 12
       }
     },
@@ -200,13 +200,13 @@
       "scenario": "deep-tree",
       "framework": "react",
       "stats": {
-        "avgNs": 488306275,
-        "minNs": 369598900,
-        "maxNs": 602294500,
-        "p25Ns": 415172200,
-        "p50Ns": 473101400,
-        "p75Ns": 544699300,
-        "p99Ns": 595874000,
+        "avgNs": 364706466.6666673,
+        "minNs": 335586900,
+        "maxNs": 430756700.0000076,
+        "p25Ns": 340081900,
+        "p50Ns": 354086100,
+        "p75Ns": 366825100.0000038,
+        "p99Ns": 392891600,
         "samples": 12
       }
     },
@@ -214,13 +214,13 @@
       "scenario": "deep-tree",
       "framework": "preact",
       "stats": {
-        "avgNs": 265467858.33333334,
-        "minNs": 237692500,
-        "maxNs": 319517800,
-        "p25Ns": 244047000,
-        "p50Ns": 257614700,
-        "p75Ns": 273151200,
-        "p99Ns": 301945400,
+        "avgNs": 210508350,
+        "minNs": 195330200,
+        "maxNs": 256472600,
+        "p25Ns": 197683200,
+        "p50Ns": 201847900,
+        "p75Ns": 207694900,
+        "p99Ns": 232970900,
         "samples": 12
       }
     },
@@ -228,139 +228,139 @@
       "scenario": "attr-style-heavy",
       "framework": "sigx",
       "stats": {
-        "avgNs": 3792587.2928176797,
-        "minNs": 2455200,
-        "maxNs": 7124300,
-        "p25Ns": 2917100,
-        "p50Ns": 3665900,
-        "p75Ns": 4369900,
-        "p99Ns": 6207700,
-        "samples": 181
+        "avgNs": 3147919.2660550456,
+        "minNs": 2561200,
+        "maxNs": 4732100,
+        "p25Ns": 2744500,
+        "p50Ns": 2916000,
+        "p75Ns": 3595900,
+        "p99Ns": 4117900,
+        "samples": 218
       }
     },
     {
       "scenario": "attr-style-heavy",
       "framework": "vue",
       "stats": {
-        "avgNs": 4276856.603773585,
-        "minNs": 2891500,
-        "maxNs": 7499500,
-        "p25Ns": 3455100,
-        "p50Ns": 4087500,
-        "p75Ns": 4829800,
-        "p99Ns": 6753100,
-        "samples": 159
+        "avgNs": 3582910,
+        "minNs": 2945900,
+        "maxNs": 5056300,
+        "p25Ns": 3157800,
+        "p50Ns": 3334200,
+        "p75Ns": 4000800,
+        "p99Ns": 5019000,
+        "samples": 190
       }
     },
     {
       "scenario": "attr-style-heavy",
       "framework": "react",
       "stats": {
-        "avgNs": 3873390.2298850575,
-        "minNs": 2277200,
-        "maxNs": 9057200,
-        "p25Ns": 2685500,
-        "p50Ns": 3792400,
-        "p75Ns": 4443400,
-        "p99Ns": 7626100,
-        "samples": 174
+        "avgNs": 3274357.4162679426,
+        "minNs": 2458400,
+        "maxNs": 5770800,
+        "p25Ns": 2658300,
+        "p50Ns": 2805100,
+        "p75Ns": 4134300,
+        "p99Ns": 4723200,
+        "samples": 209
       }
     },
     {
       "scenario": "attr-style-heavy",
       "framework": "preact",
       "stats": {
-        "avgNs": 3608370.744680851,
-        "minNs": 2371700,
-        "maxNs": 6596900,
-        "p25Ns": 2657800,
-        "p50Ns": 3428900,
-        "p75Ns": 4372900,
-        "p99Ns": 5835800,
-        "samples": 188
+        "avgNs": 2667101.1764705884,
+        "minNs": 2198300,
+        "maxNs": 4866400,
+        "p25Ns": 2323300,
+        "p50Ns": 2499600,
+        "p75Ns": 2995300,
+        "p99Ns": 3549800,
+        "samples": 255
       }
     },
     {
       "scenario": "escape-heavy",
       "framework": "sigx",
       "stats": {
-        "avgNs": 761418.3516483516,
-        "minNs": 467800,
-        "maxNs": 3232500,
-        "p25Ns": 529900,
-        "p50Ns": 605500,
-        "p75Ns": 865200,
-        "p99Ns": 2492800,
-        "samples": 910
+        "avgNs": 578290.9543568465,
+        "minNs": 448400,
+        "maxNs": 1985700,
+        "p25Ns": 484000,
+        "p50Ns": 500400,
+        "p75Ns": 536000,
+        "p99Ns": 1524900,
+        "samples": 1205
       }
     },
     {
       "scenario": "escape-heavy",
       "framework": "vue",
       "stats": {
-        "avgNs": 493741.8754473873,
-        "minNs": 279800,
-        "maxNs": 3002700,
-        "p25Ns": 327500,
-        "p50Ns": 496700,
-        "p75Ns": 570400,
-        "p99Ns": 1161300,
-        "samples": 1397
+        "avgNs": 355311.4402451481,
+        "minNs": 273500,
+        "maxNs": 1710200,
+        "p25Ns": 302800,
+        "p50Ns": 317700,
+        "p75Ns": 341200,
+        "p99Ns": 830300,
+        "samples": 1958
       }
     },
     {
       "scenario": "escape-heavy",
       "framework": "react",
       "stats": {
-        "avgNs": 462143.8328912467,
-        "minNs": 267000,
-        "maxNs": 1426800,
-        "p25Ns": 329700,
-        "p50Ns": 440900,
-        "p75Ns": 549000,
-        "p99Ns": 1015400,
-        "samples": 1508
+        "avgNs": 317693.0422919509,
+        "minNs": 257100,
+        "maxNs": 1606100,
+        "p25Ns": 283900,
+        "p50Ns": 293200,
+        "p75Ns": 308200,
+        "p99Ns": 619400,
+        "samples": 2199
       }
     },
     {
       "scenario": "escape-heavy",
       "framework": "preact",
       "stats": {
-        "avgNs": 349187.0416875942,
-        "minNs": 220200,
-        "maxNs": 1192100,
-        "p25Ns": 254500,
-        "p50Ns": 278300,
-        "p75Ns": 434200,
-        "p99Ns": 778300,
-        "samples": 1991
+        "avgNs": 259539.6282527881,
+        "minNs": 216000,
+        "maxNs": 1068500,
+        "p25Ns": 233100,
+        "p50Ns": 244200,
+        "p75Ns": 255400,
+        "p99Ns": 498000,
+        "samples": 2690
       }
     },
     {
       "scenario": "escape-clean",
       "framework": "sigx",
       "stats": {
-        "avgNs": 81233.98001175778,
-        "minNs": 42000,
-        "maxNs": 899600,
-        "p25Ns": 50100,
-        "p50Ns": 83200,
-        "p75Ns": 90500,
-        "p99Ns": 233600,
-        "samples": 8505
+        "avgNs": 47530.19002278646,
+        "minNs": 44985.205078125,
+        "maxNs": 50826.9287109375,
+        "p25Ns": 45853.271484375,
+        "p50Ns": 46777.783203125,
+        "p75Ns": 49346.2158203125,
+        "p99Ns": 50393.359375,
+        "samples": 12
       }
     },
     {
       "scenario": "escape-clean",
       "framework": "vue",
       "stats": {
-        "avgNs": 62900.651041666664,
-        "minNs": 51402.9296875,
-        "maxNs": 81894.140625,
-        "p25Ns": 57096.2158203125,
-        "p50Ns": 59560.25390625,
-        "p75Ns": 62874.70703125,
-        "p99Ns": 79229.4921875,
+        "avgNs": 53514.61181640625,
+        "minNs": 50425.5859375,
+        "maxNs": 55790.6005859375,
+        "p25Ns": 52823.3642578125,
+        "p50Ns": 53231.93359375,
+        "p75Ns": 54198.8525390625,
+        "p99Ns": 54910.546875,
         "samples": 12
       }
     },
@@ -368,13 +368,13 @@
       "scenario": "escape-clean",
       "framework": "react",
       "stats": {
-        "avgNs": 50948.931884765625,
-        "minNs": 42578.466796875,
-        "maxNs": 57783.7646484375,
-        "p25Ns": 45990.4052734375,
-        "p50Ns": 50891.5771484375,
-        "p75Ns": 54843.06640625,
-        "p99Ns": 57442.7001953125,
+        "avgNs": 41372.908528645836,
+        "minNs": 39469.3115234375,
+        "maxNs": 43287.4755859375,
+        "p25Ns": 40431.1279296875,
+        "p50Ns": 41207.8857421875,
+        "p75Ns": 42253.22265625,
+        "p99Ns": 42429.3701171875,
         "samples": 12
       }
     },
@@ -382,19 +382,19 @@
       "scenario": "escape-clean",
       "framework": "preact",
       "stats": {
-        "avgNs": 52604.43115234375,
-        "minNs": 39695.1904296875,
-        "maxNs": 58395.068359375,
-        "p25Ns": 48261.4501953125,
-        "p50Ns": 54031.5185546875,
-        "p75Ns": 55457.4951171875,
-        "p99Ns": 56479.9072265625,
+        "avgNs": 36258.170572916664,
+        "minNs": 34399.6826171875,
+        "maxNs": 39907.9833984375,
+        "p25Ns": 35014.6484375,
+        "p50Ns": 35453.076171875,
+        "p75Ns": 36633.642578125,
+        "p99Ns": 39174.0234375,
         "samples": 12
       }
     }
   ],
   "meta": {
-    "date": "2026-07-24T09:05:08.441Z",
+    "date": "2026-07-31T19:16:35.498Z",
     "node": "v22.22.0",
     "cpu": "12th Gen Intel(R) Core(TM) i9-12900HK"
   },
@@ -407,49 +407,49 @@
         "framework": "sigx",
         "bytes": 1950663,
         "ttfbMs": {
-          "p50": 0.74,
-          "p75": 0.881,
-          "p99": 1.609
+          "p50": 0.663,
+          "p75": 0.909,
+          "p99": 1.454
         },
         "totalMs": {
-          "p50": 39.432,
-          "p75": 40.203,
-          "p99": 47.036
+          "p50": 37.347,
+          "p75": 39.13,
+          "p99": 43.995
         }
       },
       {
         "framework": "vue",
         "bytes": 1811651,
         "ttfbMs": {
-          "p50": 58.068,
-          "p75": 71.074,
-          "p99": 122.075
+          "p50": 55.195,
+          "p75": 60.949,
+          "p99": 80.136
         },
         "totalMs": {
-          "p50": 58.672,
-          "p75": 71.441,
-          "p99": 122.374
+          "p50": 55.559,
+          "p75": 61.306,
+          "p99": 80.457
         }
       },
       {
         "framework": "react",
         "bytes": 1801651,
         "ttfbMs": {
-          "p50": 37.44,
-          "p75": 39.544,
-          "p99": 48.644
+          "p50": 34.035,
+          "p75": 35.193,
+          "p99": 43.23
         },
         "totalMs": {
-          "p50": 53.912,
-          "p75": 58.974,
-          "p99": 67.525
+          "p50": 50.461,
+          "p75": 52.583,
+          "p99": 61.434
         }
       }
     ]
   },
   "quick": {
     "meta": {
-      "date": "2026-07-24T09:05:08.441Z",
+      "date": "2026-07-31T19:16:35.498Z",
       "node": "v22.22.0",
       "cpu": "12th Gen Intel(R) Core(TM) i9-12900HK"
     },
@@ -458,17 +458,17 @@
         "scenario": "escape-heavy",
         "framework": "sigx",
         "stats": {
-          "avgNs": 565320.1149425284,
-          "p50Ns": 490600,
-          "samples": 696
+          "avgNs": 613032.1928460342,
+          "p50Ns": 529100,
+          "samples": 643
         }
       },
       {
         "scenario": "escape-clean",
         "framework": "sigx",
         "stats": {
-          "avgNs": 47623.38663736979,
-          "p50Ns": 47249.0478515625,
+          "avgNs": 48177.29695638021,
+          "p50Ns": 47299.51171875,
           "samples": 12
         }
       },
@@ -476,18 +476,18 @@
         "scenario": "small-page",
         "framework": "sigx",
         "stats": {
-          "avgNs": 17416.61861888633,
-          "p50Ns": 11100,
-          "samples": 22547
+          "avgNs": 13137.957820964935,
+          "p50Ns": 11099.999999523163,
+          "samples": 30252
         }
       },
       {
         "scenario": "large-table-1k",
         "framework": "sigx",
         "stats": {
-          "avgNs": 4676099.99999997,
-          "p50Ns": 4455900,
-          "samples": 79
+          "avgNs": 4536701.219512195,
+          "p50Ns": 4244800,
+          "samples": 82
         }
       }
     ],
@@ -500,10 +500,10 @@
           "framework": "sigx",
           "bytes": 191925,
           "ttfbMs": {
-            "p50": 0.248
+            "p50": 0.272
           },
           "totalMs": {
-            "p50": 4.729
+            "p50": 4.748
           }
         }
       ]
@@ -513,54 +513,99 @@
         "suite": "codec",
         "name": "encode+stringify plainList",
         "stats": {
-          "avgNs": 727197.9591836735,
-          "p50Ns": 672600,
-          "samples": 539
+          "avgNs": 686452.9824561403,
+          "p50Ns": 660200,
+          "samples": 570
         }
       },
       {
         "suite": "codec",
         "name": "parse+revive plainList",
         "stats": {
-          "avgNs": 588020.9821428572,
-          "p50Ns": 556100,
-          "samples": 672
+          "avgNs": 574608.7336244541,
+          "p50Ns": 546200,
+          "samples": 687
         }
       },
       {
         "suite": "serverfn",
         "name": "POST read 1k rows",
         "stats": {
-          "avgNs": 823119.4968553459,
-          "p50Ns": 759200,
-          "samples": 477
+          "avgNs": 788593.3333333334,
+          "p50Ns": 715100,
+          "samples": 495
+        }
+      },
+      {
+        "suite": "serverfn",
+        "name": "POST noop",
+        "stats": {
+          "avgNs": 16650.760904947918,
+          "p50Ns": 16292.28515625,
+          "samples": 12
+        }
+      },
+      {
+        "suite": "serverfn",
+        "name": "POST wide args, 400 keys",
+        "stats": {
+          "avgNs": 158439.05372894948,
+          "p50Ns": 147300,
+          "samples": 2494
         }
       },
       {
         "suite": "keymatch",
         "name": "gate 32x32 deps, 64 tuple patterns",
         "stats": {
-          "avgNs": 1747977.5784753363,
-          "p50Ns": 1644400,
-          "samples": 223
+          "avgNs": 1054101.0781671158,
+          "p50Ns": 1002100,
+          "samples": 371
         }
       },
       {
         "suite": "refresh",
         "name": "boundary refresh x32",
         "stats": {
-          "avgNs": 1030265.6992084433,
-          "p50Ns": 903000,
-          "samples": 379
+          "avgNs": 933747.0308788145,
+          "p50Ns": 872300.0000009537,
+          "samples": 421
         }
       },
       {
         "suite": "packs",
         "name": "large-table-1k resume",
         "stats": {
-          "avgNs": 5023632.432432433,
-          "p50Ns": 5007000,
-          "samples": 74
+          "avgNs": 4776836.363636363,
+          "p50Ns": 4854300,
+          "samples": 77
+        }
+      },
+      {
+        "suite": "slots",
+        "name": "default slot, 3 element children",
+        "stats": {
+          "avgNs": 101.50531969572368,
+          "p50Ns": 96.728515625,
+          "samples": 950
+        }
+      },
+      {
+        "suite": "slots",
+        "name": "default slot, 100 element children",
+        "stats": {
+          "avgNs": 136.77469308035714,
+          "p50Ns": 127.880859375,
+          "samples": 700
+        }
+      },
+      {
+        "suite": "slots",
+        "name": "default slot, render-prop child",
+        "stats": {
+          "avgNs": 170.19962855747767,
+          "p50Ns": 164.2822265625,
+          "samples": 560
         }
       }
     ],
@@ -599,7 +644,7 @@
   },
   "micro": {
     "meta": {
-      "date": "2026-07-24T09:04:53.207Z",
+      "date": "2026-07-31T19:16:25.386Z",
       "node": "v22.22.0",
       "cpu": "12th Gen Intel(R) Core(TM) i9-12900HK"
     },
@@ -607,246 +652,324 @@
       {
         "suite": "codec",
         "name": "JSON.stringify plainList (floor)",
-        "avgNs": 352151.929437707,
-        "p50Ns": 338800,
-        "samples": 1814
+        "avgNs": 399820.4132748906,
+        "p50Ns": 384400,
+        "samples": 1597
       },
       {
         "suite": "codec",
         "name": "encode+stringify plainList",
         "floorOf": "JSON.stringify plainList (floor)",
-        "avgNs": 630474.7514910508,
-        "p50Ns": 594900,
-        "samples": 1006,
-        "ratioToFloor": 1.756
+        "avgNs": 690949.6724890822,
+        "p50Ns": 665700,
+        "samples": 916,
+        "ratioToFloor": 1.732
       },
       {
         "suite": "codec",
         "name": "encode plainList (walk only)",
-        "avgNs": 263511.6134384069,
-        "p50Ns": 247600,
-        "samples": 2411
+        "avgNs": 283544.43946188263,
+        "p50Ns": 262700,
+        "samples": 2230
       },
       {
         "suite": "codec",
         "name": "encode+stringify plainList +handler",
         "floorOf": "JSON.stringify plainList (floor)",
-        "avgNs": 652156.2051282051,
-        "p50Ns": 619500,
-        "samples": 975,
-        "ratioToFloor": 1.829
+        "avgNs": 713379.7085201794,
+        "p50Ns": 682700,
+        "samples": 892,
+        "ratioToFloor": 1.776
       },
       {
         "suite": "codec",
         "name": "JSON.parse plainList (floor)",
-        "avgNs": 364343.0119794638,
-        "p50Ns": 348700,
-        "samples": 1753
+        "avgNs": 388353.1345100426,
+        "p50Ns": 379300,
+        "samples": 1643
       },
       {
         "suite": "codec",
         "name": "parse+revive plainList",
         "floorOf": "JSON.parse plainList (floor)",
-        "avgNs": 560034.797891039,
-        "p50Ns": 526700,
-        "samples": 1138,
-        "ratioToFloor": 1.51
+        "avgNs": 546893.4763948539,
+        "p50Ns": 519800,
+        "samples": 1165,
+        "ratioToFloor": 1.37
       },
       {
         "suite": "codec",
         "name": "encode+stringify richPayload",
-        "avgNs": 199543.01780693413,
-        "p50Ns": 187600,
-        "samples": 3201
+        "avgNs": 196881.66974738418,
+        "p50Ns": 185300,
+        "samples": 3246
       },
       {
         "suite": "codec",
         "name": "parse+revive richPayload",
-        "avgNs": 171083.7671049101,
-        "p50Ns": 156400,
-        "samples": 3727
+        "avgNs": 161502.62825372757,
+        "p50Ns": 151200,
+        "samples": 3957
       },
       {
         "suite": "codec",
         "name": "JSON.stringify deepPayload (floor)",
-        "avgNs": 7974.250793457031,
-        "p50Ns": 7915.1123046875,
+        "avgNs": 8209.164428710938,
+        "p50Ns": 8166.89453125,
         "samples": 16
       },
       {
         "suite": "codec",
         "name": "encode+stringify deepPayload",
         "floorOf": "JSON.stringify deepPayload (floor)",
-        "avgNs": 14023.095703125,
-        "p50Ns": 13666.748046875,
+        "avgNs": 13652.376302083334,
+        "p50Ns": 13237.646484375,
         "samples": 12,
-        "ratioToFloor": 1.727
+        "ratioToFloor": 1.621
       },
       {
         "suite": "serverfn",
         "name": "POST read 1k rows (floor)",
-        "avgNs": 461863.8282387191,
-        "p50Ns": 422400,
-        "samples": 1374
+        "avgNs": 454433.6669049321,
+        "p50Ns": 429100,
+        "samples": 1399
       },
       {
         "suite": "serverfn",
         "name": "POST read 1k rows",
         "floorOf": "POST read 1k rows (floor)",
-        "avgNs": 783593.5802469136,
-        "p50Ns": 725700,
-        "samples": 810,
-        "ratioToFloor": 1.718
+        "avgNs": 763417.1875,
+        "p50Ns": 718700,
+        "samples": 832,
+        "ratioToFloor": 1.675
       },
       {
         "suite": "serverfn",
         "name": "POST read rich payload",
-        "avgNs": 242781.93597561086,
-        "p50Ns": 225000,
-        "samples": 2624
+        "avgNs": 244081.6091953917,
+        "p50Ns": 222400.00000095367,
+        "samples": 2610
       },
       {
         "suite": "serverfn",
         "name": "POST mutation, tiny args (floor)",
-        "avgNs": 12027.945963541666,
-        "p50Ns": 11925.7568359375,
-        "samples": 9
+        "avgNs": 13366.448974609375,
+        "p50Ns": 13102.8076171875,
+        "samples": 12
       },
       {
         "suite": "serverfn",
         "name": "POST mutation, tiny args",
         "floorOf": "POST mutation, tiny args (floor)",
-        "avgNs": 19511.03515625,
-        "p50Ns": 19346.337890625,
+        "avgNs": 18471.815999348957,
+        "p50Ns": 18056.9091796875,
         "samples": 12,
-        "ratioToFloor": 1.622
+        "ratioToFloor": 1.378
+      },
+      {
+        "suite": "serverfn",
+        "name": "POST noop (floor)",
+        "avgNs": 12142.258029513889,
+        "p50Ns": 12059.2529296875,
+        "samples": 9
+      },
+      {
+        "suite": "serverfn",
+        "name": "POST noop",
+        "floorOf": "POST noop (floor)",
+        "avgNs": 16429.819742838543,
+        "p50Ns": 16259.3017578125,
+        "samples": 12,
+        "ratioToFloor": 1.348
+      },
+      {
+        "suite": "serverfn",
+        "name": "POST wide args, 400 keys (floor)",
+        "avgNs": 96292.0440821256,
+        "p50Ns": 89200,
+        "samples": 6624
+      },
+      {
+        "suite": "serverfn",
+        "name": "POST wide args, 400 keys",
+        "floorOf": "POST wide args, 400 keys (floor)",
+        "avgNs": 161164.6508097166,
+        "p50Ns": 148500,
+        "samples": 3952,
+        "ratioToFloor": 1.665
       },
       {
         "suite": "serverfn",
         "name": "GET idempotent read",
-        "avgNs": 44128.816731770836,
-        "p50Ns": 43614.013671875,
-        "samples": 12
+        "avgNs": 47222.05643374206,
+        "p50Ns": 43300,
+        "samples": 13538
       },
       {
         "suite": "serverfn",
         "name": "POST error path (ServerFnError)",
-        "avgNs": 28086.684163411457,
-        "p50Ns": 27194.189453125,
+        "avgNs": 29339.7705078125,
+        "p50Ns": 28542.9443359375,
         "samples": 12
       },
       {
         "suite": "serverfn",
         "name": "NDJSON stream, 1000 chunks",
-        "avgNs": 2601140.8333333335,
-        "p50Ns": 2502000,
-        "samples": 240
+        "avgNs": 2439480.078125,
+        "p50Ns": 2378700,
+        "samples": 256
       },
       {
         "suite": "keymatch",
         "name": "gate 1x8 deps, 64 tuple patterns",
-        "avgNs": 58928.39186691312,
-        "p50Ns": 51800,
-        "samples": 10820
+        "avgNs": 45610.80443331692,
+        "p50Ns": 41900,
+        "samples": 13985
       },
       {
         "suite": "keymatch",
         "name": "gate 8x32 deps, 64 tuple patterns",
-        "avgNs": 420571.928665786,
-        "p50Ns": 399200,
-        "samples": 1514
+        "avgNs": 260753.54072862407,
+        "p50Ns": 248500,
+        "samples": 2443
       },
       {
         "suite": "keymatch",
         "name": "gate 32x32 deps, 64 tuple patterns",
-        "avgNs": 1539080.8252426304,
-        "p50Ns": 1472600,
-        "samples": 412
+        "avgNs": 922576.0522496372,
+        "p50Ns": 892100,
+        "samples": 689
       },
       {
         "suite": "keymatch",
         "name": "gate 8x32 deps, 64 string patterns",
-        "avgNs": 282683.39991126757,
-        "p50Ns": 265100,
-        "samples": 2253
+        "avgNs": 149706.2720225511,
+        "p50Ns": 140600,
+        "samples": 4257
       },
       {
         "suite": "keymatch",
         "name": "gate 32x32 deps, 64 string patterns",
-        "avgNs": 1065378.187919463,
-        "p50Ns": 1012600,
-        "samples": 596
+        "avgNs": 530299.6655518395,
+        "p50Ns": 504800,
+        "samples": 1196
       },
       {
         "suite": "refresh",
         "name": "boundary refresh x1",
-        "avgNs": 29694.123385673138,
-        "p50Ns": 25700,
-        "samples": 21526
+        "avgNs": 30973.633739419736,
+        "p50Ns": 26900,
+        "samples": 20439
       },
       {
         "suite": "refresh",
         "name": "boundary refresh x8",
-        "avgNs": 204935.3678123996,
-        "p50Ns": 189400,
-        "samples": 3113
+        "avgNs": 219085.06181318683,
+        "p50Ns": 205300,
+        "samples": 2912
       },
       {
         "suite": "refresh",
         "name": "boundary refresh x32",
-        "avgNs": 792456.9825436409,
-        "p50Ns": 742300,
-        "samples": 802
+        "avgNs": 865324.2176870748,
+        "p50Ns": 830400,
+        "samples": 735
       },
       {
         "suite": "packs",
         "name": "small-page plain",
-        "avgNs": 57425.06313131313,
-        "p50Ns": 46100,
-        "samples": 11088
+        "avgNs": 61668.987219209914,
+        "p50Ns": 50800,
+        "samples": 10328
       },
       {
         "suite": "packs",
         "name": "small-page islands",
         "floorOf": "small-page plain",
-        "avgNs": 71998.9159891599,
-        "p50Ns": 61000,
-        "samples": 8856,
-        "ratioToFloor": 1.323
+        "avgNs": 78921.14766262677,
+        "p50Ns": 66000,
+        "samples": 8086,
+        "ratioToFloor": 1.299
       },
       {
         "suite": "packs",
         "name": "small-page resume",
         "floorOf": "small-page plain",
-        "avgNs": 71023.1858209787,
-        "p50Ns": 60900,
-        "samples": 8971,
-        "ratioToFloor": 1.321
+        "avgNs": 79104.71054915086,
+        "p50Ns": 66600,
+        "samples": 8067,
+        "ratioToFloor": 1.311
       },
       {
         "suite": "packs",
         "name": "large-table-1k plain",
-        "avgNs": 4235713.793103448,
-        "p50Ns": 4177400,
-        "samples": 145
+        "avgNs": 4572859.39849624,
+        "p50Ns": 4425500,
+        "samples": 133
       },
       {
         "suite": "packs",
         "name": "large-table-1k islands",
         "floorOf": "large-table-1k plain",
-        "avgNs": 4228260.273972603,
-        "p50Ns": 4173300,
-        "samples": 146,
-        "ratioToFloor": 0.999
+        "avgNs": 4615608.270676692,
+        "p50Ns": 4544000,
+        "samples": 133,
+        "ratioToFloor": 1.027
       },
       {
         "suite": "packs",
         "name": "large-table-1k resume",
         "floorOf": "large-table-1k plain",
-        "avgNs": 4282275.862068965,
-        "p50Ns": 4113100,
-        "samples": 145,
-        "ratioToFloor": 0.985
+        "avgNs": 4413210.714285715,
+        "p50Ns": 4338200,
+        "samples": 140,
+        "ratioToFloor": 0.98
+      },
+      {
+        "suite": "slots",
+        "name": "default slot, 3 element children",
+        "avgNs": 101.77142217765102,
+        "p50Ns": 97.55859375,
+        "samples": 1523
+      },
+      {
+        "suite": "slots",
+        "name": "slice floor n=100",
+        "avgNs": 56.96592806371426,
+        "p50Ns": 54.296875,
+        "samples": 2728
+      },
+      {
+        "suite": "slots",
+        "name": "default slot, 100 element children",
+        "floorOf": "slice floor n=100",
+        "avgNs": 136.23452345809534,
+        "p50Ns": 126.8310546875,
+        "samples": 1138,
+        "ratioToFloor": 2.336
+      },
+      {
+        "suite": "slots",
+        "name": "named slot, 100 element children",
+        "floorOf": "slice floor n=100",
+        "avgNs": 146.64037554694892,
+        "p50Ns": 138.427734375,
+        "samples": 1057,
+        "ratioToFloor": 2.549
+      },
+      {
+        "suite": "slots",
+        "name": "default slot, render-prop child",
+        "avgNs": 190.2542532828086,
+        "p50Ns": 176.6845703125,
+        "samples": 802
+      },
+      {
+        "suite": "slots",
+        "name": "default slot, render-prop child, no scoped props",
+        "avgNs": 195.28402209736342,
+        "p50Ns": 181.005859375,
+        "samples": 787
       }
     ],
     "bytes": [
