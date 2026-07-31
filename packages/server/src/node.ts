@@ -70,15 +70,17 @@ export function createServerFnHandler(options: ServerFnHandlerOptions): NodeRequ
         }
         try {
             const request = toWebRequest(req, res);
+            // Forwarded by SPREAD, deliberately: this options type EXTENDS
+            // ServerFnRequestOptions, so a hand-written allow-list has to be
+            // kept in sync with an interface it inherits from and nothing
+            // enforces that. `maxUrlBytes` was dropped that way and sat inert
+            // from #354 to #545 — it type-checked and did nothing. `resolve`
+            // and `base` are overridden with the resolved/normalized values;
+            // `functions` rides along inert (the endpoint reads only `resolve`).
             const response = await handleServerFnRequest(request, {
+                ...options,
                 resolve,
-                base,
-                guard: options.guard,
-                origin: options.origin,
-                maxBodyBytes: options.maxBodyBytes,
-                onError: options.onError,
-                timeoutMs: options.timeoutMs,
-                renderBoundaries: options.renderBoundaries
+                base
             });
             // Accumulate duplicates (set-cookie!) into arrays — a plain
             // string map would overwrite all but the last value.

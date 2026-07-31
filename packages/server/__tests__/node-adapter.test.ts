@@ -129,6 +129,48 @@ describe('createServerFnHandler over node:http', () => {
         await expect(res.text()).resolves.toBe('fallthrough');
     });
 
+    /**
+     * #545: every endpoint option must actually REACH the endpoint. The
+     * adapter used to forward a hand-written allow-list, so `maxUrlBytes`
+     * type-checked (the options type extends `ServerFnRequestOptions`) and
+     * did nothing. The existing coverage all drove `handleServerFnRequest`
+     * directly, which is exactly why it survived — this one goes through
+     * `createServerFnHandler` over a real socket.
+     */
+    it('forwards maxUrlBytes to the endpoint (414 on an oversized GET query)', async () => {
+        const capped = createServerFnHandler({
+            functions: { read_fn_00000004: async () => cachedRead },
+            maxUrlBytes: 64
+        });
+        const cappedServer = createServer((req, res) => {
+            void capped(req, res, () => {
+                res.statusCode = 404;
+                res.end('fallthrough');
+            });
+        });
+        cappedServer.listen(0, '127.0.0.1');
+        await once(cappedServer, 'listening');
+        const address = cappedServer.address();
+        if (typeof address === 'string' || address === null) throw new Error('no port');
+        const cappedOrigin = `http://127.0.0.1:${address.port}`;
+        try {
+            const long = encodeURIComponent(JSON.stringify([{ id: 'x'.repeat(200) }]));
+            const over = await fetch(`${cappedOrigin}/_sigx/fn/read_fn_00000004?args=${long}`);
+            expect(over.status).toBe(414);
+            // The control case differs ONLY in length: same encoding, same
+            // argument shape, under the cap. Asserting the payload too proves
+            // the request really ran rather than 200-ing on a degenerate input.
+            const short = encodeURIComponent(JSON.stringify([{ id: 'p1' }]));
+            const under = await fetch(`${cappedOrigin}/_sigx/fn/read_fn_00000004?args=${short}`);
+            expect(under.status).toBe(200);
+            await expect(under.json()).resolves.toEqual({ data: { id: 'p1' } });
+        } finally {
+            cappedServer.close();
+            cappedServer.closeAllConnections();
+            await once(cappedServer, 'close');
+        }
+    });
+
     it('streams serverStream NDJSON progressively — chunks arrive BEFORE the generator ends', async () => {
         const res = await fetch(`${origin}/_sigx/fn/ticks_fn_00000003`, {
             method: 'POST',
