@@ -157,9 +157,13 @@ describe('createServerFnHandler over node:http', () => {
             const long = encodeURIComponent(JSON.stringify([{ id: 'x'.repeat(200) }]));
             const over = await fetch(`${cappedOrigin}/_sigx/fn/read_fn_00000004?args=${long}`);
             expect(over.status).toBe(414);
-            // The cap is the only thing rejecting it — a short query still works.
-            const under = await fetch(`${cappedOrigin}/_sigx/fn/read_fn_00000004?a0=p1`);
+            // The control case differs ONLY in length: same encoding, same
+            // argument shape, under the cap. Asserting the payload too proves
+            // the request really ran rather than 200-ing on a degenerate input.
+            const short = encodeURIComponent(JSON.stringify([{ id: 'p1' }]));
+            const under = await fetch(`${cappedOrigin}/_sigx/fn/read_fn_00000004?args=${short}`);
             expect(under.status).toBe(200);
+            await expect(under.json()).resolves.toEqual({ data: { id: 'p1' } });
         } finally {
             cappedServer.close();
             cappedServer.closeAllConnections();
