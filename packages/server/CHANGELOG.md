@@ -2,6 +2,24 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **`createServerFnHandler` silently dropped `maxUrlBytes` (#545).**
+  `ServerFnHandlerOptions` extends `ServerFnRequestOptions`, so the option
+  type-checked — and did nothing. Every Node-adapter deployment (and the
+  `@sigx/vite` dev middleware, which goes through the same function) fell back
+  to the 8 KiB default, so a GET read's 414 fired at the wrong threshold. Inert
+  since `maxUrlBytes` shipped in #354.
+
+  The cause was the forwarding style, not the missing line: the adapter handed
+  `handleServerFnRequest` a hand-written allow-list that had to be kept in sync
+  by hand with an interface it *inherits* from. It now forwards by spread
+  (`resolve` and `base` overridden with the resolved and normalized values), so
+  the next option added to `ServerFnRequestOptions` cannot go missing the same
+  way. The regression test drives `createServerFnHandler` over a real socket —
+  the existing coverage all called `handleServerFnRequest` directly, which is
+  precisely why this survived.
+
 ### Changed
 
 - **BREAKING (wire): server-function request URLs no longer percent-encode
