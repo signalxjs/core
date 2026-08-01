@@ -884,7 +884,9 @@ the body read, then rejoins the POST pipeline unchanged: same
 prototype-pollution reviver, same codec revive, same error vocabulary,
 and the full `guard` → `input` validator → `timeoutMs` → `onError`
 chain. `invalidates` delivery is skipped (mutually exclusive with
-`cache`). POST **remains valid for every function**, marked or not — GET
+`cache` — a definition-time error since #567, so this skip is now a
+wire-level belt for a hand-stamped function rather than the place the
+contradiction is resolved). POST **remains valid for every function**, marked or not — GET
 is strictly additive (back-compat, `role: 'client'` builds, and the
 cache-busting escape hatch).
 

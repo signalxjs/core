@@ -463,8 +463,7 @@ describe('errors fork on request content-type, never on the fn (§6.4)', () => {
 });
 
 describe('definition-time checks (§6.4, #412)', () => {
-    it('form + cache warns (a form target is a mutation)', () => {
-        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const formAndCache = () =>
         serverFn({
             form: true,
             input: PassThrough,
@@ -473,7 +472,33 @@ describe('definition-time checks (§6.4, #412)', () => {
                 return 1;
             }
         });
-        expect(warn).toHaveBeenCalledWith(expect.stringContaining('a form target is a mutation'));
+
+    it('form + cache throws (a form target is a mutation, #567)', () => {
+        expect(formAndCache).toThrow(/a form target is a mutation/);
+    });
+
+    it('form + cache throws in production too — not __DEV__-gated', () => {
+        vi.stubEnv('NODE_ENV', 'production');
+        try {
+            expect(formAndCache).toThrow(/a form target is a mutation/);
+        } finally {
+            vi.unstubAllEnvs();
+        }
+    });
+
+    it('form + cache + no input reports the input error first (order is deliberate)', () => {
+        // `input` is checked before the cache contradiction, so the message
+        // names the security-load-bearing omission rather than the transport
+        // one. Pinned so the ordering stays a decision, not an accident.
+        expect(() =>
+            serverFn({
+                form: true,
+                cache: { maxAge: 60 },
+                handler: async function bare() {
+                    return 1;
+                }
+            })
+        ).toThrow(/`input`/);
     });
 
     it('form without input throws at definition (validator is load-bearing)', () => {

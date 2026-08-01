@@ -33,6 +33,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- **BREAKING: `@sigx/server`: declaring `cache` + `invalidates`, or
+  `form` + `cache`, is now a definition-time error (#567).** Both pairs used to
+  dev-warn and stay callable, and the endpoint then resolved the contradiction
+  silently — a GET answer never carries `$cache.invalidates`, and with no
+  patterns the §6.3 boundary refresh never ran either. The production symptom
+  was stale caches and dead refresh with no signal at any layer. They now throw
+  from `serverFn()` in dev **and** production, like the two neighbours that
+  already did. What breaks in practice is programmatically composed options
+  (`serverFn({ ...sharedReadOptions, invalidates })`), which now fail at server
+  boot instead of shipping a read whose invalidations did nothing. Details and
+  the fix in `packages/server/CHANGELOG.md`.
+
 - **`@sigx/server` / `@sigx/serialize`: the wire codec is bounded and runs
   after the guard (#559).** Encode and revive refuse values nesting deeper
   than 256 levels instead of overflowing the stack on attacker-typable

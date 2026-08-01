@@ -863,7 +863,10 @@ export async function handleServerFnRequest(
         // Server-declared cache directives (rfc-server §6.2) — computed
         // where the data changed, from the VALIDATED input the pipeline
         // stashed; a throw here is a fn error (masked per §5). Skipped on
-        // GET: `cache` and `invalidates` are mutually exclusive (§4.1).
+        // GET: `cache` and `invalidates` are mutually exclusive (§4.1) — a
+        // definition-time throw since #567, so this is now a wire-level belt
+        // for a hand-stamped or registry-fabricated function rather than the
+        // place the contradiction gets resolved.
         let patterns: ReadonlyArray<string | readonly unknown[]> | undefined;
         if (!isGet && fn.__sigxInvalidates) {
             patterns = resolveInvalidatePatterns(

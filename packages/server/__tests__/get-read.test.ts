@@ -444,11 +444,14 @@ describe('pipeline parity on GET', () => {
     });
 
     it('$cache.invalidates is never attached on the GET path', async () => {
-        const conflicted = serverFn({
-            cache: { maxAge: 60 },
-            invalidates: () => [['cart']],
-            handler: async () => 'both'
-        });
+        // The pair is a definition-time throw since #567, so this shape can
+        // no longer be built through `serverFn`. Hand-stamped here on purpose:
+        // what is pinned is the endpoint's own belt — a fabricated registry
+        // entry still never leaks `$cache` on a GET.
+        const conflicted = Object.assign(
+            serverFn({ cache: { maxAge: 60 }, handler: async () => 'both' }),
+            { __sigxInvalidates: () => [['cart']] }
+        );
         const res = await get('c', [], {}, { resolve: () => conflicted });
         const body = (await res.json()) as Record<string, unknown>;
         expect(body).toEqual({ data: 'both' });
@@ -456,9 +459,8 @@ describe('pipeline parity on GET', () => {
     });
 });
 
-describe('__DEV__ warnings', () => {
-    it('declaring both cache and invalidates warns at definition time', () => {
-        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+describe('definition-time checks (§4.1, #567)', () => {
+    const bothDeclared = () =>
         serverFn({
             cache: { maxAge: 60 },
             invalidates: () => [['cart']],
@@ -466,8 +468,33 @@ describe('__DEV__ warnings', () => {
                 return 1;
             }
         });
-        expect(warn).toHaveBeenCalledWith(expect.stringContaining('a read that invalidates is not a read'));
+
+    it('declaring both cache and invalidates throws at definition', () => {
+        expect(bothDeclared).toThrow(/a read that invalidates is not a read/);
     });
+
+    it('throws in production too — not __DEV__-gated', () => {
+        // The failure this prevents is a PRODUCTION one (a read whose
+        // invalidations are silently dropped, taking §6.3 refresh with them),
+        // so a dev-only signal would be absent exactly where it matters.
+        vi.stubEnv('NODE_ENV', 'production');
+        try {
+            expect(bothDeclared).toThrow(/a read that invalidates is not a read/);
+        } finally {
+            vi.unstubAllEnvs();
+        }
+    });
+
+    it('a cache-only read still defines and answers — the throw is narrow', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const cacheOnly = serverFn({ cache: { maxAge: 60 }, handler: async () => 'ok' });
+        const res = await get('c', [], {}, { resolve: () => cacheOnly });
+        expect(res.status).toBe(200);
+        expect(warn).not.toHaveBeenCalled();
+    });
+});
+
+describe('__DEV__ warnings', () => {
 
     it('a public read touching rq.request warns once', async () => {
         const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
