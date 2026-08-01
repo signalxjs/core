@@ -215,8 +215,12 @@ export function encodeWithHandlers(
  */
 const MAX_DEPTH = 256;
 
+/** One shared message for both halves — this string ships in the
+ *  size-limited client stub bundle, so encode and revive split the cost. */
+const depthError = (): TypeError => new TypeError('nests deeper than 256 levels');
+
 /** In-progress marker in the encode memo: seeing it again IS a cycle. */
-const IN_PROGRESS = Symbol('in-progress');
+const IN_PROGRESS = Symbol();
 
 /**
  * `escapeTop` is false only when walking a TAGLESS handler's output: that
@@ -233,9 +237,7 @@ function encode(
     escapeTop: boolean,
     depth: number
 ): unknown {
-    if (depth > MAX_DEPTH) {
-        throw new TypeError(`Value nests deeper than ${MAX_DEPTH} levels — refusing to encode`);
-    }
+    if (depth > MAX_DEPTH) throw depthError();
     // Registered handlers are opaque — they may own ANY value, scalars
     // included, and they win over the built-ins, so test them first, always.
     // The `.length` guard skips the loop (and its iterator) in the common
@@ -367,9 +369,7 @@ function revive(
     // cyclic LIVE value (the hydration blob mixes in client-written objects),
     // which used to recurse forever — revive keeps no `seen` set because
     // parsed JSON cannot share references.
-    if (depth > MAX_DEPTH) {
-        throw new TypeError(`Value nests deeper than ${MAX_DEPTH} levels — refusing to revive`);
-    }
+    if (depth > MAX_DEPTH) throw depthError();
     if (value === null || typeof value !== 'object') return value;
     if (Array.isArray(value)) return value.map((item) => revive(item, custom, builtin, depth + 1));
 
