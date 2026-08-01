@@ -71,7 +71,7 @@
     "devDependencies": {
         "@sigx/vite": "workspace:^",
         "typescript": "^7.0.2",
-        "vite": "^8.1.4",
+        "vite": "^8.1.5",
         "esbuild": "^0.28.1"
     }
 }
