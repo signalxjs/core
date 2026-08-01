@@ -962,7 +962,14 @@ attacker with `curl`. Defaults, in order of the failure they prevent:
 3. **Injection via 'captured' state** — structurally impossible: the
    imports-only rule (§1.2) means nothing crosses the boundary except typed
    arguments, and the `input` validator runs server-side on exactly those.
-4. **DoS** — `maxBodyBytes` enforced during body read, not after.
+4. **DoS** — `maxBodyBytes` enforced during body read, not after. The
+   boundary codec bounds its own recursion at 256 levels on both halves
+   (#559) — `JSON.parse` is not recursive and admits trees far deeper than
+   the stack survives, so encode/revive refuse rather than overflow; on
+   the request side that surfaces as the standard 400. And wire revive —
+   whose handlers do attacker-directed work: BigInt digit conversion,
+   RegExp compilation, Map/Set construction — runs AFTER the `guard`
+   (#559), so an unvetted request never reaches the codec at all.
 5. **Prototype pollution** — reviver-based key rejection on both parse
    sites (§4).
 6. **Error leakage** — non-`ServerFnError` messages and stacks are masked

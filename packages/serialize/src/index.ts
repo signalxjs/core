@@ -200,8 +200,23 @@ export function encodeWithHandlers(
     value: unknown,
     handlers: readonly TypeHandler[] = []
 ): unknown {
-    return encode(value, handlers, BUILTIN_TYPE_HANDLERS, new Set(), true);
+    return encode(value, handlers, BUILTIN_TYPE_HANDLERS, new Map(), true, 0);
 }
+
+/**
+ * Recursion ceiling for encode AND revive (#559). Encode/revive are plainly
+ * recursive while `JSON.parse`/`JSON.stringify` are not, so without a cap a
+ * deeply nested value — attacker-typable on the request side, where ~1 MiB
+ * of `[[[[…` spells hundreds of thousands of levels — overflows the stack.
+ * 256 bounds the work long before the engine is in danger while towering
+ * over anything legitimate (the deepest bench fixture is 12; boundary
+ * records nest single digits before user data starts; a handler chain like
+ * Map-of-Set-of-custom consumes a handful of levels per link).
+ */
+const MAX_DEPTH = 256;
+
+/** In-progress marker in the encode memo: seeing it again IS a cycle. */
+const IN_PROGRESS = Symbol('in-progress');
 
 /**
  * `escapeTop` is false only when walking a TAGLESS handler's output: that
@@ -214,9 +229,13 @@ function encode(
     value: unknown,
     custom: readonly TypeHandler[],
     builtin: readonly TypeHandler[],
-    seen: Set<object>,
-    escapeTop: boolean
+    seen: Map<object, unknown>,
+    escapeTop: boolean,
+    depth: number
 ): unknown {
+    if (depth > MAX_DEPTH) {
+        throw new TypeError(`Value nests deeper than ${MAX_DEPTH} levels — refusing to encode`);
+    }
     // Registered handlers are opaque — they may own ANY value, scalars
     // included, and they win over the built-ins, so test them first, always.
     // The `.length` guard skips the loop (and its iterator) in the common
@@ -224,7 +243,7 @@ function encode(
     if (custom.length) {
         for (const h of custom) {
             if (h.test(value)) {
-                const payload = encode(h.serialize(value), custom, builtin, seen, !!h.tag);
+                const payload = encode(h.serialize(value), custom, builtin, seen, !!h.tag, depth + 1);
                 return h.tag ? { [h.tag]: payload } : payload;
             }
         }
@@ -244,7 +263,7 @@ function encode(
     // first two and the object types.
     for (const h of builtin) {
         if (h.test(value)) {
-            const payload = encode(h.serialize(value), custom, builtin, seen, !!h.tag);
+            const payload = encode(h.serialize(value), custom, builtin, seen, !!h.tag, depth + 1);
             return h.tag ? { [h.tag]: payload } : payload;
         }
     }
@@ -257,29 +276,58 @@ function encode(
         return value;
     }
 
-    // Circular structures stay out of scope — surface JSON's own error rather
-    // than blowing the stack.
-    if (seen.has(value)) {
-        throw new TypeError('Converting circular structure to JSON');
+    // The memo doubles as the cycle guard (#559). IN_PROGRESS on the current
+    // path is a circular structure — surface JSON's own error rather than
+    // blowing the stack. A COMPLETED entry is a shared subtree (diamond/DAG):
+    // reuse its encoding instead of re-walking once per path, which was 2^N
+    // work for N levels of two-way sharing. The reused value makes the
+    // encoded tree a DAG, which JSON.stringify re-expands identically — the
+    // wire text is byte-for-byte what the re-walk produced. Handler-claimed
+    // values returned above deliberately stay un-memoized (a Map lookup per
+    // Date would tax the hot path); sharing routed through them is bounded
+    // by MAX_DEPTH instead.
+    const existing = seen.get(value);
+    if (existing !== undefined) {
+        if (existing === IN_PROGRESS) {
+            throw new TypeError('Converting circular structure to JSON');
+        }
+        return existing;
     }
 
     const toJSON = (value as { toJSON?: unknown }).toJSON;
-    seen.add(value);
-    try {
-        if (typeof toJSON === 'function') {
-            return encode((toJSON as () => unknown).call(value), custom, builtin, seen, escapeTop);
-        }
-        if (Array.isArray(value)) {
-            return value.map((item) => encode(item, custom, builtin, seen, true));
-        }
-        const out: Record<string, unknown> = {};
-        for (const key of Object.keys(value)) {
-            out[key] = encode((value as Record<string, unknown>)[key], custom, builtin, seen, true);
-        }
-        return escapeTop && needsEscape(out) ? { [ESCAPE_TAG]: out } : out;
-    } finally {
+    seen.set(value, IN_PROGRESS);
+    // No try/finally: a throw aborts the whole encodeWithHandlers call and
+    // its Map with it — nothing observes stale entries. Memoize only the
+    // escape-INDEPENDENT results (arrays; objects whose encoding needs no
+    // `$esc` wrap): a needsEscape object encodes differently per escapeTop,
+    // and a toJSON result may, so those delete their entry instead.
+    if (typeof toJSON === 'function') {
+        const result = encode(
+            (toJSON as () => unknown).call(value),
+            custom,
+            builtin,
+            seen,
+            escapeTop,
+            depth + 1
+        );
         seen.delete(value);
+        return result;
     }
+    if (Array.isArray(value)) {
+        const out = value.map((item) => encode(item, custom, builtin, seen, true, depth + 1));
+        seen.set(value, out);
+        return out;
+    }
+    const out: Record<string, unknown> = {};
+    for (const key of Object.keys(value)) {
+        out[key] = encode((value as Record<string, unknown>)[key], custom, builtin, seen, true, depth + 1);
+    }
+    if (needsEscape(out)) {
+        seen.delete(value);
+        return escapeTop ? { [ESCAPE_TAG]: out } : out;
+    }
+    seen.set(value, out);
+    return out;
 }
 
 /**
@@ -304,16 +352,26 @@ export function reviveWithHandlers<T = unknown>(
     value: unknown,
     handlers: readonly TypeHandler[] = []
 ): T {
-    return revive(value, handlers, BUILTIN_TYPE_HANDLERS) as T;
+    return revive(value, handlers, BUILTIN_TYPE_HANDLERS, 0) as T;
 }
 
 function revive(
     value: unknown,
     custom: readonly TypeHandler[],
-    builtin: readonly TypeHandler[]
+    builtin: readonly TypeHandler[],
+    depth: number
 ): unknown {
+    // The cap matters MOST here (#559): revive runs on attacker-typable wire
+    // JSON before anything vets it, and `JSON.parse` (not recursive) happily
+    // hands over a tree far deeper than the stack survives. It also bounds a
+    // cyclic LIVE value (the hydration blob mixes in client-written objects),
+    // which used to recurse forever — revive keeps no `seen` set because
+    // parsed JSON cannot share references.
+    if (depth > MAX_DEPTH) {
+        throw new TypeError(`Value nests deeper than ${MAX_DEPTH} levels — refusing to revive`);
+    }
     if (value === null || typeof value !== 'object') return value;
-    if (Array.isArray(value)) return value.map((item) => revive(item, custom, builtin));
+    if (Array.isArray(value)) return value.map((item) => revive(item, custom, builtin, depth + 1));
 
     // Only walk what JSON.parse can actually produce. Anything else is
     // already a live value — a Date, Map, Set, or class instance — and
@@ -345,7 +403,9 @@ function revive(
             // object with a "$date" property, not a Date.)
             const inner = payload as Record<string, unknown>;
             const unwrapped: Record<string, unknown> = {};
-            for (const k of Object.keys(inner)) unwrapped[k] = revive(inner[k], custom, builtin);
+            for (const k of Object.keys(inner)) {
+                unwrapped[k] = revive(inner[k], custom, builtin, depth + 1);
+            }
             return unwrapped;
         }
 
@@ -355,10 +415,14 @@ function revive(
         if (key.charCodeAt(0) === 36 /* $ */ && key !== ESCAPE_TAG) {
             // Custom handlers win over the built-ins on a shared tag.
             for (const h of custom) {
-                if (h.tag === key && h.revive) return h.revive(revive(payload, custom, builtin));
+                if (h.tag === key && h.revive) {
+                    return h.revive(revive(payload, custom, builtin, depth + 1));
+                }
             }
             for (const h of builtin) {
-                if (h.tag === key && h.revive) return h.revive(revive(payload, custom, builtin));
+                if (h.tag === key && h.revive) {
+                    return h.revive(revive(payload, custom, builtin, depth + 1));
+                }
             }
             if (__DEV__) {
                 console.warn(
@@ -373,7 +437,7 @@ function revive(
 
     const out: Record<string, unknown> = {};
     for (const key of keys) {
-        out[key] = revive((value as Record<string, unknown>)[key], custom, builtin);
+        out[key] = revive((value as Record<string, unknown>)[key], custom, builtin, depth + 1);
     }
     return out;
 }

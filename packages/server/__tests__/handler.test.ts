@@ -916,6 +916,35 @@ describe('handleServerFnRequest — rich wire serialization (rfc-server §4)', (
         const res = await call('circular_fn_00000011', { args: [] });
         expect(res.status).toBe(500);
     });
+
+    it('the guard runs BEFORE wire revive — a veto beats a malformed encoded arg (#559)', async () => {
+        // The codec's revive handlers do attacker-directed work (BigInt digit
+        // conversion, RegExp compilation), so an unvetted request must never
+        // reach them: the guard's 401 wins over the reviver's 400.
+        const res = await call('echo_fn_00000010', { args: [{ $bigint: 'not a number' }] }, {}, {
+            guard: (rq) => {
+                rq.responseHeaders.set('set-cookie', 'challenge=1');
+                throw new ServerFnError(401, 'sign in first');
+            }
+        });
+        expect(res.status).toBe(401);
+        // And the #557 rule holds on the post-guard revive 400 too:
+        const reject = await call('echo_fn_00000010', { args: [{ $bigint: 'not a number' }] }, {}, {
+            guard: (rq) => {
+                rq.responseHeaders.set('set-cookie', 'trace=1');
+            }
+        });
+        expect(reject.status).toBe(400);
+        expect(reject.headers.get('set-cookie')).toBe('trace=1');
+    });
+
+    it('a body nesting past the codec depth cap is a clean 400 (#559)', async () => {
+        const body = `{"args":[${'{"child":'.repeat(300)}1${'}'.repeat(300)}]}`;
+        const res = await call('echo_fn_00000010', undefined, { body });
+        expect(res.status).toBe(400);
+        const parsed = await res.json();
+        expect(parsed.error.message).toBe('Malformed encoded value in body');
+    });
 });
 
 describe('handleServerFnRequest — direct-form wire-args warning (#412)', () => {
