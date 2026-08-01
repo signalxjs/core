@@ -204,13 +204,19 @@ describe('query-string arguments (§4.1)', () => {
         expect(res.headers.get('cache-control')).toBe('no-store');
     });
 
-    it('prototype-pollution keys are DROPPED from query args by the reviver', async () => {
-        const raw = encodeURIComponent('[{"__proto__": {"polluted": 1}, "ok": 2}]');
-        const res = await get('echo_fn_00000004', undefined, {
-            url: `${ORIGIN}/_sigx/fn/echo_fn_00000004?args=${raw}`
-        });
-        expect(res.status).toBe(200);
-        await expect(res.json()).resolves.toEqual({ data: { ok: 2 } });
+    it('an own __proto__ key is DROPPED from query args by the reviver', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        try {
+            const raw = encodeURIComponent('[{"__proto__": {"polluted": 1}, "ok": 2}]');
+            const res = await get('echo_fn_00000004', undefined, {
+                url: `${ORIGIN}/_sigx/fn/echo_fn_00000004?args=${raw}`
+            });
+            expect(res.status).toBe(200);
+            await expect(res.json()).resolves.toEqual({ data: { ok: 2 } });
+            expect(warn).toHaveBeenCalledWith(expect.stringContaining('__proto__'));
+        } finally {
+            warn.mockRestore();
+        }
     });
 
     // Same prescan as the POST body (#544): a `\u`-escaped key spells a
@@ -227,18 +233,24 @@ describe('query-string arguments (§4.1)', () => {
                 return 'ok';
             }
         });
-        const raw = encodeURIComponent(
-            '[{"\\u005f\\u005fproto\\u005f\\u005f": {"polluted": 1}, "ok": 2}]'
-        );
-        const res = await get(
-            'capture_fn_00000009',
-            undefined,
-            { url: `${ORIGIN}/_sigx/fn/capture_fn_00000009?args=${raw}` },
-            { resolve: () => capture }
-        );
-        expect(res.status).toBe(200);
-        expect(seen).toEqual({ ok: 2 });
-        expect(Object.getPrototypeOf(seen)).toBe(Object.prototype);
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        try {
+            const raw = encodeURIComponent(
+                '[{"\\u005f\\u005fproto\\u005f\\u005f": {"polluted": 1}, "ok": 2}]'
+            );
+            const res = await get(
+                'capture_fn_00000009',
+                undefined,
+                { url: `${ORIGIN}/_sigx/fn/capture_fn_00000009?args=${raw}` },
+                { resolve: () => capture }
+            );
+            expect(res.status).toBe(200);
+            expect(seen).toEqual({ ok: 2 });
+            expect(Object.getPrototypeOf(seen)).toBe(Object.prototype);
+            expect(warn).toHaveBeenCalledWith(expect.stringContaining('__proto__'));
+        } finally {
+            warn.mockRestore();
+        }
     });
 
     it('reads named scalar params (#355) — the percent-free common case', async () => {

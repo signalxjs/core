@@ -617,13 +617,29 @@ describe('handleServerFnRequest — guard seam', () => {
 });
 
 describe('handleServerFnRequest — pollution reviver', () => {
-    it('drops dangerous keys from parsed args', async () => {
+    it('drops an own __proto__ key from parsed args, with a dev warning (#560)', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        try {
+            const res = await call('echo_fn_00000004', undefined, {
+                body: '{"args":[{"__proto__":{"polluted":true},"ok":1}]}'
+            });
+            const body = await res.json();
+            expect(body.data).toEqual({ ok: 1 });
+            expect(({} as { polluted?: boolean }).polluted).toBeUndefined();
+            expect(warn).toHaveBeenCalledWith(expect.stringContaining('__proto__'));
+        } finally {
+            warn.mockRestore();
+        }
+    });
+
+    it('"constructor" and "prototype" are plain data keys and SURVIVE (#560)', async () => {
+        // Dropping them silently ate legitimate payloads — only __proto__ is
+        // a prototype swap under assignment; these are ordinary own props.
         const res = await call('echo_fn_00000004', undefined, {
-            body: '{"args":[{"__proto__":{"polluted":true},"ok":1}]}'
+            body: '{"args":[{"constructor":"Acme Corp","prototype":"blueprint","ok":1}]}'
         });
         const body = await res.json();
-        expect(body.data).toEqual({ ok: 1 });
-        expect(({} as { polluted?: boolean }).polluted).toBeUndefined();
+        expect(body.data).toEqual({ constructor: 'Acme Corp', prototype: 'blueprint', ok: 1 });
     });
 
     // The parse skips the reviver when the source cannot SPELL a dangerous
@@ -647,30 +663,38 @@ describe('handleServerFnRequest — pollution reviver', () => {
     };
 
     it('drops __proto__ spelled with \\u escapes, before it reaches the handler', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        try {
+            const { fn, seen } = captor();
+            const res = await call('capture_fn_00000006', undefined, {
+                body: '{"args":[{"\\u005f\\u005fproto\\u005f\\u005f":{"polluted":true},"ok":1}]}'
+            }, { resolve: () => fn });
+
+            expect(res.status).toBe(200);
+            const input = seen();
+            expect(input).toEqual({ ok: 1 });
+            // The load-bearing one: a naive prescan leaves this pointing at
+            // {"polluted": true} rather than Object.prototype.
+            expect(Object.getPrototypeOf(input)).toBe(Object.prototype);
+            expect((input as { polluted?: boolean }).polluted).toBeUndefined();
+            expect(warn).toHaveBeenCalledWith(expect.stringContaining('__proto__'));
+        } finally {
+            warn.mockRestore();
+        }
+    });
+
+    it('"constructor"/"prototype" spelled with \\u escapes survive as data (#560)', async () => {
         const { fn, seen } = captor();
         const res = await call('capture_fn_00000006', undefined, {
-            body: '{"args":[{"\\u005f\\u005fproto\\u005f\\u005f":{"polluted":true},"ok":1}]}'
+            body:
+                '{"args":[{"\\u0063onstructor":{"a":1},' +
+                '"\\u0070rototype":{"b":2},"ok":1}]}'
         }, { resolve: () => fn });
 
         expect(res.status).toBe(200);
         const input = seen();
-        expect(input).toEqual({ ok: 1 });
-        // The load-bearing one: a naive prescan leaves this pointing at
-        // {"polluted": true} rather than Object.prototype.
+        expect(input).toEqual({ constructor: { a: 1 }, prototype: { b: 2 }, ok: 1 });
         expect(Object.getPrototypeOf(input)).toBe(Object.prototype);
-        expect((input as { polluted?: boolean }).polluted).toBeUndefined();
-    });
-
-    it('drops "constructor"/"prototype" spelled with \\u escapes', async () => {
-        const { fn, seen } = captor();
-        const res = await call('capture_fn_00000006', undefined, {
-            body:
-                '{"args":[{"\\u0063onstructor":{"bad":1},' +
-                '"\\u0070rototype":{"bad":2},"ok":1}]}'
-        }, { resolve: () => fn });
-
-        expect(res.status).toBe(200);
-        expect(seen()).toEqual({ ok: 1 });
     });
 
     it('leaves a body that merely MENTIONS a dangerous name in a value alone', async () => {

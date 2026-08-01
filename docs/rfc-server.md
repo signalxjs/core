@@ -972,8 +972,15 @@ attacker with `curl`. Defaults, in order of the failure they prevent:
    whose handlers do attacker-directed work: BigInt digit conversion,
    RegExp compilation, Map/Set construction — runs AFTER the `guard`
    (#559), so an unvetted request never reaches the codec at all.
-5. **Prototype pollution** — reviver-based key rejection on both parse
-   sites (§4).
+5. **Prototype pollution** — layered `__proto__` defense (#560/#548): both
+   parse sites drop an own `__proto__` key (with a dev warning — the drop
+   used to be silent), and `@sigx/serialize`'s revive skips the same key at
+   its own object rebuild, where plain assignment would otherwise SWAP the
+   prototype of the revived object invisibly — so any future revive site
+   that forgets a pre-filter is still covered at the codec.
+   `"constructor"`/`"prototype"` are plain own data keys under assignment
+   and round-trip as data; the old three-key rejection silently ate
+   legitimate payloads in both directions.
 6. **Error leakage** — non-`ServerFnError` messages and stacks are masked
    in prod; `ServerFnError` is the deliberate channel.
 7. **Version skew** — content-hashed symbols; stale clients get a typed,

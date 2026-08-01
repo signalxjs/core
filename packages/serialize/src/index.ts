@@ -222,6 +222,20 @@ const depthError = (): TypeError => new TypeError('nests deeper than 256 levels'
 /** In-progress marker in the encode memo: seeing it again IS a cycle. */
 const IN_PROGRESS = Symbol();
 
+const PROTO_KEY = '__proto__';
+
+/** A dropped `__proto__` must be VISIBLE in dev (#560) — the old silent
+ *  caller-side filters cost real diagnosis time. */
+function warnProtoDropped(): void {
+    if (__DEV__) {
+        console.warn(
+            '[sigx] revive dropped an own "__proto__" key — rebuilding it by ' +
+            'assignment would swap the prototype of the revived object ' +
+            'instead of creating a property (prototype-pollution guard).'
+        );
+    }
+}
+
 /**
  * `escapeTop` is false only when walking a TAGLESS handler's output: that
  * value is already the handler's own wire form (a serialize-only handler
@@ -404,6 +418,10 @@ function revive(
             const inner = payload as Record<string, unknown>;
             const unwrapped: Record<string, unknown> = {};
             for (const k of Object.keys(inner)) {
+                if (k === PROTO_KEY) {
+                    warnProtoDropped();
+                    continue;
+                }
                 unwrapped[k] = revive(inner[k], custom, builtin, depth + 1);
             }
             return unwrapped;
@@ -437,6 +455,17 @@ function revive(
 
     const out: Record<string, unknown> = {};
     for (const key of keys) {
+        // #548: `out[key] = …` with the key "__proto__" would not create an
+        // own property — it would SET the prototype of the object being
+        // built, invisibly (gone from Object.keys, JSON.stringify, and
+        // toEqual). The codec sees every boundary at once, so the defense
+        // lives here rather than in each caller's pre-filter; only this one
+        // key is dangerous in this position — "constructor"/"prototype" are
+        // plain own data keys under assignment and pass through (#560).
+        if (key === PROTO_KEY) {
+            warnProtoDropped();
+            continue;
+        }
         out[key] = revive((value as Record<string, unknown>)[key], custom, builtin, depth + 1);
     }
     return out;

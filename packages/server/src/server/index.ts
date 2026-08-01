@@ -278,26 +278,49 @@ function resolveInvalidatePatterns(
     return out;
 }
 
-/** Same three keys as the boundary serializer's DANGEROUS_KEYS. */
-const DANGEROUS_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+/**
+ * Only `__proto__` is dangerous as a parsed data key (#560): rebuilding or
+ * merging by assignment turns it into a prototype swap (`Object.assign`,
+ * spread-free merges, and revive's own walk — the latter now also guarded in
+ * `@sigx/serialize`, #548). "constructor"/"prototype" are plain own data
+ * keys under assignment; dropping them silently ate legitimate payloads.
+ */
+const DANGEROUS_KEY = '__proto__';
 
-const reviver = (key: string, value: unknown): unknown =>
-    DANGEROUS_KEYS.has(key) ? undefined : value;
+const reviver = (key: string, value: unknown): unknown => {
+    if (key === DANGEROUS_KEY) {
+        if (__DEV__) warnDroppedProtoKey();
+        return undefined;
+    }
+    return value;
+};
 
 /**
- * Could this source text SPELL a dangerous key? Only two ways: as a literal,
- * or through a `\u` escape — the one JSON escape that yields letters (`\n`,
- * `\t`, `\r`, `\b`, `\f`, `\"`, `\\`, `\/` cannot). Neither present ⇒
- * `JSON.parse` provably cannot produce one, and the reviver is dead weight.
+ * Could this source text SPELL the dangerous key? Only two ways: as a
+ * literal, or through a `\u` escape — the one JSON escape that yields
+ * letters (`\n`, `\t`, `\r`, `\b`, `\f`, `\"`, `\\`, `\/` cannot). Neither
+ * present ⇒ `JSON.parse` provably cannot produce one, and the reviver is
+ * dead weight.
  *
  * It is not free weight: the reviver is a per-KEY callback over the whole
  * document, and on a key-dense body it costs ~4x the parse itself (a 400-key
  * 4 KB body: 66.9us parsed plain, 294.6us with the reviver, 72.3us prescanned
  * — #544). Wrong in one direction only: a body that merely MENTIONS
- * "constructor" in a value, or carries any `\u` escape, takes the slow path
- * it takes today.
+ * "__proto__" in a value, or carries any `\u` escape, takes the slow path it
+ * takes today. (Bodies mentioning "constructor"/"prototype" used to take the
+ * slow path too — no longer suspect since #560.)
  */
-const SUSPECT_KEYS = /__proto__|constructor|prototype|\\u/;
+const SUSPECT_KEYS = /__proto__|\\u/;
+
+/** #560: a dropped key must be visible in dev — the silent drop cost real
+ *  diagnosis time (#548's report). */
+function warnDroppedProtoKey(): void {
+    console.warn(
+        '[sigx server] dropped an own "__proto__" key from a parsed request ' +
+        'value (prototype-pollution guard). A field genuinely named ' +
+        '"__proto__" cannot cross this boundary — rename it.'
+    );
+}
 
 /** `JSON.parse`, dropping dangerous keys — skipping the reviver when the
  *  source cannot contain one. Identical output, both branches. */
@@ -714,10 +737,15 @@ export async function handleServerFnRequest(
         }
         // Flat object; repeated names → array; File passes through; values
         // stay strings (Standard Schema coercion is the mapping tool).
-        // Dangerous field names are DROPPED, the JSON reviver's posture.
+        // A field named "__proto__" is DROPPED, the JSON reviver's posture
+        // (#560): `input[key] = …` would swap this object's prototype. Any
+        // other name — "constructor" included — is a plain own property.
         const input: Record<string, unknown> = {};
         for (const key of new Set(formData.keys())) {
-            if (DANGEROUS_KEYS.has(key)) continue;
+            if (key === DANGEROUS_KEY) {
+                if (__DEV__) warnDroppedProtoKey();
+                continue;
+            }
             const values = formData.getAll(key);
             input[key] = values.length > 1 ? values : values[0];
         }

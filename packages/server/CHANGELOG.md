@@ -4,6 +4,20 @@
 
 ### Fixed
 
+- **The pollution filters silently ate legitimate `constructor`/`prototype`
+  data keys, in both directions (#560).** The request reviver, the response
+  reviver in the client stubs, and the form-field filter all dropped three
+  keys; only `__proto__` is actually dangerous (a prototype swap under
+  assignment/merge) — `constructor`/`prototype` are plain own data keys. A
+  server function returning `{ constructor: 'Acme Corp' }` lost the field
+  on the client; a request argument or form field named `prototype` never
+  reached the handler; nothing warned. All three filters now drop only an
+  own `__proto__` key, and the drop dev-warns instead of being silent.
+  `@sigx/serialize`'s revive guards the same key at the codec itself
+  (#548), so the parse-time drops are defense in depth rather than the
+  only line. The #544 prescan narrows with it — a body merely mentioning
+  "constructor" in a value no longer takes the slow reviver path.
+
 - **The form error path dropped `ctx.responseHeaders` (#557).** A guard
   that sets a rotating session cookie on `rq.responseHeaders` and then
   rejects delivered the cookie on JSON calls but silently lost it on native
