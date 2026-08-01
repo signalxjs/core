@@ -394,7 +394,17 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
 
         load(id) {
             if (id !== RESOLVED_VIRTUAL_ID) return;
-            const lines: string[] = ['export const serverFns = {'];
+            const lines: string[] = [
+                'export const serverFns = {',
+                // Null prototype (#555): a wire symbol like "__proto__" or
+                // "constructor" must never resolve to an inherited
+                // Object.prototype member — adapters do `serverFns[symbol]`.
+                // The literal `__proto__: null` key is the one place setter
+                // semantics are wanted; every symbol key below is COMPUTED
+                // so a symbol literally named "__proto__" defines an own
+                // property instead of a second proto setter (SyntaxError).
+                '    __proto__: null,'
+            ];
             /** stableSymbol → file, to surface duplicate explicit `id`s. */
             const stableOwners = new Map<string, string>();
             const register = (
@@ -407,8 +417,8 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
                 // Dual registration (rev 2, N.3): hashed keys keep the web's
                 // skew detection; stable keys keep installed apps working
                 // across backend redeploys.
-                lines.push(`    ${JSON.stringify(fn.symbol)}: ${record},`);
-                lines.push(`    ${JSON.stringify(fn.stableSymbol)}: ${record},`);
+                lines.push(`    [${JSON.stringify(fn.symbol)}]: ${record},`);
+                lines.push(`    [${JSON.stringify(fn.stableSymbol)}]: ${record},`);
                 const owner = stableOwners.get(fn.stableSymbol);
                 if (owner && owner !== file) {
                     this.warn(

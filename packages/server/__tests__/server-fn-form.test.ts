@@ -358,6 +358,25 @@ describe('errors fork on request content-type, never on the fn (§6.4)', () => {
         expect(onError).toHaveBeenCalledOnce();
     });
 
+    it('a rejecting resolve renders as masked 500 HTML and fires onError (#555)', async () => {
+        vi.stubEnv('NODE_ENV', 'production');
+        try {
+            const onError = vi.fn();
+            const res = await formPost('broken_fn_00000009', new URLSearchParams({ a: '1' }), {}, {
+                resolve: async () => {
+                    throw new Error('registry import failed: /srv/secret/chunk.js');
+                },
+                onError
+            });
+            expect(res.status).toBe(500);
+            expect(res.headers.get('content-type')).toContain('text/html');
+            expect(await res.text()).not.toContain('secret');
+            expect(onError).toHaveBeenCalledOnce();
+        } finally {
+            vi.unstubAllEnvs();
+        }
+    });
+
     it('the guard runs on the form path and its rejection renders as HTML', async () => {
         const guard = vi.fn(() => {
             throw new ServerFnError(401, 'sign in first');

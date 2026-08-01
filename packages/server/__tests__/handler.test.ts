@@ -413,6 +413,136 @@ describe('handleServerFnRequest — errors', () => {
     });
 });
 
+describe('handleServerFnRequest — throwing resolve (#555)', () => {
+    it('a rejecting resolve is a masked 500 in prod, reported to onError with derived info', async () => {
+        vi.stubEnv('NODE_ENV', 'production');
+        try {
+            const seen: unknown[][] = [];
+            const res = await call('broken_fn_00000001', { args: [] }, {}, {
+                resolve: async () => {
+                    throw new Error('registry import failed: /srv/secret/chunk.js');
+                },
+                onError: (error, info, ctx) => {
+                    seen.push([error, info, ctx]);
+                }
+            });
+            expect(res.status).toBe(500);
+            const body = await res.json();
+            expect(body).toEqual({ error: { message: 'Internal error', status: 500 } });
+            expect(JSON.stringify(body)).not.toContain('secret');
+            expect(seen).toHaveLength(1);
+            expect((seen[0][0] as Error).message).toContain('registry import failed');
+            // The name is derived from the symbol alone — the fn never resolved.
+            expect(seen[0][1]).toMatchObject({ symbol: 'broken_fn_00000001', name: 'broken' });
+        } finally {
+            vi.unstubAllEnvs();
+        }
+    });
+
+    it('includes the message in dev', async () => {
+        const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+        try {
+            const res = await call('broken_fn_00000001', { args: [] }, {}, {
+                resolve: async () => {
+                    throw new Error('ssrLoadModule: syntax error in cart.server.ts');
+                }
+            });
+            expect(res.status).toBe(500);
+            const body = await res.json();
+            expect(body.error.message).toContain('syntax error in cart.server.ts');
+        } finally {
+            spy.mockRestore();
+        }
+    });
+
+    it('a synchronously throwing resolve is masked the same way', async () => {
+        vi.stubEnv('NODE_ENV', 'production');
+        try {
+            const res = await call('broken_fn_00000001', { args: [] }, {}, {
+                resolve: () => {
+                    throw new Error('sync registry failure');
+                }
+            });
+            expect(res.status).toBe(500);
+            await expect(res.json()).resolves.toEqual({
+                error: { message: 'Internal error', status: 500 }
+            });
+        } finally {
+            vi.unstubAllEnvs();
+        }
+    });
+
+    it('a resolve throwing ServerFnError passes through verbatim, no onError', async () => {
+        const onError = vi.fn();
+        const res = await call('warming_fn_00000001', { args: [] }, {}, {
+            resolve: () => {
+                throw new ServerFnError(503, 'registry warming');
+            },
+            onError
+        });
+        expect(res.status).toBe(503);
+        await expect(res.json()).resolves.toEqual({
+            error: { message: 'registry warming', status: 503 }
+        });
+        expect(onError).not.toHaveBeenCalled();
+    });
+
+    it('a GET with a rejecting resolve gets the masked 500 with no-store', async () => {
+        vi.stubEnv('NODE_ENV', 'production');
+        try {
+            const res = await handleServerFnRequest(
+                new Request(`${ORIGIN}/_sigx/fn/read_fn_00000001?args=%5B%5D`, { method: 'GET' }),
+                {
+                    resolve: async () => {
+                        throw new Error('chunk missing');
+                    }
+                }
+            );
+            expect(res.status).toBe(500);
+            expect(res.headers.get('cache-control')).toBe('no-store');
+            await expect(res.json()).resolves.toEqual({
+                error: { message: 'Internal error', status: 500 }
+            });
+        } finally {
+            vi.unstubAllEnvs();
+        }
+    });
+
+    it('a prototype-key symbol against a plain-object registry is a clean 404', async () => {
+        // FNS['__proto__'] is Object.prototype — truthy but carrying no
+        // __sigxFn, so the unknown-symbol check must catch it.
+        const res = await call('__proto__', { args: [] });
+        expect(res.status).toBe(404);
+        const body = await res.json();
+        expect(body.error.message).toBe('Unknown server function "__proto__"');
+    });
+
+    it('a body stream erroring mid-read is a 400, never a masked 500, no onError', async () => {
+        const onError = vi.fn();
+        const body = new ReadableStream<Uint8Array>({
+            start(controller) {
+                controller.enqueue(new TextEncoder().encode('{"args":'));
+                controller.error(new Error('connection reset'));
+            }
+        });
+        const request = new Request(`${ORIGIN}/_sigx/fn/add_fn_00000001`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', origin: ORIGIN },
+            body,
+            duplex: 'half'
+        } as unknown as RequestInit);
+        const res = await handleServerFnRequest(request, {
+            resolve: (sym) => FNS[sym] ?? null,
+            onError
+        });
+        expect(res.status).toBe(400);
+        await expect(res.json()).resolves.toEqual({
+            error: { message: 'Malformed request body', status: 400 }
+        });
+        expect(onError).not.toHaveBeenCalled();
+    });
+});
+
 describe('handleServerFnRequest — guard seam', () => {
     it('runs before the function with the symbol info and shares locals', async () => {
         const seen: unknown[] = [];

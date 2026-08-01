@@ -138,7 +138,7 @@ describe('sigxServer — path-separator normalization (#324)', () => {
             const registry = plugin.load(plugin.resolveId('virtual:sigx-server-fns'));
             // One record — an unnormalized second map entry would emit the
             // same symbol key twice.
-            expect(registry.match(/"addToCart_fn_[0-9a-f]{8}":/g)).toHaveLength(1);
+            expect(registry.match(/\["addToCart_fn_[0-9a-f]{8}"\]:/g)).toHaveLength(1);
         } finally {
             rmSync(root, { recursive: true, force: true });
         }
@@ -161,10 +161,23 @@ describe('sigxServer — virtual registry', () => {
         const code = plugin.load(resolved);
         expect(code).toContain('export const serverFns = {');
         expect(code).toMatch(
-            /"addToCart_fn_[0-9a-f]{8}": \(\) => import\("\/src\/cart\.server\.ts"\)\.then\(m => m\["addToCart"\]\)/
+            /\["addToCart_fn_[0-9a-f]{8}"\]: \(\) => import\("\/src\/cart\.server\.ts"\)\.then\(m => m\["addToCart"\]\)/
         );
         // Only serverFn exports register — server-only values have no symbol.
         expect(code).not.toContain('auditLog');
+    });
+
+    it('emits a null-prototype registry — prototype-key symbols miss cleanly (#555)', () => {
+        const code = plugin.load(plugin.resolveId('virtual:sigx-server-fns'));
+        // The literal `__proto__: null` must LEAD the object so every
+        // adapter's `serverFns[symbol]` lookup has no inherited chain.
+        expect(code).toContain('__proto__: null,');
+        // Behavior pin: evaluate the emitted module text. The lazy `import()`
+        // records are parse-legal inside Function and never invoked.
+        const fns = new Function(`${code.replace('export const', 'const')}; return serverFns;`)() as Record<string, unknown>;
+        expect(Object.getPrototypeOf(fns)).toBe(null);
+        expect(fns['constructor']).toBeUndefined();
+        expect(fns['hasOwnProperty']).toBeUndefined();
     });
 });
 
@@ -206,7 +219,7 @@ describe('sigxServer — inline extraction (non-matching files)', () => {
         plugin.transform.call(ctx('client'), INLINE, join(root, 'src/Page.tsx'));
         const registry = plugin.load(plugin.resolveId('virtual:sigx-server-fns'));
         expect(registry).toMatch(
-            /"ping_fn_[0-9a-f]{8}": \(\) => import\("\/src\/Page\.tsx"\)\.then\(m => m\["__sigxSrvFn_ping"\]\)/
+            /\["ping_fn_[0-9a-f]{8}"\]: \(\) => import\("\/src\/Page\.tsx"\)\.then\(m => m\["__sigxSrvFn_ping"\]\)/
         );
     });
 
@@ -386,9 +399,9 @@ describe('sigxServer — rev 2: role, endpoint, stable symbols, scan (#320)', ()
         const { plugin, root } = makeProject(APP);
         try {
             const registry = plugin.load(plugin.resolveId('virtual:sigx-server-fns'));
-            expect(registry).toMatch(/"addToCart_fn_[0-9a-f]{8}": \(\) => import\("\/src\/cart\.server\.ts"\)/);
+            expect(registry).toMatch(/\["addToCart_fn_[0-9a-f]{8}"\]: \(\) => import\("\/src\/cart\.server\.ts"\)/);
             expect(registry).toContain(
-                `"@test/app/src/cart.server.ts/addToCart": () => import("/src/cart.server.ts").then(m => m["addToCart"])`
+                `["@test/app/src/cart.server.ts/addToCart"]: () => import("/src/cart.server.ts").then(m => m["addToCart"])`
             );
         } finally {
             rmSync(root, { recursive: true, force: true });
@@ -560,12 +573,12 @@ describe('sigxServer — rev 2: role, endpoint, stable symbols, scan (#320)', ()
             const stableKey = '"@acme/shared/src/cart.server.ts/addToCart"';
             expect(a).toContain(stableKey);
             // Out-of-root module ⇒ absolute-path import spec, not '/src/…'.
-            const spec = /"@acme\/shared\/src\/cart\.server\.ts\/addToCart": \(\) => import\("([^"]+)"\)/.exec(a)![1];
+            const spec = /\["@acme\/shared\/src\/cart\.server\.ts\/addToCart"\]: \(\) => import\("([^"]+)"\)/.exec(a)![1];
             expect(spec).toContain('sigx-shared-');
             expect(spec).not.toBe('/src/cart.server.ts');
             // Two app builds (different roots) mint IDENTICAL registry keys
             // for the shared module — the whole point of stable-id seeds.
-            const keys = (s: string): string[] => [...s.matchAll(/^\s+"([^"]+)":/gm)].map((m) => m[1]).sort();
+            const keys = (s: string): string[] => [...s.matchAll(/^\s+\["([^"]+)"\]:/gm)].map((m) => m[1]).sort();
             expect(keys(a)).toEqual(keys(b));
         } finally {
             for (const dir of roots) rmSync(dir, { recursive: true, force: true });
@@ -595,7 +608,7 @@ describe('sigxServer — rev 2: role, endpoint, stable symbols, scan (#320)', ()
             );
             expect(result.code).toMatch(/__serverFnStub\("addToCart_fn_[0-9a-f]{8}"/);
             const registry = plugin.load(plugin.resolveId('virtual:sigx-server-fns'));
-            expect(registry.match(/"addToCart_fn_[0-9a-f]{8}":/g)).toHaveLength(1);
+            expect(registry.match(/\["addToCart_fn_[0-9a-f]{8}"\]:/g)).toHaveLength(1);
             expect(registry).toContain('"@acme/fs-pkg/src/cart.server.ts/addToCart"');
         } finally {
             for (const dir of roots) rmSync(dir, { recursive: true, force: true });

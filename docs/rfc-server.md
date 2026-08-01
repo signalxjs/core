@@ -689,7 +689,11 @@ shape forks on the REQUEST content-type):
 - `<status> {"error": {"message", "status", "data"?}}` — a thrown
   `ServerFnError(status, msg, data)` passes through verbatim; **any other
   throw is masked to `500 {"error":{"message":"Internal error"}}` in prod**
-  (`__DEV__` includes message + stack).
+  (`__DEV__` includes message + stack). Masking covers symbol
+  *resolution* too (#555): a throwing/rejecting `resolve` — the
+  registry's lazy `import()`, dev's `ssrLoadModule` — is masked and
+  reported to `onError` like any function failure. A body stream that
+  errors mid-read is the requester's `400`, never a masked 500.
 - `303` — form-mode success (§6.4): `Location` is handler-set >
   same-origin `Referer` > `/`; no body, no envelope.
 - `400` malformed body / non-array args / validator rejection (validator

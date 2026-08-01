@@ -6,7 +6,7 @@
  * response headers (multiple set-cookie values must all survive).
  */
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { createServer, type Server } from 'node:http';
 import { once } from 'node:events';
 import { createServerFnHandler } from '../src/node';
@@ -43,7 +43,10 @@ describe('createServerFnHandler over node:http', () => {
                 cookies_fn_00000001: async () => twoCookies,
                 add_fn_00000002: async () => add,
                 ticks_fn_00000003: async () => ticks,
-                read_fn_00000004: async () => cachedRead
+                read_fn_00000004: async () => cachedRead,
+                broken_fn_00000005: async () => {
+                    throw new Error('chunk missing after partial deploy');
+                }
             }
         });
         server = createServer((req, res) => {
@@ -127,6 +130,40 @@ describe('createServerFnHandler over node:http', () => {
         const res = await fetch(`${origin}/somewhere-else`);
         expect(res.status).toBe(404);
         await expect(res.text()).resolves.toBe('fallthrough');
+    });
+
+    it('a rejecting registry loader is the structured masked envelope, not next(err) (#555)', async () => {
+        const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+        try {
+            const res = await fetch(`${origin}/_sigx/fn/broken_fn_00000005`, {
+                method: 'POST',
+                headers: { 'content-type': 'application/json', origin },
+                body: '{"args":[]}'
+            });
+            expect(res.status).toBe(500);
+            expect(res.headers.get('content-type')).toBe('application/json');
+            // The fallback server answers next(err) with the literal 'error'
+            // body — seeing the JSON envelope proves the failure never
+            // escaped handleServerFnRequest.
+            const body = (await res.json()) as { error: { message: string; status: number } };
+            expect(body.error.status).toBe(500);
+        } finally {
+            spy.mockRestore();
+        }
+    });
+
+    it('prototype-key symbols against the functions record are clean 404s (#555)', async () => {
+        for (const symbol of ['__proto__', 'constructor', 'hasOwnProperty']) {
+            const res = await fetch(`${origin}/_sigx/fn/${symbol}`, {
+                method: 'POST',
+                headers: { 'content-type': 'application/json', origin },
+                body: '{"args":[]}'
+            });
+            expect(res.status).toBe(404);
+            await expect(res.json()).resolves.toEqual({
+                error: { message: `Unknown server function "${symbol}"`, status: 404 }
+            });
+        }
     });
 
     /**

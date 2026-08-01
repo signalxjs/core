@@ -32,6 +32,11 @@ export interface ServerFnRequestOptions {
      * Resolve a transport symbol to its wrapped server function (an object
      * carrying `__sigxFn`). Return null/undefined for unknown symbols —
      * a structured 404 the stub surfaces as a version-skew error.
+     *
+     * A throw or rejection here (a broken lazy import, a missing chunk
+     * after a partial deploy) is treated as a function failure: masked per
+     * §5 and reported to `onError`. A thrown `ServerFnError` passes through
+     * verbatim, so a custom resolve can speak the wire language (#555).
      */
     resolve(symbol: string): unknown | Promise<unknown>;
     /**
@@ -559,7 +564,30 @@ export async function handleServerFnRequest(
                   isGet ? NO_STORE : undefined
               );
     }
-    const fn = (await options.resolve(symbol)) as Partial<WrappedServerFn> | null | undefined;
+    let fn: Partial<WrappedServerFn> | null | undefined;
+    try {
+        fn = (await options.resolve(symbol)) as Partial<WrappedServerFn> | null | undefined;
+    } catch (error) {
+        // A throwing resolve is a server-side infrastructure failure (a
+        // broken lazy import, a missing chunk after a partial deploy) — it
+        // used to escape this handler entirely (#555): no masking, no
+        // onError, no envelope. Masked per §5 like any fn failure; a thrown
+        // ServerFnError passes through so a custom resolve can speak the
+        // wire language. The real info/ctx don't exist yet — built fresh.
+        const info = { symbol, name: symbolName(symbol) };
+        const ctx = createRequestContext(request);
+        if (!isServerFnError(error)) await reportMasked(options, error, info, ctx);
+        const shape = wireErrorShape(error, info.name || symbol);
+        return isForm
+            ? formErrorResponse(shape.status, shape.message, shape.data)
+            : errorResponse(
+                  shape.status,
+                  shape.message,
+                  shape.data,
+                  ctx.responseHeaders,
+                  isGet ? NO_STORE : undefined
+              );
+    }
     if (!fn || typeof fn.__sigxFn !== 'function') {
         // GET 404s are no-store like every non-2xx: a CDN-cached miss must
         // not shadow a redeploy's fresh symbols (§4.1).
@@ -595,19 +623,7 @@ export async function handleServerFnRequest(
     }
     // Captured: TS narrowing does not cross into the work closure below.
     const invoke = fn.__sigxFn;
-    // The export name is encoded in the symbol — the last segment of a stable
-    // symbol (`<stableId>/<name>`, checked FIRST: a stable id may itself end
-    // in a hashed-looking `_fn_<hex8>` tail), `<name>_fn_<hash8>` for hashed
-    // ones. A hashed symbol never contains '/', so the two cannot be
-    // confused. The impl's own name (`__sigxName`) is often '' for arrows.
-    const lastSlash = symbol.lastIndexOf('/');
-    const info = {
-        symbol,
-        name:
-            lastSlash >= 0
-                ? symbol.slice(lastSlash + 1)
-                : /^(.+)_fn_[0-9a-f]{8}$/.exec(symbol)?.[1] ?? fn.__sigxName ?? ''
-    };
+    const info = { symbol, name: symbolName(symbol, fn.__sigxName) };
 
     let parsed: unknown;
     let boundarySidecar: unknown;
@@ -677,7 +693,17 @@ export async function handleServerFnRequest(
         }
         parsed = [input];
     } else {
-        const body = await readBody(request, options.maxBodyBytes ?? DEFAULT_MAX_BODY);
+        let body: string | null;
+        try {
+            body = await readBody(request, options.maxBodyBytes ?? DEFAULT_MAX_BODY);
+        } catch {
+            // The body stream erroring mid-read (a disconnect mid-upload,
+            // truncated chunked encoding) is the requester's failure — the
+            // JSON twin of the formData() guard above: a 400, never a
+            // masked 500, and no onError (it would fire on every abandoned
+            // upload). #555
+            return errorResponse(400, 'Malformed request body');
+        }
         if (body === null) {
             return errorResponse(413, 'Request body too large');
         }
@@ -939,6 +965,21 @@ function warnPublicRequestTouch(
             return real;
         }
     });
+}
+
+/**
+ * The export name encoded in the symbol (#355) — the last segment of a
+ * stable symbol (`<stableId>/<name>`, checked FIRST: a stable id may itself
+ * end in a hashed-looking `_fn_<hex8>` tail), `<name>` of a hashed
+ * `<name>_fn_<hash8>`. A hashed symbol never contains '/', so the two cannot
+ * be confused. The impl's own name (`__sigxName`, often '' for arrows) is
+ * the last resort — absent entirely when the fn never resolved (#555).
+ */
+function symbolName(symbol: string, implName?: string): string {
+    const lastSlash = symbol.lastIndexOf('/');
+    return lastSlash >= 0
+        ? symbol.slice(lastSlash + 1)
+        : /^(.+)_fn_[0-9a-f]{8}$/.exec(symbol)?.[1] ?? implName ?? '';
 }
 
 /**
