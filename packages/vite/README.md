@@ -89,9 +89,9 @@ The server-function plugin (`@sigx/vite/server`) serves the RPC endpoint from
 `@sigx/server`'s handler accepts** — `origin`, `maxBodyBytes`, `maxUrlBytes`,
 `timeoutMs`, `onError` — and forwards them unchanged, on top of its own build
 options (`include`, `exclude`, `base`, `endpoint`, `role`, `scan`,
-`requireGuards`). The type derives from `ServerFnRequestOptions` rather than
-copying it, so an option added to the endpoint is reachable in dev the day it
-ships:
+`requireGuards`, `guard`, `renderBoundaries`). The type derives from
+`ServerFnRequestOptions` rather than copying it, so an option added to the
+endpoint is reachable in dev the day it ships:
 
 ```ts
 sigxServer({
