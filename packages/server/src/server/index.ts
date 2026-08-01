@@ -527,8 +527,9 @@ export async function handleServerFnRequest(
         // every POST, form submissions included — with the content-type
         // layer deliberately gone on this path, Origin is the CSRF defense,
         // so even 'verify-when-present' requires it here. The distinct
-        // absent-Origin message tells an operator who chose that policy WHY
-        // their form 403s.
+        // absent-Origin message is a DEV diagnostic — it tells an operator
+        // who chose that policy why their form 403s; prod form pages stay
+        // generic per §5 (formErrorResponse renders the message __DEV__-only).
         return isForm
             ? formErrorResponse(
                   403,

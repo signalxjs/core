@@ -55,8 +55,10 @@
   Old vs new, per request shape under `'verify-when-present'`:
   JSON POST without `Origin` — admitted, unchanged. Form POST **with** a
   matching `Origin` — admitted, unchanged. Form POST **without** `Origin` —
-  was admitted, now `403` (HTML: "Form submissions require an Origin
-  header", distinct from the cross-origin message so the operator sees WHY).
+  was admitted, now `403`. In dev the HTML page says "Form submissions
+  require an Origin header" (distinct from the cross-origin message so the
+  operator sees WHY); prod form error pages stay generic per the §5
+  masking posture, as always.
 
   The pattern this breaks: a non-browser client crafting
   `application/x-www-form-urlencoded` POSTs to a form target without an

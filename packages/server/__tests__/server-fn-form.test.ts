@@ -260,6 +260,8 @@ describe('gating (§6.4/§5.2b)', () => {
         expect(res.headers.get('content-type')).toContain('text/html');
         // The distinct message: the operator chose the relaxed policy, so
         // "cross-origin not allowed" would misdescribe an ABSENT header.
+        // Dev-rendered only — prod form pages stay generic per §5 (tests
+        // run with __DEV__ true).
         expect(await res.text()).toContain('Form submissions require an Origin header');
     });
 
