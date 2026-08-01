@@ -108,7 +108,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   (`module.exports = {}`), so the storage was permanently `null` — and nothing
   ever called `runInRequestScope` to enter it regardless. `getCurrentInstance()`
   has always read a module-level slot; that slot is now the only
-  implementation, and the file, its `?? `-merged twin in
+  implementation, and the file, the twin it was `??`-merged with in
   `component-lifecycle.ts`, and its unit test are gone.
 
   **Nothing observable changes** — this is what already ran. The unit test
