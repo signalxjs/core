@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+### Added
+
+- **The pack now registers its manifest type for `virtual:sigx-manifests` and
+  `virtual:sigx-app` (#562).** `@sigx/vite/client` ships the ambient
+  declarations for those modules but cannot type `resumeManifest` itself —
+  this pack is an optional peer of it, so an app without resume must still
+  type-check. It declares an empty `SigxPackManifests` registry instead, and
+  this pack fills in its `resume` key, so `resumeManifest` arrives as
+  `ResumeManifest | undefined` for apps that installed resume and
+  `unknown | undefined` for those that did not — which is what the value is
+  anyway. Registration rides importing the pack, the same zero-import
+  mechanism the `$sigxB` setup-context augmentation uses.
+
 ### Fixed
 
 - **The client install no longer disables full-tree hydration (#483).**

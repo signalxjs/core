@@ -6,6 +6,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- **`@sigx/vite/client` — ambient types for the generated `virtual:*` modules
+  (#562).** There were none, so every app hand-wrote `declare module` blocks
+  for `virtual:sigx-app`, `virtual:sigx-manifests`, `virtual:sigx-server-fns`,
+  `virtual:sigx-islands` and `virtual:sigx-resume/entry` — and the three copies
+  in this repo's own examples had already drifted apart, two of them typing a
+  pack manifest as `unknown` that the third typed properly. One reference line
+  replaces all of it:
+
+  ```ts
+  /// <reference types="@sigx/vite/client" />
+  ```
+
+  The two pack manifests type themselves from the packs actually installed:
+  `@sigx/ssr-islands` and `@sigx/resume` each register their manifest type into
+  a `SigxPackManifests` registry the moment the pack is imported, so
+  `islandsManifest` / `resumeManifest` arrive fully typed when their pack is
+  present and `unknown | undefined` when it is not — which is what the value is
+  anyway. `@sigx/vite/client` never imports either pack, because both are
+  optional peers and an app with only one installed must still type-check; the
+  registration mechanism is the zero-import one the `client:*` attribute types
+  already use (#481/#482 having removed the type-only subpath as an
+  anti-pattern).
+
 ### Changed
 
 - **`@sigx/server`: `origin: 'verify-when-present'` no longer admits

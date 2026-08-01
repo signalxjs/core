@@ -203,6 +203,27 @@ export const createApp = (url) =>
     defineApp(<App />).use(islandsPlugin({ manifest: islandsManifest }));
 ```
 
+### Typing the virtual modules — `@sigx/vite/client`
+
+One reference line, next to `vite/client`, types every `virtual:*` module the
+sigx plugins generate — `virtual:sigx-app`, `virtual:sigx-manifests`,
+`virtual:sigx-server-fns`, `virtual:sigx-islands`, `virtual:sigx-resume/entry`:
+
+```ts
+// src/env.d.ts
+/// <reference types="vite/client" />
+/// <reference types="@sigx/vite/client" />
+```
+
+The two pack manifests type themselves from the packs you actually installed:
+importing `@sigx/ssr-islands` gives `islandsManifest` its `IslandsManifestV2`,
+importing `@sigx/resume` gives `resumeManifest` its `ResumeManifest`, and a
+manifest whose pack is absent stays `unknown` — which is what the value is
+anyway, since a pack that is not installed contributes no manifest. That is why
+this file never imports the packs: both are optional peers, and an app with only
+one of them installed still has to type-check. Registration rides the pack's own
+import, exactly like the `client:*` and `use:` attribute types.
+
 ## Islands
 
 `sigxIslands()` (from `@sigx/vite/islands`) completes the
