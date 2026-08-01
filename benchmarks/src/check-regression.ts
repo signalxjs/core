@@ -139,10 +139,24 @@ function deltaPct(baseline: number, current: number): number {
  */
 function isQuickPayload(value: unknown): value is QuickPayload {
     if (!value || typeof value !== 'object') return false;
-    const candidate = value as { string?: unknown; stream?: unknown };
+    const candidate = value as {
+        string?: unknown;
+        stream?: { results?: unknown };
+        micro?: unknown;
+        bytes?: unknown;
+    };
+    const arrayOrAbsent = (v: unknown): boolean => v === undefined || Array.isArray(v);
+    // `micro` is the discriminator that actually bites: the quick payload holds
+    // a flat array of benches, while the full suite's section is
+    // `{meta, benches, bytes}`. Without checking it, a combined baseline whose
+    // root looks quick-shaped gets this far and then dies on `.find` of an
+    // object.
     return Array.isArray(candidate.string)
         && typeof candidate.stream === 'object'
-        && candidate.stream !== null;
+        && candidate.stream !== null
+        && Array.isArray(candidate.stream.results)
+        && arrayOrAbsent(candidate.micro)
+        && arrayOrAbsent(candidate.bytes);
 }
 
 function streamLabels(scenario: string): [string, string] {
@@ -385,9 +399,20 @@ function main(): void {
     );
     const current = readJson<QuickPayload>(currentPath ?? QUICK_LATEST, 'quick results');
 
-    const baselineQuick = isQuickPayload(baselineFile.quick)
-        ? baselineFile.quick
-        : isQuickPayload(baselineFile) ? baselineFile : undefined;
+    // The root of a combined baseline.json carries `string`/`stream`/`micro`
+    // too — the very shape a raw quick payload has — so a structural test
+    // cannot tell them apart, and falling through to the root would compare
+    // the quick suite against FULL-suite numbers recorded under a different
+    // sample budget. Only the `quick` key distinguishes them, so it wins
+    // whenever it is present, and the root is considered only for an explicit
+    // --baseline-file (which the A/B job points at a raw quick-latest.json).
+    // The default path therefore keeps its "no quick section" early exit.
+    let baselineQuick: QuickPayload | undefined;
+    if ('quick' in baselineFile) {
+        baselineQuick = isQuickPayload(baselineFile.quick) ? baselineFile.quick : undefined;
+    } else if (baselinePath !== undefined) {
+        baselineQuick = isQuickPayload(baselineFile) ? baselineFile : undefined;
+    }
     if (!baselineQuick) {
         if (baselinePath !== undefined) {
             // An explicit path holding neither shape is a mistake, not a

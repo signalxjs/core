@@ -40,6 +40,10 @@ jobs:
   bench-quick:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    # The workflow-level `permissions: {}` leaves this job with a token that
+    # cannot even clone — this job had no block at all before that line existed.
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v7
 
