@@ -192,6 +192,68 @@ describe('@sigx/cache', () => {
         expect(container.querySelector('.out')?.textContent).toBe('ready:page-2');
     });
 
+    it('keepPreviousData holds a legitimately-NULL previous value through a key change (#485)', async () => {
+        const resolvers = new Map<string, (v: string | null) => void>();
+        const page = signal({ n: 1 });
+        let cell!: AsyncState<string | null>;
+
+        const App_ = component(() => {
+            cell = useData(
+                () => ['pageN', page.n] as const,
+                ([, n]) => new Promise<string | null>(r => { resolvers.set(String(n), r); }),
+                { cache: { keepPreviousData: true } }
+            );
+            return () => <div />;
+        });
+        mountWith(cachePlugin(), jsx(App_, {}));
+        resolvers.get('1')!(null); // a legit "not found" page
+        await settle();
+        expect(cell.hasValue).toBe(true);
+
+        page.n = 2;
+        await tick();
+        // The held previous value is null AND present — presence is tracked
+        // separately, so this must read as refreshing-with-value, not pending.
+        expect(cell.state).toBe('refreshing');
+        expect(cell.hasValue).toBe(true);
+        expect(cell.value).toBeNull();
+        expect(cell.loading).toBe(false);
+
+        resolvers.get('2')!('page-2');
+        await settle();
+        expect(cell.value).toBe('page-2');
+    });
+
+    it('a failing NEW key under keepPreviousData keeps the previous value as errored last-good', async () => {
+        const page = signal({ n: 1 });
+        let cell!: AsyncState<string>;
+
+        const App_ = component(() => {
+            cell = useData(
+                () => ['pageE', page.n] as const,
+                async ([, n]) => {
+                    if (n === 2) throw new Error('page 2 broke');
+                    return `page-${n}`;
+                },
+                { cache: { keepPreviousData: true } }
+            );
+            return () => <div />;
+        });
+        mountWith(cachePlugin(), jsx(App_, {}));
+        await settle();
+        expect(cell.value).toBe('page-1');
+
+        page.n = 2;
+        await settle();
+        // SWR-through-error across the key change: the new key never had a
+        // value, so the HELD previous one is the last-good the app keeps
+        // rendering next to the error.
+        expect(cell.state).toBe('errored');
+        expect(cell.error?.message).toBe('page 2 broke');
+        expect(cell.hasValue).toBe(true);
+        expect(cell.value).toBe('page-1');
+    });
+
     // ====================================================================
     // invalidate + mutate on reads
     // ====================================================================
@@ -709,7 +771,7 @@ describe('@sigx/cache', () => {
     // ====================================================================
 
     it('an initial cached fetch failure settles as errored with the error exposed', async () => {
-        const fetcher = vi.fn(async () => {
+        const fetcher = vi.fn(async (): Promise<number> => {
             throw new Error('boom');
         });
         let cell!: AsyncState<number>;
@@ -728,7 +790,7 @@ describe('@sigx/cache', () => {
         expect(container.querySelector('.out')?.textContent).toBe('errored');
     });
 
-    it("SWR: after a failed refresh, .value clears but the last-good value surfaces as the error arm's stale — retry recovers", async () => {
+    it('SWR-through-error: a failed refresh keeps the last-good value on the state — retry recovers', async () => {
         let calls = 0;
         const fetcher = vi.fn(async () => {
             calls++;
@@ -751,16 +813,18 @@ describe('@sigx/cache', () => {
 
         expect(cell.state).toBe('errored');
         expect(cell.error?.message).toBe('flaky');
-        expect(cell.value).toBeNull();
+        // SWR-through-error: the last-good survives on the state itself.
+        expect(cell.value).toBe('v1');
+        expect(cell.hasValue).toBe(true);
 
-        // The error arm sees the last-good value as `stale`.
+        // The error arm sees the same last-good through its ctx.
         let seenStale: string | null = null;
         let retryFn!: () => void;
         const rendered = cell.match({
             ready: v => `R:${v}`,
-            error: (e, retry, stale) => {
-                seenStale = stale;
-                retryFn = retry;
+            error: (e, ctx) => {
+                seenStale = ctx.value;
+                retryFn = ctx.retry;
                 return `E:${e.message}`;
             },
         });

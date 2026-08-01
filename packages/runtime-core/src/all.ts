@@ -21,17 +21,22 @@ import {
     makeUnhandledReporter,
     isCell,
     CELL,
-    STALE,
     type AsyncState,
+    type AsyncStateImpl,
     type AsyncStateName,
     type MatchArms,
 } from './async/shared.js';
 import { getCurrentInstance } from './component-lifecycle.js';
 
-export interface AllState<T, E> extends AsyncState<T> {
+/**
+ * An intersection, not an interface — `AsyncState` is a union, and
+ * intersecting distributes over its members so discriminant narrowing
+ * (`if (x.hasValue) x.value // T`) works through the combination too.
+ */
+export type AllState<T, E> = AsyncState<T> & {
     /** Collect-all counterpart to first-error-wins `.error`. */
     readonly errors: E;
-}
+};
 
 type ValuesOf<S> = { [K in keyof S]: S[K] extends AsyncState<infer V> ? V : never };
 type ErrorsOf<S> = { [K in keyof S]: Error | null };
@@ -73,9 +78,18 @@ export function all(...sources: unknown[]): AllState<unknown, unknown> {
         return idle ? 'idle' : errored ? 'errored' : pending ? 'pending' : refreshing ? 'refreshing' : 'ready';
     }
 
+    /** Presence combines as EVERY member having a value (#485) — including
+     *  members holding last-good through 'errored' (SWR-through-error), so a
+     *  member that legitimately resolved null still counts as present. */
+    function combinedHasValue(): boolean {
+        // No early exit: every member is read so the reader subscribes to all.
+        let has = true;
+        for (const m of members) has = m.hasValue && has;
+        return has;
+    }
+
     function combinedValue(): unknown {
-        const s = combinedState();
-        if (s !== 'ready' && s !== 'refreshing') return null;
+        if (!combinedHasValue()) return null;
         if (record) {
             const out: Record<string, unknown> = {};
             for (const k of keys!) out[k] = record[k].value;
@@ -100,22 +114,6 @@ export function all(...sources: unknown[]): AllState<unknown, unknown> {
         return members.map((m) => m.error);
     }
 
-    /** Combined last-good — only when EVERY member has one. */
-    function combinedStale(): unknown {
-        const stales: unknown[] = [];
-        for (const m of members) {
-            const s = (m as unknown as Record<symbol, unknown>)[STALE];
-            if (s === null || s === undefined) return null;
-            stales.push(s);
-        }
-        if (record) {
-            const out: Record<string, unknown> = {};
-            keys!.forEach((k, i) => (out[k] = stales[i]));
-            return out;
-        }
-        return stales;
-    }
-
     function refresh(): Promise<void> {
         // Members' refresh() never rejects, so neither does the combination.
         return Promise.all(members.map((m) => m.refresh())).then(() => undefined);
@@ -123,7 +121,8 @@ export function all(...sources: unknown[]): AllState<unknown, unknown> {
 
     const reportUnhandled = makeUnhandledReporter(getCurrentInstance(), 'all');
 
-    const combined: AllState<unknown, unknown> = {
+    // Wide impl shape, cast to the union at the return — see AsyncStateImpl.
+    const impl: AsyncStateImpl<unknown> & { readonly errors: unknown } = {
         get state() {
             return combinedState();
         },
@@ -131,10 +130,7 @@ export function all(...sources: unknown[]): AllState<unknown, unknown> {
             return combinedValue();
         },
         get hasValue() {
-            // The combination is only a value when every member is (#485) —
-            // discriminated on state, not on a null test, so a member that
-            // legitimately resolved null still counts as present.
-            return members.every((m) => m.hasValue);
+            return combinedHasValue();
         },
         get error() {
             return firstError();
@@ -150,8 +146,8 @@ export function all(...sources: unknown[]): AllState<unknown, unknown> {
                 {
                     state: combinedState(),
                     value: combinedValue(),
+                    hasValue: combinedHasValue(),
                     error: firstError(),
-                    stale: combinedStale(),
                     retry: () => void refresh(),
                     onUnhandledError: reportUnhandled,
                 },
@@ -160,8 +156,7 @@ export function all(...sources: unknown[]): AllState<unknown, unknown> {
         },
         refresh,
     };
-    Object.defineProperty(combined, CELL, { value: true });
-    Object.defineProperty(combined, STALE, { get: combinedStale });
+    Object.defineProperty(impl, CELL, { value: true });
 
-    return combined;
+    return impl as AllState<unknown, unknown>;
 }

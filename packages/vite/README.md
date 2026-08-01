@@ -82,6 +82,30 @@ sigx({
 })
 ```
 
+### `sigxServer()` — the dev endpoint's options
+
+The server-function plugin (`@sigx/vite/server`) serves the RPC endpoint from
+`vite.middlewares` in dev, so `sigxServer()` accepts **every option
+`@sigx/server`'s handler accepts** — `origin`, `maxBodyBytes`, `maxUrlBytes`,
+`timeoutMs`, `onError` — and forwards them unchanged, on top of its own build
+options (`include`, `exclude`, `base`, `endpoint`, `role`, `scan`,
+`requireGuards`, `guard`, `renderBoundaries`). The type derives from
+`ServerFnRequestOptions` rather than copying it, so an option added to the
+endpoint is reachable in dev the day it ships:
+
+```ts
+sigxServer({
+  maxUrlBytes: 32_000,                      // dev matches your production cap
+  timeoutMs: 10_000,
+  onError: (err, info) => console.error(info.name, err)
+})
+```
+
+Two of them differ from their production twins by necessity: `guard` and
+`renderBoundaries` are **module specifiers** here (`'/src/fn-guard.ts'`), loaded
+through the SSR module runner per request so edits apply without a restart,
+where a production entry passes the functions themselves.
+
 ## SSR mode
 
 The dev server is `createServer` plus one handler; production is static
@@ -178,6 +202,27 @@ import { islandsManifest } from 'virtual:sigx-manifests';
 export const createApp = (url) =>
     defineApp(<App />).use(islandsPlugin({ manifest: islandsManifest }));
 ```
+
+### Typing the virtual modules — `@sigx/vite/client`
+
+One reference line, next to `vite/client`, types every `virtual:*` module the
+sigx plugins generate — `virtual:sigx-app`, `virtual:sigx-manifests`,
+`virtual:sigx-server-fns`, `virtual:sigx-islands`, `virtual:sigx-resume/entry`:
+
+```ts
+// src/env.d.ts
+/// <reference types="vite/client" />
+/// <reference types="@sigx/vite/client" />
+```
+
+The two pack manifests type themselves from the packs you actually installed:
+importing `@sigx/ssr-islands` gives `islandsManifest` its `IslandsManifestV2`,
+importing `@sigx/resume` gives `resumeManifest` its `ResumeManifest`, and a
+manifest whose pack is absent stays `unknown` — which is what the value is
+anyway, since a pack that is not installed contributes no manifest. That is why
+this file never imports the packs: both are optional peers, and an app with only
+one of them installed still has to type-check. Registration rides the pack's own
+import, exactly like the `client:*` and `use:` attribute types.
 
 ## Islands
 

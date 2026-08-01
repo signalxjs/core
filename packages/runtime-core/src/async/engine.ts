@@ -28,6 +28,16 @@ import { createToken, setProvided } from '../di/token.js';
  * @internal — the §7 pack contract surface.
  */
 export interface AsyncReadHandle<T> {
+    /**
+     * The full `AsyncState<T>` union — every member is REQUIRED of an
+     * implementor, `hasValue` included. Build the wide `AsyncStateImpl<T>`
+     * (internals) over your own state machine and return it
+     * `as AsyncState<T>`; the invariants that cast asserts (idle/pending ⇒ no
+     * value; ready/refreshing ⇒ value present, no error; errored ⇒ error
+     * non-null, last-good SURVIVES in `value`/`hasValue`) are dev-checked in
+     * `matchAsyncState`. Presence is `hasValue`, never a null test — a fetch
+     * legitimately resolving `null` is a value (#485).
+     */
     state: AsyncState<T>;
     setKey(canon: string | null, raw: unknown): void;
     dispose(): void;

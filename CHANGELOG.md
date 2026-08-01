@@ -6,6 +6,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- **`@sigx/vite/client` — ambient types for the generated `virtual:*` modules
+  (#562).** There were none, so every app hand-wrote `declare module` blocks
+  for `virtual:sigx-app`, `virtual:sigx-manifests`, `virtual:sigx-server-fns`,
+  `virtual:sigx-islands` and `virtual:sigx-resume/entry` — and the three copies
+  in this repo's own examples had already drifted apart, two of them typing a
+  pack manifest as `unknown` that the third typed properly. One reference line
+  replaces all of it:
+
+  ```ts
+  /// <reference types="@sigx/vite/client" />
+  ```
+
+  The two pack manifests type themselves from the packs actually installed:
+  `@sigx/ssr-islands` and `@sigx/resume` each register their manifest type into
+  a `SigxPackManifests` registry the moment the pack is imported, so
+  `islandsManifest` / `resumeManifest` arrive fully typed when their pack is
+  present and `unknown | undefined` when it is not — which is what the value is
+  anyway. `@sigx/vite/client` never imports either pack, because both are
+  optional peers and an app with only one installed must still type-check; the
+  registration mechanism is the zero-import one the `client:*` attribute types
+  already use (#481/#482 having removed the type-only subpath as an
+  anti-pattern).
+
 ### Changed
 
 - **BREAKING: `@sigx/server`: declaring `cache` + `invalidates`, or
@@ -19,6 +44,57 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   (`serverFn({ ...sharedReadOptions, invalidates })`), which now fail at server
   boot instead of shipping a read whose invalidations did nothing. Details and
   the fix in `packages/server/CHANGELOG.md`.
+
+- **BREAKING: `AsyncState` is a discriminated union, and `value`/`hasValue`
+  survive errors (#578; supersedes #485's `hasValue` as shipped in this
+  cycle).** Two changes with one root: presence was split across a visible
+  channel (`hasValue`, #485) and a hidden one (the `STALE` symbol + the
+  error arm's positional `stale: T | null`), and the hidden one still
+  conflated a legitimate `null` with "no value" — `all()`'s combined stale
+  died on one legit-null member, and each new pack surface grew its own
+  presence boolean to compensate (`hasPreviousData`, the proposed
+  `hasStale`).
+
+  Now: `value` is *the best data the cell has* under one rule — kept across
+  same-key `refresh()` **and across a failed fetch**, cleared on key change
+  — and `AsyncState<T>` is a tagged union
+  (`AsyncIdle | AsyncPending | AsyncReady | AsyncRefreshing | AsyncErrored`),
+  so `if (q.hasValue) q.value // T` and `if (q.state === 'ready') q.value // T`
+  narrow with no cast; the `'errored'` member genuinely splits on
+  `hasValue`. `match` still renders the error arm on every `'errored'`
+  (no fallback to `ready`), and its error arm is now
+  `error?: (e, ctx: { retry } & ({ value: T; hasValue: true } | { value: null; hasValue: false })) => R`.
+  The hidden stale channel is deleted outright. `AsyncAction` gets the same
+  union treatment and gains `hasValue`; `AsyncStateName` is finally
+  exported.
+
+  Old → new observable value, per input shape that already existed:
+
+  | shape | before | after |
+  |---|---|---|
+  | errored after a success: `.value` / `.hasValue` | `null` / `false` | **last-good `T` / `true`** |
+  | errored, never succeeded | `null` / `false` | `null` / `false` (unchanged) |
+  | error arm 2nd/3rd params | `(retry, stale)` positional | **`ctx` object** — `ctx.retry`, `ctx.value`, `ctx.hasValue` |
+  | retry from errored-after-success | `'pending'` (skeleton flash over kept content) | **`'refreshing'`** |
+  | `all()` combined value with a legit-`null` member | last-good combination `null` | combines; `hasValue` true |
+  | cache `keepPreviousData`, empty entry not in flight | `'pending'` with data shown and `loading === true` | **`'refreshing'`**, `loading === false` |
+  | `interface X extends AsyncState<T>` | compiled | **compile error** — intersect instead: `type X<T> = AsyncState<T> & {...}` |
+
+  Breaking userland patterns, by name:
+
+  - `q.error && !q.value` (or any `errored ⇒ value === null` guard) — an
+    errored cell that once had data now holds it; content next to an error
+    banner stays on screen instead of blanking. That is the intended SWR
+    posture; blank deliberately with the state check `q.state === 'errored'`.
+  - `error: (e, retry, stale) => …` — destructure instead:
+    `error: (e, { retry }) => …`; the last-good is `ctx.value`/`ctx.hasValue`
+    (a legit-null last-good finally reads as present).
+  - Engine packs (§7): implement the wide `AsyncStateImpl<T>` (internals)
+    and return it `as AsyncState<T>`; `matchAsyncState` dev-warns when a
+    producer's state/presence combination lies. Packs extending the state
+    shape switch from `extends` to an intersection; members meant to exist
+    on every state augment `AsyncStateBase<T>` (how `@sigx/cache`'s
+    `invalidate?`/`mutate?` now land).
 
 - **`@sigx/server`: `origin: 'verify-when-present'` no longer admits
   Origin-less FORM posts (#556).** The relaxation's safety rests on the JSON
@@ -96,6 +172,65 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   both provision forms, which is what keeps them from drifting again.
 
 ### Fixed
+
+- **`@sigx/server-renderer`: the `<!--t-->` text-boundary marker survives
+  Fragment and render-result-array boundaries, so slot content hydrates
+  without doubling its text (#575).** The marker was a loop-local decision in
+  the host-element child walks, and slot content always sits one level
+  deeper: a slot call among siblings — `<button><Icon/>{slots.default?.()}
+  </button>` — or a fill returning `<>…</>` (or an array) is wrapped in an
+  anonymous Fragment, which hid its texts from the loop. The browser then
+  merged `static {dynamic}` into one DOM text node and hydration *appended*
+  the dynamic half instead of adopting it — the string rendered twice after
+  the first update, with no warning. (A slot call that was the *sole* child
+  spread flat and worked, which is why the bug looked intermittent.) Text
+  adjacency is now walk state threaded through Fragments and component
+  recursion, so the marker lands wherever two texts truly touch — including
+  a component whose output *begins* with bare text after a text sibling,
+  which merged the same way (components only emit a trailing anchor). An
+  empty Fragment between two texts correctly preserves their adjacency.
+
+  In dev, hydration now warns when a non-empty text VNode finds no text node
+  to adopt — the silent append was the only signal this class of mismatch
+  gave, and a doubled short label is easy to miss.
+
+- **`@sigx/server-renderer`: a deferred stream render whose result is a raw
+  array emitted an empty `$SIGX_REPLACE` payload (#581).** The walker has no
+  branch for a bare array, so a streamed async component returning
+  `['x: ', data.value]` replaced its placeholder with nothing. Raw arrays
+  are now wrapped in a synthetic Fragment before the walk; `<Defer>`'s
+  deferred render also rides one walk instead of one per item, so
+  `<!--t-->` adjacency between its items is tracked (the `$SIGX_REPLACE`
+  client parses via `template.innerHTML`, which merges adjacent text exactly
+  like the main document parse).
+
+- **`@sigx/runtime-core`: a component render result given as a raw array
+  crashed on its first patch (#581).** `normalizeSubTree` wrapped the array
+  in a Fragment but kept raw string/number items, and the patch path
+  re-parents every Fragment child — `TypeError: Cannot create property
+  'parent' on string`. Array results now get the same item normalization as
+  a JSX child array: strings/numbers become Text VNodes, falsy items become
+  Comment placeholders so positional diffing keeps its indices.
+
+- **`@sigx/vite`: the dev server-function endpoint ignored `maxUrlBytes`,
+  `onError` and `timeoutMs` (#561).** `sigxServer()` mounts the RPC endpoint in
+  dev, and it built the handler's options from a hand-picked list of five —
+  while `SigxServerOptions` did not even *declare* the other three, so they
+  could not be spelled. A GET read tuned with `maxUrlBytes: 32_000` still 414'd
+  at the 8 KiB default under `vite dev`, and a `timeoutMs`/`onError` configured
+  for production simply did not apply: dev and prod disagreed about the request
+  policy, silently.
+
+  This is the same defect #547 fixed one layer down, in the layer #547's own
+  commit message named as the next victim — a hand-written subset kept in sync
+  by hand with an interface the package does not own, with nothing enforcing
+  it. `SigxServerOptions` now **extends** `ServerFnRequestOptions` (omitting
+  the four names the plugin owns: `resolve`, `base`, and the `guard` /
+  `renderBoundaries` module *specifiers*) and the middleware forwards by
+  spread, so an option added to the endpoint is reachable in dev the day it
+  ships. The regression test drives the middleware's handler over a real
+  socket — the existing coverage captured that handler and threw it away,
+  which is exactly why this survived.
 
 - **`@sigx/server` / `@sigx/vite`: a throwing `resolve()` escaped the
   server-function endpoint; prototype-key symbols hit the plain-object
@@ -292,10 +427,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   seam at all. New build warning: a spread in a `serverFn({...})` options
   literal hides `id`/`cache`/`invalidates`/`form` from the static readers,
   which silently disables single-flight boundary refresh.
-
-- **`AsyncState.hasValue` — presence, separate from the value (#485).** Every
-  `useData` cell, the `@sigx/cache` cell, `all()` and the SSR-side state now
-  expose `readonly hasValue: boolean`. Additive for readers.
 
 - **`@sigx/vite/assets` — `collectAssets` without the `node:` graph (#486).**
   The manifest → `DocumentOptions.assets` resolver is a pure function, but it

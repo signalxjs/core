@@ -4,7 +4,8 @@
  */
 
 import { isComputed } from '@sigx/reactivity';
-import { VNode, Fragment, Text, JSXElement } from '../jsx-runtime.js';
+import { VNode, Fragment, Text, JSXElement, normalizeChildren } from '../jsx-runtime.js';
+import type { JSXChildren } from '../jsx-runtime.js';
 
 /**
  * Normalize render result to a VNode (wrapping arrays in Fragment).
@@ -56,7 +57,11 @@ export function normalizeSubTree(result: JSXElement | JSXElement[] | null | unde
             type: Fragment,
             props: {},
             key: null,
-            children: result as VNode[],
+            // Normalize items like a JSX child array: raw strings/numbers
+            // become Text VNodes (a later patch re-parents every child, and
+            // a raw string cannot carry `.parent`), falsy items become
+            // Comment placeholders so positional diffing keeps its indices.
+            children: normalizeChildren(result as JSXChildren),
             dom: null
         };
     }

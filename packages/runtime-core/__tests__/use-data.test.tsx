@@ -207,7 +207,7 @@ describe('useData', () => {
         expect(c2.querySelector('.out2')?.textContent).toBe('');
     });
 
-    it('error arm receives (error, retry, stale); retry refetches', async () => {
+    it('error arm receives (error, ctx); retry refetches', async () => {
         let calls = 0;
         let cell!: AsyncState<string>;
         const fetcher = () => {
@@ -215,15 +215,15 @@ describe('useData', () => {
             return calls === 1 ? Promise.reject(new Error('first fails')) : Promise.resolve('second works');
         };
 
-        let seen: { e: Error; retry: () => void; stale: string | null } | null = null;
+        let seen: { e: Error; retry: () => void; hasValue: boolean } | null = null;
         const App = component(() => {
             cell = useData('retry-key', fetcher);
             return () => (
                 <div class="out">
                     {cell.match({
                         pending: () => 'PENDING',
-                        error: (e, retry, stale) => {
-                            seen = { e, retry, stale };
+                        error: (e, ctx) => {
+                            seen = { e, retry: ctx.retry, hasValue: ctx.hasValue };
                             return `ERROR:${e.message}`;
                         },
                         ready: (v) => `READY:${v}`,
@@ -235,7 +235,7 @@ describe('useData', () => {
         await settle();
 
         expect(container.querySelector('.out')?.textContent).toBe('ERROR:first fails');
-        expect(seen!.stale).toBeNull(); // no last-good yet
+        expect(seen!.hasValue).toBe(false); // never succeeded — no last-good
 
         seen!.retry();
         await settle();
@@ -243,7 +243,7 @@ describe('useData', () => {
         expect(calls).toBe(2);
     });
 
-    it('a failed refresh keeps the last-good value as the error arm\'s stale param', async () => {
+    it('a failed refresh keeps the last-good value (SWR-through-error)', async () => {
         let calls = 0;
         let cell!: AsyncState<string>;
         const fetcher = () => {
@@ -258,9 +258,9 @@ describe('useData', () => {
                 <div class="out">
                     {cell.match({
                         pending: () => 'PENDING',
-                        error: (e, _retry, stale) => {
-                            staleSeen = stale;
-                            return `ERROR(stale=${stale})`;
+                        error: (e, ctx) => {
+                            staleSeen = ctx.value;
+                            return `ERROR(stale=${ctx.value})`;
                         },
                         ready: (v) => v,
                     })}
@@ -274,12 +274,91 @@ describe('useData', () => {
         await cell.refresh();
         await settle();
 
-        // Top-level value/error stay mutually exclusive…
-        expect(cell.value).toBeNull();
+        // The last-good value SURVIVES the failure on the state itself —
+        // "keep content + toast" is two plain reads, no arm required…
+        expect(cell.value).toBe('good');
+        expect(cell.hasValue).toBe(true);
         expect(cell.error?.message).toBe('refresh failed');
-        // …but the error arm got the last-good value
+        expect(cell.state).toBe('errored');
+        // …and match still dispatches the error arm, ctx carrying it too.
         expect(container.querySelector('.out')?.textContent).toBe('ERROR(stale=good)');
         expect(staleSeen).toBe('good');
+    });
+
+    it('retry from errored-with-value runs as refreshing, never pending', async () => {
+        let calls = 0;
+        let cell!: AsyncState<string>;
+        let gate!: { resolve: (v: string) => void; reject: (e: unknown) => void };
+        const fetcher = () => new Promise<string>((resolve, reject) => {
+            calls++;
+            gate = { resolve, reject };
+        });
+
+        const arms: string[] = [];
+        const App = component(() => {
+            cell = useData('retry-refreshing', fetcher);
+            return () => (
+                <div class="out">
+                    {cell.match({
+                        pending: () => { arms.push('pending'); return 'PENDING'; },
+                        error: () => { arms.push('error'); return 'ERROR'; },
+                        ready: (v) => { arms.push('ready'); return v; },
+                    })}
+                </div>
+            );
+        });
+        mount(jsx(App, {}));
+        gate.resolve('v1');
+        await settle();
+        void cell.refresh();
+        await tick();
+        gate.reject(new Error('boom'));
+        await settle();
+        expect(cell.state).toBe('errored');
+        expect(cell.hasValue).toBe(true);
+
+        arms.length = 0;
+        void cell.refresh();
+        await tick();
+        // Errored-with-value retries as 'refreshing' — the pending arm must
+        // never flash over the content the app was keeping on screen.
+        expect(cell.state).toBe('refreshing');
+        expect(cell.loading).toBe(false);
+        expect(arms).not.toContain('pending');
+        gate.resolve('v2');
+        await settle();
+        expect(cell.state).toBe('ready');
+        expect(cell.value).toBe('v2');
+    });
+
+    it('a cell that fails, refreshes, and fails again still holds the ORIGINAL last-good', async () => {
+        let calls = 0;
+        let cell!: AsyncState<string | null>;
+        const fetcher = () => {
+            calls++;
+            // A legitimately-null first value, then two failures: the null
+            // must survive BOTH errors with hasValue true (#485 on the
+            // errored member).
+            return calls === 1 ? Promise.resolve<string | null>(null) : Promise.reject(new Error(`fail ${calls}`));
+        };
+        const App = component(() => {
+            cell = useData('null-then-fail', fetcher);
+            return () => <div class="out">{String(cell.hasValue)}</div>;
+        });
+        mount(jsx(App, {}));
+        await settle();
+        expect(cell.hasValue).toBe(true);
+        expect(cell.value).toBeNull();
+
+        await cell.refresh();
+        expect(cell.state).toBe('errored');
+        expect(cell.hasValue).toBe(true); // a null last-good IS a last-good
+        expect(cell.value).toBeNull();
+
+        await cell.refresh();
+        expect(cell.state).toBe('errored');
+        expect(cell.hasValue).toBe(true);
+        expect(cell.error?.message).toBe('fail 3');
     });
 
     // ========================================================================

@@ -1,29 +1,9 @@
-// The generated loader bootstrap provided by sigxResume() (side effects only).
-declare module 'virtual:sigx-resume/entry';
+/// <reference types="@sigx/vite/client" />
 
-// Build-emitted document artifacts (rfc-deploy §3.2) — resolved by
-// sigx({ ssr }) in the ssr environment; throws under dev.
-declare module 'virtual:sigx-app' {
-    import type { CollectedAssets, ViteManifest } from '@sigx/vite/ssr';
-    export const template: string;
-    export const assets: CollectedAssets;
-    export const manifest: ViteManifest;
-    export const islandsManifest: unknown | undefined;
-    export const resumeManifest: unknown | undefined;
-}
-
-// The pack manifests for the entry-server's app factory (#413) — resolved
-// in every mode; undefined under dev (packs run manifest-less there).
-declare module 'virtual:sigx-manifests' {
-    import type { ResumeManifest } from '@sigx/resume';
-    export const islandsManifest: unknown | undefined;
-    export const resumeManifest: ResumeManifest | undefined;
-}
-
-// The server-fn registry (explicitly passed, never ambient).
-declare module 'virtual:sigx-server-fns' {
-    export const serverFns: Record<string, () => Promise<unknown>>;
-}
+// That one line types every `virtual:*` module the sigx plugins generate
+// (#562). `resumeManifest` carries its real type because this app imports
+// @sigx/resume; `islandsManifest` stays `unknown` — islands is not installed
+// here, and the value is `undefined` in this app anyway.
 
 // jsr: specifiers resolve at runtime in Deno (auto-fetched) — TypeScript's
 // resolver doesn't understand them, so the copyable entry.deno.ts gets its

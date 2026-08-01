@@ -74,6 +74,8 @@ export type { InjectionToken } from './di/token.js';
 
 // Async engine internals (for server renderers and cache packs)
 export { matchAsyncState, registerHandledAsyncOptionKeys, makeUnhandledReporter, normalizeError, makeAbortController, inertAbortSignal } from './async/shared.js';
+// The wide shape an engine pack implements before casting to the AsyncState union
+export type { AsyncStateImpl } from './async/shared.js';
 export { reportUnhandledAsyncError } from './app.js';
 // The `__SIGX_ASYNC__` page-blob accessors — THE decode point for that seam
 // (docs/seams.md). Exported so `@sigx/cache` reads the blob through the same
