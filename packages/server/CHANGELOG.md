@@ -56,6 +56,36 @@
 
 ### Changed
 
+- **BREAKING: `cache` + `invalidates` and `form` + `cache` are definition-time
+  errors (#567).** Both pairs were dev-only `console.warn`s that left the
+  function callable, and the endpoint then resolved the contradiction
+  silently: a GET answer never carries `$cache.invalidates`, so the
+  declaration was dropped — and because the patterns stayed undefined,
+  single-flight boundary refresh (rfc-server §6.3) never ran for that mutation
+  either. The production symptom was stale client caches and dead boundary
+  refresh with no signal anywhere, which is exactly the case a `__DEV__`
+  warning cannot reach. Both now `throw` from `serverFn()` in dev **and**
+  production, matching the two neighbours that already did (`form` without
+  `input`, #412; `unguarded` on a preset-derived function, #489) — a
+  definition-time throw fails at boot or in CI, never per request, and throws
+  are this package's only prod-visible channel. Both options' doc comments
+  already said "mutually exclusive"; the throw makes the docs true.
+
+  What breaks: a module declaring either pair now fails at module evaluation
+  instead of loading. The realistic case is not a hand-written literal — both
+  doc comments already forbade it — but **programmatically composed options**:
+  `serverFn({ ...sharedReadOptions, invalidates })`, or a factory merging an
+  options bag, which now fails at server boot rather than shipping a read
+  whose invalidations silently did nothing. Fix by splitting: keep `cache` on
+  the read, and move the write with its `invalidates` into its own `serverFn`.
+  (The build already warned on a literal options spread, #437, so the two
+  diagnostics now agree.) `form` + `cache` + no `input` still reports the
+  `input` error first — that ordering is now pinned by a test.
+
+  The endpoint keeps its `!isGet` guard as a wire-level belt for hand-stamped
+  or registry-fabricated functions; it is no longer the place the
+  contradiction is resolved.
+
 - **`origin: 'verify-when-present'` no longer admits Origin-less FORM posts
   (#556).** The relaxation's safety argument is that browser CSRF stays
   blocked by the non-safelisted JSON content-type — and a `form: true`
