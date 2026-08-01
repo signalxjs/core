@@ -200,7 +200,114 @@ export function encodeWithHandlers(
     value: unknown,
     handlers: readonly TypeHandler[] = []
 ): unknown {
+    // A SEPARATE dev walk, not a path argument threaded through `encode`
+    // (#565): the encoder is on the request-path budgets, and `__DEV__` is
+    // stripped from the prod dist, so this costs production exactly nothing —
+    // no extra parameter, no extra branch. Dev pays one bounded second pass
+    // for property paths, which is the whole point of it.
+    if (__DEV__) warnUnencodable(value, handlers);
     return encode(value, handlers, BUILTIN_TYPE_HANDLERS, new Map(), true, 0);
+}
+
+/** Node budget for the dev walk — a huge payload must not stall a dev server. */
+const DEV_WALK_BUDGET = 5_000;
+
+/**
+ * Dev-only: report values this codec cannot carry, by property path, BEFORE
+ * the encoder silently flattens them (#565).
+ *
+ * Every shape below encodes to something that looks like data and is not:
+ * these are lossy SUCCESSES, so nothing else in the stack can notice them.
+ *
+ * A circular structure is deliberately NOT reported here, even though a
+ * property path would be nice: it already throws, which is a signal, and
+ * callers that encode speculatively to decide admissibility
+ * (`admitPayloadEntry` in `@sigx/server-renderer`) catch that throw and report
+ * their own better-scoped message. Warning from inside the probe would
+ * double-report the one failure that was never silent.
+ *
+ * Anything a registered or built-in handler claims is skipped, so an app that
+ * registered `Uint8Array` (or `Money`) hears nothing about it — the check
+ * consults the same handler chain the encoder does, and cannot drift from it.
+ */
+function warnUnencodable(root: unknown, custom: readonly TypeHandler[]): void {
+    const findings: string[] = [];
+    const path: string[] = [];
+    const seen = new Set<object>();
+    let budget = DEV_WALK_BUDGET;
+
+    const at = (): string => (path.length === 0 ? 'the value' : `\`${path.join('')}\``);
+
+    const walk = (value: unknown, depth: number): void => {
+        if (budget-- <= 0 || findings.length >= 3 || depth > MAX_DEPTH) return;
+        for (const h of custom) if (h.test(value)) return;
+        for (const h of BUILTIN_TYPE_HANDLERS) if (h.test(value)) return;
+
+        if (typeof value === 'number') {
+            if (!Number.isFinite(value)) {
+                findings.push(`${at()} is ${String(value)} — it encodes as null`);
+            }
+            return;
+        }
+        if (value === null || typeof value !== 'object') return;
+        // A cycle stops the walk (it must), but says nothing — see the header.
+        if (seen.has(value)) return;
+        if (ArrayBuffer.isView(value) || value instanceof ArrayBuffer) {
+            findings.push(
+                `${at()} is ${(value as object).constructor?.name ?? 'binary'} — it encodes as ` +
+                `a plain object of indices, not binary`
+            );
+            return;
+        }
+        if (value instanceof Error) {
+            findings.push(`${at()} is an Error — its message and stack are not own enumerable properties, so it encodes as {}`);
+            return;
+        }
+        if (value instanceof Promise) {
+            findings.push(`${at()} is a Promise — it encodes as {} (a missing await?)`);
+            return;
+        }
+        if (value instanceof WeakMap || value instanceof WeakSet) {
+            findings.push(`${at()} is a ${value.constructor.name} — its contents are unreachable, so it encodes as {}`);
+            return;
+        }
+        if (typeof (value as { toJSON?: unknown }).toJSON === 'function') return;
+
+        const proto = Object.getPrototypeOf(value) as object | null;
+        if (!Array.isArray(value) && proto !== Object.prototype && proto !== null) {
+            findings.push(
+                `${at()} is a ${(value as object).constructor?.name ?? 'class'} instance — it ` +
+                `encodes as a plain object and comes back WITHOUT its prototype`
+            );
+            // Keep walking: its fields may hold worse.
+        }
+
+        seen.add(value);
+        if (Array.isArray(value)) {
+            for (let i = 0; i < value.length; i++) {
+                path.push(`[${i}]`);
+                walk(value[i], depth + 1);
+                path.pop();
+            }
+        } else {
+            for (const key of Object.keys(value)) {
+                path.push(path.length === 0 ? key : `.${key}`);
+                walk((value as Record<string, unknown>)[key], depth + 1);
+                path.pop();
+            }
+        }
+        seen.delete(value);
+    };
+
+    walk(root, 0);
+    if (findings.length === 0) return;
+    console.warn(
+        '[sigx] this value contains things the boundary codec cannot carry:\n' +
+        findings.map((f) => `  • ${f}`).join('\n') +
+        '\nRegister a type handler for them (serverPlugin({ types }) / ' +
+        'provideTypeHandlers / registerWireTypeHandlers), or convert before ' +
+        'returning. Dev-only check; the value itself is unaffected.'
+    );
 }
 
 /**

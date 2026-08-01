@@ -2,6 +2,28 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Dev warning for values the codec cannot carry (#565).** Class instances
+  lose their prototype, typed arrays and `ArrayBuffer` encode as
+  `{"0":…,"1":…}`, `Error` and `Promise` and `WeakMap` as `{}`, and
+  `NaN`/`±Infinity` as `null`. Every one of those is a **lossy success** — the
+  encode returns, the value looks like data, and nothing in the stack can
+  notice. `encodeWithHandlers` now walks the value in `__DEV__` and reports the
+  offending property paths in one warning (up to three, node-budgeted so a huge
+  payload cannot stall a dev server), skipping anything a registered or
+  built-in handler claims: it consults the same chain the encoder does, so it
+  cannot scold an app that taught the codec its type.
+
+  A separate dev walk rather than a path argument threaded through `encode`:
+  `__DEV__` is stripped from the prod dist, so production pays nothing — no
+  parameter, no branch, and the prod bundle provably contains none of it.
+  Circular structures are deliberately NOT reported, despite a path being
+  useful: they already throw, and callers that encode speculatively to test
+  admissibility (`admitPayloadEntry`) catch that throw and report their own
+  message — warning here would double-report the one failure that was never
+  silent.
+
 ### Fixed
 
 - **Revive no longer turns a surviving `__proto__` key into a prototype

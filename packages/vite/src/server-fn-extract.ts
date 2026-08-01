@@ -142,6 +142,23 @@ export interface ServerFnExtraction {
     /** Non-`serverFn` value exports — throwing `__serverOnly` stubs. */
     serverOnly: string[];
     /**
+     * The subset of `serverOnly` whose declaration is PROVABLY not callable
+     * (#565): a literal, a template, an object/array literal, or a class.
+     *
+     * `__serverOnly` hands the client a throwing FUNCTION, which is honest for
+     * `export function helper()` and a lie for `export const MAX = 10` —
+     * TypeScript keeps typing that `number`, so `MAX + 1` is a silent `NaN`
+     * and only a CALL would throw. A class is the third shape: `new Db()` on
+     * the stub fails with "is not a constructor" instead of the stub's message.
+     *
+     * Data, not a message, and deliberately conservative: an initializer that
+     * is a call, an identifier, a member expression, or absent is left out —
+     * `const helper = makeThing()` may well be callable, and a false alarm
+     * costs more than a miss. The plugin emits these only in the CLIENT
+     * transform, so a constant shared between server modules stays quiet.
+     */
+    serverOnlyValues: Array<{ name: string; kind: 'value' | 'class' }>;
+    /**
      * HARD failures — the build must not proceed. Empty unless `requireGuards`
      * is on. The stub module is still produced: the client must never receive
      * the real module, whatever else is wrong.
@@ -697,6 +714,39 @@ export function extractServerFns(
     // -- pass 2: exports --
     const fns: ExtractedServerFn[] = [];
     const serverOnly: string[] = [];
+    const serverOnlyValues: Array<{ name: string; kind: 'value' | 'class' }> = [];
+
+    /**
+     * Local name → what its declaration provably is, for the #565 warning.
+     * Only shapes that CANNOT be callable are recorded; everything else is
+     * absent and therefore never warned about.
+     */
+    const localKinds = new Map<string, 'value' | 'class'>();
+    const NOT_CALLABLE = new Set([
+        'Literal',
+        'TemplateLiteral',
+        'ObjectExpression',
+        'ArrayExpression'
+    ]);
+    for (const stmt of program.body as Node[]) {
+        const decl = (stmt.type === 'ExportNamedDeclaration' || stmt.type === 'ExportDefaultDeclaration'
+            ? (isNode(stmt.declaration) ? (stmt.declaration as Node) : null)
+            : stmt) as Node | null;
+        if (!decl) continue;
+        if (decl.type === 'ClassDeclaration' && isNode(decl.id)) {
+            localKinds.set((decl.id as Node).name as string, 'class');
+        } else if (decl.type === 'VariableDeclaration') {
+            for (const d of decl.declarations as Node[]) {
+                if ((d.id as Node)?.type !== 'Identifier') continue;
+                const init = isNode(d.init) ? (d.init as Node) : null;
+                if (init && NOT_CALLABLE.has(init.type as string)) {
+                    localKinds.set((d.id as Node).name as string, 'value');
+                } else if (init && init.type === 'ClassExpression') {
+                    localKinds.set((d.id as Node).name as string, 'class');
+                }
+            }
+        }
+    }
 
     const addExport = (exportedName: string, localName: string): void => {
         const record = localFnSources.get(localName);
@@ -717,6 +767,8 @@ export function extractServerFns(
         } else {
             if (presetLocals.has(localName)) warnings.push(exportedPresetWarning(localName));
             serverOnly.push(exportedName);
+            const kind = localKinds.get(localName);
+            if (kind) serverOnlyValues.push({ name: exportedName, kind });
         }
     };
 
@@ -766,7 +818,16 @@ export function extractServerFns(
                 }
             } else if (decl.type === 'FunctionDeclaration' || decl.type === 'ClassDeclaration') {
                 const name = isNode(decl.id) ? ((decl.id as Node).name as string) : '';
-                if (name) serverOnly.push(name);
+                if (name) {
+                    serverOnly.push(name);
+                    // A class stub is a throwing FUNCTION, so `new X()` fails
+                    // with "is not a constructor" rather than the stub's own
+                    // message (#565). A function declaration is stubbed
+                    // honestly and says nothing.
+                    if (decl.type === 'ClassDeclaration') {
+                        serverOnlyValues.push({ name, kind: 'class' });
+                    }
+                }
             }
             continue;
         }
@@ -821,5 +882,5 @@ export function extractServerFns(
     }
     if (lines.length === 0) lines.push('export {};');
 
-    return { fns, serverOnly, errors, warnings, stubModule: lines.join('\n') };
+    return { fns, serverOnly, serverOnlyValues, errors, warnings, stubModule: lines.join('\n') };
 }

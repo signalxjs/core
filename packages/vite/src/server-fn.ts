@@ -641,6 +641,25 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
                 this.warn(`[sigx:server] ${relPath(clean)}: ${warning}`);
             }
             if (isClientOut(this)) {
+                // Non-callable exports that REACH THE CLIENT BUNDLE (#565).
+                // Gated on the client transform on purpose: it runs only for
+                // modules the browser build actually pulls in, so a constant
+                // shared between server modules — never stubbed for anyone —
+                // stays quiet.
+                for (const value of extraction?.serverOnlyValues ?? []) {
+                    this.warn(
+                        `[sigx:server] ${relPath(clean)}: "${value.name}" is exported from a server ` +
+                        `module and reaches the client bundle, but it is ` +
+                        `${value.kind === 'class' ? 'a class' : 'not a function'} — the client stub is ` +
+                        `a throwing function, so TypeScript keeps typing it as ` +
+                        `${
+                            value.kind === 'class'
+                                ? 'a constructor and `new` fails with "is not a constructor"'
+                                : 'its declared value type while every use is a call that throws'
+                        }. Wrap it in serverFn() if the browser needs it, move it to a shared ` +
+                        `(non-server) module if it is not secret, or drop the export.`
+                    );
+                }
                 // NEVER serve the real module to the browser — on a failed
                 // extraction (mid-edit syntax error) fall back to the last
                 // good stub, and failing that, to a loud refusal.
