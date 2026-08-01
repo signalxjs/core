@@ -54,8 +54,38 @@ import { computeStableId, type PackageProbe } from './server-extract.js';
 import { offsetToLoc } from './resume-extract.js';
 import { resolveRoot, walkFiles } from './islands.js';
 import { isModuleResolutionError } from './dev-runner.js';
+import type { ServerFnRequestOptions } from '@sigx/server/server';
 
-export interface SigxServerOptions {
+/**
+ * Options for the plugin AND for the dev endpoint it mounts.
+ *
+ * Everything `@sigx/server`'s handler accepts is accepted here and forwarded
+ * by SPREAD — the #547 posture one level up (#561). A hand-written subset had
+ * to be kept in sync with an interface this package does not own, and nothing
+ * enforced that: `maxUrlBytes`, `onError` and `timeoutMs` were not merely
+ * un-forwarded, they could not be SPELLED, so a request that 414s / 504s /
+ * reports in production sailed through the dev server. Exactly the defect that
+ * left `maxUrlBytes` inert from #354 to #545, in the layer #547's own commit
+ * message named as the next victim.
+ *
+ * Four names are the PLUGIN's, so they are omitted above and redeclared below:
+ *
+ * - `resolve` — the plugin IS the resolver (extraction maps + `ssrLoadModule`);
+ *   a user-supplied one would bypass HMR.
+ * - `base` — here it is the SERVER MOUNT path, split from `endpoint` (the fetch
+ *   target baked into stubs) since rev 2.
+ * - `guard` / `renderBoundaries` — module SPECIFIERS, not functions. A Vite
+ *   config cannot hand the dev endpoint a live function and keep it editable;
+ *   these are loaded through the SSR module runner per request, so edits apply
+ *   without a restart. Production passes the functions themselves.
+ *
+ * The `@sigx/server` type dependency is deliberate, and only on THIS subpath:
+ * a build with no `@sigx/server` has no server functions either (the stubs this
+ * plugin emits import `@sigx/server/client`), so `@sigx/vite/server` is
+ * unusable without it. `@sigx/vite`'s other entries stay free of it.
+ */
+export interface SigxServerOptions
+    extends Omit<ServerFnRequestOptions, 'resolve' | 'base' | 'guard' | 'renderBoundaries'> {
     /** Which modules are server modules. Default: `**` + `/*.server.{ts,tsx}`. */
     include?: string | string[];
     /** Excluded from matching. Default: node_modules and dist. */
@@ -128,10 +158,6 @@ export interface SigxServerOptions {
      * Loaded through the SSR module runner per request, like `guard`.
      */
     renderBoundaries?: string;
-    /** Origin policy forwarded to the dev endpoint. Default `'same-origin'`. */
-    origin?: 'same-origin' | 'verify-when-present' | string[] | false;
-    /** Body cap forwarded to the dev endpoint. Default 1 MiB. */
-    maxBodyBytes?: number;
 }
 
 const VIRTUAL_ID = 'virtual:sigx-server-fns';
@@ -642,9 +668,17 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
                 const renderBoundaries = refreshModule?.renderBoundaries as
                     import('@sigx/server/node').ServerFnHandlerOptions['renderBoundaries'];
                 const handler = nodeEntry.createServerFnHandler({
+                    // Forwarded by SPREAD, the sibling of the comment in
+                    // `@sigx/server`'s node.ts (#545/#547). `SigxServerOptions`
+                    // EXTENDS `ServerFnRequestOptions`, so a hand-picked list
+                    // here drifts from an interface this package does not own —
+                    // which is how `maxUrlBytes`, `onError` and `timeoutMs`
+                    // became unreachable in dev (#561). The plugin's own keys
+                    // (include/exclude/endpoint/role/scan/requireGuards) ride
+                    // along inert: the endpoint reads only what it declares.
+                    // The four below are overridden with the resolved values.
+                    ...options,
                     base,
-                    origin: options.origin,
-                    maxBodyBytes: options.maxBodyBytes,
                     guard,
                     renderBoundaries,
                     resolve: async (symbol: string) => {

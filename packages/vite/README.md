@@ -82,6 +82,30 @@ sigx({
 })
 ```
 
+### `sigxServer()` — the dev endpoint's options
+
+The server-function plugin (`@sigx/vite/server`) serves the RPC endpoint from
+`vite.middlewares` in dev, so `sigxServer()` accepts **every option
+`@sigx/server`'s handler accepts** — `origin`, `maxBodyBytes`, `maxUrlBytes`,
+`timeoutMs`, `onError` — and forwards them unchanged, on top of its own build
+options (`include`, `exclude`, `base`, `endpoint`, `role`, `scan`,
+`requireGuards`, `guard`, `renderBoundaries`). The type derives from
+`ServerFnRequestOptions` rather than copying it, so an option added to the
+endpoint is reachable in dev the day it ships:
+
+```ts
+sigxServer({
+  maxUrlBytes: 32_000,                      // dev matches your production cap
+  timeoutMs: 10_000,
+  onError: (err, info) => console.error(info.name, err)
+})
+```
+
+Two of them differ from their production twins by necessity: `guard` and
+`renderBoundaries` are **module specifiers** here (`'/src/fn-guard.ts'`), loaded
+through the SSR module runner per request so edits apply without a restart,
+where a production entry passes the functions themselves.
+
 ## SSR mode
 
 The dev server is `createServer` plus one handler; production is static
