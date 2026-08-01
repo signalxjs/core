@@ -60,6 +60,13 @@ Two concurrent renders that interleave at an `await` mix their head configs.
 runtime-core already has AsyncLocalStorage-based per-request isolation
 (`packages/runtime-core/src/async-context.ts`); head collection bypasses it.
 
+> **Correction (core#549):** the second sentence was wrong when written.
+> `async-context.ts` acquired its `AsyncLocalStorage` with a bare `require`
+> that the bundler stubbed to an empty object, and nothing ever called
+> `runInRequestScope`, so no per-request isolation existed to bypass. The file
+> has been deleted; per-request isolation is the `SSRContext` object, threaded
+> explicitly. The head-state hazard itself is unaffected.
+
 ### F4 — `Suspense` renders its fallback forever on the server (correctness)
 
 Server async handling is keyed entirely off `ssr.load()`. runtime-core's

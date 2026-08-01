@@ -851,9 +851,15 @@ describe('concurrent SSR requests', () => {
     });
 
     it('should isolate getCurrentInstance across concurrent async renders', async () => {
-        // This test verifies that getCurrentInstance() returns the correct
-        // component context during child setup, even when parent renders
-        // interleave at async await points.
+        // Scope, precisely: every assertion below fires SYNCHRONOUSLY inside a
+        // child's setup, so this pins the guarantee the runtime actually makes
+        // — the current-instance slot is correct for the synchronous span of
+        // setup(), even while two renders are in flight and suspending at
+        // await points around it. It does NOT cover reading the instance from
+        // an async continuation; that window is genuinely unprotected (the
+        // walk holds the pointer across `yield { p }` in render-core), and is
+        // tracked separately. See docs/rfc-use-async.md, "The async-context
+        // problem".
         const { getCurrentInstance } = await import('sigx');
         const instanceChecks: { component: string, isOwnContext: boolean }[] = [];
 

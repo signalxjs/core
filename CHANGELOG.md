@@ -98,6 +98,37 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   handed the component `[vnode]` on the client and `vnode` on the server —
   observable to any component that inspects what its slot returned.
 
+### Removed
+
+- **`@sigx/runtime-core`: the never-active AsyncLocalStorage request scope
+  (#549).** `async-context.ts` advertised per-request isolation for the
+  current-component pointer. It never provided any, in any shipped build:
+  it acquired the storage with a bare `require('node:async_hooks')` in an ESM
+  package, which the bundler resolves to its browser-external stub
+  (`module.exports = {}`), so the storage was permanently `null` — and nothing
+  ever called `runInRequestScope` to enter it regardless. `getCurrentInstance()`
+  has always read a module-level slot; that slot is now the only
+  implementation, and the file, its `?? `-merged twin in
+  `component-lifecycle.ts`, and its unit test are gone.
+
+  **Nothing observable changes** — this is what already ran. The unit test
+  asserted `hasRequestIsolation() === true` and passed only because Vitest's
+  transform supplies a working `require`, which is why CI never caught the
+  divergence.
+
+  Dropped from the (semver-exempt) `sigx/internals` and
+  `@sigx/runtime-core/internals` surface: **`runInRequestScope`** and
+  **`hasRequestIsolation`**. Neither had a caller in this repo. An out-of-repo
+  importer replaces `runInRequestScope(fn)` with `fn()` and
+  `hasRequestIsolation()` with `false` — that is what they did.
+
+  Not fixed by making the `require` work: constructing and entering an
+  `AsyncLocalStorage` even once arms Node's promise hooks process-wide and
+  permanently (#544 measured five awaits going 367 ns → 861 ns afterwards),
+  which is a steep price for carrying a component pointer. Per-request
+  isolation on the server is — and has always actually been — the `SSRContext`
+  object, threaded explicitly through the render walk.
+
 ## [0.14.0] — 2026-07-29
 
 ### Added

@@ -240,20 +240,21 @@ One rule decides where a composable lives:
 `getCurrentInstance()` is **not reliable inside async code**, and `ssr.load`'s
 callback style invites exactly that misuse:
 
-- **Client:** the current instance is a module-level variable. The render
-  walk sets it synchronously around `setup()` and restores it immediately
-  after. Any composable called after an `await` — inside an `ssr.load`
-  callback, or after the first `await` of an async setup — sees the wrong
-  instance or `null`. `useHead()`, DI lookups (`useRouter()`), anything
-  instance-dependent silently misbehaves.
-- **Server:** AsyncLocalStorage (`async-context.ts`) isolates **between
-  requests**, but within a request it is still one *mutable slot*. The slot
-  is restored when setup returns; an `ssr.load` continuation that runs later
-  reads whatever component the walk happens to be on. With streaming,
-  deferred renders interleave with the main walk at await points, so even
-  "it worked when I tried it" is timing luck.
+- **Client and server alike:** the current instance is **one module-level
+  variable** (`component-lifecycle.ts`). The render walk sets it synchronously
+  around `setup()` and restores it immediately after. Any composable called
+  after an `await` — inside an `ssr.load` callback, or after the first `await`
+  of an async setup — sees the wrong instance or `null`. `useHead()`, DI
+  lookups (`useRouter()`), anything instance-dependent silently misbehaves.
+- **The server has no extra protection.** There is no AsyncLocalStorage on the
+  render path (per-request isolation is the `SSRContext` object, threaded
+  explicitly — see `rfc-ssr-platform.md` §2.3). So the slot is shared not only
+  across a request's components but across *concurrent* requests: with
+  streaming, deferred renders and separate render calls interleave with the
+  main walk at await points, and "it worked when I tried it" is timing luck.
 
-This cannot be fully fixed for arbitrary user code in browsers (no ALS).
+This cannot be fixed for arbitrary user code in browsers (no ALS there), and
+the server deliberately does not diverge.
 The realistic strategy is to make the well-lit path not need the instance
 at all — which is the `query` design:
 
@@ -266,12 +267,14 @@ at all — which is the `query` design:
   fetcher (detectable on the server via a flag around fetcher invocation)
   warns with a pointer to this section.
 
-Optional server hardening (open question § below): wrap each component's
-async continuations in their own `AsyncLocalStorage.run({ instance })` scope
-so `getCurrentInstance()` becomes correct inside server-side fetchers and
-`ssr.load` callbacks. Structured and correct, but per-component `als.run()`
-has measurable overhead — it would be applied only on async paths (the sync
-fast path never enters ALS), gated on a bench check. The client stays
+Optional server hardening (open question § below): introduce an
+`AsyncLocalStorage` and wrap each component's async continuations in their own
+`.run({ instance })` scope, so `getCurrentInstance()` becomes correct inside
+server-side fetchers and `ssr.load` callbacks. Structured and correct, but the
+cost is not per-call and not opt-in: **constructing and entering an ALS even
+once arms Node's promise hooks for the whole process**, permanently — core#544
+measured five awaits going 367 ns → 861 ns process-wide afterwards. Confining
+it to async paths does not confine that. The client stays
 discipline-by-design either way, so code relying on it would be
 server-only — which argues for warning rather than supporting.
 
@@ -347,4 +350,6 @@ published plugin surface).
    problem"), or keep one shared slot and warn in dev when the instance is
    read from a fetcher? Warning-only keeps server/client semantics
    identical; ALS-scoping makes server-only code subtly more capable than
-   client code.
+   client code. *(Settled: one shared slot. core#549 — the ALS this question
+   assumed existed had never actually loaded — and core#544's process-wide
+   promise-hook tax closed it.)*
