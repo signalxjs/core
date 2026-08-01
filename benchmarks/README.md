@@ -197,6 +197,13 @@ against the `quick` section of `results/baseline.json`.
   the same box is not — and unlike the committed baseline it needs no machine to
   match. It never fails on a regression; read the table and decide. Fork PRs get
   the same table in the job summary (their token cannot comment).
+
+  **Its noise floor, measured**: the PR that added the job (#554) changes no
+  runtime code, so every delta in its own table was noise — and the timing rows
+  landed within ±5%, the two stream rows within ±15% (the stream is 10
+  iterations, not a sampled median). Read a few percent as nothing. The whole
+  job takes about a minute: a warm pnpm store installs in ~2s and the two builds
+  and two 8s suites fit in the rest.
 - **`bench.yml` → `bench-quick`** (manual dispatch) additionally runs
   `bench:micro` and uploads both result files.
 
