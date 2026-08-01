@@ -948,6 +948,10 @@ attacker with `curl`. Defaults, in order of the failure they prevent:
    CSRF stays independently blocked by the non-safelisted JSON content-type
    (cross-origin browsers must preflight; this endpoint never emits CORS
    approval). `Origin: null` is a PRESENT header and still rejected. The
+   relaxation is JSON-only (#556): it never applies to form-content-type
+   POSTs, whose entire safety argument above rests on the content-type
+   layer a §5.2b form target deliberately gives up — an Origin-less form
+   POST is 403 under every policy short of `origin: false`. The
    default stays `'same-origin'` — serving native clients is a deliberate,
    reviewable one-line opt-in, far narrower than `origin: false`. Caveat to
    document: never deploy an Origin-stripping proxy in front of a
@@ -1039,11 +1043,14 @@ the line:
 
 - **`Origin`, at full strength.** Unlike §5.2a's GET relaxation, the form
   path relaxes **nothing**: browsers send `Origin` on every POST, form
-  submissions included, so under the default `'same-origin'` policy a
-  cross-site form POST is 403 and an Origin-less one is too (an
-  Origin-less POST is by construction not a mainstream browser's form
-  submission). The layer that was designed for exactly this attack is the
-  one that remains.
+  submissions included, so a cross-site form POST is 403 and an
+  Origin-less one is too (an Origin-less POST is by construction not a
+  mainstream browser's form submission) — under the default policy AND
+  under `'verify-when-present'`, whose item-2 relaxation is JSON-only
+  (#556): with the content-type layer gone here, admitting absent Origin
+  would reopen exactly the attack the check exists for. The layer that
+  was designed for exactly this attack is the one that remains, under
+  every policy short of `origin: false`.
 - **The per-fn opt-in bounds the surface.** Only functions the author
   explicitly declared `form: true` accept form bodies at all — a form
   POST to any other symbol is a 415 before the pipeline runs. The
@@ -1056,12 +1063,16 @@ the line:
   target declares an explicit pass-through schema instead.
 
 The residual, stated plainly: `form: true` **combined with**
-`origin: 'verify-when-present'` or `origin: false` reopens classic CSRF
-for those functions — with both the content-type and Origin layers gone,
-any site can submit a credentialed mutation. That combination is the
-operator's informed choice (a deliberately public form endpoint);
-the default policy plus the item-2 caveat about Origin-stripping proxies
-is the recommended posture. Error responses on the form path render as
+`origin: false` (or an allowlist naming an attacker-reachable origin)
+reopens classic CSRF for those functions — with both the content-type and
+Origin layers gone, any site can submit a credentialed mutation. That
+combination is the operator's informed choice (a deliberately public form
+endpoint). `'verify-when-present'` is deliberately NOT in this list
+(#556): its relaxation never applies to form transports, so choosing it
+does not silently widen a form target's exposure — the historical
+combination that did exactly that (admitting Origin-less form POSTs) now
+403s. The default policy plus the item-2 caveat about Origin-stripping
+proxies is the recommended posture. Error responses on the form path render as
 HTML (a no-JS requester can't read JSON), which changes nothing about
 masking: §5 item 6 applies verbatim, prod pages carry the generic
 message only.
