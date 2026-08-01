@@ -31,9 +31,10 @@ export default {
         // endpoint BEFORE the document render:
         //
         // import { handleServerFnRequest, matchesServerFn } from '@sigx/server/server';
-        // import { serverFns } from 'virtual:sigx-server-fns';
-        // if (matchesServerFn(request)) {
+        // import { serverFns, serverFnBase } from 'virtual:sigx-server-fns';
+        // if (matchesServerFn(request, serverFnBase)) {
         //     return handleServerFnRequest(request, {
+        //         base: serverFnBase,          // the build's own mount path
         //         resolve: (symbol) => serverFns[symbol]?.() ?? null
         //     });
         // }

@@ -644,7 +644,15 @@ export function sigxPlugin(options: SigxPluginOptions = {}): Plugin {
                                 'dist/server'
                         ),
                         ssrInput: path.resolve(root, adapter.entry ?? ssr.entry),
-                        logger: buildLogger
+                        logger: buildLogger,
+                        // The same `api` seam the role check above reads
+                        // (#563) — a generated routing table has to route the
+                        // path this build actually mounted.
+                        serverFnBase: (
+                            builder.config.plugins?.find((p) => p.name === 'sigx:server')?.api as
+                                | { base?: string }
+                                | undefined
+                        )?.base
                     });
                 }
             }

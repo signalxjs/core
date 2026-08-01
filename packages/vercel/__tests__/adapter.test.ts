@@ -114,6 +114,28 @@ describe('generate() — the Build Output API v3 layout', () => {
         ]);
     });
 
+    it('routes the mount path the build actually baked (#563)', async () => {
+        // config.json is regenerated every build, so a hardcoded default left
+        // `sigxServer({ base })` with no user-side fix on this platform.
+        const ctx = { ...fakeBuild(), serverFnBase: '/rpc' };
+        await vercel().generate!(ctx as never);
+        const config = JSON.parse(
+            readFileSync(join(root, '.vercel/output/config.json'), 'utf-8')
+        ) as { routes: { src?: string }[] };
+        expect(config.routes[0]).toEqual({ src: '/rpc/(.*)', dest: '/_render' });
+    });
+
+    it('escapes the base — `src` is a regex, not a prefix', async () => {
+        const ctx = { ...fakeBuild(), serverFnBase: '/api.v1/fn/' };
+        await vercel().generate!(ctx as never);
+        const config = JSON.parse(
+            readFileSync(join(root, '.vercel/output/config.json'), 'utf-8')
+        ) as { routes: { src?: string }[] };
+        // The dot is escaped (it would otherwise match /apiXv1/fn) and the
+        // trailing slash is dropped, so the pattern stays `<base>/(.*)`.
+        expect(config.routes[0]).toEqual({ src: '/api\\.v1/fn/(.*)', dest: '/_render' });
+    });
+
     it('node runtime honors a nodeVersion override', async () => {
         const ctx = fakeBuild();
         await vercel({ nodeVersion: 'nodejs24.x' }).generate!(ctx as never);

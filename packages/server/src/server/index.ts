@@ -24,7 +24,13 @@ import { runInScope } from '../scope';
 import { isServerFnError } from '../errors';
 import type { ServerFnGuard, ServerFnInfo, WrappedServerFn } from '../types';
 import { encodeWire, reviveWire } from '../wire-codec';
-import { decodeFnPath, decodeReadQuery, type ReadQueryError } from '../fn-url-decode';
+import {
+    decodeFnPath,
+    decodeReadQuery,
+    fnPathPrefix,
+    DEFAULT_FN_BASE,
+    type ReadQueryError
+} from '../fn-url-decode';
 import { preparePattern } from './key-match';
 
 export interface ServerFnRequestOptions {
@@ -375,9 +381,8 @@ function errorResponse(
  * through to the document handler. The bare base with no symbol segment
  * (`/_sigx/fn`) does not match, same as the `/node` adapter's routing.
  */
-export function matchesServerFn(request: Request, base = '/_sigx/fn'): boolean {
-    const prefix = base.endsWith('/') ? base : base + '/';
-    return new URL(request.url).pathname.startsWith(prefix);
+export function matchesServerFn(request: Request, base = DEFAULT_FN_BASE): boolean {
+    return new URL(request.url).pathname.startsWith(fnPathPrefix(base));
 }
 
 function checkOrigin(
@@ -583,14 +588,23 @@ export async function handleServerFnRequest(
     // (`<stableId>/<name>`) spans several segments now that its slashes are
     // real separators instead of `%2F`. Hashed symbols are one segment and
     // are unaffected.
-    const basePrefix = (() => {
-        const base = options.base ?? '/_sigx/fn';
-        return base.endsWith('/') ? base : base + '/';
-    })();
+    const basePrefix = fnPathPrefix(options.base);
     if (!pathname.startsWith(basePrefix)) {
         // `matchesServerFn` is the routing gate; reaching here means the
         // handler is mounted somewhere its `base` does not describe, and
         // guessing a symbol out of the tail would route by accident.
+        if (__DEV__) {
+            // Silent until #563: the two sites take their base independently,
+            // so a moved mount that reached only one of them 404'd every call
+            // with nothing to point at.
+            console.warn(
+                `[sigx server] ${pathname} does not start with this handler's base ` +
+                `(${basePrefix}) — answering 404. A handler mounted somewhere its base ` +
+                `does not describe never matches anything: pass the SAME base to ` +
+                `matchesServerFn and to the handler. A Vite build exports its own value ` +
+                `as \`serverFnBase\` from 'virtual:sigx-server-fns'.`
+            );
+        }
         return isForm
             ? formErrorResponse(404, 'Not a server-function request')
             : errorResponse(

@@ -22,6 +22,7 @@
 import { Readable } from 'node:stream';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { handleServerFnRequest, type ServerFnRequestOptions } from './server/index';
+import { DEFAULT_FN_BASE, fnPathPrefix } from './fn-url-decode';
 import type { ServerFnContextInit } from './context';
 import { runInScope } from './scope';
 
@@ -50,8 +51,8 @@ export interface ServerFnHandlerOptions extends Omit<ServerFnRequestOptions, 're
  * any app-wide middleware that must also see RPC calls.
  */
 export function createServerFnHandler(options: ServerFnHandlerOptions): NodeRequestHandler {
-    const base = options.base ?? '/_sigx/fn';
-    const prefix = base.endsWith('/') ? base : base + '/';
+    const base = options.base ?? DEFAULT_FN_BASE;
+    const prefix = fnPathPrefix(base);
     const resolve =
         options.resolve ??
         (async (symbol: string) => {

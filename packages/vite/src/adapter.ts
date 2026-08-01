@@ -73,6 +73,18 @@ export interface AdapterGenerateContext {
     serverOutDir: string; // absolute
     ssrInput: string;     // the resolved server entry
     logger: { info(msg: string): void; warn(msg: string): void };
+    /**
+     * The server-function mount path this build baked (`sigxServer({ base })`,
+     * default `/_sigx/fn`); `undefined` when the build carries no
+     * `sigxServer()` at all.
+     *
+     * A platform whose routing table is GENERATED — Vercel's `config.json` —
+     * must route the path the app actually serves. Hardcoding the default made
+     * a moved mount an unfixable broken deploy, since the generated file is
+     * rewritten every build (#563). Platforms whose function sees every path
+     * (Cloudflare, Netlify) need nothing.
+     */
+    serverFnBase?: string;
 }
 
 /**

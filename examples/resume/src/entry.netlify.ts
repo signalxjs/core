@@ -11,7 +11,7 @@
 import { createFetchHandler } from '@sigx/server-renderer/server';
 import { handleServerFnRequest, matchesServerFn } from '@sigx/server/server';
 import { template, assets } from 'virtual:sigx-app';
-import { serverFns } from 'virtual:sigx-server-fns';
+import { serverFns, serverFnBase } from 'virtual:sigx-server-fns';
 // The resume pack installs in the app factory (#413) — its manifest arrives
 // there via virtual:sigx-manifests; no SSR instance to build here.
 import { createApp } from './entry-server';
@@ -24,8 +24,11 @@ const handler = createFetchHandler({
 
 export default {
     async fetch(request: Request): Promise<Response> {
-        if (matchesServerFn(request)) {
+        if (matchesServerFn(request, serverFnBase)) {
             return handleServerFnRequest(request, {
+                // The build's own mount path, so the router above and the
+                // handler here cannot disagree (#563).
+                base: serverFnBase,
                 // The registry is explicitly passed, never ambient.
                 resolve: (symbol) => serverFns[symbol]?.() ?? null
             });
