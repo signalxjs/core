@@ -195,12 +195,36 @@ export async function assertFormPost(fetchFn, { label, origin, html }) {
  * document, merged into one table. The server emits it as parseable JSON
  * (`escapeJsonForScript` only ever produces `\uXXXX`), which is what lets this
  * read the boundary records instead of inventing them.
+ *
+ * The payload is delimited by BRACE MATCHING, not by a lazy regex: a record's
+ * `props`/`state` can hold any string, and a `);` or `}` inside one would stop
+ * a scan for a terminator in the wrong place (a real risk for any app richer
+ * than this example). The scanner skips string literals and their escapes,
+ * which is all JSON needs.
  */
 function boundaryTable(html) {
-    const re =
-        /window\.__SIGX_BOUNDARIES__=Object\.assign\(Object\.create\(null\),window\.__SIGX_BOUNDARIES__,([\s\S]*?)\);/g;
+    const PREFIX =
+        'window.__SIGX_BOUNDARIES__=Object.assign(Object.create(null),window.__SIGX_BOUNDARIES__,';
     const table = {};
-    for (const match of html.matchAll(re)) Object.assign(table, JSON.parse(match[1]));
+    for (let at = html.indexOf(PREFIX); at !== -1; at = html.indexOf(PREFIX, at + 1)) {
+        const start = at + PREFIX.length;
+        let depth = 0;
+        let inString = false;
+        for (let i = start; i < html.length; i++) {
+            const ch = html[i];
+            if (inString) {
+                if (ch === '\\') i++;
+                else if (ch === '"') inString = false;
+                continue;
+            }
+            if (ch === '"') inString = true;
+            else if (ch === '{') depth++;
+            else if (ch === '}' && --depth === 0) {
+                Object.assign(table, JSON.parse(html.slice(start, i + 1)));
+                break;
+            }
+        }
+    }
     return table;
 }
 
