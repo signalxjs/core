@@ -44,6 +44,28 @@
 
 ### Changed
 
+- **`origin: 'verify-when-present'` no longer admits Origin-less FORM posts
+  (#556).** The relaxation's safety argument is that browser CSRF stays
+  blocked by the non-safelisted JSON content-type — and a `form: true`
+  target deliberately gives that layer up, so combining the two silently
+  reopened classic CSRF for exactly those functions: any requester that
+  omits `Origin` (old browsers, Origin-stripping privacy proxies,
+  hand-crafted form POSTs) could submit a credentialed mutation.
+
+  Old vs new, per request shape under `'verify-when-present'`:
+  JSON POST without `Origin` — admitted, unchanged. Form POST **with** a
+  matching `Origin` — admitted, unchanged. Form POST **without** `Origin` —
+  was admitted, now `403` (HTML: "Form submissions require an Origin
+  header", distinct from the cross-origin message so the operator sees WHY).
+
+  The pattern this breaks: a non-browser client crafting
+  `application/x-www-form-urlencoded` POSTs to a form target without an
+  `Origin` header under the relaxed policy. Send the header, call the
+  function over the JSON RPC transport instead, or — for a deliberately
+  public form endpoint — say `origin: false`, which remains the explicit
+  escape hatch (allowlists also still work; they always required a present,
+  listed `Origin`).
+
 - **`runInScope` / `__SIGX_SERVERFN_SCOPE__.run` may return a non-promise
   (#544).** The request scope resolves its `AsyncLocalStorage` through a
   dynamic `import('node:async_hooks')`, and used to `await` that memoized

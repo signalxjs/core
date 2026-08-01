@@ -71,7 +71,10 @@ export interface ServerFnRequestOptions {
      * server-to-server) never send one, and an Origin-less request is not a
      * mainstream browser's cross-site POST (browser CSRF stays blocked by
      * the non-safelisted JSON content-type; this endpoint never emits CORS
-     * approval). Never deploy an Origin-stripping proxy in front of a
+     * approval). The relaxation NEVER applies to form-content-type POSTs
+     * (#556): a §6.4 form target gives up the content-type layer, so an
+     * Origin-less form submission is 403 under every policy short of
+     * `false`. Never deploy an Origin-stripping proxy in front of a
      * cookie-authenticated app under this policy. An allowlist or `false`
      * makes the endpoint a deliberate public API.
      */
@@ -357,7 +360,8 @@ export function matchesServerFn(request: Request, base = '/_sigx/fn'): boolean {
 function checkOrigin(
     request: Request,
     policy: ServerFnRequestOptions['origin'],
-    safeMethod = false
+    safeMethod = false,
+    formTransport = false
 ): boolean {
     if (policy === false) return true;
     const origin = request.headers.get('origin');
@@ -366,7 +370,16 @@ function checkOrigin(
     // §5.2a): cross-site WRITING is excluded by the side-effect-free
     // contract, cross-site READING by CORS (no ACAO is ever emitted). A
     // present, mismatching Origin is still rejected below.
-    if (origin === null) return safeMethod || policy === 'verify-when-present';
+    //
+    // 'verify-when-present' NEVER admits an Origin-less FORM post (#556):
+    // the relaxation is safe on the JSON path because browser CSRF stays
+    // blocked by the non-safelisted content-type, and the form path is the
+    // one place that layer is deliberately gone — admitting absent Origin
+    // there reopens exactly the attack the check exists for. A deliberately
+    // public form endpoint says `origin: false`.
+    if (origin === null) {
+        return safeMethod || (policy === 'verify-when-present' && !formTransport);
+    }
     if (Array.isArray(policy)) return policy.includes(origin);
     // `Origin: null` (sandboxed iframe, some redirects) is a PRESENT header
     // with the literal value "null" — it fails this comparison, so
@@ -509,12 +522,20 @@ export async function handleServerFnRequest(
     if (!isGet && !isForm && !isJsonContentType(request)) {
         return errorResponse(415, 'Content-Type must be application/json');
     }
-    if (!checkOrigin(request, options.origin, isGet)) {
-        // NOT relaxed for forms (§5.2b): browsers send Origin on every
-        // POST, form submissions included — with the content-type layer
-        // deliberately gone on this path, Origin is the CSRF defense.
+    if (!checkOrigin(request, options.origin, isGet, isForm)) {
+        // NEVER relaxed for forms (§5.2b, #556): browsers send Origin on
+        // every POST, form submissions included — with the content-type
+        // layer deliberately gone on this path, Origin is the CSRF defense,
+        // so even 'verify-when-present' requires it here. The distinct
+        // absent-Origin message tells an operator who chose that policy WHY
+        // their form 403s.
         return isForm
-            ? formErrorResponse(403, 'Cross-origin form submissions are not allowed')
+            ? formErrorResponse(
+                  403,
+                  request.headers.get('origin') === null
+                      ? 'Form submissions require an Origin header'
+                      : 'Cross-origin form submissions are not allowed'
+              )
             : errorResponse(
                   403,
                   'Cross-origin server-function calls are not allowed',

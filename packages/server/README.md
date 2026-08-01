@@ -319,7 +319,9 @@ export const submitFeedback = serverFn({
   first line.
 - **Security**: the JSON-content-type CSRF layer is deliberately given up
   for declared form targets only; the `Origin` check stays at full
-  strength (an Origin-less form POST is 403 under the default policy).
+  strength (an Origin-less form POST is 403 under every policy short of
+  `origin: false` — even `'verify-when-present'`, whose relaxation is
+  JSON-only, #556).
   Only mark genuinely intended form targets. `form: true` **requires**
   `input` — a definition-time error without it, in dev and prod alike,
   because form fields are attacker-typable strings and the validator is
@@ -825,7 +827,9 @@ Every server function is a public HTTP endpoint; the defaults assume that:
   the header when present and admits header-less programmatic clients
   (native apps, CLIs, server-to-server) — browser CSRF stays independently
   blocked by the non-safelisted JSON content-type, and `Origin: null` is a
-  present header and still rejected. Never deploy an Origin-stripping
+  present header and still rejected. The relaxation is JSON-only: it never
+  applies to form-content-type POSTs, which give up that content-type
+  layer (#556). Never deploy an Origin-stripping
   proxy in front of a cookie-authenticated app under that policy. An
   allowlist or `origin: false` makes it a deliberate public API.
 - **`guard` hook** runs before every function reached through the endpoint —

@@ -249,12 +249,49 @@ describe('gating (§6.4/§5.2b)', () => {
         expect(res.headers.get('content-type')).toContain('text/html');
     });
 
-    it('verify-when-present admits an Origin-less form POST (the documented §5.2b risk)', async () => {
+    it('verify-when-present REFUSES an Origin-less form POST — the relaxation is JSON-only (#556)', async () => {
         const res = await formPost(
             'app/contact.server.ts/submit',
             new URLSearchParams({ message: 'hi' }),
             { noOrigin: true },
             { origin: 'verify-when-present' }
+        );
+        expect(res.status).toBe(403);
+        expect(res.headers.get('content-type')).toContain('text/html');
+        // The distinct message: the operator chose the relaxed policy, so
+        // "cross-origin not allowed" would misdescribe an ABSENT header.
+        expect(await res.text()).toContain('Form submissions require an Origin header');
+    });
+
+    it('verify-when-present still accepts a form POST WITH a matching Origin', async () => {
+        const res = await formPost(
+            'app/contact.server.ts/submit',
+            new URLSearchParams({ message: 'hi' }),
+            {},
+            { origin: 'verify-when-present' }
+        );
+        expect(res.status).toBe(303);
+    });
+
+    it('verify-when-present still admits an Origin-less JSON POST — the relaxation survives where the content-type layer holds', async () => {
+        const res = await handleServerFnRequest(
+            new Request(`${ORIGIN}/_sigx/fn/json_fn_00000002`, {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: '{"args":[7]}'
+            }),
+            { resolve: (sym) => FNS[sym] ?? null, origin: 'verify-when-present' }
+        );
+        expect(res.status).toBe(200);
+        await expect(res.json()).resolves.toEqual({ data: 7 });
+    });
+
+    it('origin: false stays the deliberate public-form escape hatch — Origin-less form POST admitted', async () => {
+        const res = await formPost(
+            'app/contact.server.ts/submit',
+            new URLSearchParams({ message: 'hi' }),
+            { noOrigin: true },
+            { origin: false }
         );
         expect(res.status).toBe(303);
     });

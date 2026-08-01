@@ -8,6 +8,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- **`@sigx/server`: `origin: 'verify-when-present'` no longer admits
+  Origin-less FORM posts (#556).** The relaxation's safety rests on the JSON
+  content-type CSRF layer, which a `form: true` target deliberately gives
+  up — the combination silently reopened classic CSRF for those functions.
+  An Origin-less form POST is now `403` under every policy short of
+  `origin: false` (the explicit public-endpoint escape hatch); JSON-path
+  behavior and form POSTs carrying a matching `Origin` are unchanged. The
+  broken pattern and migration are in `packages/server/CHANGELOG.md`.
+
 - **BREAKING (wire): server-function request URLs no longer percent-encode
   (#355).** `%40acme%2Fapi%2Fsrc%2Fcart.server.ts%23addToCart` was the route you
   saw in a network tab; it is now `@acme/api/src/cart.server.ts/addToCart`. A
