@@ -194,7 +194,7 @@ describe('slot content across the streaming seam', () => {
             <div class="host">
                 <Defer fallback={<span class="spin">wait</span>}>
                     <Wrap>
-                        <b class="s1">static</b> and {(LazyLeaf as any)({})}
+                        <b class="s1">static</b> count: {5}{(LazyLeaf as any)({})}
                     </Wrap>
                 </Defer>
             </div>
@@ -205,10 +205,12 @@ describe('slot content across the streaming seam', () => {
         // …and the deferred payload carries the full slot content.
         const payload = extractFirstReplacement(streamed);
         expect(payload).toBeTruthy();
+        expect(payload!).toContain('<div class="wrap">');
         expect(payload!).toContain('<b class="s1">static</b>');
         expect(payload!).toContain('<em class="leaf">loaded</em>');
-        // The mixed static/dynamic text inside the slot kept its boundary
-        // marker inside the payload (template.innerHTML merges text too).
-        expect(payload!).toContain('<div class="wrap">');
+        // The adjacent texts inside the slot (' count: ' and '5') kept their
+        // boundary marker inside the payload — template.innerHTML merges
+        // adjacent text exactly like the main document parse.
+        expect(payload!).toContain('count: <!--t-->5');
     });
 });
