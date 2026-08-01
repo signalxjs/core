@@ -64,6 +64,22 @@ describe('server errorScope — fallback in place', () => {
         expect(html).not.toContain('ssr-error');
     });
 
+    it('the rewind restores text adjacency — a bare-text fallback after a text sibling keeps its marker', async () => {
+        // 'a' marks the walk "last emission was text"; the scoped subtree
+        // then emits an ELEMENT (flag cleared) before throwing. The rewind
+        // must restore the flag along with the buffer, or the fallback's
+        // bare text merges with 'a' into one DOM text node (#575's family).
+        const Failing = component(() => {
+            errorScope({ fallback: () => 'fb' as any });
+            return () => <><span>partial</span>{(Thrower as any)({})}</>;
+        }, { name: 'FailingAdjacency' });
+
+        const html = await createSSR().render(<div class="er">{'a'}{(Failing as any)({})}</div>);
+
+        expect(html).toContain('a<!--t-->fb');
+        expect(html).not.toContain('partial');
+    });
+
     it('the owner component\'s own render throw is caught by its own scope', async () => {
         const SelfScoped = component(() => {
             errorScope({ fallback: (e) => <i class="own">{e.message}</i> });
