@@ -85,6 +85,45 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- **`@sigx/server-renderer`: the `<!--t-->` text-boundary marker survives
+  Fragment and render-result-array boundaries, so slot content hydrates
+  without doubling its text (#575).** The marker was a loop-local decision in
+  the host-element child walks, and slot content always sits one level
+  deeper: a slot call among siblings — `<button><Icon/>{slots.default?.()}
+  </button>` — or a fill returning `<>…</>` (or an array) is wrapped in an
+  anonymous Fragment, which hid its texts from the loop. The browser then
+  merged `static {dynamic}` into one DOM text node and hydration *appended*
+  the dynamic half instead of adopting it — the string rendered twice after
+  the first update, with no warning. (A slot call that was the *sole* child
+  spread flat and worked, which is why the bug looked intermittent.) Text
+  adjacency is now walk state threaded through Fragments and component
+  recursion, so the marker lands wherever two texts truly touch — including
+  a component whose output *begins* with bare text after a text sibling,
+  which merged the same way (components only emit a trailing anchor). An
+  empty Fragment between two texts correctly preserves their adjacency.
+
+  In dev, hydration now warns when a non-empty text VNode finds no text node
+  to adopt — the silent append was the only signal this class of mismatch
+  gave, and a doubled short label is easy to miss.
+
+- **`@sigx/server-renderer`: a deferred stream render whose result is a raw
+  array emitted an empty `$SIGX_REPLACE` payload (#581).** The walker has no
+  branch for a bare array, so a streamed async component returning
+  `['x: ', data.value]` replaced its placeholder with nothing. Raw arrays
+  are now wrapped in a synthetic Fragment before the walk; `<Defer>`'s
+  deferred render also rides one walk instead of one per item, so
+  `<!--t-->` adjacency between its items is tracked (the `$SIGX_REPLACE`
+  client parses via `template.innerHTML`, which merges adjacent text exactly
+  like the main document parse).
+
+- **`@sigx/runtime-core`: a component render result given as a raw array
+  crashed on its first patch (#581).** `normalizeSubTree` wrapped the array
+  in a Fragment but kept raw string/number items, and the patch path
+  re-parents every Fragment child — `TypeError: Cannot create property
+  'parent' on string`. Array results now get the same item normalization as
+  a JSX child array: strings/numbers become Text VNodes, falsy items become
+  Comment placeholders so positional diffing keeps its indices.
+
 - **`@sigx/server` / `@sigx/vite`: a throwing `resolve()` escaped the
   server-function endpoint; prototype-key symbols hit the plain-object
   registry (#555).** A rejecting symbol resolution (the prod registry's lazy

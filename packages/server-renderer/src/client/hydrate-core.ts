@@ -195,6 +195,18 @@ export function hydrateNode(vnode: VNode, dom: Node | null, parent: Node, region
         }
         // Hydration mismatch: expected a text node but got something else.
         // Create a fresh text node and insert it so the VNode has a valid DOM ref.
+        // Silent only for an empty vnode: SSR omits empty text (or stands it
+        // in with <!--t-->, handled in the comment loop above), so a fresh
+        // empty node is the normal synthesized case, not a mismatch. A
+        // NON-empty text landing here means SSR and client disagree — the
+        // symptom is doubled text after the first update (#575).
+        if (__DEV__ && vnode.text != null && vnode.text !== '') {
+            console.warn(
+                `[Hydrate] Expected a text node for "${String(vnode.text)}" but found:`,
+                dom,
+                '— inserting a fresh one; the SSR output does not match the client VNode tree here.'
+            );
+        }
         const textNode = document.createTextNode(String(vnode.text ?? ''));
         if (dom) {
             parent.insertBefore(textNode, dom);
