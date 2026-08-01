@@ -207,6 +207,49 @@ describe('sigxServer — virtual registry', () => {
     });
 });
 
+describe('sigxServer — non-callable server-only exports (#565)', () => {
+    const VALUES = `
+import { serverFn } from '@sigx/server';
+export const MAX = 10;
+export class Db {}
+export const helper = makeThing();
+export const addToCart = serverFn(async (rq, id) => id);
+`;
+
+    /** Transform the server module in one environment, collecting warnings. */
+    function warnFor(env: 'client' | 'ssr'): string[] {
+        const { plugin, root } = makeProject({ 'src/cart.server.ts': VALUES });
+        try {
+            const warnings: string[] = [];
+            plugin.transform.call(
+                { environment: { name: env }, warn: (m: string) => warnings.push(m) },
+                VALUES,
+                join(root, 'src/cart.server.ts')
+            );
+            return warnings;
+        } finally {
+            rmSync(root, { recursive: true, force: true });
+        }
+    }
+
+    it('warns once per non-callable export that reaches the client bundle', () => {
+        const warnings = warnFor('client');
+        expect(warnings).toHaveLength(2);
+        expect(warnings[0]).toContain('"MAX"');
+        expect(warnings[0]).toContain('a non-call use is SILENT and wrong');
+        expect(warnings[1]).toContain('"Db"');
+        expect(warnings[1]).toContain('is not a constructor');
+        // `helper` might be callable — never warned about.
+        expect(warnings.join('\n')).not.toContain('"helper"');
+    });
+
+    it('is silent in the SSR environment — nothing is stubbed there', () => {
+        // A constant shared between SERVER modules is never handed to a
+        // browser, so scolding its author would be noise.
+        expect(warnFor('ssr')).toEqual([]);
+    });
+});
+
 describe('sigxServer — the moved-mount lint (#563)', () => {
     const ENTRY = `
 import { handleServerFnRequest, matchesServerFn } from '@sigx/server/server';

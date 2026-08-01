@@ -780,3 +780,65 @@ export const feed = serverStream({ unguarded: true, handler: async function* () 
         expect(serverFnKeyStamps(result.fns)).not.toContain('__SIGX_GUARDS_CHECKED__');
     });
 });
+
+describe('extractServerFns — non-callable server-only exports (#565)', () => {
+    /** Every export here is provably NOT callable — the stub lies about each. */
+    const VALUES = `
+import { serverFn } from '@sigx/server';
+
+export const MAX = 10;
+export const NAME = 'cart';
+export const CONFIG = { retries: 3 };
+export const ORDER = ['a', 'b'];
+export const GREETING = \`hi\`;
+export class Db {}
+export const Boxed = class {};
+
+export const addToCart = serverFn(async (rq, id: string) => id);
+`;
+
+    /** …and every export here MIGHT be callable, so none may warn. */
+    const CALLABLE = `
+import { serverFn } from '@sigx/server';
+import { imported } from './elsewhere';
+
+export const helper = makeThing();          // a call — could return a function
+export const alias = imported;              // an identifier — unknowable here
+export const method = obj.thing;            // a member expression — ditto
+export const arrow = (x) => x;
+export function fn() {}
+export const lazy = await getIt();
+export let later;
+export { imported };
+
+export const addToCart = serverFn(async (rq, id: string) => id);
+`;
+
+    it('records literals, object/array literals, templates and classes', () => {
+        const result = extractServerFns(VALUES, '/src/cart.server.ts', opts('src/cart.server.ts'));
+        expect(result.serverOnlyValues).toEqual([
+            { name: 'MAX', kind: 'value' },
+            { name: 'NAME', kind: 'value' },
+            { name: 'CONFIG', kind: 'value' },
+            { name: 'ORDER', kind: 'value' },
+            { name: 'GREETING', kind: 'value' },
+            { name: 'Db', kind: 'class' },
+            { name: 'Boxed', kind: 'class' }
+        ]);
+        // The stub still exports them all — the warning is diagnosis, not a
+        // behavior change.
+        expect(result.serverOnly).toContain('MAX');
+        expect(result.serverOnly).toContain('Db');
+    });
+
+    it('records NOTHING it cannot prove — a false alarm costs more than a miss', () => {
+        const result = extractServerFns(CALLABLE, '/src/cart.server.ts', opts('src/cart.server.ts'));
+        expect(result.serverOnlyValues).toEqual([]);
+    });
+
+    it('says nothing about a module whose only exports are server functions', () => {
+        const result = extractServerFns(CART, '/src/cart.server.ts', opts('src/cart.server.ts'));
+        // `auditLog` is an arrow function: honestly stubbed, so no warning.
+        expect(result.serverOnlyValues).toEqual([]);
+    });
+});

@@ -121,12 +121,24 @@ export type ServerFnCallable<A extends unknown[], R> = ((...args: A) => Promise<
     with(options?: ServerFnCallOptions): (...args: A) => Promise<R>;
     /**
      * The stable data key (`<stableId>/<name>`) behind `useData(fn)` and
-     * fn-ref `invalidates` patterns. Declared REQUIRED for keying DX — the
-     * property is what lets `useData(getVotes)` type-check while a plain
-     * function does not. At runtime it is BUILD-stamped (the Vite transform
-     * appends it to both the client stub and the SSR module); outside the
-     * transform (unit tests, hand-wired non-Vite builds) it is absent and
-     * `useData(fn)` dev-throws with the remedy.
+     * fn-ref `invalidates` patterns. ALWAYS a string — `''` means this build
+     * stamped no key (unit tests, hand-wired non-Vite builds).
+     *
+     * Declared REQUIRED on purpose: it is what lets `useData(getVotes)`
+     * type-check while a plain function does not. The gate is runtime-core's
+     * `ServerFnDataRef.__sigxKey: string`, and making either side optional
+     * removes the gate entirely — TypeScript skips weak-type detection for a
+     * type with call signatures, so a callable whose members are all optional
+     * accepts every function.
+     *
+     * Since #565 the runtime honors that declaration rather than contradicting
+     * it: `serverFn()` mints `''` and `__serverFnStub` falls back to `''`, so
+     * `fn.__sigxKey.length` can no longer crash on a value the type calls a
+     * `string`. `''` is already what both readers mean by "absent" —
+     * `isServerFnDataRef` and the endpoint's invalidate-pattern resolver each
+     * test `key !== ''` — so `useData(fn)` still dev-throws with the remedy on
+     * an unstamped function, and unstamped fn-ref patterns are still dropped
+     * with a warning.
      */
     __sigxKey: string;
 } & WrappedServerFn;
@@ -177,8 +189,11 @@ export interface WrappedServerFn {
     __sigxForm?: boolean;
     /**
      * The build-stamped stable data key (`<stableId>/<name>`) — see
-     * `ServerFnCallable.__sigxKey`. Optional here because it exists only
-     * under the Vite transform; registries and transports never require it.
+     * `ServerFnCallable.__sigxKey`. Optional HERE, and honestly so: this
+     * interface describes a FOREIGN object (a registry entry, a hand-built
+     * transport shape) where the property may genuinely be absent, unlike a
+     * callable this package minted. The intersection in `ServerFnCallable`
+     * collapses the two to the required `string`.
      */
     __sigxKey?: string;
     /**

@@ -753,7 +753,23 @@ and `ServerFnError.data` — with no configuration:
 | `URL`, `RegExp` | ✅ |
 | explicit `undefined` property | ✅ preserved, not dropped |
 | plain objects, arrays, primitives | ✅ unchanged |
-| **circular structures** | ❌ still an error — the one unsupported shape |
+| **circular structures** | ❌ an error — the one shape that fails LOUDLY |
+| class instances | ❌ arrive as plain objects, prototype gone (register a handler) |
+| `Uint8Array` / typed arrays / `ArrayBuffer` | ❌ arrive as `{"0":…,"1":…}` |
+| `Error` | ❌ arrives as `{}` — message and stack are not own enumerable props |
+| `Promise` | ❌ arrives as `{}` (a missing `await`) |
+| `NaN` / `±Infinity` | ❌ arrive as `null` |
+| `WeakMap` / `WeakSet` | ❌ arrive as `{}` |
+
+Everything in the second group is a **lossy success**: the call returns 200 and
+the value looks like data. In dev the codec now warns once per call, naming the
+property path (`result.items[0].thumb is Uint8Array — it encodes as a plain
+object of indices`), and skips anything a registered handler claims — so an app
+that taught it `Uint8Array` hears nothing. There is no type-level guard on a
+server function's return type, deliberately: serializability is
+runtime-configurable through that same handler registry, so a
+`Serializable<R>` bound would reject exactly the apps that did the right thing,
+and could not see a missing `await` or a cycle anyway.
 
 ```ts
 export const getOrder = serverFn(async (rq, id: string) => ({

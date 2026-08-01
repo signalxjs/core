@@ -495,8 +495,14 @@ describe('__serverFnStub — stable data key (#452)', () => {
         expect(fn.__sigxKey).toBe('src/cart.server.ts/add');
     });
 
-    it('leaves __sigxKey undefined when the build emitted no key', () => {
+    it('falls back to the empty key when the build emitted none (#565)', () => {
+        // `''`, not `undefined`: the public type declares `__sigxKey` a
+        // required `string` (that is what makes `useData(getVotes)`
+        // type-check), so the runtime keeps the declaration true. `''` is what
+        // both readers already treat as "no key" — `isServerFnDataRef` and the
+        // endpoint's pattern resolver each test `key !== ''`.
         const fn = __serverFnStub('add_fn_00000001', 'add', '/_sigx/fn');
-        expect(fn.__sigxKey).toBeUndefined();
+        expect(fn.__sigxKey).toBe('');
     });
+
 });

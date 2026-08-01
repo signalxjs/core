@@ -1034,6 +1034,36 @@ describe('useData', () => {
         expect(rpc).not.toHaveBeenCalled();
     });
 
+    it('the empty key is "unstamped" too — a `serverFn()` outside the transform (#565)', () => {
+        // `@sigx/server` mints `__sigxKey: ''` so the required-`string` type
+        // it declares is true everywhere. `''` must read as ABSENT here, or
+        // every unstamped fn would key as `'[""]'` and collide.
+        const rpc = vi.fn(async () => 1);
+        const unstamped = Object.assign(rpc, { __sigxFn: () => {}, __sigxKey: '' });
+        const App = component(() => {
+            expect(() => (useData as any)(unstamped)).toThrow(/__sigxKey/);
+            return () => null;
+        });
+        mount(jsx(App, {}));
+        expect(rpc).not.toHaveBeenCalled();
+    });
+
+    it('the DX gate this typing exists for: a stamped fn keys, a plain function does not', () => {
+        // COMPILE-TIME assertion (the root tsconfig includes __tests__, so
+        // `pnpm typecheck` enforces it). `ServerFnDataRef.__sigxKey` is a
+        // required `string`; relaxing it — here or on
+        // `@sigx/server`'s `ServerFnCallable` — would remove the gate
+        // entirely, because TypeScript skips weak-type detection for a type
+        // with call signatures. That is why #565 fixed the runtime instead.
+        const _pin = (): void => {
+            const ref = stamped('src/api.server.ts/getVotes', async () => 3);
+            useData(ref);
+            // @ts-expect-error — a plain function carries no __sigxKey.
+            useData(async () => 3);
+        };
+        expect(typeof _pin).toBe('function');
+    });
+
     it('a falsy getter result still idles with a fn-headed tuple form', async () => {
         const getItem = stamped('src/api.server.ts/getItem', async (id: number) => `item-${id}`);
         const on = signal(false);

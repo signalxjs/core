@@ -441,13 +441,19 @@ function createServerFn(
             `Drop \`cache\` here, or drop \`form\` if this really is a read.`
         );
     }
-    // The cast covers `__sigxKey` (declared required on the callable for
-    // `useData(fn)` DX): it is BUILD-stamped — the Vite transform appends
-    // the assignment to the SSR module — never minted here.
+    // `__sigxKey: ''` is the UNSTAMPED value (#565). The real key is
+    // BUILD-stamped — the Vite transform appends the assignment to the SSR
+    // module — and nothing here can know it; minting the empty string keeps
+    // the declared type (required `string`, which is what makes
+    // `useData(getVotes)` type-check) true in every environment instead of
+    // contradicting it. `''` is already what both readers mean by "no key":
+    // `isServerFnDataRef` and `resolveInvalidatePatterns` each test
+    // `key !== ''`.
     return Object.assign(wrapper, {
         with: callWith,
         __sigxFn: invoke,
         __sigxName: name,
+        __sigxKey: '',
         ...(invalidates ? { __sigxInvalidates: invalidates } : {}),
         ...(cache ? { __sigxGet: true, __sigxCacheControl: cacheControlValue(cache) } : {}),
         ...(form ? { __sigxForm: true } : {})
