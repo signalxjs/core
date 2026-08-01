@@ -284,10 +284,10 @@ promise result. The router SSR contract (§3.2) feeds this — a route miss sets
   top-level `node:` imports on the string/Web-stream/document-Web-stream
   paths.
 - Document the isolation guarantee as a contract: **per-request `SSRContext`
-  is the isolation mechanism; AsyncLocalStorage is never required** (it is
-  only the best-effort backstop for user code reading `getCurrentInstance()`
-  after an `await` — dev-warned per `rfc-use-async.md`'s async-context
-  section).
+  is the isolation mechanism; AsyncLocalStorage is never required** (there is
+  none on the render path — reading `getCurrentInstance()` after an `await`
+  is unsupported on the server exactly as in the browser, per
+  `rfc-use-async.md`'s async-context section).
 - CI gains an edge smoke test (workerd or equivalent) rendering the reference
   example through the Web-stream document path — F8 was exactly the class of
   bug that only a non-Node runtime catches.

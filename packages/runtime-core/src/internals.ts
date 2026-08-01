@@ -124,9 +124,6 @@ export { createEmit, splitComponentProps } from './utils/component-props.js';
 // isn't a throw, or that can't depend on runtime-core, inline the code instead.
 export { prodError } from './errors.js';
 
-// Async context (for SSR isolation)
-export { runInRequestScope, hasRequestIsolation } from './async-context.js';
-
 // DevTools hook (for @sigx/devtools and other inspectors)
 export {
     DEVTOOLS_HOOK_KEY,

@@ -149,6 +149,10 @@ The client-composition layer has concrete gaps — stated against the current co
    module-global boundary is only the browser fallback. The fragility is the
    ordering (register *during* the children render, check `pending.size` *after*)
    and the `try/catch` on a thrown promise — not "a global".
+   *(Correction, core#549: that `AsyncLocalStorage` never actually loaded — a
+   bare `require` the bundler stubbed out — so the module-global boundary was
+   the only implementation on every platform. It was "a global" after all,
+   which does not change this section's conclusion.)*
 2. **`ErrorBoundary` catches too little and recovers too shallowly.** Its
    `try/catch` wraps only the synchronous slot render (`error-boundary.ts`) —
    a throw from a child's reactive re-render or effect never reaches it. And

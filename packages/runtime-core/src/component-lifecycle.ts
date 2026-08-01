@@ -6,12 +6,16 @@
  */
 
 import type { ComponentSetupContext, MountContext } from './component-types.js';
-import {
-    getCurrentInstanceSafe,
-    setCurrentInstanceSafe
-} from './async-context.js';
 import { getDevtoolsHook } from './devtools-hook.js';
 
+/**
+ * The component whose `setup()` is currently running. One module-level slot,
+ * on every platform: the render walk sets it synchronously around `setup()`
+ * and restores it immediately after, so it is only meaningful inside that
+ * window. Reading it from an async continuation — after the first `await` of
+ * an async setup, or from a fetcher — sees whatever component the walk has
+ * moved on to. See `docs/rfc-use-async.md`, "The async-context problem".
+ */
 let currentComponentContext: ComponentSetupContext<any, any, any> | null = null;
 
 /**
@@ -66,14 +70,11 @@ export function getParentInstanceId(ctx: ComponentSetupContext<any, any, any> | 
  * ```
  */
 export function getCurrentInstance() {
-    // Prefer async-safe storage (AsyncLocalStorage on server), fallback to module-level
-    return getCurrentInstanceSafe() ?? currentComponentContext;
+    return currentComponentContext;
 }
 
 export function setCurrentInstance(ctx: ComponentSetupContext<any, any, any> | null) {
-    // Update both: async-safe storage AND module-level fallback
-    const prevSafe = setCurrentInstanceSafe(ctx);
-    const prevModule = currentComponentContext;
+    const prev = currentComponentContext;
     currentComponentContext = ctx;
 
     // Devtools: mint an id for this ctx the first time we see it, and
@@ -98,8 +99,8 @@ export function setCurrentInstance(ctx: ComponentSetupContext<any, any, any> | n
         }
     }
 
-    // Return the previous value — prefer async-safe if it was set
-    return prevSafe ?? prevModule;
+    // Return the previous value so the caller can restore it on the way out.
+    return prev;
 }
 
 /**

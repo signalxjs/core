@@ -116,9 +116,13 @@ Request isolation is a contract, not a runtime feature: **the per-request
 `SSRContext` is the isolation mechanism — AsyncLocalStorage is never
 required.** Everything a request collects (head configs, response state,
 async results, the boundary table) lives on its own context, created per
-render call; concurrent renders share nothing. AsyncLocalStorage remains
-only a best-effort backstop for user code reading `getCurrentInstance()`
-after an `await` inside setup, which is dev-warned.
+render call; concurrent renders share nothing. There is no AsyncLocalStorage
+anywhere on the render path and never has been — reading
+`getCurrentInstance()` from an async continuation (after the first `await` of
+an async setup, or from a fetcher) is **unsupported on the server exactly as
+it is in the browser**: the current instance is one module-level slot, live
+only for the synchronous span of `setup()`. Resolve everything
+instance-dependent synchronously in setup and close over the result.
 
 ## Request-state registration (packs)
 
