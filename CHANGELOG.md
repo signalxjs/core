@@ -226,6 +226,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   path of any value the boundary codec cannot carry, and `__sigxKey` is now a
   string in every environment. Details in each package's changelog.
 
+- **Every platform entry but Node lost single-flight boundary refresh
+  (#564).** The `renderBoundaries` option (rfc-server §6.3) was wired in
+  exactly two places — `examples/resume/server.mjs` and the dev plugin's
+  `sigxServer({ renderBoundaries })`. The Cloudflare, Vercel, Netlify, Deno and
+  Bun entries all called `handleServerFnRequest(request, { resolve })` without
+  it, so on every deployed edge tier a mutation's response carried no fresh
+  boundary HTML: the page still converged, through a second `$cache` round trip
+  that also loaded the component chunk — precisely the trip and the chunk §6.3
+  exists to remove.
+
+  Nothing failed, which is why it shipped: the option is optional, the endpoint
+  skips the whole `$boundaries` block when it is absent, and the deploy smokes
+  only asserted a 200 with `data`. They now send a real `$boundaries` sidecar
+  and assert the refreshed HTML end to end on all six tiers — with the
+  descriptor read out of the document's own boundary table rather than
+  hand-written, so it cannot drift from what a browser sends. The three
+  adapters' commented mount blocks carry the option too, and
+  `docs/rfc-deploy.md` §4.1 — the block those entries are copied from — shows
+  it.
+
 - **`@sigx/vercel`: the generated server-fn route was hardcoded to
   `/_sigx/fn` (#563).** `.vercel/output/config.json` is a generation contract —
   rewritten every build — so an app that moved its mount with

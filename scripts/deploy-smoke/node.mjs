@@ -15,6 +15,7 @@ import {
     assertServerFn,
     assertCatalogGet,
     assertFormPost,
+    assertBoundaryRefresh,
     assertFallthrough,
     SSR_CONTEXT_MARKER
 } from './assertions.mjs';
@@ -73,6 +74,7 @@ try {
     });
     await assertCatalogGet(fetchFn, { label });
     await assertFormPost(fetchFn, { label, origin: ORIGIN, html: resumeHtml });
+    await assertBoundaryRefresh(fetchFn, { label, origin: ORIGIN, html: resumeHtml });
     assert(/via Node\.js/.test(data), `${label}: fn ran under node (${data})`);
     await assertFallthrough(fetchFn, { label });
     console.log('\n✅ deploy-smoke: the external build serves documents, assets, and server functions under node');

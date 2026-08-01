@@ -8,6 +8,10 @@
         "types": ["node"],
         "noEmit": true
     },
+    // `server.bun.ts` is deliberately OUT of this program: it uses the Bun
+    // globals (no @types/bun here) and imports ./dist/server/*.js, which only
+    // exist after a build — including it would fail a clean checkout. Its
+    // coverage is scripts/deploy-smoke/bun.mjs, which runs it for real (#564).
     "include": [
         "src/**/*.ts",
         "src/**/*.tsx",

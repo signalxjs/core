@@ -18,6 +18,7 @@ import {
     assertServerFn,
     assertCatalogGet,
     assertFormPost,
+    assertBoundaryRefresh,
     assertFallthrough,
     SSR_CONTEXT_MARKER
 } from './assertions.mjs';
@@ -112,6 +113,7 @@ try {
         });
         await assertCatalogGet(fetchFn, { label });
         await assertFormPost(fetchFn, { label, origin: 'http://localhost', html: resumeHtml });
+        await assertBoundaryRefresh(fetchFn, { label, origin: 'http://localhost', html: resumeHtml });
         assert(/via Cloudflare-Workers/.test(data), `${label}: fn ran under workerd, not node (${data})`);
         await assertFallthrough(fetchFn, { label });
     });
