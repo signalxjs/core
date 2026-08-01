@@ -74,7 +74,7 @@ describe('matchAsyncState producer-invariant dev warn', () => {
         // errored with no error to show.
         matchAsyncState(view({ state: 'errored', error: null }), ARMS);
 
-        const messages: string[] = warn.mock.calls.map((c) => String(c[0]));
+        const messages: string[] = warn.mock.calls.map((c: unknown[]) => String(c[0]));
         expect(messages.some((m) => m.includes("state 'pending' must have hasValue: false"))).toBe(true);
         expect(messages.some((m) => m.includes("state 'ready' must have hasValue: true"))).toBe(true);
         expect(messages.some((m) => m.includes("state 'refreshing' must have hasValue: true"))).toBe(true);
