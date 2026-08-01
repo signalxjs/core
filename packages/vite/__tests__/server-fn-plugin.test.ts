@@ -236,7 +236,7 @@ export const addToCart = serverFn(async (rq, id) => id);
         const warnings = warnFor('client');
         expect(warnings).toHaveLength(2);
         expect(warnings[0]).toContain('"MAX"');
-        expect(warnings[0]).toContain('not a function');
+        expect(warnings[0]).toContain('a non-call use is SILENT and wrong');
         expect(warnings[1]).toContain('"Db"');
         expect(warnings[1]).toContain('is not a constructor');
         // `helper` might be callable — never warned about.
