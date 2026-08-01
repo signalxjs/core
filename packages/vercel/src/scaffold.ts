@@ -5,6 +5,11 @@
  * detects a WEB handler by the presence of a `fetch` METHOD on the default
  * export (a bare default function would be treated as a legacy (req, res)
  * handler); the edge runtime gets a generated wrapper.
+ *
+ * The commented server-fn mount carries `renderBoundaries` too (#564): that
+ * option is OPTIONAL, so an entry that omits it type-checks and silently
+ * loses single-flight boundary refresh. The committed example entries are the
+ * full reference (`examples/resume/src/entry.vercel.ts`, rfc-deploy §4.1).
  */
 export function scaffoldEntry(ssrEntryImport: string): string {
     return `// Vercel function entry — scaffolded by @sigx/vercel, YOURS from here on
@@ -35,7 +40,15 @@ export default {
         // if (matchesServerFn(request, serverFnBase)) {
         //     return handleServerFnRequest(request, {
         //         base: serverFnBase,          // the build's own mount path
-        //         resolve: (symbol) => serverFns[symbol]?.() ?? null
+        //         resolve: (symbol) => serverFns[symbol]?.() ?? null,
+        //         // Using @sigx/resume? Single-flight boundary refresh
+        //         // (rfc-server §6.3) needs this option; without it a
+        //         // mutation's response carries no fresh HTML and the
+        //         // client pays a second round trip to converge:
+        //         // renderBoundaries: createBoundaryRefresh({
+        //         //     plugins: [resumePlugin({ manifest: resumeManifest })],
+        //         //     components: { /* __resumeId -> server component */ }
+        //         // })
         //     });
         // }
         return handler(request);

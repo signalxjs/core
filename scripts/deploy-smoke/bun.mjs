@@ -15,6 +15,7 @@ import {
     assertServerFn,
     assertCatalogGet,
     assertFormPost,
+    assertBoundaryRefresh,
     assertFallthrough,
     SSR_CONTEXT_MARKER
 } from './assertions.mjs';
@@ -89,6 +90,7 @@ try {
     });
     await assertCatalogGet(fetchFn, { label });
     await assertFormPost(fetchFn, { label, origin: ORIGIN, html: resumeHtml });
+    await assertBoundaryRefresh(fetchFn, { label, origin: ORIGIN, html: resumeHtml });
     // navigator.userAgent names the runtime — proof the fn ran HERE, not
     // in a Node process (`Bun/x.y.z`).
     assert(/via Bun\//.test(data), `${label}: fn ran under bun (${data})`);

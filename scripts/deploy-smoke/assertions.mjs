@@ -190,6 +190,105 @@ export async function assertFormPost(fetchFn, { label, origin, html }) {
     );
 }
 
+/**
+ * Every `window.__SIGX_BOUNDARIES__=Object.assign(…,{…});` patch in a streamed
+ * document, merged into one table. The server emits it as parseable JSON
+ * (`escapeJsonForScript` only ever produces `\uXXXX`), which is what lets this
+ * read the boundary records instead of inventing them.
+ *
+ * The payload is delimited by BRACE MATCHING, not by a lazy regex: a record's
+ * `props`/`state` can hold any string, and a `);` or `}` inside one would stop
+ * a scan for a terminator in the wrong place (a real risk for any app richer
+ * than this example). The scanner skips string literals and their escapes,
+ * which is all JSON needs.
+ */
+function boundaryTable(html) {
+    const PREFIX =
+        'window.__SIGX_BOUNDARIES__=Object.assign(Object.create(null),window.__SIGX_BOUNDARIES__,';
+    const table = {};
+    for (let at = html.indexOf(PREFIX); at !== -1; at = html.indexOf(PREFIX, at + 1)) {
+        const start = at + PREFIX.length;
+        let depth = 0;
+        let inString = false;
+        for (let i = start; i < html.length; i++) {
+            const ch = html[i];
+            if (inString) {
+                if (ch === '\\') i++;
+                else if (ch === '"') inString = false;
+                continue;
+            }
+            if (ch === '"') inString = true;
+            else if (ch === '{') depth++;
+            else if (ch === '}' && --depth === 0) {
+                Object.assign(table, JSON.parse(html.slice(start, i + 1)));
+                break;
+            }
+        }
+    }
+    return table;
+}
+
+/**
+ * Single-flight boundary refresh on the wire (rfc-server §6.3) — the
+ * assertion an entry that forgot `renderBoundaries` fails.
+ *
+ * That option is OPTIONAL, so omitting it type-checks and the endpoint just
+ * skips the whole `$boundaries` block: the page still converges, one `$cache`
+ * round trip later and with the component chunk loaded after all. Nothing else
+ * here would notice, which is exactly how every platform entry in this repo
+ * shipped without it (#564).
+ *
+ * The descriptor is NOT hand-written: it is read out of the document's own
+ * boundary table, the same records `@sigx/resume/client`'s collect() sends, so
+ * this cannot drift from what a browser does.
+ */
+export async function assertBoundaryRefresh(fetchFn, { label, origin, html, component = 'Poll' }) {
+    const found = Object.entries(boundaryTable(html)).find(
+        ([, r]) => r?.component === component && Array.isArray(r.deps) && r.deps.length > 0
+    );
+    assert(found, `${label}: the document's boundary table has a ${component} record with deps`);
+    const [rawId, record] = found;
+    const descriptor = {
+        id: Number(rawId),
+        component,
+        deps: record.deps,
+        ...(record.props ? { props: record.props } : {})
+    };
+    const res = await fetchFn(fnPath('@sigx/resume-example/src/api.server.ts/vote'), {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', origin },
+        // `base` is the floor for the re-render's component ids — a client
+        // picks one above everything live on the page.
+        body: JSON.stringify({ args: [], $boundaries: { base: 1_000_000, refresh: [descriptor] } })
+    });
+    assert(res.status === 200, `${label}: refresh mutation 200 (got ${res.status})`);
+    const envelope = await res.json();
+    assert(
+        Array.isArray(envelope.$cache?.invalidates) && envelope.$cache.invalidates.length > 0,
+        `${label}: the mutation declared $cache invalidates`
+    );
+    assert(
+        Array.isArray(envelope.$boundaries) && envelope.$boundaries.length === 1,
+        `${label}: the response carries $boundaries — the entry wired renderBoundaries ` +
+        `(got ${JSON.stringify(envelope.$boundaries)})`
+    );
+    const [fresh] = envelope.$boundaries;
+    assert(fresh.for === descriptor.id, `${label}: the fresh entry replaces the requested boundary`);
+    assert(
+        typeof fresh.html === 'string' && fresh.html.includes(`<!--$c:${fresh.id}-->`),
+        `${label}: the fresh HTML carries its own boundary marker`
+    );
+    // Single-flight, literally: the re-render shows the value THIS mutation
+    // returned, in the same response. Text-boundary markers are stripped
+    // first — SSR emits `total <!--t-->4`, and reading that as missing text is
+    // a recurring misdiagnosis (core#97).
+    const text = fresh.html.replaceAll('<!--t-->', '');
+    assert(
+        text.includes(`total ${envelope.data}`),
+        `${label}: fresh HTML shows this mutation's own result (total ${envelope.data})`
+    );
+}
+
 /** Non-asset paths fall through the static tier to the worker/handler. */
 export async function assertFallthrough(fetchFn, { label }) {
     const res = await fetchFn('/definitely-not-an-asset', {
