@@ -29,6 +29,7 @@ import {
     type AsyncFetcherContext,
     type Fetcher,
     type MatchArms,
+    type ValuePresence,
 } from './async/shared.js';
 
 /** A superseded run resolves { ok: false, error: SupersededError } and never writes `.error`. */
@@ -42,13 +43,8 @@ export type RunResult<T> = { ok: true; value: T } | { ok: false; error: Error };
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export interface ActionOptions {}
 
-export interface AsyncAction<T, In> {
-    readonly state: 'idle' | 'pending' | 'ready' | 'errored'; // no 'refreshing'
-    /** Last successful result (a search box renders from this). */
-    readonly value: T | null;
-    readonly error: Error | null;
-    /** state === 'pending' — the blessed double-submit guard: disabled={a.loading}. */
-    readonly loading: boolean;
+/** Methods shared by every {@link AsyncAction} member. */
+export interface AsyncActionBase<T, In> {
     match<R>(arms: MatchArms<T, R>): R | undefined;
     /**
      * Trigger. Never rejects; in-flight runs are never aborted.
@@ -63,6 +59,22 @@ export interface AsyncAction<T, In> {
      */
     reset(): void;
 }
+
+/**
+ * A discriminated union like {@link AsyncState} (same narrowing:
+ * `if (a.hasValue) a.value // T`), with action-specific semantics — no
+ * 'refreshing'; `value` is the LAST SUCCESSFUL result and survives both a
+ * re-run ('pending' — a search box renders from it) and a failure
+ * ('errored' — SWR-through-error); `loading` is the blessed double-submit
+ * guard: disabled={a.loading}. Only `reset()` clears the value.
+ */
+export type AsyncAction<T, In> = AsyncActionBase<T, In> &
+    (
+        | { readonly state: 'idle'; readonly value: null; readonly hasValue: false; readonly error: null; readonly loading: false }
+        | ({ readonly state: 'pending'; readonly error: null; readonly loading: true } & ValuePresence<T>)
+        | { readonly state: 'ready'; readonly value: T; readonly hasValue: true; readonly error: null; readonly loading: false }
+        | ({ readonly state: 'errored'; readonly error: Error; readonly loading: false } & ValuePresence<T>)
+    );
 
 /** Option keys the default engine itself reads — none; the interface is a pack seam. */
 const handledActionOptionKeys: ReadonlySet<string> = new Set();
@@ -83,17 +95,17 @@ export function useAction<T, In = void>(fn: Fetcher<T, In>, opts?: ActionOptions
     }
 
     const state = signal({
-        st: 'idle' as AsyncAction<T, In>['state'],
+        st: 'idle' as 'idle' | 'pending' | 'ready' | 'errored',
         data: null as T | null,
         err: null as Error | null,
+        /** `data` is a VALUE (the last success) — presence, not a null test (#485). */
+        has: false,
     });
 
     /** Supersede token: bumped by every run(), reset(), and unmount. */
     let seq = 0;
     let lastInput: In;
     let hasRun = false;
-    /** Last successful value — handed to the error arm as `stale`. */
-    let stale: T | null = null;
 
     const reportUnhandled = makeUnhandledReporter(instance, 'useAction');
 
@@ -127,11 +139,11 @@ export function useAction<T, In = void>(fn: Fetcher<T, In>, opts?: ActionOptions
             }
             const v = await p;
             if (id !== seq) return superseded(); // never writes state
-            stale = v;
             untrack(() =>
                 batch(() => {
                     state.st = 'ready';
                     state.data = v;
+                    state.has = true;
                     state.err = null;
                 })
             );
@@ -141,10 +153,9 @@ export function useAction<T, In = void>(fn: Fetcher<T, In>, opts?: ActionOptions
             const err = normalizeError(e);
             untrack(() =>
                 batch(() => {
-                    // value/error stay mutually exclusive; the last success
-                    // survives in `stale` for the error arm.
+                    // SWR-through-error: the last success survives in
+                    // `data`/`has` — only reset() clears it.
                     state.st = 'errored';
-                    state.data = null;
                     state.err = err;
                 })
             );
@@ -154,11 +165,11 @@ export function useAction<T, In = void>(fn: Fetcher<T, In>, opts?: ActionOptions
 
     function reset(): void {
         seq++;
-        stale = null;
         untrack(() =>
             batch(() => {
                 state.st = 'idle';
                 state.data = null;
+                state.has = false;
                 state.err = null;
             })
         );
@@ -170,12 +181,16 @@ export function useAction<T, In = void>(fn: Fetcher<T, In>, opts?: ActionOptions
         seq++;
     });
 
-    const action: AsyncAction<T, In> = {
+    // Wide impl shape, cast to the union at the seam (see AsyncStateImpl).
+    const action = {
         get state() {
             return state.st;
         },
         get value() {
             return state.data;
+        },
+        get hasValue() {
+            return state.has;
         },
         get error() {
             return state.err;
@@ -188,8 +203,9 @@ export function useAction<T, In = void>(fn: Fetcher<T, In>, opts?: ActionOptions
                 {
                     state: state.st,
                     value: state.data,
+                    hasValue: state.has,
                     error: state.err,
-                    stale,
+                    pendingKeepsValue: true,
                     // Write-retry: re-run with the last input. (A zero-arg
                     // closure re-reads current signals by construction.)
                     retry: () => {
@@ -202,7 +218,7 @@ export function useAction<T, In = void>(fn: Fetcher<T, In>, opts?: ActionOptions
         },
         run,
         reset,
-    };
+    } as AsyncAction<T, In>;
 
     return engine?.wrapAction ? engine.wrapAction(action, opts ?? {}, instance) : action;
 }

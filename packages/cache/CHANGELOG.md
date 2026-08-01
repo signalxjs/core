@@ -5,6 +5,21 @@ repository-root `CHANGELOG.md`.
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING: rides the `AsyncState` union + SWR-through-error redesign
+  (core #578; full table in the root changelog).** Pack-visible specifics:
+  `CachedAsyncState<T>` is now an intersection alias
+  (`AsyncState<T> & { invalidate; mutate }`) — `extends` on it stops
+  compiling; the `invalidate?`/`mutate?` module augmentation moved from
+  `AsyncState` to `AsyncStateBase` and `mutate?` is now precisely typed
+  (`T | ((current: T | null) => T)` instead of `unknown`); an errored cached
+  read keeps its last-good `value`/`hasValue` (entry value first, held
+  previous-key value under `keepPreviousData` second); and the
+  empty-entry-not-in-flight `keepPreviousData` corner that reported
+  `'pending'` with data on screen and `loading === true` now reports
+  `'refreshing'` — `pending ⇒ hasValue: false` holds everywhere.
+
 ### Fixed
 
 - **`invalidates` reaches reads that carry no `cache` option (#484).**

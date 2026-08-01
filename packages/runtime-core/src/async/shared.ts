@@ -27,17 +27,37 @@ export type Fetcher<T, Arg> = (arg: Arg, ctx: AsyncFetcherContext) => Promise<T>
 
 export type AsyncStateName = 'idle' | 'pending' | 'ready' | 'refreshing' | 'errored';
 
+/**
+ * The presence pair: `hasValue` is the discriminant that makes `value` a `T`.
+ *
+ * `value !== null` cannot answer "is there a value?" for a nullable `T` — a
+ * fetch that legitimately resolves `null` (a "not found" read) is a VALUE
+ * (#485). `if (x.hasValue) x.value // T` is the type-safe form of that
+ * question, everywhere this pair appears.
+ */
+export type ValuePresence<T> =
+    | { readonly value: T; readonly hasValue: true }
+    | { readonly value: null; readonly hasValue: false };
+
+/**
+ * Second parameter of the `error` arm. `value`/`hasValue` are the surviving
+ * last-good (the same thing the state's own `value` holds during `'errored'`)
+ * — a legitimately-null last-good has `hasValue: true`.
+ */
+export type ErrorArmContext<T> = { readonly retry: () => void } & ValuePresence<T>;
+
 export interface MatchArms<T, R> {
     /** Conditional fetch not started ("Type to search…"). Defaults to `pending`. */
     idle?: () => R;
     /** Nothing to show yet. Omitted ⇒ renders nothing while pending. */
     pending?: () => R;
     /**
-     * Fetch failed. `stale` is the last-good value (survives internally even
-     * though top-level `value` is nulled) — "keep content + toast" needs no
-     * extra state. Omitted ⇒ null + bubble to errorScope / app onError.
+     * Fetch failed. "Keep content + toast" reads `ctx.value`/`ctx.hasValue`
+     * (the surviving last-good); the common case destructures just
+     * `(e, { retry })`. Omitted ⇒ undefined + bubble to errorScope / app
+     * onError.
      */
-    error?: (e: Error, retry: () => void, stale: T | null) => R;
+    error?: (e: Error, ctx: ErrorArmContext<T>) => R;
     /**
      * The happy path. Reached when the cell HAS a value — which for a nullable
      * `T` includes a legitimately `null` one, so this is "the value is
@@ -46,43 +66,117 @@ export interface MatchArms<T, R> {
     ready: (v: T) => R;
 }
 
-/** Reactive — reads inside a render fn subscribe like any signal. */
-export interface AsyncState<T> {
-    readonly state: AsyncStateName;
-    /** SWR last-good; kept across same-key refresh(), CLEARED on key change. */
-    readonly value: T | null;
-    /**
-     * Whether `value` is a VALUE rather than "nothing yet" (#485).
-     *
-     * `value !== null` is not that question, and reading it as such is wrong
-     * for any nullable `T`: a fetch that legitimately resolves `null` — a
-     * "not found" read — looks identical to an unsettled cell. Prefer `state`
-     * (`'ready'`/`'refreshing'` ⇒ present) in templates; this is the direct
-     * form for engines and for code that holds a value it must not conflate
-     * with absence.
-     */
-    readonly hasValue: boolean;
-    readonly error: Error | null;
-    /** state === 'pending' ONLY — "nothing to show yet". Refresh indicators read state === 'refreshing'. */
-    readonly loading: boolean;
+/** Methods shared by every {@link AsyncState} member. */
+export interface AsyncStateBase<T> {
     match<R>(arms: MatchArms<T, R>): R | undefined;
     /** Re-run in place. NEVER rejects — failures land on `.error`. */
     refresh(): Promise<void>;
 }
 
+export interface AsyncIdle<T> extends AsyncStateBase<T> {
+    readonly state: 'idle';
+    readonly value: null;
+    readonly hasValue: false;
+    readonly error: null;
+    readonly loading: false;
+}
+export interface AsyncPending<T> extends AsyncStateBase<T> {
+    readonly state: 'pending';
+    readonly value: null;
+    readonly hasValue: false;
+    readonly error: null;
+    readonly loading: true;
+}
+export interface AsyncReady<T> extends AsyncStateBase<T> {
+    readonly state: 'ready';
+    readonly value: T;
+    readonly hasValue: true;
+    readonly error: null;
+    readonly loading: false;
+}
+export interface AsyncRefreshing<T> extends AsyncStateBase<T> {
+    readonly state: 'refreshing';
+    readonly value: T;
+    readonly hasValue: true;
+    readonly error: null;
+    readonly loading: false;
+}
+/**
+ * SWR-through-error: the last-good value survives a failed same-key fetch, so
+ * this member genuinely splits on presence — `hasValue: true` after a failed
+ * refresh of settled data, `false` when the cell never succeeded.
+ */
+export type AsyncErrored<T> = AsyncStateBase<T> & {
+    readonly state: 'errored';
+    readonly error: Error;
+    readonly loading: false;
+} & ValuePresence<T>;
+
+/**
+ * Reactive — reads inside a render fn subscribe like any signal.
+ *
+ * A discriminated union over one STABLE object: `if (x.hasValue) x.value // T`
+ * and `if (x.state === 'ready') x.value // T` both narrow. Narrowing is a
+ * per-read snapshot — the underlying state moves on, so re-check after an
+ * `await` (render fns re-run and re-narrow on every change; this only matters
+ * in event handlers and async code).
+ *
+ * Invariants every producer upholds: `value` is the SWR last-good — kept
+ * across same-key refresh() AND across a failed fetch, CLEARED on key
+ * change; `loading` is `state === 'pending'` ONLY ("nothing to show yet" —
+ * refresh indicators read `'refreshing'`). The state/presence/error
+ * combinations are additionally dev-checked in `matchAsyncState`; `loading`
+ * is not (derive it from the state name and it cannot lie).
+ */
+export type AsyncState<T> =
+    | AsyncIdle<T>
+    | AsyncPending<T>
+    | AsyncReady<T>
+    | AsyncRefreshing<T>
+    | AsyncErrored<T>;
+
+/**
+ * The WIDE shape an engine implements — build one of these (getters over your
+ * own state machine) and return it `as AsyncState<T>` at the seam; the union
+ * is how CONSUMERS see it, not a shape TypeScript can check a stable getter
+ * object against. Invariants the cast asserts, dev-warned in
+ * `matchAsyncState`: idle/pending ⇒ `hasValue` false & `error` null;
+ * ready/refreshing ⇒ `hasValue` true & `error` null; errored ⇒ `error`
+ * non-null. `loading` must be `state === 'pending'` — not runtime-checked
+ * (`matchAsyncState` never sees it); derive it from the state name, as every
+ * in-tree producer does, and it cannot disagree.
+ *
+ * @internal — the §7 pack contract surface.
+ */
+export interface AsyncStateImpl<T> {
+    readonly state: AsyncStateName;
+    readonly value: T | null;
+    readonly hasValue: boolean;
+    readonly error: Error | null;
+    readonly loading: boolean;
+    match<R>(arms: MatchArms<T, R>): R | undefined;
+    refresh(): Promise<void>;
+}
+
 /** Brand identifying engine-made cells — `all()` uses it to tell the object form from a single-member tuple. @internal */
 export const CELL: unique symbol = Symbol('sigx:asyncCell');
-/** Non-enumerable getter exposing a cell's internal last-good value so `all()` can combine stales. @internal */
-export const STALE: unique symbol = Symbol('sigx:asyncStale');
 
 /** @internal */
 export function isCell(v: unknown): boolean {
     return !!v && (v as Record<symbol, unknown>)[CELL] === true;
 }
 
+/** One warning per distinct producer bug, not one per render. */
+const invariantWarned = __DEV__ ? new Set<string>() : null!;
+
 /**
  * The state→arm dispatch table (shared by client cells, actions, `all()`,
  * and the server renderer's provider).
+ *
+ * In dev it also checks the {@link AsyncStateImpl} state/presence/error
+ * invariants — the honesty check behind every producer's `as AsyncState<T>`
+ * cast, third-party engines included. (`loading` is outside the view and
+ * outside the check — see {@link AsyncStateImpl}.)
  *
  * @internal
  */
@@ -90,14 +184,33 @@ export function matchAsyncState<T, R>(
     view: {
         state: AsyncStateName;
         value: T | null;
+        hasValue: boolean;
         error: Error | null;
-        stale: T | null;
         retry: () => void;
+        /** Actions keep the last success visible while 'pending' — data cells never do. */
+        pendingKeepsValue?: boolean;
         /** Called when the cell is errored and no `error` arm was given. */
         onUnhandledError?: (e: Error) => void;
     },
     arms: MatchArms<T, R>
 ): R | undefined {
+    if (__DEV__) {
+        const s = view.state;
+        const bug =
+            (s === 'idle' || (s === 'pending' && !view.pendingKeepsValue)) && view.hasValue
+                ? `state '${s}' must have hasValue: false`
+                : (s === 'ready' || s === 'refreshing') && !view.hasValue
+                    ? `state '${s}' must have hasValue: true`
+                    : s !== 'errored' && view.error
+                        ? `state '${s}' must have error: null`
+                        : s === 'errored' && !view.error
+                            ? "state 'errored' must carry a non-null error"
+                            : null;
+        if (bug && !invariantWarned.has(bug)) {
+            invariantWarned.add(bug);
+            console.warn(`[AsyncState] producer invariant violated: ${bug} — the engine that built this state is lying to the union type.`);
+        }
+    }
     switch (view.state) {
         case 'idle':
             return (arms.idle ?? arms.pending)?.();
@@ -107,7 +220,13 @@ export function matchAsyncState<T, R>(
         case 'refreshing':
             return arms.ready(view.value as T);
         case 'errored':
-            if (arms.error) return arms.error(view.error as Error, view.retry, view.stale);
+            if (arms.error) {
+                return arms.error(view.error as Error, {
+                    retry: view.retry,
+                    value: view.value,
+                    hasValue: view.hasValue,
+                } as ErrorArmContext<T>);
+            }
             view.onUnhandledError?.(view.error as Error);
             return undefined;
     }

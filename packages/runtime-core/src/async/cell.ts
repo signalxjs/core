@@ -16,10 +16,10 @@ import type { ComponentSetupContext } from '../component-types.js';
 import {
     type AsyncFetcherContext,
     type AsyncState,
+    type AsyncStateImpl,
     type AsyncStateName,
     type MatchArms,
     CELL,
-    STALE,
     matchAsyncState,
     normalizeError,
     makeUnhandledReporter,
@@ -154,17 +154,12 @@ export function createDataCell<T>(
          *
          * `data !== null` cannot answer that: a fetch legitimately resolving
          * `null` — a "not found" read — is indistinguishable from an unsettled
-         * cell. Reading it as presence made a ready null-valued cell go back to
-         * `'pending'` on refresh, which flashes a skeleton over live content
-         * and violates the pinned rule that `loading` means "nothing to show
-         * yet" (docs/rfc-async.md). It also made the `ready` arm's documented
-         * "value is present" guarantee false for a nullable `T`.
+         * cell. Both survive a failed fetch (SWR-through-error): last-good is
+         * `data` itself, in every state — there is no hidden stale channel.
+         * Cleared only on key change and skip.
          */
         has: false,
     });
-
-    /** Last-good value — survives a failed refresh (handed to the error arm as `stale`). */
-    let stale: T | null = null;
     /** Supersede token: bumped by every new run, key change, and dispose. */
     let runId = 0;
     let canonKey: string | null = null;
@@ -270,7 +265,6 @@ export function createDataCell<T>(
         try {
             const v = (await entry.p) as T;
             if (id !== runId) return; // superseded — never writes state
-            stale = v;
             batch(() => {
                 state.st = 'ready';
                 state.data = v;
@@ -281,12 +275,11 @@ export function createDataCell<T>(
             if (id !== runId) return; // superseded — never writes `.error`
             const err = normalizeError(e);
             batch(() => {
-                // value/error are mutually exclusive — a failed fetch clears
-                // data so success and error branches can't co-render. The
-                // last-good value survives in `stale` for the error arm.
+                // SWR-through-error: `data`/`has` survive — the app decides
+                // whether stale content outlives a failure by reading them,
+                // and a later retry runs as 'refreshing', never flashing a
+                // skeleton over content the error arm was showing.
                 state.st = 'errored';
-                state.data = null;
-                state.has = false;
                 state.err = err;
             });
         }
@@ -308,7 +301,6 @@ export function createDataCell<T>(
             if (canon !== null) registerMounted(canon, onInvalidate);
             runId++; // supersede any in-flight observation
             release();
-            stale = null;
 
             if (canon === null) {
                 batch(() => {
@@ -323,7 +315,6 @@ export function createDataCell<T>(
             const restored = peekRestored(canon);
             if (restored.hit) {
                 const v = restored.value as T;
-                stale = v;
                 batch(() => {
                     state.st = 'ready';
                     state.data = v;
@@ -352,7 +343,9 @@ export function createDataCell<T>(
         return startRun(true);
     }
 
-    const cell: AsyncState<T> = {
+    // Built as the wide impl shape, cast to the union at the seam — the
+    // invariants the cast asserts are dev-checked in matchAsyncState.
+    const impl: AsyncStateImpl<T> = {
         get state() {
             return state.st;
         },
@@ -373,8 +366,8 @@ export function createDataCell<T>(
                 {
                     state: state.st,
                     value: state.data,
+                    hasValue: state.has,
                     error: state.err,
-                    stale,
                     retry: () => void refresh(),
                     onUnhandledError: reportUnhandled,
                 },
@@ -383,11 +376,10 @@ export function createDataCell<T>(
         },
         refresh,
     };
-    Object.defineProperty(cell, CELL, { value: true });
-    Object.defineProperty(cell, STALE, { get: () => stale });
+    Object.defineProperty(impl, CELL, { value: true });
 
     return {
-        cell,
+        cell: impl as AsyncState<T>,
         setKey,
         dispose() {
             runId++;
@@ -418,6 +410,5 @@ export const INERT_IDLE_CELL: AsyncState<never> = (() => {
         refresh: () => Promise.resolve(),
     };
     Object.defineProperty(cell, CELL, { value: true });
-    Object.defineProperty(cell, STALE, { value: null });
     return Object.freeze(cell);
 })();

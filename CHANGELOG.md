@@ -33,6 +33,57 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- **BREAKING: `AsyncState` is a discriminated union, and `value`/`hasValue`
+  survive errors (#578; supersedes #485's `hasValue` as shipped in this
+  cycle).** Two changes with one root: presence was split across a visible
+  channel (`hasValue`, #485) and a hidden one (the `STALE` symbol + the
+  error arm's positional `stale: T | null`), and the hidden one still
+  conflated a legitimate `null` with "no value" — `all()`'s combined stale
+  died on one legit-null member, and each new pack surface grew its own
+  presence boolean to compensate (`hasPreviousData`, the proposed
+  `hasStale`).
+
+  Now: `value` is *the best data the cell has* under one rule — kept across
+  same-key `refresh()` **and across a failed fetch**, cleared on key change
+  — and `AsyncState<T>` is a tagged union
+  (`AsyncIdle | AsyncPending | AsyncReady | AsyncRefreshing | AsyncErrored`),
+  so `if (q.hasValue) q.value // T` and `if (q.state === 'ready') q.value // T`
+  narrow with no cast; the `'errored'` member genuinely splits on
+  `hasValue`. `match` still renders the error arm on every `'errored'`
+  (no fallback to `ready`), and its error arm is now
+  `error?: (e, ctx: { retry } & ({ value: T; hasValue: true } | { value: null; hasValue: false })) => R`.
+  The hidden stale channel is deleted outright. `AsyncAction` gets the same
+  union treatment and gains `hasValue`; `AsyncStateName` is finally
+  exported.
+
+  Old → new observable value, per input shape that already existed:
+
+  | shape | before | after |
+  |---|---|---|
+  | errored after a success: `.value` / `.hasValue` | `null` / `false` | **last-good `T` / `true`** |
+  | errored, never succeeded | `null` / `false` | `null` / `false` (unchanged) |
+  | error arm 2nd/3rd params | `(retry, stale)` positional | **`ctx` object** — `ctx.retry`, `ctx.value`, `ctx.hasValue` |
+  | retry from errored-after-success | `'pending'` (skeleton flash over kept content) | **`'refreshing'`** |
+  | `all()` combined value with a legit-`null` member | last-good combination `null` | combines; `hasValue` true |
+  | cache `keepPreviousData`, empty entry not in flight | `'pending'` with data shown and `loading === true` | **`'refreshing'`**, `loading === false` |
+  | `interface X extends AsyncState<T>` | compiled | **compile error** — intersect instead: `type X<T> = AsyncState<T> & {...}` |
+
+  Breaking userland patterns, by name:
+
+  - `q.error && !q.value` (or any `errored ⇒ value === null` guard) — an
+    errored cell that once had data now holds it; content next to an error
+    banner stays on screen instead of blanking. That is the intended SWR
+    posture; blank deliberately with the state check `q.state === 'errored'`.
+  - `error: (e, retry, stale) => …` — destructure instead:
+    `error: (e, { retry }) => …`; the last-good is `ctx.value`/`ctx.hasValue`
+    (a legit-null last-good finally reads as present).
+  - Engine packs (§7): implement the wide `AsyncStateImpl<T>` (internals)
+    and return it `as AsyncState<T>`; `matchAsyncState` dev-warns when a
+    producer's state/presence combination lies. Packs extending the state
+    shape switch from `extends` to an intersection; members meant to exist
+    on every state augment `AsyncStateBase<T>` (how `@sigx/cache`'s
+    `invalidate?`/`mutate?` now land).
+
 - **`@sigx/server`: `origin: 'verify-when-present'` no longer admits
   Origin-less FORM posts (#556).** The relaxation's safety rests on the JSON
   content-type CSRF layer, which a `form: true` target deliberately gives
@@ -364,10 +415,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   seam at all. New build warning: a spread in a `serverFn({...})` options
   literal hides `id`/`cache`/`invalidates`/`form` from the static readers,
   which silently disables single-flight boundary refresh.
-
-- **`AsyncState.hasValue` — presence, separate from the value (#485).** Every
-  `useData` cell, the `@sigx/cache` cell, `all()` and the SSR-side state now
-  expose `readonly hasValue: boolean`. Additive for readers.
 
 - **`@sigx/vite/assets` — `collectAssets` without the `node:` graph (#486).**
   The manifest → `DocumentOptions.assets` resolver is a pure function, but it

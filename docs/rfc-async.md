@@ -251,28 +251,40 @@ fetcher not run) on any falsy result — `null`, `undefined`, `false`, `''`
 an empty tuple** (skipped + dev-warned, rev 7: `[]` is truthy but is almost
 always a bug; treating it like `''` keeps "no parameters yet ⇒ no fetch").
 
-`AsyncState` — `state` is the canonical truth:
+`AsyncState` — a **discriminated union** over one stable reactive object
+(rev 10; Solid's `Resource` is the precedent). Plain reads narrow:
+`if (x.hasValue) x.value // T` and `if (x.state === 'ready') x.value // T`
+are both type-safe, no cast and no `match` required.
 
 ```ts
-interface AsyncState<T> {
-  readonly state: 'idle' | 'pending' | 'ready' | 'refreshing' | 'errored';
-  readonly value: T | null;          // SWR last-good; kept across refresh(), CLEARED on key change
-  readonly hasValue: boolean;        // rev 9: `value` is a VALUE, not "nothing yet" — see below
-  readonly error: Error | null;      // normalized; mutually exclusive with value
-  readonly loading: boolean;         // state === 'pending' ONLY — "nothing to show yet" (rev 6)
+type AsyncState<T> =
+  | AsyncIdle<T>        // state 'idle'       value null  hasValue false  error null   loading false
+  | AsyncPending<T>     // state 'pending'    value null  hasValue false  error null   loading true
+  | AsyncReady<T>       // state 'ready'      value T     hasValue true   error null   loading false
+  | AsyncRefreshing<T>  // state 'refreshing' value T     hasValue true   error null   loading false
+  | AsyncErrored<T>;    // state 'errored'    error Error loading false — and the presence SPLIT:
+                        //   { value: T; hasValue: true } | { value: null; hasValue: false }
 
-  match<R>(arms: {
-    idle?:    () => R;                              // defaults to the pending arm (rev 6)
-    pending?: () => R;                              // omitted ⇒ renders nothing while pending
-    error?:   (e: Error, retry: () => void, stale: T | null) => R;   // stale = last-good (rev 6)
-    ready:    (v: T) => R;                          // required: the happy path
-  }): R | undefined;
-
-  refresh(): Promise<void>;          // re-run in place; NEVER rejects — failures land on .error
-}
+// every member shares (AsyncStateBase<T>):
+//   match<R>(arms: {
+//     idle?:    () => R;                          // defaults to the pending arm (rev 6)
+//     pending?: () => R;                          // omitted ⇒ renders nothing while pending
+//     error?:   (e: Error, ctx: ErrorArmContext<T>) => R;  // ctx = { retry } & ValuePresence<T> (rev 10)
+//     ready:    (v: T) => R;                      // required: the happy path
+//   }): R | undefined;
+//   refresh(): Promise<void>;   // re-run in place; NEVER rejects — failures land on .error
 ```
 
-**Pinned semantics (rev 6):**
+`value` is the SWR last-good — kept across same-key `refresh()` **and across
+a failed fetch** (rev 10), CLEARED on key change. `hasValue` is the presence
+discriminant that makes `value` a `T`. `loading` is `state === 'pending'`
+only. Narrowing is a per-read snapshot: render fns re-run and re-narrow on
+every change; in event handlers and async code, re-check after an `await`
+(same rule as Solid). Extensions intersect rather than extend — the union
+distributes: `type AllState<T, E> = AsyncState<T> & { errors: E }`,
+`type CachedAsyncState<T> = AsyncState<T> & { invalidate(); mutate() }`.
+
+**Pinned semantics (rev 6, presence-split refined by rev 10):**
 
 - **`loading` means "nothing to show yet"** — `state === 'pending'` only.
   The blessed migration idiom `if (x.loading) return <Skeleton/>` stays
@@ -280,36 +292,39 @@ interface AsyncState<T> {
   revalidate. Refresh indicators read `state === 'refreshing'` explicitly.
 - **Key change ⇒ hard reset:** value cleared, state `pending`. Rendering
   user A's data under user B's key is a wrong-data flash — strictly worse
-  than a skeleton. `value` is kept only across *same-key* `refresh()`
-  (state `refreshing`). `keepPreviousData` stale-hold across key changes is
+  than a skeleton. `keepPreviousData` stale-hold across key changes is
   exactly a `cache: {}` pack policy (§7).
-- **A failed background refresh does not blank live content:** on error,
-  top-level `value`/`error` stay mutually exclusive (matching shipped
-  behavior), but the engine retains the last-good value internally and hands
-  it to the error arm as `stale` — so "keep showing data, add a toast" is
-  expressible with zero extra state. (This deliberately revises rev 2's
-  "errored + value ⇒ render `ready`" — the *app* decides whether stale
-  content survives an error, not the framework.)
+- **A failed fetch does not blank live content (SWR-through-error, rev 10):**
+  `value`/`hasValue` SURVIVE `'errored'`. This revises rev 6's "top-level
+  `value`/`error` stay mutually exclusive": the mutual exclusion forced the
+  last-good into a hidden per-channel side channel (the `STALE` symbol, the
+  error arm's positional `stale` param, `hasStale`, `hasPreviousData` — each
+  re-growing its own presence boolean, each re-conflating a legit null), and
+  rev 6's own principle — *the app decides whether stale content survives an
+  error, not the framework* — is served better by a readable state:
+  "keep content + toast" is `{x.hasValue && show(x.value)} {x.error && <Toast/>}`,
+  two plain narrowing reads, zero extra state. `match` still renders the
+  **error arm, always** on `'errored'` (no silent fallback to `ready` —
+  co-rendering stale content next to the error remains the app's explicit
+  choice inside the arm), and a retry from errored-with-value runs as
+  `'refreshing'`, never flashing a skeleton over content the arm was showing.
 - **`idle` is matchable:** conditional fetch is a headline feature, and
   "Type to search…" is not a spinner. The optional `idle` arm defaults to
   the `pending` arm, so simple cases stay two-arm.
 
-**`match` is sugar at runtime, load-bearing for types.** Plain `state` checks
-work (`if (x.loading) …`), but TypeScript cannot narrow `value: T | null`
-across reactive getter reads — `ready: (v: T) => R` is the only *type-safe*
-path to the value. `match` also carries the error-bubbling guarantee
-(an omitted `error` arm is never silently swallowed). Both are contract, not
-convenience.
+**`match` is sugar at runtime, and no longer the only type-safe path** (rev
+10 — the union narrows plain reads too). It remains contract for the arms'
+exhaustive dispatch and for the error-bubbling guarantee: an omitted `error`
+arm is never silently swallowed — the error bubbles to the nearest
+errorScope / app `onError`.
 
-**`value` is not a presence signal (rev 9).** For a nullable `T`, a fetch that
-legitimately resolves `null` — a "not found" read — is a VALUE, and
-`value !== null` cannot tell it from an unsettled cell. Presence is `state`
-(`'ready'`/`'refreshing'` ⇒ present) or, directly, **`hasValue`**. The engine
-itself used to get this wrong: it derived its state name from `data !== null`,
-so refreshing a ready null-valued cell went back to `'pending'` and flashed a
-skeleton over live content, breaking the rev-6 rule below. The `ready` arm
-therefore means "the value is present", not "the value is non-null" — a
-nullable `T` reaches it with `null`, which is correct and type-honest.
+**`value` is not a presence signal (rev 9; structural since rev 10).** For a
+nullable `T`, a fetch that legitimately resolves `null` — a "not found" read
+— is a VALUE, and `value !== null` cannot tell it from an unsettled cell.
+Presence is **`hasValue`**, on every channel: the state itself, the errored
+split, and the error arm's `ctx`. The `ready` arm means "the value is
+present", not "the value is non-null" — a nullable `T` reaches it with
+`null`, which is correct and type-honest.
 
 **State → arm mapping** (`match` is exactly this table):
 
@@ -318,7 +333,7 @@ nullable `T` reaches it with `null`, which is correct and type-honest.
 | `idle` | null | the `idle` arm, else the `pending` arm, else nothing |
 | `pending` | null | the `pending` arm, or nothing if it's omitted |
 | `ready` / `refreshing` | present | `ready(value)` — live, stale-while-revalidating |
-| `errored` | null | `error(e, retry, stale)`, or `null` + bubble to `onError` if no `error` arm |
+| `errored` | last-good (`hasValue` splits) | `error(e, ctx)`, or `undefined` + bubble to `onError` if no `error` arm |
 
 **No `latest`, no flash, but honest about the model.** `value` already is the
 SWR last-good value, so a separate `latest` is redundant (dropped). The `ready`
@@ -625,6 +640,18 @@ user.mutate(u => ({ ...u, name })); // pack-provided: optimistic write-through
    the option site (packs own the diagnostics for their augmented *methods*;
    in TS, unaugmented options are already a compile error thanks to
    excess-property checks on the open interfaces).
+6. **The producer obligations (rev 10).** An engine's cells implement the
+   wide `AsyncStateImpl<T>` (internals) and return it `as AsyncState<T>`;
+   the cast asserts the union's invariants, and `matchAsyncState` dev-warns
+   when a producer lies: `idle`/`pending` ⇒ `hasValue` false and `error`
+   null; `ready`/`refreshing` ⇒ `hasValue` true and `error` null; `errored`
+   ⇒ `error` non-null and the **last-good surviving** in `value`/`hasValue`
+   (SWR-through-error — an engine that blanks value on error re-introduces
+   the skeleton-over-content flash on retry). Presence is `hasValue`, never
+   a null test. Extensions intersect (`AsyncState<T> & {...}`) rather than
+   `extends`; member additions that must exist on every state augment
+   `AsyncStateBase<T>`, which is how the pack's `invalidate?`/`mutate?`
+   reach plain reads.
 
 One primitive family, one vocabulary, unchanged call sites — but core carries
 mechanism only, exactly like islands (`SSRPlugin`) and the store SSR adapter.
@@ -732,8 +759,16 @@ Each phase = its own issue → worktree → PR → Copilot review → merge.
 ## Resolved decisions
 
 - Snapshot arm + diff-in-place, no live accessor (honesty note in §1).
-- Arm names `idle`/`pending`/`error`/`ready`; `match` is sugar at runtime,
-  **load-bearing for types** (§1); `idle` arm optional, defaults to `pending`.
+- Arm names `idle`/`pending`/`error`/`ready`; `match` is sugar at runtime;
+  since rev 10 the union narrows plain reads too, so `match`'s contract is
+  arm dispatch + error bubbling, not type access; `idle` arm optional,
+  defaults to `pending`.
+- **`AsyncState` is a discriminated union (rev 10)** — `state`, `hasValue`,
+  and literal `loading` all discriminate; extensions intersect
+  (`AllState`, `CachedAsyncState`); cross-state member additions augment
+  `AsyncStateBase`; engines implement `AsyncStateImpl` + cast (§7
+  obligation 6). No snapshot objects — the stable-reactive-object model is
+  unchanged; narrowing is per-read.
 - Missing `error` arm ⇒ `null` + bubble to `onError` + first-time dev warning.
 - `errorScope` ships Phase 1 with the §4 contract (parent-chain walk is
   Phase-1 wiring, not current behavior); the `SafeWidget` pattern is the
@@ -747,8 +782,12 @@ Each phase = its own issue → worktree → PR → Copilot review → merge.
   **untracked**.
 - **Key change ⇒ value cleared ⇒ `pending`** (rev 6); SWR keep applies to
   same-key `refresh()` only; `keepPreviousData` is pack policy.
-- **Errored keeps content expressible**: `error` arm receives `stale: T | null`
-  (rev 6); top-level `value`/`error` stay mutually exclusive.
+- **Errored keeps content, structurally (rev 10; revises rev 6)**:
+  `value`/`hasValue` survive a failed fetch — the hidden stale channel
+  (STALE symbol, positional `stale` param) is deleted; the error arm takes
+  `(e, ctx)` with `ctx = { retry } & ValuePresence<T>`; a retry from
+  errored-with-value runs as `'refreshing'`. `match` still always renders
+  the error arm on `'errored'`.
 - `all()` errors: first-error-wins + `.errors` (shapes pinned in §3);
   combined `refresh()` refreshes all members; any-member-refreshing ⇒
   combined `refreshing`.

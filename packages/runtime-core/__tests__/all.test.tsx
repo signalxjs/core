@@ -206,7 +206,7 @@ describe('all', () => {
                 <div class="out">
                     {combined.match({
                         pending: () => 'PENDING',
-                        error: (e, retry) => {
+                        error: (e, { retry }) => {
                             (globalThis as any).__retryAll = retry;
                             return `ERROR:${e.message}`;
                         },
@@ -225,5 +225,45 @@ describe('all', () => {
         expect(calls).toEqual(['a', 'b', 'a', 'b']);
         expect(container.querySelector('.out')?.textContent).toBe('READY:{"a":"A","b":"B"}');
         delete (globalThis as any).__retryAll;
+    });
+
+    it('a member whose last-good is a legitimate NULL does not sink the combined value (#485 on the combination)', async () => {
+        // Regression for the old combinedStale(): it discriminated members'
+        // last-good on a null test, so ONE member that legitimately resolved
+        // null nulled the whole combination. Presence now combines on
+        // hasValue — including through 'errored' (SWR-through-error).
+        let combined!: AsyncState<unknown>;
+        let aCalls = 0;
+        const App = component(() => {
+            const a = useData('null-a', () => {
+                aCalls++;
+                // First read legitimately resolves null; refresh fails.
+                return aCalls === 1
+                    ? Promise.resolve<string | null>(null)
+                    : Promise.reject(new Error('a refresh failed'));
+            });
+            const b = useData('null-b', async () => 'B');
+            combined = all({ a, b });
+            return () => <div />;
+        });
+        mount(jsx(App, {}));
+        await settle();
+        expect(combined.state).toBe('ready');
+        expect(combined.hasValue).toBe(true);
+        expect(combined.value).toEqual({ a: null, b: 'B' }); // null IS a value
+
+        await combined.refresh();
+        await settle();
+        expect(combined.state).toBe('errored');
+        // Every member still HAS a value (a's is null, held through the
+        // error), so the combination does too.
+        expect(combined.hasValue).toBe(true);
+        expect(combined.value).toEqual({ a: null, b: 'B' });
+        const seen: { hasValue: boolean; value: unknown } = combined.match({
+            error: (_e, ctx) => ({ hasValue: ctx.hasValue, value: ctx.value }),
+            ready: () => { throw new Error('errored must dispatch the error arm'); },
+        })!;
+        expect(seen.hasValue).toBe(true);
+        expect(seen.value).toEqual({ a: null, b: 'B' });
     });
 });

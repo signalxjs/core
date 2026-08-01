@@ -451,8 +451,10 @@ function serverUseAsync(
             return matchAsyncState({
                 state: state.st,
                 value: state.data,
+                // Server cells never hold last-good through 'errored' (one
+                // request, no prior success) — the errored empty split.
+                hasValue: state.st === 'ready',
                 error: state.failure,
-                stale: null,
                 retry: () => { /* no-op on the server */ }
             }, arms);
         },
