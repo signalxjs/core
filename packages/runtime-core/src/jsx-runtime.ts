@@ -49,7 +49,10 @@ function createTextVNode(text: string | number): VNode {
     return { type: Text, props: EMPTY_PROPS, key: null, children: EMPTY_CHILDREN, dom: null, text };
 }
 
-function normalizeChildren(children: JSXChildren): VNode[] {
+// Exported for normalizeSubTree: a component render result that is a raw
+// array needs the same per-item normalization as a JSX child array, or the
+// patch path meets raw strings/nulls it cannot re-parent.
+export function normalizeChildren(children: JSXChildren): VNode[] {
     if (children == null || children === false || children === true) {
         return [];
     }
