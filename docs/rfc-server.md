@@ -575,12 +575,18 @@ analysis + plugin):
 
 ```ts
 export interface ServerFnExtraction {
-    fns: { name: string; symbol: string }[];   // serverFn/serverStream exports
+    fns: ExtractedServerFn[];                  // serverFn/serverStream exports
     serverOnly: string[];                      // unwrapped value exports
+    serverOnlyValues: { name: string; kind: 'value' | 'class' }[];  // #565
+    errors: ServerFnExtractionError[];         // hard failures (requireGuards)
+    warnings: string[];                        // constructs it cannot represent
     stubModule: string;                        // full client replacement source
-    liftedModule?: string;                     // inline form: generated server module
 }
 ```
+
+*(As shipped — `packages/vite/src/server-fn-extract.ts`. The sketch this
+replaces also carried a `liftedModule` for the inline form; lifting is not how
+it was built, see the inline bullet below.)*
 
 - Recognizes `serverFn`/`serverStream` by **import tracking** from
   `@sigx/server` (the same discipline `componentFactories` uses for
@@ -612,10 +618,16 @@ export interface ServerFnExtraction {
   untouched (the `serverFn` wrapper is pure runtime there).
 - Inline form: scan files importing `@sigx/server` for module-scope
   `serverFn(...)`; run the free-variable check (imports-only, §1.2, hard
-  error via `this.error`); lift bodies into a generated
-  `\0<file>.serverfns.ts` module with replicated imports; replace
-  declarations with stubs; strip now-unused imports. In the SSR environment
-  the body stays in place (direct invocation).
+  error via `this.error`). **As shipped** (`server-fn-inline.ts`) there is no
+  generated lifted module: the CLIENT build rewrites each initializer to a
+  `__serverFnStub(...)` call in place and strips imports used only inside
+  extracted bodies (whole statements when no specifier survives, so a
+  server-only side effect never runs client-side); the SSR build leaves the
+  body where it is — one module instance, no state split — and appends a
+  mangled `__sigxSrvFn_<name>` export so the registry can import a declaration
+  that was never exported. The `\0<file>.serverfns.ts` virtual module sketched
+  here was dropped: rewriting in place needs no second module-graph node and
+  keeps SSR-side identity trivially intact.
 
 **`server-fn.ts`** — `sigxServer(options?)` plugin, `enforce: 'pre'`,
 structured like `sigxResume`:
@@ -648,10 +660,11 @@ structured like `sigxResume`:
   Every example already mounts `vite.middlewares` before the dev request
   handler, so dev needs no example wiring. Resolution: symbol → extraction
   map → `ssrLoadModule(file)` → export. The shared request logic is itself
-  loaded via `ssrLoadModule('@sigx/server/server')` for module-graph
-  identity (the exact concern `vite/src/ssr.ts` documents); cross-graph
-  error identification uses the `__sigxServerFnError` brand, never
-  `instanceof`.
+  loaded through the SSR module runner for module-graph identity (the exact
+  concern `vite/src/ssr.ts` documents) — **`'@sigx/server/node'` as shipped**,
+  the adapter entry the connect-shaped middleware needs, not the `/server`
+  entry sketched here; cross-graph error identification uses the
+  `__sigxServerFnError` brand, never `instanceof`.
 - Dev lint: `serverFn` referenced in a file that neither matches the
   include pattern nor gets inline extraction → `this.warn` (the body would
   ship to the client).
@@ -1560,7 +1573,8 @@ option (revisit only if that proves painful).
   component-name allowlist was REMOVED before any release and replaced by
   data-keyed admission — auto-captured `record.deps` ∩ the mutation's
   `invalidates` patterns, with `useData(fn)` stable keys
-  (`__sigxKey = "<stableId>#<name>"`, all fn-derived keys tuples) making
+  (`__sigxKey = "<stableId>/<name>"` — `#` at the time of #452, changed to
+  `/` when #355 made symbols route-safe; all fn-derived keys tuples) making
   the whole loop reference-based. One declaration drives §6.2 cache
   invalidation and §6.3 refresh. Known trade recorded: a file move
   without an explicit `id` changes stable keys — refresh silently stops

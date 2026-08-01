@@ -17,9 +17,22 @@
  *
  * ```js
  * import { __serverFnStub, __serverOnly } from '@sigx/server/client';
- * export const addToCart = __serverFnStub("addToCart_fn_9f3a01cc", "addToCart", "/_sigx/fn");
- * export const auditLog = __serverOnly("auditLog", "src/cart.server.ts");
+ * export const addToCart = __serverFnStub(
+ *     "addToCart_fn_9f3a01cc",                   // wire symbol (content-hashed)
+ *     "addToCart",                               // export name, for error text
+ *     "/_sigx/fn",                               // endpoint
+ *     "@acme/api/src/cart.server.ts/addToCart",  // stable key → __sigxKey
+ *     0,                                         // 1 = cache-marked GET read (§4.1)
+ *     1                                          // 1 = declares invalidates (§6.2/§6.3)
+ * );
+ * export const auditLog = __serverOnly("auditLog", "@acme/api/src/cart.server.ts");
  * ```
+ *
+ * The two positional flags are omitted when unset (`stubFlags`), so an
+ * unmarked function's stub is byte-identical to what shipped before either
+ * feature existed; a `serverStream` gets `__serverStreamStub` with no key and
+ * no flags. `__serverOnly`'s second argument is the module's STABLE ID, not a
+ * raw relative path.
  *
  * Symbols are content-hashed (`<name>_fn_<hash8(stableId\0name\0implSource)>`,
  * the resume discipline) so version skew is a detectable 404 — a stale client

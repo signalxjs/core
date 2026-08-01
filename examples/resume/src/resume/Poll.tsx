@@ -13,7 +13,7 @@ import { getVotes, vote } from '../api.server';
  *
  * `useData(fn)` during SSR (and during the refresh re-render) is an
  * in-process call to the same server function the browser would hit over
- * RPC — the key (`'["<stableId>#getVotes"]'`) is identical on both sides.
+ * RPC — the key (`'["<stableId>/getVotes"]'`) is identical on both sides.
  */
 export const Poll = component((ctx) => {
     void ctx;

@@ -630,6 +630,31 @@ A non-default `base` whose entry still calls `matchesServerFn(request)` is a
 build-time warning, and a request that reaches a handler its base does not
 describe is a `__DEV__` warning beside the 404.
 
+### Request caps — `maxBodyBytes` and `maxUrlBytes`
+
+```js
+createServerFnHandler({
+    functions: serverFns,
+    maxBodyBytes: 1_048_576,   // default 1 MiB — enforced WHILE reading; 413 over it
+    maxUrlBytes: 8_192         // default 8 KiB — a GET read's query string; 414 over it
+});
+```
+
+`maxUrlBytes` is the request-line analog of `maxBodyBytes` and applies to
+cache-marked GET reads (§4.1), whose arguments ride the query string. The 8 KiB
+default sits under mainstream proxies' request-line limits, so the endpoint
+answers `414` before a proxy answers it for you with something less
+diagnosable. The client stub independently warns in `__DEV__` above ~2 KiB of
+arguments — arguments that large make a poor cache key, which is the real signal
+to drop `cache` and let the read POST.
+
+Both flow through every mount unchanged: `createServerFnHandler` (Node),
+`handleServerFnRequest` (WinterCG), and the `sigxServer()` dev middleware, which
+goes through the Node adapter. Each of those three forwarded a hand-picked
+subset at some point and silently dropped `maxUrlBytes` — #545/#547 at the
+adapter, #561 at the dev middleware — so both now derive their option type by
+inheritance instead of copying it.
+
 ### Operations: `onError` and `timeoutMs`
 
 Two opt-in endpoint options harden a real deployment (both flow through the
@@ -872,6 +897,8 @@ Every server function is a public HTTP endpoint; the defaults assume that:
   default) is what makes "nobody forgot one" a guarantee rather than an
   intention.
 - **`maxBodyBytes`** (1 MiB default) enforced while reading.
+- **`maxUrlBytes`** (8 KiB default) caps a cache-marked GET read's query
+  string — the URL analog of `maxBodyBytes`, answered with a 414.
 - **Error masking**: only `ServerFnError` crosses the wire verbatim; other
   throws become a generic 500 in production.
 - **Prototype-pollution keys dropped** from parsed values on both parse
