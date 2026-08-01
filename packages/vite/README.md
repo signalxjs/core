@@ -82,46 +82,6 @@ sigx({
 })
 ```
 
-### `sigxServer()` — the dev endpoint's options
-
-The server-function plugin (`@sigx/vite/server`) serves the RPC endpoint from
-`vite.middlewares` in dev, so `sigxServer()` accepts **every option
-`@sigx/server`'s handler accepts** — `origin`, `maxBodyBytes`, `maxUrlBytes`,
-`timeoutMs`, `onError` — and forwards them unchanged, on top of its own build
-options (`include`, `exclude`, `base`, `endpoint`, `role`, `scan`,
-`requireGuards`, `guard`, `renderBoundaries`). The type derives from
-`ServerFnRequestOptions` rather than copying it, so an option added to the
-endpoint is reachable in dev the day it ships:
-
-```ts
-sigxServer({
-  maxUrlBytes: 32_000,                      // dev matches your production cap
-  timeoutMs: 10_000,
-  onError: (err, info) => console.error(info.name, err)
-})
-```
-
-The registry module exports the mount path alongside the functions, so an
-entry never has to repeat it:
-
-```js
-import { serverFns, serverFnBase } from 'virtual:sigx-server-fns';
-
-if (matchesServerFn(request, serverFnBase)) {
-    return handleServerFnRequest(request, { base: serverFnBase, resolve: … });
-}
-```
-
-`base` is configured in the plugin and consumed in your entry, and the two
-default independently — a disagreement is a silent 404. Importing the build's
-own value is what keeps them from drifting; a non-default `base` whose entry
-still calls `matchesServerFn(request)` gets a build warning.
-
-Two options differ from their production twins by necessity: `guard` and
-`renderBoundaries` are **module specifiers** here (`'/src/fn-guard.ts'`), loaded
-through the SSR module runner per request so edits apply without a restart,
-where a production entry passes the functions themselves.
-
 ## SSR mode
 
 The dev server is `createServer` plus one handler; production is static
@@ -164,6 +124,112 @@ tags).
 
 Pass `devStyles: false` to opt out if your template already ships its own
 stylesheet link.
+
+## Server functions — `sigxServer()`
+
+`sigxServer()` (from `@sigx/vite/server`) is the build half of
+[`@sigx/server`](../server/README.md). A `*.server.ts` module is server-only
+**wholesale**: the SSR build keeps its body, the client build replaces the
+entire module with generated RPC stubs, so a server-only import can never
+reach the browser.
+
+```ts
+// vite.config.ts
+import sigx from '@sigx/vite';
+import { sigxServer } from '@sigx/vite/server';
+
+export default defineConfig({
+  plugins: [sigx({ ssr: { entry: 'src/entry-server.tsx' } }), sigxServer()]
+});
+```
+
+```ts
+// src/api.server.ts — never shipped to the browser
+export const getProduct = serverFn({
+  unguarded: true,
+  handler: async (rq, id: string) => db.get(id)
+});
+```
+
+```tsx
+// Product.tsx — a normal import; the client gets a stub that POSTs
+import { getProduct } from './api.server';
+const product = await getProduct('sku-1');
+```
+
+**Dev needs no wiring**: the plugin serves the endpoint from
+`vite.middlewares`, which every example mounts already. Production reads the
+build's registry — `virtual:sigx-server-fns`, emitted as
+`dist/server/sigx-server-fns.js` (or inlined in a bundled build) — and your
+entry passes it explicitly, never ambiently:
+
+```js
+import { handleServerFnRequest, matchesServerFn } from '@sigx/server/server';
+import { serverFns, serverFnBase } from 'virtual:sigx-server-fns';
+
+if (matchesServerFn(request, serverFnBase)) {
+  return handleServerFnRequest(request, {
+    base: serverFnBase,
+    resolve: (symbol) => serverFns[symbol]?.() ?? null
+  });
+}
+```
+
+### Options
+
+| Option | Type | Default | What it does |
+|---|---|---|---|
+| `include` | `string \| string[]` | `['**/*.server.ts', '**/*.server.tsx']` | Which modules are server modules. |
+| `exclude` | `string \| string[]` | `['**/node_modules/**', '**/dist/**']` | Excluded from matching. |
+| `base` | `string` | `'/_sigx/fn'` | The **server mount path** — the dev middleware's and `createServerFnHandler`'s prefix. Exported back to your entry as `serverFnBase`; pass it to `matchesServerFn` and the handler so all three agree. |
+| `endpoint` | `string` | `base` | The **fetch target** baked into stubs; an absolute URL for a build that calls a remote server. Call-time precedence: `configureServerFn` > this > `base`. |
+| `role` | `'auto' \| 'client'` | `'auto'` | `'auto'` swaps stubs in the Vite `client` environment only. `'client'` declares the whole build a remote-server client (lynx, terminal): every environment gets stubs, baked with **stable** symbols, and no registry is emitted — there is no server in this build. |
+| `scan` | `string[]` | `[]` | Extra directories scanned for server modules — shared workspace packages outside the Vite root. |
+| `guard` | `string` | — | A Vite-root-relative module (`'/src/fn-guard.ts'`) whose `guard` export is forwarded to the **dev** endpoint, so dev and prod enforce the same wire-level backstop. Like its production twin it runs for endpoint requests only — an in-process (SSR-time) call never reaches it. |
+| `requireGuards` | `boolean \| 'warn'` | `true` | The guard-declaration gate: every extracted `serverFn`/`serverStream` must be preset-derived, declare `use`, or declare `unguarded: true`. A bare one is a build error naming its file, line and all three remedies. `'warn'` lists them without failing; `false` opts out deliberately. |
+| `renderBoundaries` | `string` | — | A Vite-root-relative module exporting `renderBoundaries` — the value `createBoundaryRefresh` (`@sigx/resume/server`) builds for production entries — forwarded to the **dev** endpoint so single-flight boundary refresh behaves identically in dev. |
+| `origin` | `'same-origin' \| 'verify-when-present' \| string[] \| false` | `'same-origin'` | Origin policy forwarded to the dev endpoint. |
+| `maxBodyBytes` | `number` | `1_048_576` | Body cap forwarded to the dev endpoint. |
+| `maxUrlBytes` | `number` | `8_192` | A GET read's query-string cap, forwarded to the dev endpoint. |
+| `timeoutMs` | `number` | — | Forwarded to the dev endpoint. |
+| `onError` | `(error, info, ctx) => void` | — | Forwarded to the dev endpoint. |
+
+The last five come from `ServerFnRequestOptions` by inheritance rather than by
+being copied, so an option added to the endpoint is reachable in dev the day it
+ships. `guard` and `renderBoundaries` are the two that differ from their
+production twins by necessity: they are **module specifiers** here, loaded
+through the SSR module runner per request so edits apply without a restart,
+where a production entry passes the functions themselves. Everything about what
+those values *mean* lives in [`@sigx/server`](../server/README.md).
+
+### Inline server functions
+
+A `serverFn` declared at module scope of any client-reachable file is extracted
+in place: the client build replaces the initializer with a stub and **strips
+imports used only inside extracted bodies**, so a server-only dependency never
+loads in the browser (dev included — there is no tree-shaking there). Captured
+free variables are a hard build error: the rule is imports-only, and the message
+tells you to pass the value as an argument.
+
+### Extraction outside Vite — `@sigx/vite/server-extract`
+
+Non-Vite bundlers (a lynx app on Rspack, say) reach the same analysis directly:
+`@sigx/vite/server-extract` exports `extractServerFns`,
+`extractInlineServerFns`, `mintSymbols` and `computeStableId` with no Vite
+plugin around them, so every client of one solution mints identical stable
+symbols.
+
+## Resumability — `sigxResume()`
+
+`sigxResume()` (from `@sigx/vite/resume`) completes the `@sigx/resume` story:
+event handlers in resume modules (`*.resume.tsx`, or anything under `resume/`)
+are extracted at build time into lazily-imported QRL chunks, signal state is
+keyed from its declaration (`const hits = ctx.signal(0)` is keyed `"hits"` —
+named = transferred), and the client build emits
+`.vite/sigx-resume-manifest.json` for `resumePlugin({ manifest })` on the
+server. With `sigxServer()` present it also stamps real `action`/`method`
+attributes onto a `<form>` whose submit handler calls a `form: true` server
+function — the zero-JS transport (rfc-server §6.4).
 
 ## Deployment artifacts — `ssr.adapter` and `virtual:sigx-app`
 
