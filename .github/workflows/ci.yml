@@ -308,12 +308,24 @@ jobs:
     # subset (src/micro/), whose per-bench correctness guards fail the job if
     # the endpoint starts rejecting, a pack stops claiming, or the §6.3 gate
     # admits nothing — those would otherwise show up as suspiciously good
-    # numbers. bench:ssr:quick does NOT pass --enforce, so check-regression
+    # numbers. bench:ssr:quick:ci does NOT pass --enforce, so check-regression
     # only prints its delta table (expect "worse than +25%" notes: a CI runner
     # is slower than whatever machine recorded the baseline). Timing
     # enforcement stays local — and even under --enforce, check-regression
     # skips timings on a machine-fingerprint mismatch (payload-byte benches
     # still gate there, being machine-independent).
+    #
+    # What it DOES pass is --require-baseline-rows, which fails when a quick
+    # bench has no entry in the committed baseline. That is a set membership
+    # question, not a measurement, so it holds on any hardware — and it is the
+    # one thing CI can check that nothing else did: three `slots/*` benches
+    # added by #537 sat measured-but-ungated for four PRs because
+    # check-regression silently skipped the rows it could not match. Add a
+    # quick bench, re-baseline in the same PR.
+    #
+    # Per-PR timing numbers come from the `bench-ab` job in bench.yml, which
+    # measures the base and head refs on one runner — the comparison this job
+    # structurally cannot make.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -342,7 +354,7 @@ jobs:
         run: pnpm --filter @sigx/benchmarks verify
 
       - name: Quick benchmark suite
-        run: pnpm bench:ssr:quick
+        run: pnpm bench:ssr:quick:ci
 
   coverage:
     runs-on: ubuntu-latest

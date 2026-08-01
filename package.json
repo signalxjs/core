@@ -21,6 +21,7 @@
         "bench:ssr:stream": "pnpm --filter @sigx/benchmarks bench:stream",
         "bench:micro": "pnpm --filter @sigx/benchmarks bench:micro",
         "bench:ssr:quick": "pnpm --filter @sigx/benchmarks bench:quick",
+        "bench:ssr:quick:ci": "pnpm --filter @sigx/benchmarks bench:quick:ci",
         "bench:ssr:baseline": "pnpm --filter @sigx/benchmarks bench:baseline",
         "build": "pnpm run build:core && pnpm --filter @sigx/server-renderer run build && pnpm --filter @sigx/ssr-islands run build && pnpm --filter @sigx/resume run build && pnpm --filter @sigx/cache run build && pnpm --filter @sigx/server run build && pnpm --filter @sigx/vite run build && pnpm --filter @sigx/cloudflare run build && pnpm --filter @sigx/vercel run build && pnpm --filter @sigx/netlify run build",
         "build:core": "pnpm --filter @sigx/serialize run build && pnpm --filter @sigx/reactivity run build && pnpm --filter @sigx/runtime-core run build && pnpm --filter @sigx/runtime-dom run build && pnpm --filter sigx run build",

@@ -58,6 +58,13 @@ export interface QuickStreamResult {
 export interface QuickMicroResult {
     suite: string;
     name: string;
+    /**
+     * Mirrors the bench's `informational` flag (see micro/types.ts): compared
+     * and printed, never gated. Recorded here so the decision travels with the
+     * numbers — check-regression reads the CURRENT run's flag, so flipping it
+     * takes effect without a re-baseline.
+     */
+    informational?: boolean;
     stats: { avgNs: number; p50Ns: number; samples: number };
 }
 
@@ -143,9 +150,10 @@ async function main(): Promise<void> {
             micro.push({
                 suite: bench.suite,
                 name: bench.name,
+                ...(bench.informational ? { informational: true } : {}),
                 stats: { avgNs: stats.avg, p50Ns: stats.p50, samples: stats.samples.length }
             });
-            console.log(`  ${`${bench.suite}/${bench.name}`.padEnd(40)} p50 ${toMs(stats.p50).toFixed(4).padStart(9)} ms`);
+            console.log(`  ${`${bench.suite}/${bench.name}`.padEnd(40)} p50 ${toMs(stats.p50).toFixed(4).padStart(9)} ms${bench.informational ? '  (info)' : ''}`);
         }
         if (suite.bytes) byteMetrics.push(...(await suite.bytes()));
     }

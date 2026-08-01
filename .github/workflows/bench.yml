@@ -1,15 +1,44 @@
 name: Bench
 
 # Informational only: benchmark numbers from shared runners are too noisy to
-# gate on, so this never runs with --enforce and never fails on regressions.
-# Trigger it manually and inspect the uploaded artifacts. (The micro suite's
-# per-bench correctness guards DO fail hard — a bench that cannot prove it is
-# doing its work must not report a number.)
+# gate on, so nothing here runs with --enforce and nothing here fails on a
+# regression. (The micro suite's per-bench correctness guards DO fail hard — a
+# bench that cannot prove it is doing its work must not report a number.)
+#
+# Two jobs, two shapes:
+#
+# - `bench-quick` (manual): one run of the current ref, results uploaded as an
+#   artifact for a human to read.
+# - `bench-ab` (perf-sensitive PRs): the PR's base ref and its head ref
+#   measured back to back ON THE SAME RUNNER, posted as a comment. Absolute
+#   numbers from a shared vCPU mean nothing, but the delta between two runs a
+#   few minutes apart on the same box does — that is what makes this readable
+#   where a comparison against the committed baseline is not (check-regression
+#   skips timing enforcement outright on a fingerprint mismatch, and CI never
+#   matches the machine that recorded the baseline).
+#
+# Deliberately NOT a required check and deliberately no `merge_group` trigger:
+# nothing here may block a merge, so there is no context to go missing on the
+# queue ref (cf. the comment in bundle-size.yml, which is the inverse case).
 on:
   workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'packages/**'
+      - 'benchmarks/**'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/bench.yml'
+
+permissions: {}
+
+concurrency:
+  group: bench-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   bench-quick:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -41,3 +70,99 @@ jobs:
           path: |
             benchmarks/results/quick-latest.json
             benchmarks/results/micro-latest.json
+
+  bench-ab:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    env:
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+    steps:
+      # fetch-depth 0: the job checks the base ref out in place, so both commits
+      # must be in the clone.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+
+      # Both halves invoke src/quick.ts BY PATH, never through a pnpm script:
+      # the base ref is an arbitrary older commit and need not define a script
+      # name this PR introduces.
+      - name: Bench the base ref
+        run: |
+          git checkout --detach "$BASE_SHA"
+          pnpm install --frozen-lockfile
+          pnpm build
+          node --conditions production benchmarks/src/quick.ts
+          cp benchmarks/results/quick-latest.json "$RUNNER_TEMP/base.json"
+
+      - name: Bench the head ref
+        run: |
+          git checkout --detach "$HEAD_SHA"
+          # A dist left over from the base build is not overwritten when the
+          # head build no longer emits that file — the head half must measure
+          # the head's output and nothing else.
+          rm -rf packages/*/dist
+          pnpm install --frozen-lockfile
+          pnpm build
+          node --conditions production benchmarks/src/quick.ts
+          cp benchmarks/results/quick-latest.json "$RUNNER_TEMP/head.json"
+
+      # The HEAD checkout's comparer, so a PR that changes check-regression is
+      # read by the version it ships. No --enforce and no
+      # --require-baseline-rows: this job reports, it never fails on numbers.
+      - name: Compare
+        run: |
+          node --conditions production benchmarks/src/check-regression.ts \
+            --baseline-file="$RUNNER_TEMP/base.json" \
+            --current-file="$RUNNER_TEMP/head.json" \
+            --markdown="$RUNNER_TEMP/bench.md" \
+            --title="base \`${BASE_SHA:0:7}\` (before) → head \`${HEAD_SHA:0:7}\` (after), both measured on this runner."
+
+      - name: Job summary
+        run: cat "$RUNNER_TEMP/bench.md" >> "$GITHUB_STEP_SUMMARY"
+
+      # Fork PRs get a read-only token on `pull_request`, so the comment call
+      # would 403. The job summary above still carries the table for those.
+      - name: Comment on the PR
+        if: github.event.pull_request.head.repo.full_name == github.repository
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const fs = require('node:fs');
+            const marker = '<!-- sigx-bench-ab -->';
+            const body = marker + '\n' + fs.readFileSync(process.env.RUNNER_TEMP + '/bench.md', 'utf8');
+            const { owner, repo } = context.repo;
+            const issue_number = context.payload.pull_request.number;
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner, repo, issue_number, per_page: 100
+            });
+            // One comment per PR, updated in place — a push should refresh the
+            // numbers, not bury the thread under a new table each time.
+            const existing = comments.find((c) => c.body?.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            }
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: bench-ab-results
+          path: |
+            ${{ runner.temp }}/base.json
+            ${{ runner.temp }}/head.json
+            ${{ runner.temp }}/bench.md
+          if-no-files-found: ignore

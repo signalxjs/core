@@ -24,6 +24,16 @@ export interface MicroBench {
     /** Included in the reduced quick suite (one or two per suite). */
     quick?: boolean;
     /**
+     * Measured and printed by the quick suite, but never gated by
+     * `check-regression` (#474/#477). For a p50 down in the tens of
+     * nanoseconds, timer resolution and scheduling quantization dominate the
+     * delta — the median measures the clock as much as the code, so run-to-run
+     * jitter routinely exceeds the threshold and no sample budget steadies it.
+     * Such a bench earns its keep through its `check()` guard and its
+     * `floorOf` ratio, not through an absolute-p50 gate.
+     */
+    informational?: boolean;
+    /**
      * Correctness guard, run ONCE before measuring. Must throw on anything
      * unexpected: a bench that silently measures a 403, an empty render, or a
      * plugin that failed to install would otherwise report a flattering

@@ -62,7 +62,7 @@ histograms and entity-decoded text content must match across all frameworks
 
 ## Request-path benches (`bench:micro`)
 
-`pnpm bench:micro` runs `src/run-micro.ts` over five suites in `src/micro/`.
+`pnpm bench:micro` runs `src/run-micro.ts` over six suites in `src/micro/`.
 Payloads come from `src/fixtures/payloads.ts`, derived from the same seeded
 data as the scenarios.
 
@@ -73,6 +73,7 @@ data as the scenarios.
 | `keymatch` | the §6.3 boundary-refresh admission gate — `deps × patterns` matching, swept by size, tuple vs string patterns    |
 | `refresh`  | `createBoundaryRefresh` re-rendering 1 / 8 / 32 descriptors                                                       |
 | `packs`    | a scenario rendered plain vs `islandsPlugin()` vs `resumePlugin()` — time **and** payload bytes                   |
+| `slots`    | `createSlots(children).default(...)` — the slot read every component with children makes, against a `slice` floor |
 
 ### Floors, not competitors
 
@@ -153,20 +154,51 @@ against the `quick` section of `results/baseline.json`.
   `check-regression` marks them **informational**: measured and printed with an
   `(info)` tag, never gated. The renderer stays gated by `escape-heavy`,
   `large-table-1k` and the stream; every pack config by its deterministic byte
-  row.
+  row. A *request-path* bench carries the same exemption per bench, via
+  `informational: true` in its definition (`src/micro/types.ts`) — that is how
+  the `slots/*` reads, all around a hundred nanoseconds, stay measured and
+  guarded without ever failing a gate. The flag is read off the current run, so
+  flipping it takes effect without a re-baseline.
 - **Fingerprint skip**: if the baseline's CPU model or Node *major* version
   differs from the current machine, enforcement of the **timing** benches is
   skipped with a warning — cross-machine deltas are meaningless. Byte rows
   keep gating.
+- **Every run reports its own coverage.** A bench with no matching entry on the
+  baseline side is compared against nothing, so it cannot fail. Those rows are
+  listed under the table as `ungated`, and baseline entries that were not
+  measured as `stale` (a rename shows up as one of each). This is not cosmetic:
+  the three `slots/*` benches added by #537 were measured, printed and ungated
+  for four PRs because the mismatch was silent.
+  `--require-baseline-rows` turns an ungated row into a failure — that is
+  `bench:quick:ci`, which CI runs (below), and `--enforce` implies it.
 - **Re-baseline** after *intentional* perf changes (and on the same machine
   the checks will run on): `node src/quick.ts --baseline`, or the full
-  `pnpm bench:ssr:baseline`.
-- **CI**: `.github/workflows/ci.yml`'s `bench-smoke` job runs the quick suite
-  on every PR as a *correctness* gate (the micro benches' `check()` guards
-  fail it), never a timing one. `.github/workflows/bench.yml` (manual
-  trigger) additionally runs `bench:micro` and uploads both result files —
-  shared runners are far too noisy to gate on, so CI numbers are
-  informational only.
+  `pnpm bench:ssr:baseline`. Adding a quick bench means re-baselining in the
+  same PR — CI fails otherwise.
+- **Comparing two arbitrary result files**: `--baseline-file=<path>` and
+  `--current-file=<path>` take either shape (a raw `quick-latest.json`, or a
+  `baseline.json` with a `quick` section) instead of the committed baseline,
+  and `--markdown=<path>` writes the comparison as a report to post.
+  `--enforce` is refused alongside `--current-file`: the noise re-run can only
+  re-measure `results/quick-latest.json`.
+
+### CI
+
+- **`ci.yml` → `bench-smoke`** runs `pnpm bench:ssr:quick:ci` on every PR. It
+  is a *correctness* gate — the micro benches' `check()` guards fail it, and
+  `--require-baseline-rows` fails it when a quick bench has no baseline entry
+  (set membership, so it needs no matching hardware). Never a timing gate: the
+  delta table prints, and "worse than +25%" notes on a CI runner are expected.
+- **`bench.yml` → `bench-ab`** runs on PRs touching `packages/**`,
+  `benchmarks/**` or the lockfile, and is where PR-time *numbers* come from. It
+  measures the PR's base ref and then its head ref **on the same runner**, and
+  posts the delta as a single comment it updates in place. Absolute figures from
+  a shared vCPU are worthless, but the delta between two runs minutes apart on
+  the same box is not — and unlike the committed baseline it needs no machine to
+  match. It never fails on a regression; read the table and decide. Fork PRs get
+  the same table in the job summary (their token cannot comment).
+- **`bench.yml` → `bench-quick`** (manual dispatch) additionally runs
+  `bench:micro` and uploads both result files.
 
 ## Baseline & caveats
 
@@ -182,3 +214,11 @@ themselves change.
 hardware/OS/Node version. `meta` records date, Node version and CPU model —
 treat cross-machine comparisons (and the committed baseline on different
 hardware) as indicative only.
+
+This cuts both ways: a machine also stops being comparable to *itself*. A
+baseline recorded under load bakes in slow numbers and hides real regressions,
+and a machine that has since changed behaviour reads every row as a regression
+it is not. Before re-baselining, confirm the machine is quiet — run the suite
+twice and check that the rows your change does not touch land within a few
+percent of the existing baseline. If they don't, don't record; the `bench-ab`
+job compares base against head on one runner and needs no baseline at all.

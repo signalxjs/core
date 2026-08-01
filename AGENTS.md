@@ -177,6 +177,12 @@ pnpm smoke:hydration   # did the prod build actually HYDRATE, or silently re-ren
                        # so this is the ONLY hydration signal a prod dist has (#377). Needs a browser:
                        # `pnpm exec playwright install chromium` once. CI job: hydration-smoke.
 pnpm bench:ssr:quick   # sigx-only quick SSR bench + regression table vs the committed baseline (after pnpm build)
+pnpm bench:ssr:quick:ci # the same, plus --require-baseline-rows: FAILS when a quick bench has no
+                       # baseline entry. A row check-regression cannot match is compared against
+                       # nothing and gates nothing — silently, until #551. Every run now lists those
+                       # as `ungated` (and un-measured baseline entries as `stale`; a rename is one
+                       # of each), and this is the CI job's variant, because set membership needs no
+                       # matching hardware. Add a quick bench => re-baseline in the SAME PR.
 pnpm bench:micro       # request-path benches (after pnpm build): the server-fn endpoint, the
                        # @sigx/serialize boundary codec, the §6.3 boundary-refresh gate,
                        # createBoundaryRefresh, and the islands/resume SSR pack overhead.
@@ -197,7 +203,13 @@ pnpm bench:ssr         # full comparative SSR bench: equivalence check, then sig
                        # Enforce timings locally with
                        # `pnpm --filter @sigx/benchmarks bench:quick:enforce`, and re-baseline on YOUR machine
                        # with `pnpm bench:ssr:baseline` (check-regression refuses to enforce TIMINGS across
-                       # machines; payload-byte benches gate everywhere).
+                       # machines; payload-byte benches gate everywhere). Don't re-baseline from a machine
+                       # you haven't confirmed is quiet — recording under load bakes in slow numbers and
+                       # hides real regressions. PR-time NUMBERS come from bench.yml's `bench-ab` job
+                       # instead: it measures the PR's base ref and head ref back to back on ONE runner
+                       # and comments the delta, so it needs no baseline and no matching machine. It runs
+                       # automatically on PRs touching packages/**, benchmarks/** or the lockfile, and
+                       # never fails on a regression — read the table and decide.
                        # Every bench script runs node --conditions production: sigx picks its dev/prod dist at
                        # module resolution, so a bare `node` measures the dev build (see benchmarks/README.md).
 pnpm dev:sigx    # watch-build the sigx package
