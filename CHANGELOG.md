@@ -76,6 +76,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- **`@sigx/server` / `@sigx/vite`: a throwing `resolve()` escaped the
+  server-function endpoint; prototype-key symbols hit the plain-object
+  registry (#555).** A rejecting symbol resolution (the prod registry's lazy
+  `import()`, dev's `ssrLoadModule`) used to leave `handleServerFnRequest`
+  with no masking, no `onError`, and no structured envelope — now it is the
+  standard masked failure, and a body stream erroring mid-read is a
+  structured 400. The generated `virtual:sigx-server-fns` registry now has a
+  null prototype with computed keys, so `serverFns['__proto__']` is
+  `undefined` rather than `Object.prototype` — existing entry files using
+  `serverFns[symbol]?.() ?? null` are safe unchanged. Details in
+  `packages/server/CHANGELOG.md`.
+
 - **`@sigx/runtime-core` / `@sigx/server-renderer`: a scoped slot invoked with
   no props hands its fill `{}`, not `undefined` (#534).** `slots.default?.()`
   used to invoke a function child with `undefined`, so the idiomatic fill —

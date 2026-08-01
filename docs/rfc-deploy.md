@@ -422,6 +422,10 @@ export default {
 };
 ```
 
+The generated `serverFns` registry has a null prototype (#555), so a
+prototype-key symbol (`__proto__`, `constructor`) misses cleanly and
+`serverFns[s]?.() ?? null` is safe exactly as written.
+
 Static assets never reach this code on Cloudflare: with the wrangler
 `assets` config (default `run_worker_first: false`), the platform serves
 matching files before the worker is invoked. The `run_worker_first: true`

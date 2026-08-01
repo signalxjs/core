@@ -55,8 +55,13 @@ export function createServerFnHandler(options: ServerFnHandlerOptions): NodeRequ
     const resolve =
         options.resolve ??
         (async (symbol: string) => {
-            const load = options.functions?.[symbol];
-            return load ? await load() : null;
+            // Own-property + callable checks (#555): `functions` is a
+            // plain-object registry in the wild, and an inherited lookup
+            // ("__proto__", "constructor") must be an unknown symbol — a
+            // structured 404 — not a TypeError out of Object.prototype.
+            const fns = options.functions;
+            const load = fns !== undefined && Object.hasOwn(fns, symbol) ? fns[symbol] : undefined;
+            return typeof load === 'function' ? await load() : null;
         });
 
     return async function handleFnRequest(req, res, next) {

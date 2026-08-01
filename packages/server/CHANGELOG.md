@@ -4,6 +4,28 @@
 
 ### Fixed
 
+- **A throwing `resolve()` escaped `handleServerFnRequest` (#555).** A
+  rejecting symbol resolution — the prod registry's lazy `import()` after a
+  partial deploy, dev's `ssrLoadModule` on a broken server module — left the
+  handler entirely: no prod masking, no `onError`, no structured envelope. On
+  Node it surfaced as the adapter's bare 500 / `next(err)`; on WinterCG as an
+  unhandled fetch-handler rejection. It is now the standard masked failure: a
+  thrown `ServerFnError` passes through verbatim (so a custom `resolve` can
+  speak the wire language), anything else is a masked 500 reported to
+  `onError`, with the error shape forked on the form transport as everywhere
+  else.
+
+  A body stream that errors mid-read (a disconnect mid-upload, truncated
+  chunked encoding) had the same escape; it is now a structured
+  `400 Malformed request body` — the JSON twin of the already-guarded
+  `formData()` path — and deliberately not routed to `onError`, whose common
+  cause would be every abandoned upload.
+
+  `createServerFnHandler`'s `functions:` lookup is now own-property and
+  callable-checked, so a prototype-key symbol (`POST /_sigx/fn/__proto__`,
+  which used to resolve to `Object.prototype` and `TypeError` through the
+  escape above) is a clean structured 404.
+
 - **`createServerFnHandler` silently dropped `maxUrlBytes` (#545).**
   `ServerFnHandlerOptions` extends `ServerFnRequestOptions`, so the option
   type-checked — and did nothing. Every Node-adapter deployment (and the
