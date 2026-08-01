@@ -213,6 +213,7 @@ describe('query-string arguments (§4.1)', () => {
             });
             expect(res.status).toBe(200);
             await expect(res.json()).resolves.toEqual({ data: { ok: 2 } });
+            expect(warn).toHaveBeenCalledWith(expect.stringContaining('__proto__'));
         } finally {
             warn.mockRestore();
         }
@@ -246,6 +247,7 @@ describe('query-string arguments (§4.1)', () => {
             expect(res.status).toBe(200);
             expect(seen).toEqual({ ok: 2 });
             expect(Object.getPrototypeOf(seen)).toBe(Object.prototype);
+            expect(warn).toHaveBeenCalledWith(expect.stringContaining('__proto__'));
         } finally {
             warn.mockRestore();
         }

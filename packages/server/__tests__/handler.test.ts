@@ -677,6 +677,7 @@ describe('handleServerFnRequest — pollution reviver', () => {
             // {"polluted": true} rather than Object.prototype.
             expect(Object.getPrototypeOf(input)).toBe(Object.prototype);
             expect((input as { polluted?: boolean }).polluted).toBeUndefined();
+            expect(warn).toHaveBeenCalledWith(expect.stringContaining('__proto__'));
         } finally {
             warn.mockRestore();
         }

@@ -190,6 +190,8 @@ describe('__serverFnStub', () => {
             stubFetch(200, '{"data":{"__proto__":{"polluted":true},"ok":1}}');
             const fn = __serverFnStub('e_fn_00000006', 'echo', '/_sigx/fn');
             await expect(fn()).resolves.toEqual({ ok: 1 });
+            // The dev warning is part of the #560 contract — drops are loud.
+            expect(warn).toHaveBeenCalledWith(expect.stringContaining('__proto__'));
         } finally {
             warn.mockRestore();
         }
