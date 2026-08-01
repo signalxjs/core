@@ -14,10 +14,14 @@
 // (rfc-deploy §5.2).
 import { createFetchHandler } from '@sigx/server-renderer/server';
 import { handleServerFnRequest, matchesServerFn } from '@sigx/server/server';
+import { resumePlugin } from '@sigx/resume';
+import { createBoundaryRefresh } from '@sigx/resume/server';
 // ONE import replaces four readFiles (rfc-deploy §3.2). The resume pack
 // installs in the app factory (#413) — no SSR instance to build here.
-import { template, assets } from './dist/server/sigx-app.js';
-import { createApp } from './dist/server/entry-server.js';
+// Boundary refresh is the ENDPOINT's side of resume, not the document's, so
+// it is built below and needs the manifest here.
+import { template, assets, resumeManifest } from './dist/server/sigx-app.js';
+import { createApp, refreshComponents } from './dist/server/entry-server.js';
 import { serverFns } from './dist/server/sigx-server-fns.js';
 import { join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -28,6 +32,20 @@ const handler = createFetchHandler({
     template,
     app: (url: string) => createApp(url),
     document: { assets }
+});
+
+// Single-flight boundary refresh (rfc-server §6.3): a mutation's response
+// carries the freshly rendered HTML of every boundary whose recorded data
+// deps its `invalidates` names. WITHOUT this option the endpoint silently
+// skips the whole block and the client falls back to $cache revalidation —
+// a working page, one round trip slower, and the component chunk loads
+// after all. The re-render runs the same plugin set the page rendered with,
+// explicit like the registry. An app with app-level DI the re-render must
+// see (serverPlugin({ types }), provideTypeHandlers) passes
+// `app: (rq) => createApp(...)` instead, and the app's plugins win.
+const renderBoundaries = createBoundaryRefresh({
+    plugins: [resumePlugin({ manifest: resumeManifest })],
+    components: refreshComponents
 });
 
 Bun.serve({
@@ -63,7 +81,8 @@ Bun.serve({
         if (matchesServerFn(request)) {
             return handleServerFnRequest(request, {
                 // The registry is explicitly passed, never ambient.
-                resolve: (symbol) => serverFns[symbol]?.() ?? null
+                resolve: (symbol) => serverFns[symbol]?.() ?? null,
+                renderBoundaries
             });
         }
 

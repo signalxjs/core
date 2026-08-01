@@ -399,9 +399,12 @@ import { createFetchHandler } from '@sigx/server-renderer/server';
 import { handleServerFnRequest, matchesServerFn } from '@sigx/server/server';
 import { template, assets } from 'virtual:sigx-app';
 import { serverFns } from 'virtual:sigx-server-fns';
+import { resumePlugin } from '@sigx/resume';
+import { createBoundaryRefresh } from '@sigx/resume/server';
+import { resumeManifest } from 'virtual:sigx-manifests';
 // The strategy packs install in createApp (app.use, #413); their manifests
 // arrive there via virtual:sigx-manifests.
-import { createApp } from './entry-server';
+import { createApp, refreshComponents } from './entry-server';
 
 const handler = createFetchHandler<{ env: Env; ctx: ExecutionContext }>({
     template,
@@ -409,11 +412,18 @@ const handler = createFetchHandler<{ env: Env; ctx: ExecutionContext }>({
     document: { assets }
 });
 
+// The refresh re-render is the ENDPOINT's, not the document's — built once.
+const renderBoundaries = createBoundaryRefresh({
+    plugins: [resumePlugin({ manifest: resumeManifest })],
+    components: refreshComponents
+});
+
 export default {
     async fetch(request: Request, env: Env, ctx: ExecutionContext) {
         if (matchesServerFn(request)) {
             return handleServerFnRequest(request, {
-                resolve: (s) => serverFns[s]?.() ?? null
+                resolve: (s) => serverFns[s]?.() ?? null,
+                renderBoundaries
                 // guard, origin: see §5
             });
         }
@@ -425,6 +435,18 @@ export default {
 The generated `serverFns` registry has a null prototype (#555), so a
 prototype-key symbol (`__proto__`, `constructor`) misses cleanly and
 `serverFns[s]?.() ?? null` is safe exactly as written.
+
+`renderBoundaries` is what makes single-flight boundary refresh (rfc-server
+§6.3) work on this tier. It is **optional**, so an entry that omits it
+type-checks and serves correctly — the endpoint skips the `$boundaries` block
+and the client converges through `$cache` revalidation one round trip later,
+loading the component chunk it was supposed to avoid. That silence is exactly
+why every platform entry in this repo shipped without it (#564); the deploy
+smokes now send a real `$boundaries` sidecar on every tier and assert the
+response carries fresh HTML. An app that installs app-level DI the re-render
+must see (`serverPlugin({ types })`, `provideTypeHandlers`) passes
+`app: (rq) => createApp(…)` instead of `plugins:`, and the app's own plugin set
+is used.
 
 Static assets never reach this code on Cloudflare: with the wrangler
 `assets` config (default `run_worker_first: false`), the platform serves

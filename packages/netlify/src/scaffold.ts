@@ -4,6 +4,11 @@
  * the `export default { fetch }` shape shared by every sigx platform entry;
  * the Netlify-specific function contract (bare default fn + in-source
  * `config`) lives in the GENERATED wrapper, not in user code.
+ *
+ * The commented server-fn mount carries `renderBoundaries` too (#564): that
+ * option is OPTIONAL, so an entry that omits it type-checks and silently
+ * loses single-flight boundary refresh. The committed example entries are the
+ * full reference (`examples/resume/src/entry.netlify.ts`, rfc-deploy §4.1).
  */
 export function scaffoldEntry(ssrEntryImport: string): string {
     return `// Netlify function entry — scaffolded by @sigx/netlify, YOURS from here on
@@ -33,7 +38,15 @@ export default {
         // import { serverFns } from 'virtual:sigx-server-fns';
         // if (matchesServerFn(request)) {
         //     return handleServerFnRequest(request, {
-        //         resolve: (symbol) => serverFns[symbol]?.() ?? null
+        //         resolve: (symbol) => serverFns[symbol]?.() ?? null,
+        //         // Using @sigx/resume? Single-flight boundary refresh
+        //         // (rfc-server §6.3) needs this option; without it a
+        //         // mutation's response carries no fresh HTML and the
+        //         // client pays a second round trip to converge:
+        //         // renderBoundaries: createBoundaryRefresh({
+        //         //     plugins: [resumePlugin({ manifest: resumeManifest })],
+        //         //     components: { /* __resumeId -> server component */ }
+        //         // })
         //     });
         // }
         return handler(request);

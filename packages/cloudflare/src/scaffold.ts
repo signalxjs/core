@@ -3,8 +3,10 @@
  * that moment (the wrangler.jsonc posture applied to the entry; PR #322).
  * Deliberately minimal: the server-fn mount ships as a commented block
  * because `virtual:sigx-server-fns` only resolves when `sigxServer()` is
- * configured. The committed example entries are the full reference
- * (rfc-deploy §4.1).
+ * configured. The block carries `renderBoundaries` too (#564): that option is
+ * OPTIONAL, so an entry that omits it type-checks and silently loses
+ * single-flight boundary refresh. The committed example entries are the full
+ * reference (`examples/resume/src/entry.cloudflare.ts`, rfc-deploy §4.1).
  */
 export function scaffoldEntry(ssrEntryImport: string): string {
     return `// Cloudflare Worker entry — scaffolded by @sigx/cloudflare, YOURS from here
@@ -34,7 +36,15 @@ export default {
         // import { serverFns } from 'virtual:sigx-server-fns';
         // if (matchesServerFn(request)) {
         //     return handleServerFnRequest(request, {
-        //         resolve: (symbol) => serverFns[symbol]?.() ?? null
+        //         resolve: (symbol) => serverFns[symbol]?.() ?? null,
+        //         // Using @sigx/resume? Single-flight boundary refresh
+        //         // (rfc-server §6.3) needs this option; without it a
+        //         // mutation's response carries no fresh HTML and the
+        //         // client pays a second round trip to converge:
+        //         // renderBoundaries: createBoundaryRefresh({
+        //         //     plugins: [resumePlugin({ manifest: resumeManifest })],
+        //         //     components: { /* __resumeId -> server component */ }
+        //         // })
         //     });
         // }
         return handler(request);
