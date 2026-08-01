@@ -168,6 +168,15 @@ const DEFAULT_INCLUDE = ['**/*.server.ts', '**/*.server.tsx'];
 const DEFAULT_EXCLUDE = ['**/node_modules/**', '**/dist/**'];
 const DEFAULT_BASE = '/_sigx/fn';
 
+/**
+ * A mount path as a routing prefix — the build-time twin of `@sigx/server`'s
+ * `fnPathPrefix`, duplicated on purpose: this is build-time code and
+ * `@sigx/server` is an OPTIONAL peer of this package (the same trade
+ * `resume-extract.ts` documents for `encodeFnPath`). Kept identical so
+ * `/rpc`, `/rpc/` and `/rpc//` mean one thing on both sides.
+ */
+const mountPrefix = (base: string): string => base.replace(/\/+$/, '') + '/';
+
 /** `import … from '@sigx/server'` (not -renderer), excluding type-only.
  *  The lookahead sits directly after `import` — a backtrackable `\s*` before
  *  it would let `import type {` match with zero spaces consumed. */
@@ -223,6 +232,39 @@ function callsServerFn(code: string): boolean {
     return serverFnCallPatterns(code).some((pattern) => pattern.test(code));
 }
 
+/** `import … from '@sigx/server/server'`, excluding type-only — the entry-side
+ *  routing import, where `matchesServerFn` comes from. */
+const SERVER_ROUTING_IMPORT_RE = /import(?!\s*type\b)([^;'"]*)from\s*['"]@sigx\/server\/server['"]/g;
+
+/**
+ * Best-effort dev lint (#563): does this module call `matchesServerFn(request)`
+ * with no base argument, i.e. taking the `/_sigx/fn` DEFAULT?
+ *
+ * Only asked when the plugin's own `base` is non-default, so the 95% case is
+ * silent. Same admitted limits as `callsServerFn`: re-exports and indirections
+ * are out of scope, and a nested call expression inside the argument list reads
+ * as "not defaulted" — a false negative, never a false alarm.
+ */
+function matchesServerFnDefaulted(code: string): boolean {
+    for (const match of code.matchAll(SERVER_ROUTING_IMPORT_RE)) {
+        const clause = match[1];
+        const namespace = /\*\s*as\s+([\w$]+)/.exec(clause);
+        const name = namespace
+            ? `${escapeRe(namespace[1])}\\s*\\.\\s*matchesServerFn`
+            : (() => {
+                  if (/\btype\s+matchesServerFn\b/.test(clause)) return null;
+                  const spec = /\bmatchesServerFn\b(?:\s+as\s+([\w$]+))?/.exec(clause);
+                  return spec ? escapeRe(spec[1] ?? 'matchesServerFn') : null;
+              })();
+        if (!name) continue;
+        // One argument only: no comma before the closing paren. `[^,()]*`
+        // stops at a nested call, so `matchesServerFn(req, base())` is not a
+        // match either way.
+        if (new RegExp(`(?<![\\w$.])${name}\\s*\\([^,()]*\\)`).test(code)) return true;
+    }
+    return false;
+}
+
 export function sigxServer(options: SigxServerOptions = {}): Plugin {
     const filter = createFilter(options.include ?? DEFAULT_INCLUDE, options.exclude ?? DEFAULT_EXCLUDE);
     const base = options.base ?? DEFAULT_BASE;
@@ -238,6 +280,8 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
     const inline = new Map<string, InlineServerFnExtraction>();
     /** Directory → nearest-package probe, for stable-id derivation. */
     const pkgCache = new Map<string, PackageProbe>();
+    /** Files already warned about a defaulted `matchesServerFn` base (#563). */
+    const warnedBase = new Set<string>();
 
     const relPath = (file: string): string => path.relative(root, file).replace(/\\/g, '/');
     const extractOptions = (file: string): ServerFnExtractOptions => ({
@@ -462,6 +506,17 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
                 for (const fn of extraction.fns) register(file, fn, fn.mangled);
             }
             lines.push('};');
+            // The mount path this build baked, beside the registry that needs
+            // it (#563). `base` lived in the plugin config and NOWHERE an
+            // app's entry could read it, so `matchesServerFn(request)` and
+            // `handleServerFnRequest(request, {...})` each fell back to the
+            // `/_sigx/fn` default and a moved mount routed nothing. Worse
+            // since #543 made `base` load-bearing for symbol extraction
+            // (everything after it IS the symbol): a partially wrong base
+            // slices the symbol at the wrong offset instead of missing
+            // cleanly. The entry imports both from one module:
+            //   import { serverFns, serverFnBase } from 'virtual:sigx-server-fns';
+            lines.push(`export const serverFnBase = ${JSON.stringify(base)};`);
             return lines.join('\n');
         },
 
@@ -493,6 +548,30 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
             if (clean.startsWith('/@fs/')) {
                 clean = clean.slice('/@fs/'.length);
                 if (!clean.startsWith('/') && !/^[a-zA-Z]:/.test(clean)) clean = '/' + clean;
+            }
+            // A moved mount that only reached the plugin (#563). The entry's
+            // `matchesServerFn(request)` would take the /_sigx/fn default and
+            // route nothing — a silent 404 through the document handler, and
+            // since #543 a base wrong only in PART mangles the symbol rather
+            // than missing cleanly. Once per file, and only when `base` is
+            // non-default, so a stock app never sees it.
+            // Compared as PREFIXES: `/_sigx/fn/` is the default written with a
+            // cosmetic trailing slash, and routes identically, so it must not
+            // trip the warning.
+            if (
+                mountPrefix(base) !== mountPrefix(DEFAULT_BASE) &&
+                !warnedBase.has(clean) &&
+                matchesServerFnDefaulted(code)
+            ) {
+                warnedBase.add(clean);
+                this.warn(
+                    `[sigx:server] ${relPath(clean)}: matchesServerFn(request) takes the default ` +
+                    `base '${DEFAULT_BASE}', but this build mounts server functions at '${base}' — ` +
+                    `every call would fall through to the document handler. Pass the build's own ` +
+                    `value: \`import { serverFnBase } from 'virtual:sigx-server-fns'\` → ` +
+                    `matchesServerFn(request, serverFnBase), and ` +
+                    `handleServerFnRequest(request, { base: serverFnBase, … }).`
+                );
             }
             if (!filter(clean)) {
                 // Inline extraction (rfc-server §1.1(b)): module-scope
@@ -636,7 +715,7 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
                     `called during SSR will not see the request: ${message}`
                 );
             });
-            const prefix = base.endsWith('/') ? base : base + '/';
+            const prefix = mountPrefix(base);
             server.middlewares.use(async (req, res, next) => {
                 if (!req.url?.startsWith(prefix)) return next();
                 try {

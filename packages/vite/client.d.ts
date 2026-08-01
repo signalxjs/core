@@ -55,6 +55,13 @@ type SigxResumeManifest = SigxPackManifests extends { resume: infer T } ? T : un
  */
 declare module 'virtual:sigx-server-fns' {
     export const serverFns: Record<string, () => Promise<unknown>>;
+    /**
+     * The server mount path this build baked (`sigxServer({ base })`, default
+     * `/_sigx/fn`). Pass it to BOTH `matchesServerFn` and the handler so all
+     * three sites agree — a disagreement is a silent 404, and since #543 a
+     * partially wrong base mangles the symbol rather than missing cleanly.
+     */
+    export const serverFnBase: string;
 }
 
 /**

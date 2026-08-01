@@ -11,7 +11,7 @@
 import { createFetchHandler } from '@sigx/server-renderer/server';
 import { handleServerFnRequest, matchesServerFn } from '@sigx/server/server';
 import { template, assets } from 'virtual:sigx-app';
-import { serverFns } from 'virtual:sigx-server-fns';
+import { serverFns, serverFnBase } from 'virtual:sigx-server-fns';
 import { resumePlugin } from '@sigx/resume';
 import { createBoundaryRefresh } from '@sigx/resume/server';
 import { resumeManifest } from 'virtual:sigx-manifests';
@@ -43,8 +43,11 @@ const renderBoundaries = createBoundaryRefresh({
 
 export default {
     async fetch(request: Request): Promise<Response> {
-        if (matchesServerFn(request)) {
+        if (matchesServerFn(request, serverFnBase)) {
             return handleServerFnRequest(request, {
+                // The build's own mount path, so the router above and the
+                // handler here cannot disagree (#563).
+                base: serverFnBase,
                 // The registry is explicitly passed, never ambient.
                 resolve: (symbol) => serverFns[symbol]?.() ?? null,
                 renderBoundaries

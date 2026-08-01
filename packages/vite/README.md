@@ -101,7 +101,23 @@ sigxServer({
 })
 ```
 
-Two of them differ from their production twins by necessity: `guard` and
+The registry module exports the mount path alongside the functions, so an
+entry never has to repeat it:
+
+```js
+import { serverFns, serverFnBase } from 'virtual:sigx-server-fns';
+
+if (matchesServerFn(request, serverFnBase)) {
+    return handleServerFnRequest(request, { base: serverFnBase, resolve: … });
+}
+```
+
+`base` is configured in the plugin and consumed in your entry, and the two
+default independently — a disagreement is a silent 404. Importing the build's
+own value is what keeps them from drifting; a non-default `base` whose entry
+still calls `matchesServerFn(request)` gets a build warning.
+
+Two options differ from their production twins by necessity: `guard` and
 `renderBoundaries` are **module specifiers** here (`'/src/fn-guard.ts'`), loaded
 through the SSR module runner per request so edits apply without a restart,
 where a production entry passes the functions themselves.
