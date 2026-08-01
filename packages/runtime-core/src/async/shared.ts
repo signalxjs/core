@@ -121,10 +121,12 @@ export type AsyncErrored<T> = AsyncStateBase<T> & {
  * `await` (render fns re-run and re-narrow on every change; this only matters
  * in event handlers and async code).
  *
- * Invariants every producer upholds (dev-checked in `matchAsyncState`):
- * `value` is the SWR last-good — kept across same-key refresh() AND across a
- * failed fetch, CLEARED on key change; `loading` is `state === 'pending'`
- * ONLY ("nothing to show yet" — refresh indicators read `'refreshing'`).
+ * Invariants every producer upholds: `value` is the SWR last-good — kept
+ * across same-key refresh() AND across a failed fetch, CLEARED on key
+ * change; `loading` is `state === 'pending'` ONLY ("nothing to show yet" —
+ * refresh indicators read `'refreshing'`). The state/presence/error
+ * combinations are additionally dev-checked in `matchAsyncState`; `loading`
+ * is not (derive it from the state name and it cannot lie).
  */
 export type AsyncState<T> =
     | AsyncIdle<T>
@@ -137,10 +139,12 @@ export type AsyncState<T> =
  * The WIDE shape an engine implements — build one of these (getters over your
  * own state machine) and return it `as AsyncState<T>` at the seam; the union
  * is how CONSUMERS see it, not a shape TypeScript can check a stable getter
- * object against. Invariants the cast asserts (dev-warned in
- * `matchAsyncState`): idle/pending ⇒ `hasValue` false & `error` null;
+ * object against. Invariants the cast asserts, dev-warned in
+ * `matchAsyncState`: idle/pending ⇒ `hasValue` false & `error` null;
  * ready/refreshing ⇒ `hasValue` true & `error` null; errored ⇒ `error`
- * non-null; `loading` ⇔ pending.
+ * non-null. `loading` must be `state === 'pending'` — not runtime-checked
+ * (`matchAsyncState` never sees it); derive it from the state name, as every
+ * in-tree producer does, and it cannot disagree.
  *
  * @internal — the §7 pack contract surface.
  */
@@ -169,9 +173,10 @@ const invariantWarned = __DEV__ ? new Set<string>() : null!;
  * The state→arm dispatch table (shared by client cells, actions, `all()`,
  * and the server renderer's provider).
  *
- * In dev it also checks the {@link AsyncStateImpl} invariants — the honesty
- * check behind every producer's `as AsyncState<T>` cast, third-party engines
- * included.
+ * In dev it also checks the {@link AsyncStateImpl} state/presence/error
+ * invariants — the honesty check behind every producer's `as AsyncState<T>`
+ * cast, third-party engines included. (`loading` is outside the view and
+ * outside the check — see {@link AsyncStateImpl}.)
  *
  * @internal
  */
