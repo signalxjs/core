@@ -451,8 +451,10 @@ function serverUseAsync(
             return matchAsyncState({
                 state: state.st,
                 value: state.data,
+                // Server cells never hold last-good through 'errored' (one
+                // request, no prior success) — the errored empty split.
+                hasValue: state.st === 'ready',
                 error: state.failure,
-                stale: null,
                 retry: () => { /* no-op on the server */ }
             }, arms);
         },
@@ -737,6 +739,16 @@ interface RenderBufState {
      * interleave on the shared SSRContext, so this must not live on ctx.
      */
     inDefer?: boolean;
+    /**
+     * True when the last node emitted into the current insertion parent was
+     * text. Drives the `<!--t-->` boundary between adjacent text nodes the
+     * browser parser would otherwise merge. Walk state, not buffer state:
+     * it crosses Fragment and component boundaries (slot content arrives
+     * Fragment-wrapped, #575) and survives streaming flushes; any tag or
+     * comment emission clears it, so `true` can only mean "the previous
+     * emission into the same DOM parent was text".
+     */
+    lastWasText: boolean;
 }
 
 /**
@@ -763,22 +775,33 @@ function syncSubtreeWorker(
     if ((element as VNode).type === Comment) {
         buf.push('<!---->');
         state.len += 7;
+        state.lastWasText = false;
         return true;
     }
 
     if (typeof element === 'string' || typeof element === 'number') {
+        if (state.lastWasText) {
+            buf.push('<!--t-->');
+            state.len += 8;
+        }
         const s = escapeHtml(typeof element === 'string' ? element : String(element));
         buf.push(s);
         state.len += s.length;
+        state.lastWasText = true;
         return true;
     }
 
     const vnode = element as VNode;
 
     if (vnode.type === Text) {
+        if (state.lastWasText) {
+            buf.push('<!--t-->');
+            state.len += 8;
+        }
         const s = escapeHtml(typeof vnode.text === 'string' ? vnode.text : String(vnode.text));
         buf.push(s);
         state.len += s.length;
+        state.lastWasText = true;
         return true;
     }
 
@@ -792,6 +815,7 @@ function syncSubtreeWorker(
     if (typeof vnode.type === 'string') {
         const tagName = vnode.type;
         const props = serializeOpenTagProps(vnode, appContext);
+        state.lastWasText = false;
 
         if (VOID_ELEMENTS.has(tagName)) {
             const tag = `<${tagName}${props}>`;
@@ -804,20 +828,14 @@ function syncSubtreeWorker(
         buf.push(openTag);
         state.len += openTag.length;
 
-        let prevWasText = false;
         for (const child of vnode.children) {
-            const isText = isTextContent(child);
-            if (isText && prevWasText) {
-                buf.push('<!--t-->');
-                state.len += 8;
-            }
             if (!syncSubtreeWorker(child, appContext, buf, state)) return false;
-            prevWasText = isText;
         }
 
         const closeTag = `</${tagName}>`;
         buf.push(closeTag);
         state.len += closeTag.length;
+        state.lastWasText = false;
         return true;
     }
 
@@ -845,11 +863,25 @@ function* emitStreamPlaceholder(
     const open = `<div data-async-placeholder="${id}" style="display:contents;">`;
     buf.push(open);
     state.len += open.length;
+    state.lastWasText = false;
     if (content != null) {
         yield* renderNode(content, ctx, parentContext, appContext, buf, state);
     }
     buf.push('</div>');
     state.len += 6;
+    state.lastWasText = false;
+}
+
+/**
+ * Wrap a raw item array in a synthetic Fragment so a single walk renders it.
+ * Deferred renders need this: their HTML is parsed via `template.innerHTML`
+ * ($SIGX_REPLACE), which merges adjacent text exactly like the main document
+ * parse, so cross-item `<!--t-->` adjacency must be tracked in ONE walk —
+ * and the walker itself has no branch for a bare array (it would render
+ * nothing at all).
+ */
+function fragmentOf(items: JSXElement[]): VNode {
+    return { type: Fragment, props: {}, key: null, children: items as VNode[], dom: null } as VNode;
 }
 
 /** Rollback wrapper: on bail-out, restores buf/state to the entry marks. */
@@ -861,9 +893,11 @@ function renderSyncSubtree(
 ): boolean {
     const mark = buf.length;
     const lenMark = state.len;
+    const textMark = state.lastWasText;
     if (syncSubtreeWorker(element, appContext, buf, state)) return true;
     buf.length = mark;
     state.len = lenMark;
+    state.lastWasText = textMark;
     return false;
 }
 
@@ -895,22 +929,33 @@ function* renderNode(
     if ((element as VNode).type === Comment) {
         buf.push('<!---->');
         state.len += 7;
+        state.lastWasText = false;
         return;
     }
 
     if (typeof element === 'string' || typeof element === 'number') {
+        if (state.lastWasText) {
+            buf.push('<!--t-->');
+            state.len += 8;
+        }
         const s = escapeHtml(typeof element === 'string' ? element : String(element));
         buf.push(s);
         state.len += s.length;
+        state.lastWasText = true;
         return;
     }
 
     const vnode = element as VNode;
 
     if (vnode.type === Text) {
+        if (state.lastWasText) {
+            buf.push('<!--t-->');
+            state.len += 8;
+        }
         const s = escapeHtml(typeof vnode.text === 'string' ? vnode.text : String(vnode.text));
         buf.push(s);
         state.len += s.length;
+        state.lastWasText = true;
         return;
     }
 
@@ -961,14 +1006,12 @@ function* renderNode(
                 // Leading comment mirrors the client Defer's constant render
                 // shape ([fallback-or-comment, …children]) so the streamed
                 // replacement hydrates against the client's null-fallback slot.
-                let html = '<!---->';
-                for (const item of items) {
-                    // The deferred driver awaits unresolved lazy() preloads
-                    // inline (rule above) and — via inDefer — blocks on keyed
-                    // useData reads too, so this resolves to real content.
-                    html += await renderVNodeToString(item, ctx, appContext, capturedParentCtx, { inDefer: true });
-                }
-                return html;
+                // One walk over a synthetic Fragment, not a call per item —
+                // cross-item text adjacency needs the shared marker state.
+                // The deferred driver awaits unresolved lazy() preloads
+                // inline (rule above) and — via inDefer — blocks on keyed
+                // useData reads too, so this resolves to real content.
+                return '<!---->' + await renderVNodeToString(fragmentOf(items), ctx, appContext, capturedParentCtx, { inDefer: true });
             })();
 
             ctx._pendingAsync.push({ id, promise: deferredRender });
@@ -978,6 +1021,7 @@ function* renderNode(
             const marker = `<!--$c:${id}-->`;
             buf.push(marker);
             state.len += marker.length;
+            state.lastWasText = false;
 
             if (state.len >= state.threshold) yield FLUSH;
             return;
@@ -1037,6 +1081,7 @@ function* renderNode(
             const open = `<div data-boundary="${id}" style="display:contents;">`;
             buf.push(open);
             state.len += open.length;
+            state.lastWasText = false;
             if (boundary.fallback) {
                 try {
                     yield* renderNode(boundary.fallback(), ctx, parentCtx, appContext, buf, state);
@@ -1046,6 +1091,7 @@ function* renderNode(
                     if (fallbackHtml) {
                         buf.push(fallbackHtml);
                         state.len += fallbackHtml.length;
+                        state.lastWasText = false;
                     }
                 }
             }
@@ -1054,6 +1100,7 @@ function* renderNode(
             const marker = `<!--$c:${id}-->`;
             buf.push(marker);
             state.len += marker.length;
+            state.lastWasText = false;
             ctx.popComponent();
             if (state.len >= state.threshold) yield FLUSH;
             return;
@@ -1062,10 +1109,11 @@ function* renderNode(
         const setup = vnode.type.__setup;
         const { componentName, ssrLoads, componentCtx } = createComponentState(vnode, ctx, parentCtx, appContext, id);
 
-        // Rewind marks for a possible errorScope fallback (two locals —
-        // consulted only when a scope catches below).
+        // Rewind marks for a possible errorScope fallback (consulted only
+        // when a scope catches below).
         const bufMark = buf.length;
         const lenMark = state.len;
+        const textMark = state.lastWasText;
         let ownScope: ServerErrorScope | null = null;
         let scopeMarks: {
             pendingAsync: number;
@@ -1127,6 +1175,7 @@ function* renderNode(
                     const placeholder = `<div data-async-placeholder="${id}" style="display:contents;">`;
                     buf.push(placeholder);
                     state.len += placeholder.length;
+                    state.lastWasText = false;
 
                     if (boundary?.fallback) {
                         // A boundary fallback renders in place of content
@@ -1152,6 +1201,7 @@ function* renderNode(
 
                     buf.push('</div>');
                     state.len += 6;
+                    state.lastWasText = false;
 
                     // Core always manages the deferred render and race-loop entry
                     const capturedRenderFn = renderFn;
@@ -1234,6 +1284,7 @@ function* renderNode(
                 // the same visual contract as the client (rfc-async §4).
                 buf.length = bufMark;
                 state.len = lenMark;
+                state.lastWasText = textMark;
                 if (scopeMarks) {
                     ctx._pendingAsync.length = scopeMarks.pendingAsync;
                     ctx._pendingStreams.length = scopeMarks.pendingStreams;
@@ -1274,6 +1325,7 @@ function* renderNode(
                         if (fallbackHtml) {
                             buf.push(fallbackHtml);
                             state.len += fallbackHtml.length;
+                            state.lastWasText = false;
                         }
                     }
                 }
@@ -1291,6 +1343,7 @@ function* renderNode(
                 if (fallbackHtml) {
                     buf.push(fallbackHtml);
                     state.len += fallbackHtml.length;
+                    state.lastWasText = false;
                 }
             }
         } finally {
@@ -1310,6 +1363,7 @@ function* renderNode(
                 if (transformed) {
                     buf.push(transformed);
                     state.len += transformed.length;
+                    state.lastWasText = false;
                 }
             }
         }
@@ -1318,6 +1372,7 @@ function* renderNode(
         const marker = `<!--$c:${id}-->`;
         buf.push(marker);
         state.len += marker.length;
+        state.lastWasText = false;
         ctx.popComponent();
 
         if (state.len >= state.threshold) yield FLUSH;
@@ -1328,6 +1383,7 @@ function* renderNode(
     if (typeof vnode.type === 'string') {
         const tagName = vnode.type;
         const props = serializeOpenTagProps(vnode, appContext);
+        state.lastWasText = false;
 
         // Void elements
         if (VOID_ELEMENTS.has(tagName)) {
@@ -1339,7 +1395,8 @@ function* renderNode(
         }
 
         // Fast path: if all children are leaf types (text/number/null/bool),
-        // render entire element as a single string.
+        // render entire element as a single string. Children start a fresh
+        // parent context, so the loop-local adjacency tracking is exact here.
         if (vnode.children.length > 0 && allChildrenAreLeaves(vnode.children)) {
             let html = `<${tagName}${props}>`;
             let prevWasText = false;
@@ -1364,27 +1421,20 @@ function* renderNode(
         buf.push(openTag);
         state.len += openTag.length;
 
-        // Render children with text boundary markers
-        // Adjacent text nodes get merged by the browser, so we insert <!--t--> markers
-        let prevWasText = false;
+        // Adjacent text nodes get merged by the browser; the leaf emission
+        // sites separate them with <!--t--> via state.lastWasText.
         for (const child of vnode.children) {
-            const isText = isTextContent(child);
-            if (isText && prevWasText) {
-                // Insert marker between adjacent text nodes
-                buf.push('<!--t-->');
-                state.len += 8;
-            }
             if (!renderSyncSubtree(child, appContext, buf, state)) {
                 yield* renderNode(child, ctx, parentCtx, appContext, buf, state);
             } else if (state.len >= state.threshold) {
                 yield FLUSH;
             }
-            prevWasText = isText;
         }
 
         const closeTag = `</${tagName}>`;
         buf.push(closeTag);
         state.len += closeTag.length;
+        state.lastWasText = false;
 
         if (state.len >= state.threshold) yield FLUSH;
     }
@@ -1414,7 +1464,9 @@ export async function* renderToChunks(
     appContext: AppContext | null = null
 ): AsyncGenerator<string> {
     const buf: string[] = [];
-    const state: RenderBufState = { len: 0, threshold: STREAM_FLUSH_THRESHOLD };
+    // Flushes reset only buf/len below — lastWasText is walk state and must
+    // survive chunk boundaries (text in chunk N+1 can follow text in chunk N).
+    const state: RenderBufState = { len: 0, threshold: STREAM_FLUSH_THRESHOLD, lastWasText: false };
     const gen = renderNode(element, ctx, parentCtx, appContext, buf, state);
 
     let result = gen.next();
@@ -1458,8 +1510,12 @@ export async function* renderToChunks(
  *   keep their provide/inject chain
  */
 export async function renderVNodeToString(element: JSXElement, ctx: SSRContext, appContext: AppContext | null = null, parentCtx: ComponentSetupContext | null = null, opts?: { inDefer?: boolean }): Promise<string> {
+    // A component's render function can return a raw array (the walker has
+    // no branch for one — it would render NOTHING); deferred renders hand
+    // such results straight here. Wrap in a Fragment so the walk consumes it.
+    if (Array.isArray(element)) element = fragmentOf(element);
     const buf: string[] = [];
-    const state: RenderBufState = { len: 0, threshold: Infinity, inDefer: opts?.inDefer };
+    const state: RenderBufState = { len: 0, threshold: Infinity, inDefer: opts?.inDefer, lastWasText: false };
     const gen = renderNode(element, ctx, parentCtx, appContext, buf, state);
 
     let result = gen.next();

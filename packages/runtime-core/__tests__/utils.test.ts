@@ -3,7 +3,7 @@ import { isPromise, Utils, guid } from '../src/utils/index';
 import { isComponent } from '../src/utils/is-component';
 import { normalizeSubTree } from '../src/utils/normalize';
 import { createSlots } from '../src/utils/slots';
-import { Text, Fragment } from '../src/jsx-runtime';
+import { Text, Fragment, Comment } from '../src/jsx-runtime';
 
 // ── Utils.isPromise ─────────────────────────────────────────────────────────
 
@@ -126,13 +126,37 @@ describe('normalizeSubTree', () => {
         expect(result.text).toBe('');
     });
 
-    it('returns a Fragment VNode for an array', () => {
+    it('returns a Fragment VNode for an array, passing VNode items through', () => {
         const children = [
             { type: 'div', props: {}, key: null, children: [], dom: null },
         ];
         const result = normalizeSubTree(children as any);
         expect(result.type).toBe(Fragment);
-        expect(result.children).toBe(children);
+        // Items are normalized into a fresh array; existing VNodes keep identity.
+        expect(result.children).toHaveLength(1);
+        expect(result.children[0]).toBe(children[0]);
+    });
+
+    it('normalizes raw string/number items of an array result into Text VNodes', () => {
+        // A later patch re-parents every Fragment child (`child.parent = …`),
+        // which a raw string cannot carry — this crashed on the first update
+        // of a component whose render returned ['a: ', n] (found via #575).
+        const result = normalizeSubTree(['a: ', 5] as any);
+        expect(result.type).toBe(Fragment);
+        expect(result.children).toHaveLength(2);
+        expect(result.children[0].type).toBe(Text);
+        expect(result.children[0].text).toBe('a: ');
+        expect(result.children[1].type).toBe(Text);
+        expect(result.children[1].text).toBe(5);
+    });
+
+    it('turns falsy items of an array result into Comment placeholders', () => {
+        const result = normalizeSubTree([null, 'x', false] as any);
+        expect(result.type).toBe(Fragment);
+        expect(result.children).toHaveLength(3);
+        expect(result.children[0].type).toBe(Comment);
+        expect(result.children[1].text).toBe('x');
+        expect(result.children[2].type).toBe(Comment);
     });
 
     it('returns a Text VNode for a string', () => {

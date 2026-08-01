@@ -90,8 +90,19 @@ export type { DeferProps } from './defer.js';
 // Value-first async — reads, writes, composition (docs/rfc-async.md)
 export { useData } from './use-data.js';
 export type { AsyncState, AsyncOptions, AsyncFetcherContext, Fetcher, MatchArms, KeyValue, KeyTuple, Falsy } from './use-data.js';
+export type {
+    AsyncStateName,
+    AsyncStateBase,
+    AsyncIdle,
+    AsyncPending,
+    AsyncReady,
+    AsyncRefreshing,
+    AsyncErrored,
+    ValuePresence,
+    ErrorArmContext,
+} from './async/shared.js';
 export { useAction, SupersededError } from './use-action.js';
-export type { AsyncAction, ActionOptions, RunResult } from './use-action.js';
+export type { AsyncAction, AsyncActionBase, ActionOptions, RunResult } from './use-action.js';
 export { all } from './all.js';
 export type { AllState } from './all.js';
 export { useStream } from './use-stream.js';

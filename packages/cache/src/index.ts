@@ -45,7 +45,10 @@ declare module '@sigx/runtime-core' {
         /** Cache effects for this action — provided by @sigx/cache (app.use(cachePlugin())). */
         cache?: import('./options.js').CacheActionOptions;
     }
-    interface AsyncState<T> {
+    // `AsyncState<T>` itself is a union (not augmentable); `AsyncStateBase`
+    // is the interface every member carries, so augmenting it lands these on
+    // every member — and therefore on every `AsyncState<T>` read.
+    interface AsyncStateBase<T> {
         /**
          * Drop this key's cached value and refetch (all mounted consumers
          * update). Present on every read once @sigx/cache is installed.
@@ -53,12 +56,12 @@ declare module '@sigx/runtime-core' {
         invalidate?(): void;
         /**
          * Optimistic write-through to this key's cached value. Present on
-         * reads served WITH a `cache` option. Loosely typed here so the
-         * augmentation stays variance-neutral for AsyncState<T> generally —
-         * `CachedAsyncState<T>` (exported by this pack) is the precisely
-         * typed view.
+         * reads served WITH a `cache` option — `CachedAsyncState<T>` is the
+         * view where it is non-optional. Same signature as there: the base is
+         * generic, so the augmentation can be precisely typed (method-syntax
+         * bivariance keeps AsyncState<T> assignability unaffected).
          */
-        mutate?(update: unknown): void;
+        mutate?(update: T | ((current: T | null) => T)): void;
     }
 }
 

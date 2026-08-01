@@ -11,7 +11,7 @@
  */
 
 import { signal, batch, untrack } from '@sigx/reactivity';
-import type { AsyncFetcherContext, AsyncState, MatchArms } from '@sigx/runtime-core';
+import type { AsyncFetcherContext, AsyncState, AsyncStateName, MatchArms } from '@sigx/runtime-core';
 import {
     matchAsyncState,
     makeUnhandledReporter,
@@ -19,20 +19,25 @@ import {
     isLiveClient,
     type AsyncEngine,
     type AsyncReadHandle,
+    type AsyncStateImpl,
 } from '@sigx/runtime-core/internals';
 import { CacheStore, type CacheEntry, type EntrySubscriber } from './store.js';
 import type { CacheOptions, CacheActionOptions } from './options.js';
 
 type Fetcher = (arg: unknown, ctx: AsyncFetcherContext) => Promise<unknown>;
-type StateName = 'idle' | 'pending' | 'ready' | 'refreshing' | 'errored';
 
-/** The state object cached reads return — AsyncState plus the pack methods. */
-export interface CachedAsyncState<T> extends AsyncState<T> {
+/**
+ * The state object cached reads return — AsyncState plus the pack methods.
+ * An intersection, not an interface: `AsyncState` is a union, and
+ * intersecting distributes over its members so discriminant narrowing works
+ * through the pack extension too.
+ */
+export type CachedAsyncState<T> = AsyncState<T> & {
     /** Drop this key's cached value and refetch (all mounted consumers update). */
     invalidate(): void;
     /** Optimistic write-through: update the cached value in place (every mounted consumer re-renders). */
     mutate(update: T | ((current: T | null) => T)): void;
-}
+};
 
 function createCachedRead<T>(
     store: CacheStore,
@@ -49,7 +54,7 @@ function createCachedRead<T>(
     const keepPreviousData = cache.keepPreviousData ?? false;
 
     const state = signal({
-        st: 'idle' as StateName,
+        st: 'idle' as AsyncStateName,
         data: null as T | null,
         err: null as Error | null,
         /** Whether `data` is a value rather than "nothing yet" (#485). */
@@ -59,8 +64,6 @@ function createCachedRead<T>(
     let canonKey: string | null = null;
     let rawArg: unknown = null;
     let entry: CacheEntry | null = null;
-    /** Last-good value handed to the error arm (mirrors core's stale param). */
-    let staleVal: T | null = null;
     /** Previous key's value — shown through a key change under keepPreviousData. */
     let previousData: T | null = null;
     /** …and whether there WAS one: `previousData !== null` conflates a cached null (#485). */
@@ -82,35 +85,43 @@ function createCachedRead<T>(
         }
         const e = entry;
         const inflight = e.promise !== null;
+        // `e.hasValue` is the store's own presence bit — never re-derive
+        // presence with a null test; a cached `null` IS a value (#485).
         batch(() => {
             if (inflight) {
-                // `hasValue` is the store's own presence bit — its comment
-                // says exactly why it exists. Re-deriving presence with a null
-                // test here threw it away, so a cached `null` revalidated as
-                // 'pending' and flashed a skeleton over live content (#485).
                 const showCached = e.hasValue;
                 const showPrevious = !showCached && keepPreviousData && hasPreviousData;
-                const shown = showCached ? (e.value as T) : showPrevious ? previousData : null;
                 state.st = showCached || showPrevious ? 'refreshing' : 'pending';
-                state.data = shown;
+                state.data = showCached ? (e.value as T) : showPrevious ? previousData : null;
                 state.has = showCached || showPrevious;
                 state.err = null;
             } else if (e.error) {
-                if (e.hasValue) staleVal = e.value as T;
+                // SWR-through-error: the entry's last-good (or, across a key
+                // change under keepPreviousData, the previous key's) survives
+                // in `data`/`has` — the app reads it there; there is no
+                // hidden stale channel.
+                const showCached = e.hasValue;
+                const showPrevious = !showCached && keepPreviousData && hasPreviousData;
                 state.st = 'errored';
-                state.data = null;
-                state.has = false;
+                state.data = showCached ? (e.value as T) : showPrevious ? previousData : null;
+                state.has = showCached || showPrevious;
                 state.err = e.error;
             } else if (e.hasValue) {
-                staleVal = e.value as T;
                 state.st = 'ready';
                 state.data = e.value as T;
                 state.has = true;
                 state.err = null;
             } else {
-                state.st = 'pending';
-                state.data = keepPreviousData ? previousData : null;
-                state.has = keepPreviousData && hasPreviousData;
+                // Empty entry, nothing in flight. Under keepPreviousData the
+                // held data is SHOWN, so the state must say so: 'refreshing'
+                // (a fetch is imminent — setKey/invalidate start one), never
+                // the old 'pending'-with-data corner, which both broke the
+                // union invariant (pending ⇒ no value) and had `loading`
+                // true while content rendered.
+                const showPrevious = keepPreviousData && hasPreviousData;
+                state.st = showPrevious ? 'refreshing' : 'pending';
+                state.data = showPrevious ? previousData : null;
+                state.has = showPrevious;
                 state.err = null;
             }
         });
@@ -134,7 +145,6 @@ function createCachedRead<T>(
             if (canonKey !== null) store.unsubscribe(canonKey, subscriber);
             canonKey = canon;
             rawArg = raw;
-            staleVal = null;
 
             if (canon === null || disposed) {
                 entry = null;
@@ -161,7 +171,8 @@ function createCachedRead<T>(
         return store.fetch(canonKey, fetcher, rawArg, true);
     }
 
-    const cell: CachedAsyncState<T> = {
+    // Wide impl shape, cast to the union at the return (see AsyncStateImpl).
+    const cell: AsyncStateImpl<T> & { invalidate(): void; mutate(update: T | ((current: T | null) => T)): void } = {
         get state() {
             return state.st;
         },
@@ -182,8 +193,8 @@ function createCachedRead<T>(
                 {
                     state: state.st,
                     value: state.data,
+                    hasValue: state.has,
                     error: state.err,
-                    stale: staleVal,
                     retry: () => void refresh(),
                     onUnhandledError: reportUnhandled,
                 },
@@ -203,7 +214,7 @@ function createCachedRead<T>(
     };
 
     return {
-        state: cell,
+        state: cell as CachedAsyncState<T>,
         setKey,
         dispose() {
             disposed = true;
@@ -234,7 +245,7 @@ export function createCacheEngine(store: CacheStore): AsyncEngine {
                 // No cache policy — core's default engine verbatim, plus the
                 // convenience invalidate() (≡ refresh: drop + refetch).
                 const handle = defaultAsyncEngine.read<T>(fetcher as (arg: unknown, ctx: AsyncFetcherContext) => Promise<T>, options, instance);
-                (handle.state as Partial<CachedAsyncState<T>>).invalidate = () => void handle.state.refresh();
+                (handle.state as { invalidate?: () => void }).invalidate = () => void handle.state.refresh();
                 return handle;
             }
             return createCachedRead<T>(store, fetcher, cache, instance);

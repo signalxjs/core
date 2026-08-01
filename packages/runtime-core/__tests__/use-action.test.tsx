@@ -78,7 +78,7 @@ describe('useAction', () => {
         expect(action.error).toBeNull();
     });
 
-    it('a failing run resolves { ok: false, error } and never rejects; value/error mutually exclusive', async () => {
+    it('a failing run resolves { ok: false, error } and never rejects; the last success survives (SWR-through-error)', async () => {
         let calls = 0;
         const action = mountAction<string, void>(() => {
             calls++;
@@ -92,7 +92,10 @@ describe('useAction', () => {
         expect(r.ok).toBe(false);
         if (!r.ok) expect(r.error.message).toBe('failed');
         expect(action.state).toBe('errored');
-        expect(action.value).toBeNull();
+        // The last success stays readable next to the error — only reset()
+        // clears it ("keep content + toast" without a match arm).
+        expect(action.value).toBe('first');
+        expect(action.hasValue).toBe(true);
         expect(action.error?.message).toBe('failed');
     });
 
@@ -189,7 +192,7 @@ describe('useAction', () => {
         expect(action.state).toBe('idle'); // no write after reset
     });
 
-    it('the error arm\'s retry re-runs the LAST input; stale is the last success', async () => {
+    it('the error arm\'s retry re-runs the LAST input; ctx carries the last success', async () => {
         let calls = 0;
         const inputs: string[] = [];
         let action!: AsyncAction<string, string>;
@@ -207,9 +210,9 @@ describe('useAction', () => {
                     {action.match({
                         idle: () => 'IDLE',
                         pending: () => 'PENDING',
-                        error: (e, retry, stale) => {
-                            armRetry = retry;
-                            armStale = stale;
+                        error: (e, ctx) => {
+                            armRetry = ctx.retry;
+                            armStale = ctx.value;
                             return `ERROR:${e.message}`;
                         },
                         ready: (v) => v,
@@ -228,6 +231,9 @@ describe('useAction', () => {
         await settle();
         expect(container.querySelector('.out')?.textContent).toBe('ERROR:second fails');
         expect(armStale).toBe('ok:first'); // last success survives for the arm
+        // …and on the action itself (SWR-through-error) — only reset() clears it.
+        expect(action.value).toBe('ok:first');
+        expect(action.hasValue).toBe(true);
 
         armRetry();
         await settle();

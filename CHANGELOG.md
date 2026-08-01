@@ -61,6 +61,57 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- **BREAKING: `AsyncState` is a discriminated union, and `value`/`hasValue`
+  survive errors (#578; supersedes #485's `hasValue` as shipped in this
+  cycle).** Two changes with one root: presence was split across a visible
+  channel (`hasValue`, #485) and a hidden one (the `STALE` symbol + the
+  error arm's positional `stale: T | null`), and the hidden one still
+  conflated a legitimate `null` with "no value" — `all()`'s combined stale
+  died on one legit-null member, and each new pack surface grew its own
+  presence boolean to compensate (`hasPreviousData`, the proposed
+  `hasStale`).
+
+  Now: `value` is *the best data the cell has* under one rule — kept across
+  same-key `refresh()` **and across a failed fetch**, cleared on key change
+  — and `AsyncState<T>` is a tagged union
+  (`AsyncIdle | AsyncPending | AsyncReady | AsyncRefreshing | AsyncErrored`),
+  so `if (q.hasValue) q.value // T` and `if (q.state === 'ready') q.value // T`
+  narrow with no cast; the `'errored'` member genuinely splits on
+  `hasValue`. `match` still renders the error arm on every `'errored'`
+  (no fallback to `ready`), and its error arm is now
+  `error?: (e, ctx: { retry } & ({ value: T; hasValue: true } | { value: null; hasValue: false })) => R`.
+  The hidden stale channel is deleted outright. `AsyncAction` gets the same
+  union treatment and gains `hasValue`; `AsyncStateName` is finally
+  exported.
+
+  Old → new observable value, per input shape that already existed:
+
+  | shape | before | after |
+  |---|---|---|
+  | errored after a success: `.value` / `.hasValue` | `null` / `false` | **last-good `T` / `true`** |
+  | errored, never succeeded | `null` / `false` | `null` / `false` (unchanged) |
+  | error arm 2nd/3rd params | `(retry, stale)` positional | **`ctx` object** — `ctx.retry`, `ctx.value`, `ctx.hasValue` |
+  | retry from errored-after-success | `'pending'` (skeleton flash over kept content) | **`'refreshing'`** |
+  | `all()` combined value with a legit-`null` member | last-good combination `null` | combines; `hasValue` true |
+  | cache `keepPreviousData`, empty entry not in flight | `'pending'` with data shown and `loading === true` | **`'refreshing'`**, `loading === false` |
+  | `interface X extends AsyncState<T>` | compiled | **compile error** — intersect instead: `type X<T> = AsyncState<T> & {...}` |
+
+  Breaking userland patterns, by name:
+
+  - `q.error && !q.value` (or any `errored ⇒ value === null` guard) — an
+    errored cell that once had data now holds it; content next to an error
+    banner stays on screen instead of blanking. That is the intended SWR
+    posture; blank deliberately with the state check `q.state === 'errored'`.
+  - `error: (e, retry, stale) => …` — destructure instead:
+    `error: (e, { retry }) => …`; the last-good is `ctx.value`/`ctx.hasValue`
+    (a legit-null last-good finally reads as present).
+  - Engine packs (§7): implement the wide `AsyncStateImpl<T>` (internals)
+    and return it `as AsyncState<T>`; `matchAsyncState` dev-warns when a
+    producer's state/presence combination lies. Packs extending the state
+    shape switch from `extends` to an intersection; members meant to exist
+    on every state augment `AsyncStateBase<T>` (how `@sigx/cache`'s
+    `invalidate?`/`mutate?` now land).
+
 - **`@sigx/server`: `origin: 'verify-when-present'` no longer admits
   Origin-less FORM posts (#556).** The relaxation's safety rests on the JSON
   content-type CSRF layer, which a `form: true` target deliberately gives
@@ -147,6 +198,45 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   regex-escaped, since `src` is a pattern and a base like `/api.v1/fn` must not
   also match `/apiXv1/fn`. Cloudflare and Netlify were unaffected — their
   functions see every path.
+
+- **`@sigx/server-renderer`: the `<!--t-->` text-boundary marker survives
+  Fragment and render-result-array boundaries, so slot content hydrates
+  without doubling its text (#575).** The marker was a loop-local decision in
+  the host-element child walks, and slot content always sits one level
+  deeper: a slot call among siblings — `<button><Icon/>{slots.default?.()}
+  </button>` — or a fill returning `<>…</>` (or an array) is wrapped in an
+  anonymous Fragment, which hid its texts from the loop. The browser then
+  merged `static {dynamic}` into one DOM text node and hydration *appended*
+  the dynamic half instead of adopting it — the string rendered twice after
+  the first update, with no warning. (A slot call that was the *sole* child
+  spread flat and worked, which is why the bug looked intermittent.) Text
+  adjacency is now walk state threaded through Fragments and component
+  recursion, so the marker lands wherever two texts truly touch — including
+  a component whose output *begins* with bare text after a text sibling,
+  which merged the same way (components only emit a trailing anchor). An
+  empty Fragment between two texts correctly preserves their adjacency.
+
+  In dev, hydration now warns when a non-empty text VNode finds no text node
+  to adopt — the silent append was the only signal this class of mismatch
+  gave, and a doubled short label is easy to miss.
+
+- **`@sigx/server-renderer`: a deferred stream render whose result is a raw
+  array emitted an empty `$SIGX_REPLACE` payload (#581).** The walker has no
+  branch for a bare array, so a streamed async component returning
+  `['x: ', data.value]` replaced its placeholder with nothing. Raw arrays
+  are now wrapped in a synthetic Fragment before the walk; `<Defer>`'s
+  deferred render also rides one walk instead of one per item, so
+  `<!--t-->` adjacency between its items is tracked (the `$SIGX_REPLACE`
+  client parses via `template.innerHTML`, which merges adjacent text exactly
+  like the main document parse).
+
+- **`@sigx/runtime-core`: a component render result given as a raw array
+  crashed on its first patch (#581).** `normalizeSubTree` wrapped the array
+  in a Fragment but kept raw string/number items, and the patch path
+  re-parents every Fragment child — `TypeError: Cannot create property
+  'parent' on string`. Array results now get the same item normalization as
+  a JSX child array: strings/numbers become Text VNodes, falsy items become
+  Comment placeholders so positional diffing keeps its indices.
 
 - **`@sigx/vite`: the dev server-function endpoint ignored `maxUrlBytes`,
   `onError` and `timeoutMs` (#561).** `sigxServer()` mounts the RPC endpoint in
@@ -363,10 +453,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   seam at all. New build warning: a spread in a `serverFn({...})` options
   literal hides `id`/`cache`/`invalidates`/`form` from the static readers,
   which silently disables single-flight boundary refresh.
-
-- **`AsyncState.hasValue` — presence, separate from the value (#485).** Every
-  `useData` cell, the `@sigx/cache` cell, `all()` and the SSR-side state now
-  expose `readonly hasValue: boolean`. Additive for readers.
 
 - **`@sigx/vite/assets` — `collectAssets` without the `node:` graph (#486).**
   The manifest → `DocumentOptions.assets` resolver is a pure function, but it

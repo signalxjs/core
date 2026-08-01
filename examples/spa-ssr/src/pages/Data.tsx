@@ -56,7 +56,7 @@ const FlakyCard = component(() => {
             <h3 style="margin-top: 0;">Soft errors + retry</h3>
             {flaky.match({
                 pending: () => <p>Loading…</p>,
-                error: (e, retry) => (
+                error: (e, { retry }) => (
                     <p style="color: #b00;">
                         {e.message}{' '}
                         <button onClick={retry}>Retry</button>
