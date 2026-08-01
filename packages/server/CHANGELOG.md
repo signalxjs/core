@@ -4,6 +4,28 @@
 
 ### Fixed
 
+- **The browser entry's type re-export list was unreachable, and completing it
+  would have been worse (#565).** `browser.ts` hand-mirrored 14 type names from
+  `index.ts` and had drifted three behind (`InvalidatePattern`,
+  `ServerFnKeyRef`, `ServerStreamOptions`) — but nothing could ever see them:
+  `package.json` routes `"types"` to `dist/index.d.ts` unconditionally, above
+  the `browser` condition. That routing is correct and deliberate: the browser
+  entry's values are throwing stand-ins whose signatures contradict the real
+  API (`serverFn(): never` takes no arguments and is not generic), so a
+  consumer resolving those types would fail to compile every `*.server.ts`. One
+  type surface, two value surfaces. The list is gone, with the reason written
+  where it used to be, and a test now pins the parity that does matter —
+  VALUE-export parity between the two entries — plus the absence of a `types`
+  key under `browser`.
+
+  The `browser` condition also gained a `"default"`. A resolver that set
+  `browser` but matched none of `development`/`production`/`import` fell out of
+  the sub-object and continued at the parent, where the next match would have
+  been the **server** module. In practice such a resolver hit "no conditions
+  matched" instead, but this entry exists precisely so that class of
+  misconfiguration fails loudly rather than shipping a server body to the
+  client.
+
 - **The pollution filters silently ate legitimate `constructor`/`prototype`
   data keys, in both directions (#560).** The request reviver, the response
   reviver in the client stubs, and the form-field filter all dropped three
@@ -69,6 +91,28 @@
   precisely why this survived.
 
 ### Changed
+
+- **`__sigxKey` is a string in every environment (#565).**
+  `ServerFnCallable.__sigxKey` is declared a required `string`, and that
+  declaration is load-bearing — it is what lets `useData(getVotes)` type-check
+  while a plain function does not. Outside the Vite transform the property was
+  simply absent, so `fn.__sigxKey.length` type-checked and crashed. Making it
+  optional was not available: the gate is runtime-core's
+  `ServerFnDataRef.__sigxKey: string`, and relaxing either side removes it
+  entirely, because TypeScript skips weak-type detection for a type with call
+  signatures — every function would satisfy it. The runtime was made honest
+  instead: `serverFn()` mints `__sigxKey: ''` and `__serverFnStub` falls back
+  to `''` when the build emitted no key. `''` is already what both readers mean
+  by "absent" (`isServerFnDataRef` and the endpoint's invalidate-pattern
+  resolver each test `key !== ''`), so keying, `useData(fn)`'s dev throw and
+  fn-ref `invalidates` behave exactly as before. The client stub's own return
+  type said `string | undefined` — a contradiction inside one package — and now
+  says `string`.
+
+  **What breaks is detecting "unstamped" by `undefined`**:
+  `fn.__sigxKey === undefined`, or a test asserting `toBeUndefined()`.
+  (`'__sigxKey' in fn` was already true on stubs.) Falsiness checks are
+  unaffected, and nothing stops compiling.
 
 - **A base mismatch now says so in dev (#563).** The mount `base` is spelled by
   `matchesServerFn`, by `handleServerFnRequest` and by the Node adapter, each

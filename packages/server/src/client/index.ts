@@ -240,7 +240,11 @@ export function __serverFnStub(
     boundaries?: 0 | 1
 ): ((...args: unknown[]) => Promise<unknown>) & {
     with(options?: ServerFnCallOptions): (...args: unknown[]) => Promise<unknown>;
-    __sigxKey: string | undefined;
+    // `string`, never `string | undefined` (#565): the public
+    // `ServerFnCallable` declares it required, and this returning the wider
+    // type was a contradiction inside one package. An un-stamped build gets
+    // `''` below — the value every reader already treats as "no key".
+    __sigxKey: string;
 } {
     const call = async (args: unknown[], options?: ServerFnCallOptions): Promise<unknown> => {
         // §6.3 sidecar — only invalidates-declaring mutations pay the
@@ -297,7 +301,9 @@ export function __serverFnStub(
     // v2 per-call bullet pulled forward): explicit, so the wire args stay
     // exactly the user's args (no trailing-argument sniffing).
     return Object.assign((...args: unknown[]) => call(args), {
-        __sigxKey: key,
+        // `''` when the build emitted no key — the same sentinel the server
+        // wrapper mints, so both sides of the transform agree (#565).
+        __sigxKey: key ?? '',
         with:
             (options?: ServerFnCallOptions) =>
             (...args: unknown[]) => {

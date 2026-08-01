@@ -209,6 +209,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- **`@sigx/vite`: the build now warns when a non-callable server-module export
+  reaches the client bundle (#565).** `export const MAX = 10` from a
+  `*.server.ts` becomes `__serverOnly("MAX", …)` — a throwing *function* that
+  TypeScript still types `number`, so `MAX + 1` is a silent `NaN` and only a
+  CALL would throw; `export class Db {}` gets `new Db()` failing with "is not a
+  constructor" instead of the stub's message. The extractor now records exports
+  whose declaration is provably not callable (literal, template, object/array
+  literal, class) — never a `const x = makeThing()`, an identifier or a
+  re-export, where a false alarm would cost more than a miss — and the plugin
+  emits them only in the CLIENT transform, i.e. only for modules the browser
+  build actually pulls in, so a constant shared between server modules stays
+  quiet.
+
+  Also `@sigx/serialize` and `@sigx/server`: a dev warning naming the property
+  path of any value the boundary codec cannot carry, and `__sigxKey` is now a
+  string in every environment. Details in each package's changelog.
+
 - **Every platform entry but Node lost single-flight boundary refresh
   (#564).** The `renderBoundaries` option (rfc-server §6.3) was wired in
   exactly two places — `examples/resume/server.mjs` and the dev plugin's

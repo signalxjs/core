@@ -537,3 +537,83 @@ describe('defineTypeHandler + generic TypeHandler', () => {
         expect(chain.length).toBeGreaterThan(2);
     });
 });
+
+describe('dev warning for values the codec cannot carry (#565)', () => {
+    const warnOn = (value: unknown, handlers: TypeHandler[] = []): string => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        try {
+            try {
+                encodeWithHandlers(value, handlers);
+            } catch {
+                // A circular value still throws — the warning precedes it.
+            }
+            return warn.mock.calls.map((c) => String(c[0])).join('\n');
+        } finally {
+            warn.mockRestore();
+        }
+    };
+
+    it('names the property path of each corrupting shape', () => {
+        expect(warnOn({ thumb: new Uint8Array([1, 2]) })).toContain('`thumb` is Uint8Array');
+        expect(warnOn({ stats: { ratio: NaN } })).toContain('`stats.ratio` is NaN');
+        expect(warnOn({ items: [{ err: new Error('x') }] })).toContain('`items[0].err` is an Error');
+        expect(warnOn({ pending: Promise.resolve(1) })).toContain('`pending` is a Promise');
+        expect(warnOn({ cache: new WeakMap() })).toContain('`cache` is a WeakMap');
+    });
+
+    it('names a class instance losing its prototype', () => {
+        class Money {
+            constructor(readonly cents: number) {}
+        }
+        expect(warnOn({ price: new Money(1999) })).toContain('`price` is a Money instance');
+    });
+
+    it('says nothing about a circular structure — that one already throws', () => {
+        // The check is for LOSSY SUCCESSES. A cycle is loud on its own, and
+        // callers that encode speculatively to test admissibility catch the
+        // throw and report their own message — warning here would
+        // double-report it. The walk still has to stop, and does.
+        const cyclic: Record<string, unknown> = { a: 1, bad: new Uint8Array([1]) };
+        cyclic.self = cyclic;
+        const out = warnOn(cyclic);
+        expect(out).not.toContain('circular');
+        expect(out).toContain('`bad` is Uint8Array');
+    });
+
+    it('says nothing about what the codec DOES carry', () => {
+        expect(
+            warnOn({
+                at: new Date(0),
+                tags: new Set(['a']),
+                map: new Map([['k', 1]]),
+                total: 42n,
+                home: new URL('https://example.com/'),
+                pattern: /ab+/g,
+                nested: { list: [1, 'two', true, null] },
+                custom: { toJSON: () => [1, 2] }
+            })
+        ).toBe('');
+    });
+
+    it('says nothing about a value a REGISTERED handler claims', () => {
+        // The check consults the same chain the encoder does, so an app that
+        // taught the codec its type does not get scolded for using it.
+        const bytes: TypeHandler = {
+            name: 'bytes',
+            tag: '$bytes',
+            test: (v): v is Uint8Array => v instanceof Uint8Array,
+            serialize: (v) => Array.from(v as Uint8Array),
+            revive: (raw) => new Uint8Array(raw as number[])
+        };
+        expect(warnOn({ thumb: new Uint8Array([1, 2]) }, [bytes])).toBe('');
+    });
+
+    it('is silent in production', () => {
+        vi.stubEnv('NODE_ENV', 'production');
+        try {
+            expect(warnOn({ thumb: new Uint8Array([1]) })).toBe('');
+        } finally {
+            vi.unstubAllEnvs();
+        }
+    });
+});
