@@ -648,12 +648,13 @@ diagnosable. The client stub independently warns in `__DEV__` above ~2 KiB of
 arguments — arguments that large make a poor cache key, which is the real signal
 to drop `cache` and let the read POST.
 
-Both flow through every mount unchanged: `createServerFnHandler` (Node),
-`handleServerFnRequest` (WinterCG), and the `sigxServer()` dev middleware, which
-goes through the Node adapter. Each of those three forwarded a hand-picked
-subset at some point and silently dropped `maxUrlBytes` — #545/#547 at the
-adapter, #561 at the dev middleware — so both now derive their option type by
-inheritance instead of copying it.
+`handleServerFnRequest` (WinterCG) enforces both directly. The two layers that
+WRAP it — `createServerFnHandler` (Node) and the `sigxServer()` dev middleware,
+which goes through that adapter — each hand-listed the options they passed
+down, and each silently dropped `maxUrlBytes` that way: #545/#547 at the
+adapter, #561 at the dev middleware. Both now derive their option type from
+`ServerFnRequestOptions` and forward by spread, so an option added to the
+endpoint reaches every mount without being copied anywhere.
 
 ### Operations: `onError` and `timeoutMs`
 
