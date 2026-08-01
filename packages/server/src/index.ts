@@ -156,7 +156,8 @@ export interface ServerFnOptions<S, R> {
      * (`private` + `Vary: Cookie` by default; `public` is an explicit
      * opt-in under the args-only contract, §5.2a). POST stays valid.
      * Mutually exclusive with `invalidates` — a read that invalidates is
-     * not a read. Layering with `@sigx/cache`'s staleTime: §6.2.
+     * not a read; declaring both is a definition-time error (in production
+     * too, #567). Layering with `@sigx/cache`'s staleTime: §6.2.
      */
     cache?: ServerFnReadCache;
     /**
@@ -181,7 +182,8 @@ export interface ServerFnOptions<S, R> {
      * silently fail extraction, #437). REQUIRES `input` (definition-time
      * error without it, #412): form fields are attacker-typable strings and
      * the validator is what stands between them and the handler (§5.2b).
-     * Mutually exclusive with `cache` — a form target is a mutation.
+     * Mutually exclusive with `cache` — a form target is a mutation;
+     * declaring both is a definition-time error (in production too, #567).
      */
     form?: true;
     /**
@@ -389,11 +391,20 @@ function createServerFn(
     // The §4.1 read marker: precompute the Cache-Control value once, at
     // definition time — the endpoint's per-request cost is one header set.
     const cache = typeof arg === 'function' ? undefined : arg.cache;
-    if (__DEV__ && cache && invalidates) {
-        console.warn(
+    if (cache && invalidates) {
+        // #567: NOT __DEV__-gated, the posture of the two throws below. The
+        // endpoint resolves this contradiction SILENTLY — a GET answer never
+        // carries `$cache.invalidates`, and with no patterns the §6.3
+        // boundary refresh never runs for it either — so in production the
+        // symptom is stale client caches and dead refresh, with no signal at
+        // any layer. That is exactly where a dev-only warning is not present.
+        throw new Error(
             `[sigx server] serverFn ${name ? `"${name}" ` : ''}declares both \`cache\` and ` +
             `\`invalidates\` — a read that invalidates is not a read (rfc-server §4.1). ` +
-            `The function stays callable, but pick one.`
+            `The endpoint drops the \`invalidates\` declaration on the GET path: no client ` +
+            `cache is ever told, and single-flight boundary refresh (§6.3) never runs for ` +
+            `it. Split them — keep \`cache\` on the read, and move the write with its ` +
+            `\`invalidates\` into its own serverFn.`
         );
     }
     // The §6.4 form-target marker: the endpoint's gate for accepting form
@@ -418,11 +429,16 @@ function createServerFn(
             `{ version: 1, vendor: 'app', validate: (v) => ({ value: v }) } }.`
         );
     }
-    if (__DEV__ && form && cache) {
-        console.warn(
+    if (form && cache) {
+        // #567: NOT __DEV__-gated — see the `cache` + `invalidates` throw
+        // above. These two also program opposite transports, so the
+        // contradiction is not even resolvable at request time.
+        throw new Error(
             `[sigx server] serverFn ${name ? `"${name}" ` : ''}declares both \`form\` and ` +
-            `\`cache\` — a form target is a mutation; a cacheable read cannot be one ` +
-            `(rfc-server §6.4). The function stays callable, but pick one.`
+            `\`cache\` — a form target is a mutation, and a cacheable read cannot be one ` +
+            `(rfc-server §6.4). They also program opposite transports: \`cache\` makes the ` +
+            `stub issue a GET with the arguments in the URL, while a form POSTs fields. ` +
+            `Drop \`cache\` here, or drop \`form\` if this really is a read.`
         );
     }
     // The cast covers `__sigxKey` (declared required on the callable for

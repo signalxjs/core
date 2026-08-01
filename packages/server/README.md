@@ -327,6 +327,10 @@ export const submitFeedback = serverFn({
   because form fields are attacker-typable strings and the validator is
   the only thing between them and the handler (a deliberately raw target
   declares an explicit pass-through schema; the error message shows it).
+- `form` and `cache` are mutually exclusive, and declaring both is a
+  definition-time error too (#567): a form target is a mutation, and the two
+  program opposite transports — `cache` makes the stub GET with the arguments
+  in the URL, a form POSTs fields.
 - JSON callers of the same fn are untouched — same envelope, same errors.
 
 ### Cacheable reads — GET + `Cache-Control`
@@ -353,7 +357,10 @@ export const getProduct = serverFn({
 - **Declaring `cache` is a promise.** A mutating function marked `cache`
   re-opens CSRF — GET has no content-type gate and no preflight. Only mark
   genuinely side-effect-free reads; `cache` and `invalidates` are mutually
-  exclusive.
+  exclusive, and declaring both is a **definition-time error** (in production
+  too, #567): the endpoint would drop the `invalidates` declaration on the GET
+  path, telling no client cache and never running §6.3 boundary refresh — a
+  silence you would only notice as stale data.
 - Every non-2xx GET is `no-store`; a handler-set `cache-control` (via
   `rq.responseHeaders`) wins for dynamic per-input TTLs. POST stays valid
   for every function.

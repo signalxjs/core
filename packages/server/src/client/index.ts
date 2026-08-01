@@ -22,13 +22,27 @@ import { encodeWire, reviveWire } from '../wire-codec';
 // `/server` entry (#355).
 import { encodeFnPath, encodeReadQuery } from '../fn-url';
 
-/** Same three keys as the boundary serializer's DANGEROUS_KEYS — duplicated
- *  here (a 3-entry set) to keep this entry dependency-free. */
-const DANGEROUS_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
-
-/** Reviver DROPS prototype-pollution keys from the parsed value (rfc-server §4). */
-const reviver = (key: string, value: unknown): unknown =>
-    DANGEROUS_KEYS.has(key) ? undefined : value;
+/**
+ * Reviver DROPS an own `__proto__` key from the parsed value (rfc-server §4)
+ * — the one key that is a prototype swap under later assignment/merge.
+ * "constructor"/"prototype" are plain data keys and pass through (#560: a
+ * server function returning `{ constructor: 'Acme Corp' }` used to lose the
+ * field here, silently). `@sigx/serialize`'s revive guards the same key at
+ * its own rebuild (#548); this parse-time drop is the belt for response
+ * data consumers that never go through the codec.
+ */
+const reviver = (key: string, value: unknown): unknown => {
+    if (key === '__proto__') {
+        if (__DEV__) {
+            console.warn(
+                '[sigx] dropped an own "__proto__" key from a server response ' +
+                '(prototype-pollution guard).'
+            );
+        }
+        return undefined;
+    }
+    return value;
+};
 
 interface WireError {
     message?: string;

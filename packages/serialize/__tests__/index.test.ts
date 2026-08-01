@@ -286,6 +286,28 @@ describe('unsupported values', () => {
         expect(encodeWithHandlers(custom)).toEqual({ shaped: true });
     });
 
+    it('revive drops an own __proto__ key instead of swapping the prototype (#548)', () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        // Straight from JSON.parse — an own key, harmless until a rebuild
+        // assigns it. No caller pre-filter here: the codec itself must hold.
+        const parsed = JSON.parse('{"__proto__":{"polluted":true},"ok":1}');
+        const revived = reviveWithHandlers(parsed) as Record<string, unknown>;
+        expect(revived).toEqual({ ok: 1 });
+        expect(Object.getPrototypeOf(revived)).toBe(Object.prototype);
+        expect((revived as { polluted?: boolean }).polluted).toBeUndefined();
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining('__proto__'));
+        // The $esc unwrap path guards the same key.
+        const escaped = JSON.parse('{"$esc":{"$date":1,"__proto__":{"polluted":true}}}');
+        const unwrapped = reviveWithHandlers(escaped) as Record<string, unknown>;
+        expect(Object.getPrototypeOf(unwrapped)).toBe(Object.prototype);
+        expect(Object.keys(unwrapped)).toEqual(['$date']);
+    });
+
+    it('"constructor"/"prototype" are plain data keys and round-trip (#560)', () => {
+        const value = { constructor: 'Acme Corp', prototype: { plan: 'b' }, ok: 1 };
+        expect(roundTrip(value)).toEqual(value);
+    });
+
     it('refuses to encode past the depth cap; comfortably deep values pass (#559)', () => {
         const nest = (levels: number): unknown => {
             let value: unknown = 'leaf';

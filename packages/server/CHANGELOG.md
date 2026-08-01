@@ -4,6 +4,20 @@
 
 ### Fixed
 
+- **The pollution filters silently ate legitimate `constructor`/`prototype`
+  data keys, in both directions (#560).** The request reviver, the response
+  reviver in the client stubs, and the form-field filter all dropped three
+  keys; only `__proto__` is actually dangerous (a prototype swap under
+  assignment/merge) — `constructor`/`prototype` are plain own data keys. A
+  server function returning `{ constructor: 'Acme Corp' }` lost the field
+  on the client; a request argument or form field named `prototype` never
+  reached the handler; nothing warned. All three filters now drop only an
+  own `__proto__` key, and the drop dev-warns instead of being silent.
+  `@sigx/serialize`'s revive guards the same key at the codec itself
+  (#548), so the parse-time drops are defense in depth rather than the
+  only line. The #544 prescan narrows with it — a body merely mentioning
+  "constructor" in a value no longer takes the slow reviver path.
+
 - **The form error path dropped `ctx.responseHeaders` (#557).** A guard
   that sets a rotating session cookie on `rq.responseHeaders` and then
   rejects delivered the cookie on JSON calls but silently lost it on native
@@ -67,6 +81,36 @@
   a Vite build now provides on `virtual:sigx-server-fns`. Internally the three
   copies of the trailing-slash normalization collapsed into one `fnPathPrefix`,
   so `/rpc` and `/rpc/` cannot start routing differently in one of them.
+
+- **BREAKING: `cache` + `invalidates` and `form` + `cache` are definition-time
+  errors (#567).** Both pairs were dev-only `console.warn`s that left the
+  function callable, and the endpoint then resolved the contradiction
+  silently: a GET answer never carries `$cache.invalidates`, so the
+  declaration was dropped — and because the patterns stayed undefined,
+  single-flight boundary refresh (rfc-server §6.3) never ran for that mutation
+  either. The production symptom was stale client caches and dead boundary
+  refresh with no signal anywhere, which is exactly the case a `__DEV__`
+  warning cannot reach. Both now `throw` from `serverFn()` in dev **and**
+  production, matching the two neighbours that already did (`form` without
+  `input`, #412; `unguarded` on a preset-derived function, #489) — a
+  definition-time throw fails at boot or in CI, never per request, and throws
+  are this package's only prod-visible channel. Both options' doc comments
+  already said "mutually exclusive"; the throw makes the docs true.
+
+  What breaks: a module declaring either pair now fails at module evaluation
+  instead of loading. The realistic case is not a hand-written literal — both
+  doc comments already forbade it — but **programmatically composed options**:
+  `serverFn({ ...sharedReadOptions, invalidates })`, or a factory merging an
+  options bag, which now fails at server boot rather than shipping a read
+  whose invalidations silently did nothing. Fix by splitting: keep `cache` on
+  the read, and move the write with its `invalidates` into its own `serverFn`.
+  (The build already warned on a literal options spread, #437, so the two
+  diagnostics now agree.) `form` + `cache` + no `input` still reports the
+  `input` error first — that ordering is now pinned by a test.
+
+  The endpoint keeps its `!isGet` guard as a wire-level belt for hand-stamped
+  or registry-fabricated functions; it is no longer the place the
+  contradiction is resolved.
 
 - **Wire revive runs AFTER the endpoint `guard` (#559).** The codec's
   revive handlers do attacker-directed work — `$bigint` is a superlinear
