@@ -161,6 +161,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- **`@sigx/runtime-core`: removing the children (or slots) prop on patch now
+  clears the slot content (#586).** `cond ? <Wrap>content</Wrap> : <Wrap />`
+  left the stale fill mounted forever: the patch path updated slot state only
+  when the new vnode *carried* a `children`/`slots` key, so the fully-absent
+  form — unlike the `children: null` form — skipped the update and the version
+  bump entirely. An absent key now reads as "no slot content", the old fill
+  unmounts, and the consumer's `?? fallback` renders. The static-slot-content
+  elision (#66) is untouched: both-absent still compares equal and skips the
+  bump.
+
 - **`@sigx/server-renderer`: the `<!--t-->` text-boundary marker survives
   Fragment and render-result-array boundaries, so slot content hydrates
   without doubling its text (#575).** The marker was a loop-local decision in
