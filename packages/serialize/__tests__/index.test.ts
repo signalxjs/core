@@ -286,6 +286,49 @@ describe('unsupported values', () => {
         expect(encodeWithHandlers(custom)).toEqual({ shaped: true });
     });
 
+    it('refuses to encode past the depth cap; comfortably deep values pass (#559)', () => {
+        const nest = (levels: number): unknown => {
+            let value: unknown = 'leaf';
+            for (let i = 0; i < levels; i++) value = { child: value };
+            return value;
+        };
+        expect(() => encodeWithHandlers(nest(300))).toThrow(/nests deeper/);
+        expect(roundTrip(nest(200))).toEqual(nest(200));
+    });
+
+    it('refuses to revive past the depth cap — the attacker-typable side (#559)', () => {
+        // JSON.parse is not recursive and happily produces a 300-deep tree;
+        // revive must bound its own stack rather than overflow it.
+        const deep = JSON.parse('{"child":'.repeat(300) + '1' + '}'.repeat(300));
+        expect(() => reviveWithHandlers(deep)).toThrow(/nests deeper/);
+    });
+
+    it('a cyclic LIVE value in revive hits the depth cap instead of recursing forever (#559)', () => {
+        // The hydration blob mixes server-encoded trees with client-written
+        // live objects; a cycle among the latter used to be an infinite
+        // recursion (revive keeps no seen-set — parsed JSON cannot share).
+        const cyclic: Record<string, unknown> = {};
+        cyclic.self = cyclic;
+        expect(() => reviveWithHandlers(cyclic)).toThrow(/nests deeper/);
+    });
+
+    it('shared PLAIN subtrees encode once — a two-way-sharing DAG completes (#559)', () => {
+        // 40 levels of {left, right} both pointing at the same child is 2^40
+        // paths without the memo — an effective hang. With it, linear. The
+        // memo covers plain objects and arrays (where structural sharing
+        // lives); handler-claimed values still encode per reference.
+        let node: Record<string, unknown> = { leaf: true };
+        for (let i = 0; i < 40; i++) node = { left: node, right: node };
+        const encoded = encodeWithHandlers(node) as { left: unknown; right: unknown };
+        expect(encoded.left).toBe(encoded.right); // shared identity, by design
+        // JSON.stringify re-expands the shared identity — the wire text is
+        // exactly what the unshared walk produced (pinned shallow: 2^40
+        // stringify is the caller's problem, not the codec's).
+        const small = { a: { k: 1 }, b: {} } as Record<string, unknown>;
+        small.b = small.a;
+        expect(JSON.stringify(encodeWithHandlers(small))).toBe('{"a":{"k":1},"b":{"k":1}}');
+    });
+
     it('lets a handler win over toJSON, seeing the raw value', () => {
         // The whole reason handlers see pre-toJSON values: Date.toJSON would
         // otherwise have flattened it to a string before any handler ran.

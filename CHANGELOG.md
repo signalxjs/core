@@ -33,6 +33,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- **`@sigx/server` / `@sigx/serialize`: the wire codec is bounded and runs
+  after the guard (#559).** Encode and revive refuse values nesting deeper
+  than 256 levels instead of overflowing the stack on attacker-typable
+  wire JSON; shared plain subtrees encode once instead of once per path
+  (wire text byte-for-byte unchanged); and the endpoint revives arguments
+  AFTER `guard` runs, so nothing executes codec work — built-in or
+  app-registered — for an unvetted request. Details and the observable
+  edges in the two package changelogs.
 - **BREAKING: `AsyncState` is a discriminated union, and `value`/`hasValue`
   survive errors (#578; supersedes #485's `hasValue` as shipped in this
   cycle).** Two changes with one root: presence was split across a visible

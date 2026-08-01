@@ -2,6 +2,32 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **Both halves refuse values nesting deeper than 256 levels (#559).**
+  `encode` and `revive` are recursive where `JSON.parse`/`JSON.stringify`
+  are not, and wire data is attacker-typable — ~1 MiB of `[[[[…` spells
+  hundreds of thousands of levels and used to overflow the stack. Each half
+  now throws a `TypeError` ("Value nests deeper than 256 levels") instead.
+  A value that legitimately nests past 256 levels stops round-tripping —
+  no in-repo payload comes within an order of magnitude (the deepest bench
+  fixture is 12; boundary records nest single digits). The cap also turns a
+  cyclic *live* value handed to `reviveWithHandlers` (possible in the mixed
+  hydration blob, which revive walks idempotently) from an infinite
+  recursion into that same clean throw.
+
+- **Shared subtrees are encoded once (#559).** The cycle-detection set is
+  now an in-progress/done memo: a plain object or array reachable through
+  N paths (diamond/DAG) encodes once instead of once per path — two-way
+  sharing N levels deep was 2^N work. Wire text is byte-for-byte unchanged
+  (`JSON.stringify` re-expands the shared identity per reference, exactly
+  as the re-walk produced), and cycles still throw. Two observable edges:
+  `encodeWithHandlers`' RETURN VALUE now carries shared object identity
+  where the input did (every in-repo consumer stringifies immediately), and
+  handler `test`/`serialize` run once per unique plain-structure subtree
+  rather than once per path. Handler-claimed values stay un-memoized —
+  sharing routed through them is bounded by the depth cap instead.
+
 ### Performance
 
 - **`encodeWithHandlers` skips the handler sweep for JSON-native scalars, and
