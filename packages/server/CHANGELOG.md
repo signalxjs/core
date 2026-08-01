@@ -4,6 +4,18 @@
 
 ### Fixed
 
+- **The form error path dropped `ctx.responseHeaders` (#557).** A guard
+  that sets a rotating session cookie on `rq.responseHeaders` and then
+  rejects delivered the cookie on JSON calls but silently lost it on native
+  form submissions of the same function — same guard, same function,
+  different transport, different observable behavior. `formErrorResponse`
+  now merges the context's headers under its own load-bearing
+  `Content-Type`/`Cache-Control`, exactly like the JSON path and the form
+  303 success path already did. Applies everywhere a request context
+  exists: guard vetoes, masked handler throws, timeouts, and a throwing
+  `resolve` (#555). Pre-context refusals (origin, malformed path, unknown
+  symbol) are unchanged — no guard has run, so there is nothing to carry.
+
 - **A throwing `resolve()` escaped `handleServerFnRequest` (#555).** A
   rejecting symbol resolution — the prod registry's lazy `import()` after a
   partial deploy, dev's `ssrLoadModule` on a broken server module — left the

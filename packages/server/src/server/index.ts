@@ -429,8 +429,19 @@ const escapeHtml = (value: string): string =>
  * minimal, self-contained HTML page. `__DEV__` shows the message plus any
  * validator issues (ESCAPED — issues echo attacker-typed field values);
  * prod stays generic, matching the §5 masking posture. Always `no-store`.
+ *
+ * HEADERS is the context's `responseHeaders` where a context exists (#557):
+ * a guard that sets a rotating cookie and then rejects must deliver it on
+ * the form transport exactly like the JSON path does — same guard, same
+ * function, same observable behavior. Merged UNDER this page's own
+ * content-type and cache-control, which are load-bearing and always win.
  */
-function formErrorResponse(status: number, message: string, data?: unknown): Response {
+function formErrorResponse(
+    status: number,
+    message: string,
+    data?: unknown,
+    headers?: Headers
+): Response {
     let detail = '';
     let heading = `Something went wrong (${status}).`;
     if (status === 400) {
@@ -458,13 +469,10 @@ function formErrorResponse(status: number, message: string, data?: unknown): Res
         `<title>${status}</title>` +
         `<style>body{font:16px/1.5 system-ui,sans-serif;max-width:36rem;margin:15vh auto;padding:0 1rem;color:#333}pre{overflow-x:auto;background:#f6f6f6;padding:.75rem}</style>` +
         `<h1>${heading}</h1>${detail}`;
-    return new Response(body, {
-        status,
-        headers: {
-            'content-type': 'text/html; charset=utf-8',
-            'cache-control': 'no-store'
-        }
-    });
+    const merged = new Headers(headers);
+    merged.set('content-type', 'text/html; charset=utf-8');
+    merged.set('cache-control', 'no-store');
+    return new Response(body, { status, headers: merged });
 }
 
 /** Read the body, enforcing the byte cap DURING the read. Null ⇒ over cap. */
@@ -601,7 +609,7 @@ export async function handleServerFnRequest(
         if (!isServerFnError(error)) await reportMasked(options, error, info, ctx);
         const shape = wireErrorShape(error, info.name || symbol);
         return isForm
-            ? formErrorResponse(shape.status, shape.message, shape.data)
+            ? formErrorResponse(shape.status, shape.message, shape.data, ctx.responseHeaders)
             : errorResponse(
                   shape.status,
                   shape.message,
@@ -930,7 +938,7 @@ export async function handleServerFnRequest(
             void Promise.resolve(work).catch(() => {});
             await reportMasked(options, timeoutError, info, ctx);
             return isForm
-                ? formErrorResponse(504, 'Server function timed out')
+                ? formErrorResponse(504, 'Server function timed out', undefined, ctx.responseHeaders)
                 : errorResponse(
                       504,
                       'Server function timed out',
@@ -944,7 +952,7 @@ export async function handleServerFnRequest(
         }
         const shape = wireErrorShape(error, info.name || symbol);
         return isForm
-            ? formErrorResponse(shape.status, shape.message, shape.data)
+            ? formErrorResponse(shape.status, shape.message, shape.data, ctx.responseHeaders)
             : errorResponse(
                   shape.status,
                   shape.message,
