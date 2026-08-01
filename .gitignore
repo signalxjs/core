@@ -21,6 +21,11 @@ docs/dist/
 # Shared ambients for the examples' type-check (__DEV__) — sits at the
 # examples root, so the per-example exception above does not cover it.
 !examples/env.d.ts
+# The SHIPPED ambients for the generated virtual: modules (#562). Hand-written,
+# and at the package root because `tsc` never copies a .d.ts out of src/ — so
+# the blanket rule above would silently drop the one file `@sigx/vite/client`
+# publishes.
+!packages/vite/client.d.ts
 *.js
 *.js.map
 

@@ -3,7 +3,26 @@
  * contract that used to exist only as inline casts at the two stamp sites.
  * Follows the established augmentation pattern (`@sigx/server-renderer`'s
  * `ssr`, `@sigx/ssr-islands`' `client:*` attributes).
+ *
+ * It also carries resume's half of the `virtual:sigx-manifests` /
+ * `virtual:sigx-app` manifest types (#562, below), for the same reason and by
+ * the same mechanism: registration rides the pack's own import.
  */
+
+import type { ResumeManifest } from './types';
+
+/**
+ * The resume half of `virtual:sigx-manifests` / `virtual:sigx-app` (#562).
+ * `@sigx/vite` cannot type these itself — this pack is an OPTIONAL peer of it,
+ * so an app without resume must still type-check — so `@sigx/vite/client`
+ * declares an empty registry and each pack fills in its own key here. Keys stay
+ * disjoint across packs: interface merging rejects a duplicate member.
+ */
+declare global {
+    interface SigxPackManifests {
+        resume: ResumeManifest;
+    }
+}
 
 declare module '@sigx/runtime-core' {
     interface ComponentSetupContext {

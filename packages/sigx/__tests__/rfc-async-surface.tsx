@@ -46,9 +46,9 @@ async function getJson<T>(url: string, signal: AbortSignal): Promise<T> {
 
 // ───────────────────────────────────────────────────────────────────────
 // 1. Keyed read + match — the everyday case. `u` in the ready arm is
-//    UserProfile (narrowed); the stale param is UserProfile | null.
-//    `loading` is true ONLY while state === 'pending' — the skeleton
-//    never flashes over live content during a background refresh.
+//    UserProfile (narrowed); the error arm's ctx carries the surviving
+//    last-good. `loading` is true ONLY while state === 'pending' — the
+//    skeleton never flashes over live content during a background refresh.
 // ───────────────────────────────────────────────────────────────────────
 
 export const ProfileCard = component(() => {
@@ -59,17 +59,34 @@ export const ProfileCard = component(() => {
     expectType<UserProfile | null>(profile.value);
     expectType<boolean>(profile.loading);
 
+    // AsyncState is a DISCRIMINATED UNION — plain reads narrow, no match
+    // and no casts required. All three discriminants work:
+    if (profile.hasValue) expectType<UserProfile>(profile.value);
+    if (profile.state === 'ready') expectType<UserProfile>(profile.value);
+    if (profile.state === 'refreshing') expectType<UserProfile>(profile.value);
+    if (profile.state === 'pending') expectType<null>(profile.value);
+    if (profile.loading) expectType<'pending'>(profile.state);
+    if (profile.state === 'errored') {
+        expectType<Error>(profile.error);
+        // SWR-through-error: the errored member itself splits on presence.
+        if (profile.hasValue) expectType<UserProfile>(profile.value);
+    }
+
     return () =>
         profile.match({
             pending: () => <p>Loading…</p>,
-            error: (e, retry, stale) => (
-                <div>
-                    {/* stale keeps last-good content on a failed background refresh */}
-                    {stale && <p class="stale">{stale.name}</p>}
-                    <p class="error">{e.message}</p>
-                    <button onClick={retry}>Retry</button>
-                </div>
-            ),
+            error: (e, ctx) => {
+                // ctx.hasValue narrows ctx.value — last-good content
+                // survives a failed refresh, legit-null included.
+                if (ctx.hasValue) expectType<UserProfile>(ctx.value);
+                return (
+                    <div>
+                        {ctx.hasValue && <p class="stale">{ctx.value.name}</p>}
+                        <p class="error">{e.message}</p>
+                        <button onClick={ctx.retry}>Retry</button>
+                    </div>
+                );
+            },
             ready: (u) => <p>{u.name} ({u.plan})</p>,
         });
 });
@@ -196,7 +213,7 @@ export const DeleteButton = component(() => {
         <div>
             <button disabled={remove.loading} onClick={() => remove.run('post-1')}>Delete</button>
             {remove.match({
-                error: (e, retry) => <button onClick={retry}>Delete failed — retry</button>,
+                error: (e, { retry }) => <button onClick={retry}>Delete failed — retry</button>,
                 // reset() (rev 8): back to idle — the blessed way to dismiss
                 // a success state and make the action reusable.
                 ready: () => <button onClick={() => remove.reset()}>Deleted — dismiss</button>,
@@ -219,14 +236,24 @@ export const Dashboard = component(() => {
     expectType<{ user: UserProfile; posts: Post[] } | null>(page.value);
     expectType<{ user: Error | null; posts: Error | null }>(page.errors);
 
+    // Narrowing DISTRIBUTES through the AllState intersection — the canary
+    // for the `AsyncState-union & extras` extension pattern (§7 packs use
+    // the same shape, e.g. CachedAsyncState).
+    if (page.hasValue) expectType<{ user: UserProfile; posts: Post[] }>(page.value);
+    if (page.state === 'ready') {
+        expectType<{ user: UserProfile; posts: Post[] }>(page.value);
+        expectType<{ user: Error | null; posts: Error | null }>(page.errors);
+    }
+
     const pair = all(user, posts);
     expectType<[UserProfile, Post[]] | null>(pair.value);
     expectType<[Error | null, Error | null]>(pair.errors);
+    if (pair.hasValue) expectType<[UserProfile, Post[]]>(pair.value);
 
     return () =>
         page.match({
             pending: () => <p>Loading dashboard…</p>,
-            error: (e, retry) => <button onClick={retry}>Failed — retry all</button>,
+            error: (e, { retry }) => <button onClick={retry}>Failed — retry all</button>,
             ready: ({ user: u, posts: p }) => (
                 <div>
                     <h1>{u.name}</h1>

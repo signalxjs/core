@@ -10,6 +10,9 @@
             "types": "./dist/index.d.ts",
             "import": "./dist/index.js"
         },
+        "./client": {
+            "types": "./client.d.ts"
+        },
         "./assets": {
             "types": "./dist/assets.d.ts",
             "import": "./dist/assets.js"
@@ -48,7 +51,8 @@
     },
     "files": [
         "dist",
-        "src"
+        "src",
+        "client.d.ts"
     ],
     "sideEffects": false,
     "scripts": {
