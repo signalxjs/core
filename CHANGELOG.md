@@ -8,6 +8,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- **`@sigx/vite`: the server-fn registry exports the mount path it baked
+  (#563).** `virtual:sigx-server-fns` now carries `serverFnBase` beside
+  `serverFns`, so an entry stops repeating a value it cannot see:
+
+  ```js
+  import { serverFns, serverFnBase } from 'virtual:sigx-server-fns';
+  if (matchesServerFn(request, serverFnBase)) {
+      return handleServerFnRequest(request, { base: serverFnBase, resolve: … });
+  }
+  ```
+
+  `sigxServer({ base })` configured the plugin and nothing propagated it into
+  the app's entry, where `matchesServerFn(request)` and the handler each
+  defaulted to `/_sigx/fn` independently — so a moved mount routed nothing, as
+  a 404 through the document handler with nothing to point at. Since #543 made
+  `base` load-bearing for symbol extraction (everything after it *is* the
+  symbol), a base wrong only in PART is worse than a miss: it slices the symbol
+  at the wrong offset. Additive — `serverFns` is untouched and every existing
+  entry keeps working.
+
+  Two guard rails came with it: the plugin warns at build time when a
+  non-default `base` is configured and an entry still calls
+  `matchesServerFn(request)` with no base, and the handler `__DEV__`-warns
+  beside the 404 it already returned for a path its base does not describe.
+  `AdapterGenerateContext` gains `serverFnBase` so a platform whose routing
+  table is generated can route the real path — which fixes `@sigx/vercel`
+  below.
+
 - **`@sigx/vite/client` — ambient types for the generated `virtual:*` modules
   (#562).** There were none, so every app hand-wrote `declare module` blocks
   for `virtual:sigx-app`, `virtual:sigx-manifests`, `virtual:sigx-server-fns`,
@@ -109,6 +137,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   both provision forms, which is what keeps them from drifting again.
 
 ### Fixed
+
+- **`@sigx/vercel`: the generated server-fn route was hardcoded to
+  `/_sigx/fn` (#563).** `.vercel/output/config.json` is a generation contract —
+  rewritten every build — so an app that moved its mount with
+  `sigxServer({ base })` had no user-side fix: the route that must precede the
+  filesystem handle pointed at a path the app does not serve. The prefix now
+  comes from the build (`AdapterGenerateContext.serverFnBase`) and is
+  regex-escaped, since `src` is a pattern and a base like `/api.v1/fn` must not
+  also match `/apiXv1/fn`. Cloudflare and Netlify were unaffected — their
+  functions see every path.
 
 - **`@sigx/vite`: the dev server-function endpoint ignored `maxUrlBytes`,
   `onError` and `timeoutMs` (#561).** `sigxServer()` mounts the RPC endpoint in

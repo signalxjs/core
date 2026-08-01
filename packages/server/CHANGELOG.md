@@ -56,6 +56,18 @@
 
 ### Changed
 
+- **A base mismatch now says so in dev (#563).** The mount `base` is spelled by
+  `matchesServerFn`, by `handleServerFnRequest` and by the Node adapter, each
+  defaulting to `/_sigx/fn` independently — so an app that moved its mount and
+  updated only one of them 404'd every call with nothing to point at, and since
+  #543 made `base` load-bearing for symbol extraction, a base wrong only in
+  part mangles the symbol instead of missing cleanly. A request reaching a
+  handler whose `base` does not describe it now carries a `__DEV__` warning
+  beside the same 404 (production unchanged), naming the `serverFnBase` export
+  a Vite build now provides on `virtual:sigx-server-fns`. Internally the three
+  copies of the trailing-slash normalization collapsed into one `fnPathPrefix`,
+  so `/rpc` and `/rpc/` cannot start routing differently in one of them.
+
 - **`origin: 'verify-when-present'` no longer admits Origin-less FORM posts
   (#556).** The relaxation's safety argument is that browser CSRF stays
   blocked by the non-safelisted JSON content-type — and a `form: true`

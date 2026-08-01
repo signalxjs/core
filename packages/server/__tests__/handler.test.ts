@@ -89,6 +89,69 @@ describe('matchesServerFn (rfc-deploy §2)', () => {
     });
 });
 
+describe('base agreement (#563)', () => {
+    it('the handler routes a custom base identically with or without a trailing slash', async () => {
+        // The invariant `fnPathPrefix` now centralizes: the predicate and the
+        // handler derived it independently before, in three copies.
+        for (const base of ['/rpc', '/rpc/']) {
+            const request = new Request(`${ORIGIN}/rpc/add_fn_00000001`, {
+                method: 'POST',
+                headers: { 'content-type': 'application/json', origin: ORIGIN },
+                body: JSON.stringify({ args: [2, 3] })
+            });
+            const res = await handleServerFnRequest(request, {
+                resolve: (sym) => FNS[sym] ?? null,
+                base
+            });
+            expect(res.status).toBe(200);
+            await expect(res.json()).resolves.toEqual({ data: 5 });
+        }
+    });
+
+    /** A well-formed POST under the DEFAULT base — the mismatch case. */
+    const defaultBasePost = (): Request =>
+        new Request(`${ORIGIN}/_sigx/fn/add_fn_00000001`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', origin: ORIGIN },
+            body: JSON.stringify({ args: [2, 3] })
+        });
+
+    it('a request under a base the handler does not describe is a 404 — and says so in dev', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        try {
+            const res = await handleServerFnRequest(defaultBasePost(), {
+                resolve: (sym) => FNS[sym] ?? null,
+                base: '/rpc'
+            });
+            expect(res.status).toBe(404);
+            // Silent until #563: a mount the two sites disagree about 404s
+            // every call with nothing to point at.
+            expect(warn).toHaveBeenCalledWith(
+                expect.stringContaining("does not start with this handler's base")
+            );
+            expect(warn).toHaveBeenCalledWith(expect.stringContaining('serverFnBase'));
+        } finally {
+            warn.mockRestore();
+        }
+    });
+
+    it('the mismatch warning is silent in production', async () => {
+        vi.stubEnv('NODE_ENV', 'production');
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        try {
+            const res = await handleServerFnRequest(defaultBasePost(), {
+                resolve: (sym) => FNS[sym] ?? null,
+                base: '/rpc'
+            });
+            expect(res.status).toBe(404);
+            expect(warn).not.toHaveBeenCalled();
+        } finally {
+            warn.mockRestore();
+            vi.unstubAllEnvs();
+        }
+    });
+});
+
 describe('handleServerFnRequest — happy path', () => {
     it('invokes the function and returns {data}', async () => {
         const res = await call('add_fn_00000001', { args: [2, 3] });

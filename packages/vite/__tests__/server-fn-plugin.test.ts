@@ -167,6 +167,30 @@ describe('sigxServer — virtual registry', () => {
         expect(code).not.toContain('auditLog');
     });
 
+    it('exports the mount path the build baked, beside the registry (#563)', () => {
+        // The one place an app's entry can READ the base: `base` lived only
+        // in the plugin config, so `matchesServerFn(request)` and the handler
+        // each fell back to the default and a moved mount routed nothing.
+        expect(plugin.load(plugin.resolveId('virtual:sigx-server-fns'))).toContain(
+            'export const serverFnBase = "/_sigx/fn";'
+        );
+    });
+
+    it('serverFnBase follows a custom base', () => {
+        const { plugin: moved, root: movedRoot } = makeProject(
+            { 'src/cart.server.ts': CART },
+            'build',
+            { base: '/rpc' }
+        );
+        try {
+            expect(moved.load(moved.resolveId('virtual:sigx-server-fns'))).toContain(
+                'export const serverFnBase = "/rpc";'
+            );
+        } finally {
+            rmSync(movedRoot, { recursive: true, force: true });
+        }
+    });
+
     it('emits a null-prototype registry — prototype-key symbols miss cleanly (#555)', () => {
         const code = plugin.load(plugin.resolveId('virtual:sigx-server-fns'));
         // The literal `__proto__: null` must LEAD the object so every
@@ -174,10 +198,66 @@ describe('sigxServer — virtual registry', () => {
         expect(code).toContain('__proto__: null,');
         // Behavior pin: evaluate the emitted module text. The lazy `import()`
         // records are parse-legal inside Function and never invoked.
-        const fns = new Function(`${code.replace('export const', 'const')}; return serverFns;`)() as Record<string, unknown>;
+        // replaceAll, not replace: the module has carried a second export
+        // since #563 (`serverFnBase`), and a leftover `export` is a SyntaxError.
+        const fns = new Function(`${code.replaceAll('export const', 'const')}; return serverFns;`)() as Record<string, unknown>;
         expect(Object.getPrototypeOf(fns)).toBe(null);
         expect(fns['constructor']).toBeUndefined();
         expect(fns['hasOwnProperty']).toBeUndefined();
+    });
+});
+
+describe('sigxServer — the moved-mount lint (#563)', () => {
+    const ENTRY = `
+import { handleServerFnRequest, matchesServerFn } from '@sigx/server/server';
+import { serverFns } from 'virtual:sigx-server-fns';
+export default { fetch(request) {
+    if (matchesServerFn(request)) return handleServerFnRequest(request, { resolve: (s) => serverFns[s]?.() ?? null });
+    return new Response('doc');
+} };
+`;
+    /** Transform `src/entry.ts` and collect the plugin's warnings. */
+    function warnFor(entry: string, options?: Parameters<typeof sigxServer>[0]): string[] {
+        const { plugin, root } = makeProject({ 'src/cart.server.ts': CART }, 'build', options);
+        try {
+            const warnings: string[] = [];
+            plugin.transform.call(
+                { environment: { name: 'ssr' }, warn: (m: string) => warnings.push(m) },
+                entry,
+                join(root, 'src/entry.ts')
+            );
+            return warnings;
+        } finally {
+            rmSync(root, { recursive: true, force: true });
+        }
+    }
+
+    it('warns when the entry takes the default base but the build moved the mount', () => {
+        const warnings = warnFor(ENTRY, { base: '/rpc' });
+        expect(warnings).toHaveLength(1);
+        expect(warnings[0]).toContain("mounts server functions at '/rpc'");
+        expect(warnings[0]).toContain('serverFnBase');
+    });
+
+    it('is silent on a stock build — the default base is the 95% case', () => {
+        expect(warnFor(ENTRY)).toEqual([]);
+    });
+
+    it('is silent once the entry passes the build value', () => {
+        const fixed = ENTRY.replace('matchesServerFn(request)', 'matchesServerFn(request, serverFnBase)');
+        expect(warnFor(fixed, { base: '/rpc' })).toEqual([]);
+    });
+
+    it('follows an aliased import', () => {
+        const aliased = ENTRY.replace(
+            'matchesServerFn }',
+            'matchesServerFn as isFn }'
+        ).replace('matchesServerFn(request)', 'isFn(request)');
+        expect(warnFor(aliased, { base: '/rpc' })).toHaveLength(1);
+    });
+
+    it('says nothing about a file that does not route', () => {
+        expect(warnFor(`export const x = 1;\n`, { base: '/rpc' })).toEqual([]);
     });
 });
 

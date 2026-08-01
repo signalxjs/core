@@ -163,13 +163,20 @@ export function vercel(options: VercelAdapterOptions = {}): SigxAdapter {
             // prefix BEFORE the filesystem handle (POSTs must never be
             // shadowed by files), statics from the filesystem, then the
             // catch-all to the render function.
+            //
+            // The prefix follows `sigxServer({ base })` (#563): this file is
+            // regenerated every build, so a hardcoded default would leave a
+            // moved mount with no user-side fix. `src` is a REGEX, so the base
+            // is escaped — `/api.v1/fn` must not also match `/apiXv1/fn`.
+            const fnBase = (ctx.serverFnBase ?? '/_sigx/fn').replace(/\/+$/, '');
+            const fnRoute = fnBase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
             fs.writeFileSync(
                 path.join(output, 'config.json'),
                 JSON.stringify(
                     {
                         version: 3,
                         routes: [
-                            { src: '/_sigx/fn/(.*)', dest: `/${FN_NAME}` },
+                            { src: `${fnRoute}/(.*)`, dest: `/${FN_NAME}` },
                             { handle: 'filesystem' },
                             { src: '/(.*)', dest: `/${FN_NAME}` }
                         ]

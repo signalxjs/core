@@ -44,7 +44,10 @@ choices are load-bearing:
   `static/index.html` for `/`, which would shadow the document render with
   the raw outlet template.
 - **The server-fn route precedes the filesystem handle** — POSTs to
-  `/_sigx/fn/*` must never be shadowed by files.
+  `/_sigx/fn/*` must never be shadowed by files. The prefix follows
+  `sigxServer({ base })` rather than the default (#563): `config.json` is
+  regenerated every build, so a moved mount would otherwise have no
+  user-side fix on this platform.
 
 ## The platform entry — yours, scaffolded once
 

@@ -12,6 +12,24 @@
 
 import { LITERALS, NUMERIC } from './fn-url';
 
+/** The endpoint's default mount path — the one literal in this package. */
+export const DEFAULT_FN_BASE = '/_sigx/fn';
+
+/**
+ * A mount path as a routing PREFIX: exactly one trailing slash, so `/rpc` and
+ * `/rpc/` route identically and everything after it IS the symbol (#355/#543).
+ *
+ * One function because there were three copies of the same expression — in
+ * `matchesServerFn`, in `handleServerFnRequest`, and in the Node adapter — and
+ * a mount path that three sites derive independently is exactly the shape #563
+ * is about. (`@sigx/vite` keeps its own fourth copy: it is build-time code and
+ * `@sigx/server` is an optional peer there, the same trade `resume-extract.ts`
+ * documents for `encodeFnPath`.)
+ */
+export function fnPathPrefix(base: string = DEFAULT_FN_BASE): string {
+    return base.endsWith('/') ? base : base + '/';
+}
+
 /**
  * Path → symbol. Throws `URIError` on a malformed escape (`%FF`) — the
  * endpoint catches it and answers 400 rather than letting it surface as a

@@ -600,6 +600,29 @@ return renderDocument(request);   // your document handler
 path — deliberately a predicate, not a combinator; composition stays in
 your entry.)
 
+**If you moved the mount, say so in one place.** `sigxServer({ base })`,
+`matchesServerFn(request, base)` and the handler's own `base` must agree, and
+they default independently — a disagreement is a silent 404, and since #543
+`base` is load-bearing for symbol extraction (everything after it *is* the
+symbol), so a base that is wrong only in part slices the symbol at the wrong
+offset instead of missing cleanly. The build exports what it baked, so nothing
+has to be repeated:
+
+```js
+import { serverFns, serverFnBase } from 'virtual:sigx-server-fns';
+
+if (matchesServerFn(request, serverFnBase)) {
+    return handleServerFnRequest(request, {
+        base: serverFnBase,
+        resolve: (symbol) => serverFns[symbol]?.() ?? null
+    });
+}
+```
+
+A non-default `base` whose entry still calls `matchesServerFn(request)` is a
+build-time warning, and a request that reaches a handler its base does not
+describe is a `__DEV__` warning beside the 404.
+
 ### Operations: `onError` and `timeoutMs`
 
 Two opt-in endpoint options harden a real deployment (both flow through the
