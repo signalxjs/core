@@ -202,7 +202,11 @@ export default [
     // its own module (`fn-url-decode`) so the stubs never bundle it.
     name: '@sigx/server/client (fetch stubs)',
     path: 'packages/server/dist/client/index.prod.js',
-    limit: '2.4 KB',
+    // 2.4 → 2.45 KB with #559: the stubs bundle both codec halves, and the
+    // depth guards (encode AND revive refuse >256 levels — stack safety on
+    // attacker-typable wire data) plus the shared-subtree encode memo are
+    // ~10 B of real semantics, plus a little headroom.
+    limit: '2.45 KB',
   },
   {
     // The app-plugin face (#413): serverPlugin (transport + one-registration

@@ -17,7 +17,6 @@ import {
     TestCounter,
     TestCounterWithProps,
     TestText,
-    TestWrapper,
     TestButton
 } from './test-utils';
 

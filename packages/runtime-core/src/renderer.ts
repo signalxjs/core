@@ -591,11 +591,17 @@ export function createRenderer<HostNode = any, HostElement = any>(
 
             // Update slots with new children and slot functions
             const slotsRef = oldInternal._slots;
-            const newChildren = newVNode.props?.children;
-            const newSlotsFromProps = newVNode.props?.slots;
+            const newProps = newVNode.props;
 
-            if (slotsRef) {
+            // Guard only on props existing at all — an ABSENT children/slots
+            // key is a real state ("no slot content now") and must clear the
+            // old content, or `cond ? <Wrap>x</Wrap> : <Wrap />` leaves the
+            // stale fill mounted forever (#586). Both-absent compares equal
+            // below, so slot-less components still skip the bump.
+            if (slotsRef && newProps) {
                 let slotContentChanged = false;
+                const newChildren = newProps.children;
+                const newSlotsFromProps = newProps.slots;
 
                 // Update children for default slot — only when the new
                 // content structurally differs. On equality we keep the
@@ -603,23 +609,36 @@ export function createRenderer<HostNode = any, HostElement = any>(
                 // references) and skip the version bump entirely, so a
                 // parent-only re-render no longer forces every child
                 // with static slot content to re-render.
-                if (newChildren !== undefined) {
-                    if (sameSlotChildren(slotsRef._children, newChildren)) {
-                        // keep mounted originals
-                    } else {
-                        slotsRef._children = newChildren;
-                        slotContentChanged = true;
-                    }
+                if (sameSlotChildren(slotsRef._children, newChildren)) {
+                    // keep mounted originals
+                } else {
+                    slotsRef._children = newChildren;
+                    slotContentChanged = true;
                 }
 
                 // Update slot functions from the slots prop. Function
                 // identity is the only cheap safe signal here: inline
                 // slot objects/closures always differ and always bump.
-                if (newSlotsFromProps !== undefined) {
-                    if (slotsRef._slotsFromProps !== newSlotsFromProps) {
-                        slotsRef._slotsFromProps = newSlotsFromProps;
+                // An ABSENT slots prop means "no fills": createSlots stores
+                // `{}` for that, so only bump when fills were actually
+                // installed before — never on the perpetual absent case.
+                if (newSlotsFromProps === undefined) {
+                    // Own keys only — the slot accessor honors nothing else
+                    // (createSlots guards every fill lookup with hasOwn).
+                    let hadFills = false;
+                    for (const k in slotsRef._slotsFromProps) {
+                        if (Object.prototype.hasOwnProperty.call(slotsRef._slotsFromProps, k)) {
+                            hadFills = true;
+                            break;
+                        }
+                    }
+                    if (hadFills) {
+                        slotsRef._slotsFromProps = {};
                         slotContentChanged = true;
                     }
+                } else if (slotsRef._slotsFromProps !== newSlotsFromProps) {
+                    slotsRef._slotsFromProps = newSlotsFromProps;
+                    slotContentChanged = true;
                 }
 
                 // Trigger component re-render by bumping version

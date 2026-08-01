@@ -45,6 +45,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   boot instead of shipping a read whose invalidations did nothing. Details and
   the fix in `packages/server/CHANGELOG.md`.
 
+- **`@sigx/server` / `@sigx/serialize`: the wire codec is bounded and runs
+  after the guard (#559).** Encode and revive refuse values nesting deeper
+  than 256 levels instead of overflowing the stack on attacker-typable
+  wire JSON; shared plain subtrees encode once instead of once per path
+  (wire text byte-for-byte unchanged); and the endpoint revives arguments
+  AFTER `guard` runs, so nothing executes codec work — built-in or
+  app-registered — for an unvetted request. Details and the observable
+  edges in the two package changelogs.
 - **BREAKING: `AsyncState` is a discriminated union, and `value`/`hasValue`
   survive errors (#578; supersedes #485's `hasValue` as shipped in this
   cycle).** Two changes with one root: presence was split across a visible
@@ -172,6 +180,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   both provision forms, which is what keeps them from drifting again.
 
 ### Fixed
+
+- **`@sigx/runtime-core`: removing the children (or slots) prop on patch now
+  clears the slot content (#586).** `cond ? <Wrap>content</Wrap> : <Wrap />`
+  left the stale fill mounted forever: the patch path updated slot state only
+  when the new vnode *carried* a `children`/`slots` key, so the fully-absent
+  form — unlike the `children: null` form — skipped the update and the version
+  bump entirely. An absent key now reads as "no slot content", the old fill
+  unmounts, and the consumer's `?? fallback` renders. The static-slot-content
+  elision (#66) is untouched: both-absent still compares equal and skips the
+  bump.
 
 - **`@sigx/server-renderer`: the `<!--t-->` text-boundary marker survives
   Fragment and render-result-array boundaries, so slot content hydrates

@@ -86,6 +86,20 @@
   or registry-fabricated functions; it is no longer the place the
   contradiction is resolved.
 
+- **Wire revive runs AFTER the endpoint `guard` (#559).** The codec's
+  revive handlers do attacker-directed work — `$bigint` is a superlinear
+  digit conversion, `$regexp` compiles an attacker's pattern, `$map`/`$set`
+  construct arbitrary collections, and app-registered handlers run too —
+  and all of it used to run before anything vetted the request. Argument
+  revival now happens inside the request scope, after `guard`. Observable
+  shifts: an unauthenticated request with a malformed encoded argument gets
+  the guard's rejection (e.g. 401) instead of the reviver's 400, and the
+  revive 400 now carries guard-set `responseHeaders` (#557). The guard's
+  contract is unchanged — it reads `(ctx, info)` and never saw arguments.
+  Deep nesting is refused by the codec itself at 256 levels (see
+  `@sigx/serialize`'s changelog), surfacing as the standard
+  `400 Malformed encoded value` on the request side.
+
 - **`origin: 'verify-when-present'` no longer admits Origin-less FORM posts
   (#556).** The relaxation's safety argument is that browser CSRF stays
   blocked by the non-safelisted JSON content-type — and a `form: true`

@@ -46,6 +46,8 @@ entry that `@sigx/resume` handler chunks replicate.
 | plain objects, arrays, primitives | ✅ unchanged |
 | class instances | prototype lost unless you register a handler |
 | circular structures | ❌ throws, same as `JSON.stringify` |
+| nesting beyond 256 levels | ❌ throws, on encode AND revive — the codec is recursive where `JSON.parse`/`stringify` are not, so it bounds its own stack; wire data is attacker-typable (#559) |
+| shared references (DAG) | ✅ as copies — each reference serializes independently, exactly like `JSON.stringify`; encode-phase work is memoized so a heavily shared tree costs linear time (#559) |
 
 ## API
 
