@@ -623,8 +623,15 @@ export function createRenderer<HostNode = any, HostElement = any>(
                 // `{}` for that, so only bump when fills were actually
                 // installed before — never on the perpetual absent case.
                 if (newSlotsFromProps === undefined) {
+                    // Own keys only — the slot accessor honors nothing else
+                    // (createSlots guards every fill lookup with hasOwn).
                     let hadFills = false;
-                    for (const _k in slotsRef._slotsFromProps) { hadFills = true; break; }
+                    for (const k in slotsRef._slotsFromProps) {
+                        if (Object.prototype.hasOwnProperty.call(slotsRef._slotsFromProps, k)) {
+                            hadFills = true;
+                            break;
+                        }
+                    }
                     if (hadFills) {
                         slotsRef._slotsFromProps = {};
                         slotContentChanged = true;
