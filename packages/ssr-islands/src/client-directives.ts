@@ -9,6 +9,21 @@
  */
 
 import type { HydrationStrategy } from './types';
+import type { IslandsManifestV2 } from './plugin';
+
+/**
+ * The islands half of `virtual:sigx-manifests` / `virtual:sigx-app` (#562).
+ * `@sigx/vite` cannot type these itself — this pack is an OPTIONAL peer of it,
+ * so an app without islands must still type-check — so `@sigx/vite/client`
+ * declares an empty registry and each pack fills in its own key here.
+ * Registered by IMPORTING this pack, the same way the `client:*` attributes
+ * below are (#481/#482: no type-only subpath). Keys stay disjoint across packs.
+ */
+declare global {
+    interface SigxPackManifests {
+        islands: IslandsManifestV2;
+    }
+}
 
 export interface ClientDirectives {
     'client:load'?: boolean;
