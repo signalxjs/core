@@ -770,28 +770,6 @@ export async function handleServerFnRequest(
             isGet ? NO_STORE : undefined
         );
     }
-    // Rich types on the way IN (rfc-server §4) — decoded AFTER the
-    // prototype-pollution reviver, so dangerous keys are already gone. A
-    // malformed tag payload is the caller's bad request, not a 500. Form
-    // input is NEVER wire-decoded: its values are strings and Files, and a
-    // field literally named like a tag must stay what the user typed.
-    let args: unknown[];
-    if (isForm) {
-        args = parsed;
-    } else {
-        try {
-            args = parsed.map((arg) => reviveWire(arg));
-        } catch {
-            return errorResponse(
-                400,
-                isGet ? 'Malformed encoded value in args' : 'Malformed encoded value in body',
-                undefined,
-                undefined,
-                isGet ? NO_STORE : undefined
-            );
-        }
-    }
-
     const ctx = createRequestContext(request);
     // #350: the timeout controller merges into the context's signal so a
     // cooperative handler cancels cleanly; the race below is what
@@ -812,6 +790,33 @@ export async function handleServerFnRequest(
     // Unscoped where the runtime has no AsyncLocalStorage; nothing else moves.
     const work = runInScope(ctx as ServerFnContext, async (): Promise<Response> => {
         await options.guard?.(ctx as ServerFnContext, info);
+        // Rich types on the way IN (rfc-server §4) — decoded AFTER the
+        // prototype-pollution reviver, so dangerous keys are already gone,
+        // and AFTER the guard (#559): the codec's revive handlers (built-in
+        // and app-registered alike) do attacker-directed work — BigInt digit
+        // conversion, RegExp compilation, Map/Set construction — so nothing
+        // runs them before the request is vetted. The guard reads only
+        // (ctx, info), never args, so it loses nothing by going first. A
+        // malformed tag payload is the caller's bad request, not a 500.
+        // Form input is NEVER wire-decoded: its values are strings and
+        // Files, and a field literally named like a tag must stay what the
+        // user typed.
+        let args: unknown[];
+        if (isForm) {
+            args = parsed;
+        } else {
+            try {
+                args = parsed.map((arg) => reviveWire(arg));
+            } catch {
+                return errorResponse(
+                    400,
+                    isGet ? 'Malformed encoded value in args' : 'Malformed encoded value in body',
+                    undefined,
+                    ctx.responseHeaders,
+                    isGet ? NO_STORE : undefined
+                );
+            }
+        }
         // Installed AFTER the app-wide guard — it may legitimately read the
         // request (it only rejects; it does not shape the body).
         if (__DEV__ && isGet && fn.__sigxCacheControl?.startsWith('public')) {

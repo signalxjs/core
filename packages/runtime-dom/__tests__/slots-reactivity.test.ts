@@ -174,4 +174,62 @@ describe('slot reactivity', () => {
         // signal read subscribes the child and it re-renders on change.
         expect(container.querySelector('.n')?.textContent).toBe('2');
     });
+
+    it('flips presence when the children prop goes fully ABSENT — not just null (#586)', async () => {
+        // The null form (children: cond ? content : null) always worked; the
+        // ABSENT form (`cond ? jsx(Child, {children}) : jsx(Child, {})`) used
+        // to skip the slot update entirely, leaving the stale fill mounted.
+        const show = signal({ value: true });
+        const Child = component(({ slots }) =>
+            () => jsx('div', {
+                class: 'child',
+                children: slots.default?.() ?? jsx('span', { class: 'fb', children: 'fallback' })
+            }));
+        const Parent = component(() =>
+            () => show.value
+                ? jsx(Child, { children: jsx('p', { class: 'real', children: 'real' }) })
+                : jsx(Child, {}));
+
+        render(jsx(Parent, {}), container);
+        await tick();
+        expect(container.querySelector('.real')).toBeTruthy();
+
+        show.value = false;
+        await tick();
+        // Content gone, fallback back — the stale-fill bug left `.real` here.
+        expect(container.querySelector('.real')).toBeFalsy();
+        expect(container.querySelector('.fb')).toBeTruthy();
+
+        show.value = true;
+        await tick();
+        expect(container.querySelector('.real')?.textContent).toBe('real');
+        expect(container.querySelector('.fb')).toBeFalsy();
+    });
+
+    it('flips presence when the slots PROP goes fully absent (#586)', async () => {
+        const show = signal({ value: true });
+        const Child = component(({ slots }) =>
+            () => jsx('div', {
+                class: 'child',
+                children: (slots as any).header?.() ?? jsx('span', { class: 'hfb', children: 'no header' })
+            }));
+        const Parent = component(() =>
+            () => show.value
+                ? jsx(Child, { slots: { header: () => jsx('h1', { class: 'h', children: 'H' }) } })
+                : jsx(Child, {}));
+
+        render(jsx(Parent, {}), container);
+        await tick();
+        expect(container.querySelector('.h')).toBeTruthy();
+
+        show.value = false;
+        await tick();
+        expect(container.querySelector('.h')).toBeFalsy();
+        expect(container.querySelector('.hfb')).toBeTruthy();
+
+        show.value = true;
+        await tick();
+        expect(container.querySelector('.h')?.textContent).toBe('H');
+        expect(container.querySelector('.hfb')).toBeFalsy();
+    });
 });
