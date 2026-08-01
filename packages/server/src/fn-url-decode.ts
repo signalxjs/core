@@ -16,8 +16,10 @@ import { LITERALS, NUMERIC } from './fn-url';
 export const DEFAULT_FN_BASE = '/_sigx/fn';
 
 /**
- * A mount path as a routing PREFIX: exactly one trailing slash, so `/rpc` and
- * `/rpc/` route identically and everything after it IS the symbol (#355/#543).
+ * A mount path as a routing PREFIX: exactly one trailing slash, so `/rpc`,
+ * `/rpc/` and `/rpc//` route identically and everything after it IS the symbol
+ * (#355/#543). Collapsing a doubled trailing slash is deliberate — it would
+ * otherwise leave an empty first segment in the symbol `decodeFnPath` splits.
  *
  * One function because there were three copies of the same expression — in
  * `matchesServerFn`, in `handleServerFnRequest`, and in the Node adapter — and
@@ -27,7 +29,7 @@ export const DEFAULT_FN_BASE = '/_sigx/fn';
  * documents for `encodeFnPath`.)
  */
 export function fnPathPrefix(base: string = DEFAULT_FN_BASE): string {
-    return base.endsWith('/') ? base : base + '/';
+    return base.replace(/\/+$/, '') + '/';
 }
 
 /**

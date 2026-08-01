@@ -168,6 +168,15 @@ const DEFAULT_INCLUDE = ['**/*.server.ts', '**/*.server.tsx'];
 const DEFAULT_EXCLUDE = ['**/node_modules/**', '**/dist/**'];
 const DEFAULT_BASE = '/_sigx/fn';
 
+/**
+ * A mount path as a routing prefix — the build-time twin of `@sigx/server`'s
+ * `fnPathPrefix`, duplicated on purpose: this is build-time code and
+ * `@sigx/server` is an OPTIONAL peer of this package (the same trade
+ * `resume-extract.ts` documents for `encodeFnPath`). Kept identical so
+ * `/rpc`, `/rpc/` and `/rpc//` mean one thing on both sides.
+ */
+const mountPrefix = (base: string): string => base.replace(/\/+$/, '') + '/';
+
 /** `import … from '@sigx/server'` (not -renderer), excluding type-only.
  *  The lookahead sits directly after `import` — a backtrackable `\s*` before
  *  it would let `import type {` match with zero spaces consumed. */
@@ -546,7 +555,14 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
             // since #543 a base wrong only in PART mangles the symbol rather
             // than missing cleanly. Once per file, and only when `base` is
             // non-default, so a stock app never sees it.
-            if (base !== DEFAULT_BASE && !warnedBase.has(clean) && matchesServerFnDefaulted(code)) {
+            // Compared as PREFIXES: `/_sigx/fn/` is the default written with a
+            // cosmetic trailing slash, and routes identically, so it must not
+            // trip the warning.
+            if (
+                mountPrefix(base) !== mountPrefix(DEFAULT_BASE) &&
+                !warnedBase.has(clean) &&
+                matchesServerFnDefaulted(code)
+            ) {
                 warnedBase.add(clean);
                 this.warn(
                     `[sigx:server] ${relPath(clean)}: matchesServerFn(request) takes the default ` +
@@ -699,7 +715,7 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
                     `called during SSR will not see the request: ${message}`
                 );
             });
-            const prefix = base.endsWith('/') ? base : base + '/';
+            const prefix = mountPrefix(base);
             server.middlewares.use(async (req, res, next) => {
                 if (!req.url?.startsWith(prefix)) return next();
                 try {

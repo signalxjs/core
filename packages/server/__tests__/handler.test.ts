@@ -82,18 +82,21 @@ describe('matchesServerFn (rfc-deploy §2)', () => {
         expect(matchesServerFn(req('/api/_sigx/fn/x'))).toBe(false);    // not under the mount
     });
 
-    it('honors a custom base, with or without a trailing slash', () => {
+    it('honors a custom base however it is slashed', () => {
         expect(matchesServerFn(req('/rpc/add_fn_00000001'), '/rpc')).toBe(true);
         expect(matchesServerFn(req('/rpc/add_fn_00000001'), '/rpc/')).toBe(true);
+        expect(matchesServerFn(req('/rpc/add_fn_00000001'), '/rpc//')).toBe(true);
         expect(matchesServerFn(req('/_sigx/fn/add_fn_00000001'), '/rpc')).toBe(false);
     });
 });
 
 describe('base agreement (#563)', () => {
-    it('the handler routes a custom base identically with or without a trailing slash', async () => {
+    it('the handler routes a custom base identically however it is slashed', async () => {
         // The invariant `fnPathPrefix` now centralizes: the predicate and the
-        // handler derived it independently before, in three copies.
-        for (const base of ['/rpc', '/rpc/']) {
+        // handler derived it independently before, in three copies. `/rpc//`
+        // is included because leaving it doubled would put an empty first
+        // segment into the symbol `decodeFnPath` splits.
+        for (const base of ['/rpc', '/rpc/', '/rpc//']) {
             const request = new Request(`${ORIGIN}/rpc/add_fn_00000001`, {
                 method: 'POST',
                 headers: { 'content-type': 'application/json', origin: ORIGIN },

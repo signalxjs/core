@@ -243,6 +243,12 @@ export default { fetch(request) {
         expect(warnFor(ENTRY)).toEqual([]);
     });
 
+    it('is silent for the default written with a cosmetic trailing slash', () => {
+        // `/rpc` and `/rpc/` route identically, so a base that differs from
+        // the default only in slashes has not moved anything.
+        expect(warnFor(ENTRY, { base: '/_sigx/fn/' })).toEqual([]);
+    });
+
     it('is silent once the entry passes the build value', () => {
         const fixed = ENTRY.replace('matchesServerFn(request)', 'matchesServerFn(request, serverFnBase)');
         expect(warnFor(fixed, { base: '/rpc' })).toEqual([]);
