@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **Revive no longer turns a surviving `__proto__` key into a prototype
+  swap (#548).** `out[key] = value` with the key `__proto__` does not
+  create an own property — it sets the prototype of the object being
+  rebuilt, invisibly (gone from `Object.keys`, `JSON.stringify`, and a
+  `toEqual` assertion; `Object.getPrototypeOf` is the only witness). Every
+  in-repo caller pre-filtered the key so this was never exploitable, but
+  the safety lived entirely one layer up, one forgotten pre-filter from a
+  hole — and the codec is the one place that sees every boundary (the SSR
+  state blob, resume boundary props, the cache seed, the RPC wire). Revive
+  now skips an own `__proto__` key at both of its object rebuilds, with a
+  dev warning naming the drop.
+
 ### Changed
 
 - **Both halves refuse values nesting deeper than 256 levels (#559).**

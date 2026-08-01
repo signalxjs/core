@@ -169,6 +169,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- **`@sigx/server` / `@sigx/serialize`: the `__proto__` defense moved into
+  the codec; `constructor`/`prototype` round-trip as data (#560, #548).**
+  Revive itself now drops an own `__proto__` key (previously a silent
+  prototype swap held off only by caller pre-filters), the wire filters
+  narrowed from three keys to the one that is dangerous, and every drop
+  dev-warns. A payload with a `constructor` or `prototype` data key no
+  longer silently loses it in either direction. Details in the two package
+  changelogs.
+
 - **`@sigx/runtime-core`: removing the children (or slots) prop on patch now
   clears the slot content (#586).** `cond ? <Wrap>content</Wrap> : <Wrap />`
   left the stale fill mounted forever: the patch path updated slot state only

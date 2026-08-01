@@ -184,10 +184,27 @@ describe('__serverFnStub', () => {
         expect((mock.mock.calls[0][1] as RequestInit).method).toBe('POST');
     });
 
-    it('drops dangerous keys from the response payload', async () => {
-        stubFetch(200, '{"data":{"__proto__":{"polluted":true},"ok":1}}');
+    it('drops an own __proto__ key from the response payload', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        try {
+            stubFetch(200, '{"data":{"__proto__":{"polluted":true},"ok":1}}');
+            const fn = __serverFnStub('e_fn_00000006', 'echo', '/_sigx/fn');
+            await expect(fn()).resolves.toEqual({ ok: 1 });
+        } finally {
+            warn.mockRestore();
+        }
+    });
+
+    it('"constructor" survives in the response payload — a plain data key (#560)', async () => {
+        // The three-key reviver silently ate a server function returning
+        // { constructor: 'Acme Corp' }; only __proto__ is dangerous.
+        stubFetch(200, '{"data":{"constructor":"Acme Corp","prototype":"blueprint","ok":1}}');
         const fn = __serverFnStub('e_fn_00000006', 'echo', '/_sigx/fn');
-        await expect(fn()).resolves.toEqual({ ok: 1 });
+        await expect(fn()).resolves.toEqual({
+            constructor: 'Acme Corp',
+            prototype: 'blueprint',
+            ok: 1
+        });
     });
 });
 

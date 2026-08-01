@@ -174,19 +174,30 @@ describe('form-mode success — 303 PRG (§6.4)', () => {
         expect(await (seen!.doc as File).text()).toBe('hello');
     });
 
-    it('dangerous field names are dropped from the normalized input', async () => {
-        let seen: Record<string, unknown> | undefined;
-        const catcher = serverFn({
-            form: true,
-            input: PassThrough,
-            handler: async (_rq, input: Record<string, unknown>) => {
-                seen = input;
-                return null;
-            }
-        });
-        await formPost('c', new URLSearchParams([['__proto__', 'x'], ['ok', '1']]), {}, { resolve: () => catcher });
-        expect(seen).toEqual({ ok: '1' });
-        expect(Object.getPrototypeOf(seen)).toBe(Object.prototype);
+    it('a field named __proto__ is dropped; "constructor" is a plain field and survives (#560)', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        try {
+            let seen: Record<string, unknown> | undefined;
+            const catcher = serverFn({
+                form: true,
+                input: PassThrough,
+                handler: async (_rq, input: Record<string, unknown>) => {
+                    seen = input;
+                    return null;
+                }
+            });
+            await formPost(
+                'c',
+                new URLSearchParams([['__proto__', 'x'], ['constructor', 'Acme Corp'], ['ok', '1']]),
+                {},
+                { resolve: () => catcher }
+            );
+            expect(seen).toEqual({ constructor: 'Acme Corp', ok: '1' });
+            expect(Object.getPrototypeOf(seen)).toBe(Object.prototype);
+            expect(warn).toHaveBeenCalledWith(expect.stringContaining('__proto__'));
+        } finally {
+            warn.mockRestore();
+        }
     });
 
     it('invalidates never runs on the form branch, but still runs for JSON callers', async () => {

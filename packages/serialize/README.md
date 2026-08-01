@@ -47,6 +47,7 @@ entry that `@sigx/resume` handler chunks replicate.
 | class instances | prototype lost unless you register a handler |
 | circular structures | ❌ throws, same as `JSON.stringify` |
 | nesting beyond 256 levels | ❌ throws, on encode AND revive — the codec is recursive where `JSON.parse`/`stringify` are not, so it bounds its own stack; wire data is attacker-typable (#559) |
+| a property named `__proto__` | ❌ dropped at revive with a dev warning — rebuilding it by assignment would swap the revived object's prototype instead of creating a property (#548); `constructor`/`prototype` are plain data keys and round-trip |
 | shared references (DAG) | ✅ as copies — each reference serializes independently, exactly like `JSON.stringify`; encode-phase work is memoized so a heavily shared tree costs linear time (#559) |
 
 ## API
