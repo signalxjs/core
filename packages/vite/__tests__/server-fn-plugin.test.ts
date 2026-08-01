@@ -818,3 +818,170 @@ export const use = () => save;
         expect(plugin.api.resolveServerFn(importer, '@acme/api/feedback.server', 'x')).toBeNull();
     });
 });
+
+describe('sigxServer — hotUpdate (#568)', () => {
+    /**
+     * The re-extract → invalidate-registry path had no coverage at all, and it
+     * is what makes a symbol change propagate: symbols are content-hashed, so
+     * every edit to a server function's body mints a new one, and a registry
+     * that kept serving the old map would 404 every call from the freshly
+     * transformed client.
+     */
+    const hotCtx = (): {
+        ctx: unknown;
+        invalidated: unknown[];
+    } => {
+        const mod = { id: '\0virtual:sigx-server-fns' };
+        const invalidated: unknown[] = [];
+        return {
+            ctx: {
+                environment: {
+                    name: 'ssr',
+                    moduleGraph: {
+                        getModuleById: (id: string) => (id === mod.id ? mod : undefined),
+                        invalidateModule: (m: unknown) => invalidated.push(m)
+                    }
+                }
+            },
+            invalidated
+        };
+    };
+
+    const registryOf = (plugin: any): string =>
+        plugin.load(plugin.resolveId('virtual:sigx-server-fns')) as string;
+
+    const EDITED = CART.replace('db.cart.add(id)', 'db.cart.addOne(id)');
+    const RENAMED = `
+import { serverFn } from '@sigx/server';
+export const addToBasket = serverFn(async (rq, id: string) => id);
+`;
+
+    it('re-extracts an edited server module and invalidates the registry', async () => {
+        const { plugin, root } = makeProject({ 'src/cart.server.ts': CART });
+        try {
+            const before = registryOf(plugin);
+            const { ctx, invalidated } = hotCtx();
+            await plugin.hotUpdate.call(ctx, {
+                type: 'update',
+                file: join(root, 'src/cart.server.ts'),
+                read: async () => EDITED
+            });
+            const after = registryOf(plugin);
+            // Same export, NEW content hash — the whole point of re-extracting.
+            expect(after).toMatch(/\["addToCart_fn_[0-9a-f]{8}"\]/);
+            expect(after).not.toBe(before);
+            expect(invalidated).toHaveLength(1);
+        } finally {
+            rmSync(root, { recursive: true, force: true });
+        }
+    });
+
+    it('a renamed export replaces the old symbol', async () => {
+        const { plugin, root } = makeProject({ 'src/cart.server.ts': CART });
+        try {
+            const { ctx } = hotCtx();
+            await plugin.hotUpdate.call(ctx, {
+                type: 'update',
+                file: join(root, 'src/cart.server.ts'),
+                read: async () => RENAMED
+            });
+            const after = registryOf(plugin);
+            expect(after).toContain('addToBasket');
+            expect(after).not.toContain('addToCart');
+        } finally {
+            rmSync(root, { recursive: true, force: true });
+        }
+    });
+
+    it('a deleted server module drops out of the registry', async () => {
+        const { plugin, root } = makeProject({ 'src/cart.server.ts': CART });
+        try {
+            const { ctx, invalidated } = hotCtx();
+            await plugin.hotUpdate.call(ctx, {
+                type: 'delete',
+                file: join(root, 'src/cart.server.ts'),
+                read: async () => ''
+            });
+            expect(registryOf(plugin)).not.toContain('addToCart');
+            expect(invalidated).toHaveLength(1);
+        } finally {
+            rmSync(root, { recursive: true, force: true });
+        }
+    });
+
+    it('a mid-edit syntax error keeps the last good extraction', async () => {
+        const { plugin, root } = makeProject({ 'src/cart.server.ts': CART });
+        try {
+            const before = registryOf(plugin);
+            const { ctx } = hotCtx();
+            await plugin.hotUpdate.call(ctx, {
+                type: 'update',
+                file: join(root, 'src/cart.server.ts'),
+                read: async () => CART + '\nconst oops = {'
+            });
+            // Unchanged: an editor saves broken syntax constantly, and
+            // dropping the symbol would 404 every call until the next keystroke.
+            expect(registryOf(plugin)).toBe(before);
+        } finally {
+            rmSync(root, { recursive: true, force: true });
+        }
+    });
+
+    it('says nothing about an unrelated file that never held a serverFn', async () => {
+        const { plugin, root } = makeProject({ 'src/cart.server.ts': CART });
+        try {
+            const { ctx, invalidated } = hotCtx();
+            await plugin.hotUpdate.call(ctx, {
+                type: 'update',
+                file: join(root, 'src/util.ts'),
+                read: async () => 'export const x = 1;'
+            });
+            // Early return — every keystroke in every file would otherwise
+            // invalidate the registry.
+            expect(invalidated).toHaveLength(0);
+        } finally {
+            rmSync(root, { recursive: true, force: true });
+        }
+    });
+
+    it('re-extracts an INLINE carrier, and survives a graph with no registry module', async () => {
+        const INLINE = `
+import { serverFn } from '@sigx/server';
+export const Page = () => null;
+const search = serverFn(async (rq, q: string) => q);
+`;
+        const { plugin, root } = makeProject({ 'src/cart.server.ts': CART });
+        try {
+            const file = join(root, 'src/Page.tsx');
+            // Transform it once so the plugin knows it is a carrier.
+            plugin.transform.call(
+                { environment: { name: 'client' }, warn: () => {}, error: (m: string) => { throw new Error(m); } },
+                INLINE,
+                file
+            );
+            const { ctx, invalidated } = hotCtx();
+            await plugin.hotUpdate.call(ctx, {
+                type: 'update',
+                file,
+                read: async () => INLINE.replace('async (rq, q: string) => q', 'async (rq, q: string) => q + "!"')
+            });
+            expect(invalidated).toHaveLength(1);
+
+            // A graph without the virtual module (it was never imported) must
+            // not throw — `getModuleById` returning undefined is normal.
+            await expect(
+                plugin.hotUpdate.call(
+                    {
+                        environment: {
+                            name: 'ssr',
+                            moduleGraph: { getModuleById: () => undefined, invalidateModule: () => {} }
+                        }
+                    },
+                    { type: 'update', file, read: async () => INLINE }
+                )
+            ).resolves.toBeUndefined();
+        } finally {
+            rmSync(root, { recursive: true, force: true });
+        }
+    });
+});
