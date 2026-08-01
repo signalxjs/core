@@ -124,6 +124,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   a JSX child array: strings/numbers become Text VNodes, falsy items become
   Comment placeholders so positional diffing keeps its indices.
 
+- **`@sigx/vite`: the dev server-function endpoint ignored `maxUrlBytes`,
+  `onError` and `timeoutMs` (#561).** `sigxServer()` mounts the RPC endpoint in
+  dev, and it built the handler's options from a hand-picked list of five —
+  while `SigxServerOptions` did not even *declare* the other three, so they
+  could not be spelled. A GET read tuned with `maxUrlBytes: 32_000` still 414'd
+  at the 8 KiB default under `vite dev`, and a `timeoutMs`/`onError` configured
+  for production simply did not apply: dev and prod disagreed about the request
+  policy, silently.
+
+  This is the same defect #547 fixed one layer down, in the layer #547's own
+  commit message named as the next victim — a hand-written subset kept in sync
+  by hand with an interface the package does not own, with nothing enforcing
+  it. `SigxServerOptions` now **extends** `ServerFnRequestOptions` (omitting
+  the four names the plugin owns: `resolve`, `base`, and the `guard` /
+  `renderBoundaries` module *specifiers*) and the middleware forwards by
+  spread, so an option added to the endpoint is reachable in dev the day it
+  ships. The regression test drives the middleware's handler over a real
+  socket — the existing coverage captured that handler and threw it away,
+  which is exactly why this survived.
+
 - **`@sigx/server` / `@sigx/vite`: a throwing `resolve()` escaped the
   server-function endpoint; prototype-key symbols hit the plain-object
   registry (#555).** A rejecting symbol resolution (the prod registry's lazy
