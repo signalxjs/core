@@ -10,6 +10,7 @@
         "bench:micro": "node --conditions production src/run-micro.ts",
         "bench:micro:baseline": "node --conditions production src/run-micro.ts --baseline",
         "bench:quick": "node --conditions production src/quick.ts && node --conditions production src/check-regression.ts",
+        "bench:quick:ci": "node --conditions production src/quick.ts && node --conditions production src/check-regression.ts --require-baseline-rows",
         "bench:quick:enforce": "node --conditions production src/quick.ts && node --conditions production src/check-regression.ts --enforce",
         "bench:baseline": "node --conditions production src/run-all.ts --baseline && node --conditions production src/run-stream.ts --baseline && node --conditions production src/run-micro.ts --baseline && node --conditions production src/quick.ts --baseline",
         "verify": "node --conditions production src/verify-equivalence.ts",

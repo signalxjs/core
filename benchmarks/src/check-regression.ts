@@ -20,6 +20,19 @@
  * Machine fingerprint: if the baseline was recorded on a different CPU model
  * or Node major version the TIMINGS are not comparable — a warning is printed
  * and only the byte rows keep gating.
+ *
+ * Coverage: a bench with no matching entry on the baseline side cannot fail —
+ * it is measured, printed, and compared against nothing. That used to be
+ * silent (`if (!base) continue`), which left the three `slots/*` benches added
+ * by #537 ungated for four PRs. Unmatched rows are now listed on every run in
+ * both directions (`ungated` / `stale`), and --require-baseline-rows (implied
+ * by --enforce) turns an ungated row into a failure. That check is set
+ * membership, not timing, so it needs no matching hardware and CI runs it.
+ *
+ * Files: --baseline-file / --current-file compare two arbitrary result files
+ * instead of the committed baseline — how the Bench workflow's A/B job
+ * compares a PR's base ref against its head ref, both measured on the same
+ * runner. --markdown=<path> writes that comparison as a report to post.
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -49,6 +62,10 @@ const BYTES_THRESHOLD_PCT = 2;
  * gated by the larger string benches (`escape-heavy`), `large-table-1k`, and
  * the stream, so dropping these two from the GATE loses no real coverage —
  * only false alarms.
+ *
+ * This set is keyed on the string-bench label format and covers the SSR string
+ * benches only; a request-path bench carries the same exemption per bench, via
+ * `informational` in micro/types.ts.
  */
 const INFORMATIONAL_TIMINGS = new Set<string>([
     'small-page (string)',
@@ -64,6 +81,15 @@ interface DeltaRow {
     kind: 'time' | 'bytes';
     /** False for informational rows: printed and compared, but never fail. */
     gated: boolean;
+}
+
+interface Comparison {
+    /** Benches present on both sides — the only ones that can pass or fail. */
+    rows: DeltaRow[];
+    /** Measured now, absent from the baseline: compared against nothing. */
+    ungated: string[];
+    /** In the baseline, not measured now: the bench was renamed or removed. */
+    stale: string[];
 }
 
 function thresholdFor(row: DeltaRow, timingThreshold: number): number {
@@ -82,12 +108,18 @@ function readJson<T>(file: string, what: string): T {
     return JSON.parse(fs.readFileSync(file, 'utf8')) as T;
 }
 
+/** `--name=value`, or undefined when the flag was not passed. */
+function argValue(name: string): string | undefined {
+    const prefix = `--${name}=`;
+    return process.argv.find((a) => a.startsWith(prefix))?.slice(prefix.length);
+}
+
 function thresholdPct(): number {
-    const arg = process.argv.find((a) => a.startsWith('--threshold='));
-    if (!arg) return DEFAULT_THRESHOLD_PCT;
-    const value = Number(arg.slice('--threshold='.length));
+    const raw = argValue('threshold');
+    if (raw === undefined) return DEFAULT_THRESHOLD_PCT;
+    const value = Number(raw);
     if (!Number.isFinite(value) || value <= 0) {
-        console.error(`[check-regression] invalid --threshold value: ${arg}`);
+        console.error(`[check-regression] invalid --threshold value: --threshold=${raw}`);
         process.exit(1);
     }
     return value;
@@ -101,14 +133,50 @@ function deltaPct(baseline: number, current: number): number {
     return ((current - baseline) / baseline) * 100;
 }
 
-function compare(baseline: QuickPayload, current: QuickPayload): DeltaRow[] {
+/**
+ * A quick payload, whether it came from a raw quick-latest.json (which IS the
+ * payload) or from the combined baseline.json (which nests it under `quick`).
+ */
+function isQuickPayload(value: unknown): value is QuickPayload {
+    if (!value || typeof value !== 'object') return false;
+    const candidate = value as {
+        string?: unknown;
+        stream?: { results?: unknown };
+        micro?: unknown;
+        bytes?: unknown;
+    };
+    const arrayOrAbsent = (v: unknown): boolean => v === undefined || Array.isArray(v);
+    // `micro` is the discriminator that actually bites: the quick payload holds
+    // a flat array of benches, while the full suite's section is
+    // `{meta, benches, bytes}`. Without checking it, a combined baseline whose
+    // root looks quick-shaped gets this far and then dies on `.find` of an
+    // object.
+    return Array.isArray(candidate.string)
+        && typeof candidate.stream === 'object'
+        && candidate.stream !== null
+        && Array.isArray(candidate.stream.results)
+        && arrayOrAbsent(candidate.micro)
+        && arrayOrAbsent(candidate.bytes);
+}
+
+function streamLabels(scenario: string): [string, string] {
+    return [`${scenario} (stream ttfb)`, `${scenario} (stream total)`];
+}
+
+function compare(baseline: QuickPayload, current: QuickPayload): Comparison {
     const rows: DeltaRow[] = [];
+    const ungated = new Set<string>();
+    const stale = new Set<string>();
+
     for (const cur of current.string) {
+        const bench = `${cur.scenario} (string)`;
         const base = baseline.string.find(
             (b) => b.scenario === cur.scenario && b.framework === cur.framework
         );
-        if (!base) continue;
-        const bench = `${cur.scenario} (string)`;
+        if (!base) {
+            ungated.add(bench);
+            continue;
+        }
         rows.push({
             bench,
             baselineP50Ms: Number((base.stats.p50Ns / 1e6).toFixed(3)),
@@ -118,13 +186,28 @@ function compare(baseline: QuickPayload, current: QuickPayload): DeltaRow[] {
             gated: !INFORMATIONAL_TIMINGS.has(bench)
         });
     }
+    for (const base of baseline.string) {
+        const measured = current.string.some(
+            (c) => c.scenario === base.scenario && c.framework === base.framework
+        );
+        if (!measured) stale.add(`${base.scenario} (string)`);
+    }
+
+    // A renamed stream scenario un-matches every stream row at once, so it is
+    // reported as the rename it is rather than quietly halving the coverage.
+    const sameStreamScenario = baseline.stream.scenario === current.stream.scenario;
     for (const cur of current.stream.results) {
-        const base = baseline.stream.scenario === current.stream.scenario
+        const [ttfb, total] = streamLabels(current.stream.scenario);
+        const base = sameStreamScenario
             ? baseline.stream.results.find((b) => b.framework === cur.framework)
             : undefined;
-        if (!base) continue;
+        if (!base) {
+            ungated.add(ttfb);
+            ungated.add(total);
+            continue;
+        }
         rows.push({
-            bench: `${current.stream.scenario} (stream ttfb)`,
+            bench: ttfb,
             baselineP50Ms: base.ttfbMs.p50,
             currentP50Ms: cur.ttfbMs.p50,
             deltaPct: deltaPct(base.ttfbMs.p50, cur.ttfbMs.p50),
@@ -132,7 +215,7 @@ function compare(baseline: QuickPayload, current: QuickPayload): DeltaRow[] {
             gated: true
         });
         rows.push({
-            bench: `${current.stream.scenario} (stream total)`,
+            bench: total,
             baselineP50Ms: base.totalMs.p50,
             currentP50Ms: cur.totalMs.p50,
             deltaPct: deltaPct(base.totalMs.p50, cur.totalMs.p50),
@@ -140,31 +223,54 @@ function compare(baseline: QuickPayload, current: QuickPayload): DeltaRow[] {
             gated: true
         });
     }
-    // Request-path timings. A baseline recorded before these existed simply
-    // has no `micro` section and contributes no rows.
+    for (const base of baseline.stream.results) {
+        const measured = sameStreamScenario
+            && current.stream.results.some((c) => c.framework === base.framework);
+        if (!measured) for (const label of streamLabels(baseline.stream.scenario)) stale.add(label);
+    }
+
+    // Request-path timings. A baseline recorded before these existed has no
+    // `micro` section — every row is then reported as ungated, not skipped.
     for (const cur of current.micro ?? []) {
+        const bench = `${cur.suite}/${cur.name}`;
         const base = (baseline.micro ?? []).find(
             (b) => b.suite === cur.suite && b.name === cur.name
         );
-        if (!base) continue;
+        if (!base) {
+            ungated.add(bench);
+            continue;
+        }
         rows.push({
-            bench: `${cur.suite}/${cur.name}`,
+            bench,
             baselineP50Ms: Number((base.stats.p50Ns / 1e6).toFixed(4)),
             currentP50Ms: Number((cur.stats.p50Ns / 1e6).toFixed(4)),
             deltaPct: deltaPct(base.stats.p50Ns, cur.stats.p50Ns),
             kind: 'time',
-            gated: true
+            // Read off the CURRENT run: flipping a bench to informational takes
+            // effect immediately, without waiting for a re-baseline.
+            gated: !cur.informational
         });
     }
+    for (const base of baseline.micro ?? []) {
+        const measured = (current.micro ?? []).some(
+            (c) => c.suite === base.suite && c.name === base.name
+        );
+        if (!measured) stale.add(`${base.suite}/${base.name}`);
+    }
+
     // Payload sizes — the `ms` columns carry BYTES for these rows (the table
     // is shared); `kind` is what the threshold and the fingerprint skip read.
     for (const cur of current.bytes ?? []) {
+        const bench = `${cur.suite}/${cur.name} (bytes)`;
         const base = (baseline.bytes ?? []).find(
             (b) => b.suite === cur.suite && b.name === cur.name
         );
-        if (!base) continue;
+        if (!base) {
+            ungated.add(bench);
+            continue;
+        }
         rows.push({
-            bench: `${cur.suite}/${cur.name} (bytes)`,
+            bench,
             baselineP50Ms: base.bytes,
             currentP50Ms: cur.bytes,
             deltaPct: deltaPct(base.bytes, cur.bytes),
@@ -172,7 +278,14 @@ function compare(baseline: QuickPayload, current: QuickPayload): DeltaRow[] {
             gated: true
         });
     }
-    return rows;
+    for (const base of baseline.bytes ?? []) {
+        const measured = (current.bytes ?? []).some(
+            (c) => c.suite === base.suite && c.name === base.name
+        );
+        if (!measured) stale.add(`${base.suite}/${base.name} (bytes)`);
+    }
+
+    return { rows, ungated: [...ungated].sort(), stale: [...stale].sort() };
 }
 
 function printTable(rows: DeltaRow[]): void {
@@ -184,30 +297,166 @@ function printTable(rows: DeltaRow[]): void {
     })));
 }
 
+function printCoverage({ ungated, stale }: Comparison): void {
+    if (ungated.length > 0) {
+        console.log(`\nungated — measured but no baseline entry, cannot fail (${ungated.length}):`);
+        for (const bench of ungated) console.log(`  - ${bench}`);
+    }
+    if (stale.length > 0) {
+        console.log(`\nstale — in the baseline but not measured, so the bench was renamed or removed (${stale.length}):`);
+        for (const bench of stale) console.log(`  - ${bench}`);
+    }
+    if (ungated.length > 0 && stale.length > 0) {
+        console.log('\n(a bench in both lists was renamed — the two entries are its old and new name.)');
+    }
+}
+
+function formatDelta(row: DeltaRow): string {
+    return `${row.deltaPct >= 0 ? '+' : ''}${row.deltaPct.toFixed(1)}%`;
+}
+
+function metaLine(label: string, meta: ResultsMeta | undefined): string {
+    if (!meta) return `${label}: unknown`;
+    return `${label}: \`${meta.cpu}\`, node ${meta.node}, ${meta.date}`;
+}
+
+/**
+ * The same comparison as the console table, as a report to post on a PR. Kept
+ * deliberately generic — "before"/"after" rather than "baseline"/"current" —
+ * because the A/B job's two sides are a base ref and a head ref, neither of
+ * which is the committed baseline. `--title` says which is which.
+ */
+function markdownReport(
+    comparison: Comparison,
+    threshold: number,
+    baselineMeta: ResultsMeta | undefined,
+    currentMeta: ResultsMeta | undefined,
+    title: string | undefined
+): string {
+    const { rows, ungated, stale } = comparison;
+    const lines: string[] = [];
+    lines.push('### Benchmark comparison');
+    if (title) lines.push('', title);
+    lines.push('');
+
+    if (rows.length === 0) {
+        lines.push('_No bench matched on both sides — nothing to compare._');
+    } else {
+        lines.push('| bench | before | after | delta | |');
+        lines.push('| --- | ---: | ---: | ---: | --- |');
+        for (const row of rows) {
+            const status = !row.gated
+                ? 'info'
+                : isRegression(row, threshold)
+                    ? `over +${thresholdFor(row, threshold)}%`
+                    : 'ok';
+            lines.push(
+                `| ${row.bench} | ${row.baselineP50Ms} | ${row.currentP50Ms} | ${formatDelta(row)} | ${status} |`
+            );
+        }
+    }
+
+    if (ungated.length > 0) {
+        lines.push('', `**Ungated** — measured but absent from the "before" side, so nothing compares them (${ungated.length}):`);
+        for (const bench of ungated) lines.push(`- \`${bench}\``);
+    }
+    if (stale.length > 0) {
+        lines.push('', `**Stale** — on the "before" side but not measured now, so renamed or removed (${stale.length}):`);
+        for (const bench of stale) lines.push(`- \`${bench}\``);
+    }
+
+    lines.push('');
+    lines.push(`<sub>${metaLine('before', baselineMeta)}</sub><br>`);
+    lines.push(`<sub>${metaLine('after', currentMeta)}</sub><br>`);
+    lines.push(
+        `<sub>Thresholds for reference: +${threshold}% timings, +${BYTES_THRESHOLD_PCT}% payload bytes. `
+        + 'Timings measured on a shared CI runner are indicative, never a gate — the `(bytes)` rows are exact. '
+        + 'Figures are millisecond p50s except those `(bytes)` rows, which are byte counts.</sub>'
+    );
+    return lines.join('\n') + '\n';
+}
+
 function main(): void {
     const enforce = process.argv.includes('--enforce');
+    const requireBaselineRows = enforce || process.argv.includes('--require-baseline-rows');
     const threshold = thresholdPct();
+    const baselinePath = argValue('baseline-file');
+    const currentPath = argValue('current-file');
+    const markdownPath = argValue('markdown');
+    const title = argValue('title');
 
-    const baselineFile = readJson<Record<string, unknown> & { meta?: ResultsMeta; quick?: QuickPayload }>(BASELINE, 'baseline');
-    const current = readJson<QuickPayload>(QUICK_LATEST, 'quick results');
+    // The noise re-run respawns quick.ts, which always writes quick-latest.json
+    // — it cannot re-measure a file handed in from elsewhere. Rather than
+    // enforce a verdict against a file it is unable to re-measure, refuse.
+    if (enforce && currentPath !== undefined) {
+        console.error('[check-regression] --enforce cannot be combined with --current-file: the noise re-run re-measures results/quick-latest.json, not an arbitrary file.');
+        process.exit(1);
+    }
 
-    const baselineQuick = baselineFile.quick;
+    const baselineFile = readJson<Record<string, unknown> & { meta?: ResultsMeta; quick?: QuickPayload }>(
+        baselinePath ?? BASELINE,
+        'baseline'
+    );
+    const current = readJson<QuickPayload>(currentPath ?? QUICK_LATEST, 'quick results');
+
+    // The root of a combined baseline.json carries `string`/`stream`/`micro`
+    // too — the very shape a raw quick payload has — so a structural test
+    // cannot tell them apart, and falling through to the root would compare
+    // the quick suite against FULL-suite numbers recorded under a different
+    // sample budget. Only the `quick` key distinguishes them, so it wins
+    // whenever it is present, and the root is considered only for an explicit
+    // --baseline-file (which the A/B job points at a raw quick-latest.json).
+    // The default path therefore keeps its "no quick section" early exit.
+    let baselineQuick: QuickPayload | undefined;
+    if ('quick' in baselineFile) {
+        baselineQuick = isQuickPayload(baselineFile.quick) ? baselineFile.quick : undefined;
+    } else if (baselinePath !== undefined) {
+        baselineQuick = isQuickPayload(baselineFile) ? baselineFile : undefined;
+    }
     if (!baselineQuick) {
+        if (baselinePath !== undefined) {
+            // An explicit path holding neither shape is a mistake, not a
+            // missing baseline — say so instead of silently passing.
+            console.error(`[check-regression] ${baselinePath} is neither a quick results file nor a baseline with a \`quick\` section.`);
+            process.exit(1);
+        }
         console.warn('[check-regression] baseline.json has no `quick` section — run `node src/quick.ts --baseline` (or `pnpm bench:ssr:baseline`) on this machine first. Skipping comparison.');
         process.exit(0);
     }
 
-    let rows = compare(baselineQuick, current);
+    let comparison = compare(baselineQuick, current);
+    let rows = comparison.rows;
+    if (rows.length > 0) printTable(rows);
+    else console.warn('[check-regression] no comparable benches between baseline and current quick results.');
+    printCoverage(comparison);
+
+    const baselineMeta = baselineQuick.meta ?? baselineFile.meta;
+    if (markdownPath !== undefined) {
+        fs.writeFileSync(
+            markdownPath,
+            markdownReport(comparison, threshold, baselineMeta, current.meta, title)
+        );
+        console.log(`\nwrote ${markdownPath}`);
+    }
+
+    // Coverage before enforcement: an unmatched row is set membership, not a
+    // measurement, so it holds on any machine — CI checks it (bench-smoke)
+    // even though CI can never enforce a timing.
+    if (requireBaselineRows && comparison.ungated.length > 0) {
+        console.error(`\n[check-regression] FAIL: ${comparison.ungated.length} bench(es) have no baseline entry and therefore gate nothing:`);
+        for (const bench of comparison.ungated) console.error(`  - ${bench}`);
+        console.error('Re-baseline on a quiet machine (`pnpm bench:ssr:baseline`, or `node src/quick.ts --baseline` for the quick section alone) and commit results/baseline.json.');
+        process.exit(1);
+    }
+
     if (rows.length === 0) {
-        console.warn('[check-regression] no comparable benches between baseline and current quick results. Skipping.');
+        console.warn('[check-regression] nothing to gate. Skipping.');
         process.exit(0);
     }
-    printTable(rows);
 
     const report = (r: DeltaRow): string =>
         `  - ${r.bench}: ${r.baselineP50Ms} -> ${r.currentP50Ms} ` +
-        `(${r.deltaPct >= 0 ? '+' : ''}${r.deltaPct.toFixed(1)}%, ` +
-        `threshold +${thresholdFor(r, threshold)}%)`;
+        `(${formatDelta(r)}, threshold +${thresholdFor(r, threshold)}%)`;
 
     let failing = rows.filter((r) => isRegression(r, threshold));
     if (!enforce) {
@@ -224,7 +473,6 @@ function main(): void {
     // hardware or a different Node major version would only produce false
     // alarms. Byte counts are machine-independent, so they keep gating —
     // a fatter payload is a real regression on any CPU.
-    const baselineMeta = baselineQuick.meta ?? baselineFile.meta;
     const currentCpu = os.cpus()[0]?.model ?? 'unknown';
     const foreignMachine = Boolean(
         baselineMeta &&
@@ -267,8 +515,8 @@ function main(): void {
     }
 
     const rerunResults = readJson<QuickPayload>(QUICK_LATEST, 'quick results (re-run)');
-    rows = compare(baselineQuick, rerunResults);
-    if (foreignMachine) rows = rows.filter((r) => r.kind === 'bytes');
+    comparison = compare(baselineQuick, rerunResults);
+    rows = foreignMachine ? comparison.rows.filter((r) => r.kind === 'bytes') : comparison.rows;
     console.log('');
     printTable(rows);
 

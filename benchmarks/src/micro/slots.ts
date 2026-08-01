@@ -71,6 +71,10 @@ function defaultSlot(n: number, quick = false, floor = false): MicroBench {
         name: `default slot, ${n} element children`,
         ...(floor ? { floorOf: `slice floor n=${n}` } : {}),
         quick,
+        // Around a hundred nanoseconds — an order of magnitude below the two
+        // SSR string benches #477 had to un-gate for the same reason. See the
+        // header: the floor ratio is the figure that means something here.
+        informational: true,
         check: () => {
             const out = slots.default!();
             assert(out.length === n, `default slot returned ${out.length} children, expected ${n}`);
@@ -102,6 +106,8 @@ function renderPropSlot(quick = false): MicroBench {
         suite: 'slots',
         name: 'default slot, render-prop child',
         quick,
+        // Sub-microsecond, like every bench in this suite — informational.
+        informational: true,
         check: () => {
             const out = slots.default!({ greeting: 'hi' }) as { type: string }[];
             assert(out.length === 1, `render-prop slot returned ${out.length} children, expected 1`);
