@@ -144,7 +144,12 @@ export function namedSlotFor(child: any): string | null {
         }
         return null;
     }
-    return child.props.slot;
+    // Coerced so the declared return type is true for any truthy `slot`
+    // value: a string passes through unchanged, a number routes to the same
+    // key it always did (object keys stringify), and a Symbol — which used
+    // to land on a symbol key no string accessor could ever read — routes
+    // under its string form like the warning above already prints it.
+    return String(child.props.slot);
 }
 
 /**
