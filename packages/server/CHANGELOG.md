@@ -31,6 +31,24 @@
   verbatim) and marks the §5 guard-asymmetry pin as landed in
   `handler.test.ts`.
 
+- **`@sigx/server/testing` — a public testing surface (#570).**
+  `createTestServerFnContext(init?)` builds a real, Request-backed
+  `ServerFnContext` (default `http://localhost/`) with zero ceremony:
+  `rq.request`/`rq.url` never throw the detached error, `rq.status(code)`
+  records to a readable `.statusCode` instead of dev-warning, caller
+  `locals` keep their identity (one factory context across several
+  `fn.with({ context: ctx })` calls is ONE request store; two contexts are
+  two — the store-identity rule, now on public surface), and a previously
+  built context as `init` is copied with guarded reads so throwing getters
+  cannot crash it. `stampServerFnKey(fn, key?)` mints the build stamp
+  `useData(fn)` requires (`__sigxKey`, default `test/<name>`, plus
+  `__sigxGuardChecked`) on the SAME function — mutating because identity is
+  load-bearing; streams are rejected in dev. There is deliberately NO new
+  invoker: `fn.with({ context })(…)` already runs the whole in-process
+  pipeline (preset guards → `use` chain → arity gate → `input` validation),
+  and the README's new Testing section is that recipe. The detached-context
+  error now names the factory as its third remedy.
+
 - **`serverStream` gained a single-input options form — declarative `input`
   validation for streams (#572).** Declaring `input` (any Standard Schema —
   Zod/Valibot/ArkType) selects a `serverFn`-shaped single-input handler:

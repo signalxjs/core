@@ -81,8 +81,12 @@ function ambientContext(): ServerFnContextInit | undefined {
  * Build a live-ish context from what an in-process caller supplied.
  * `responseHeaders`/`status()` stay inert: there is no HTTP response to
  * affect, and pretending otherwise would silently drop headers.
+ *
+ * Exported for the `/testing` entry (#570), which layers a Request-backed
+ * default and a recording `status()` on top — the merge semantics stay HERE
+ * so the two can never drift.
  */
-function contextFrom(init: ServerFnContextInit, signal?: AbortSignal): ServerFnContext {
+export function contextFrom(init: ServerFnContextInit, signal?: AbortSignal): ServerFnContext {
     const partial: Partial<ServerFnContext> =
         init instanceof Request ? { request: init } : init;
     const request = partial.request;
@@ -154,10 +158,11 @@ export function createDetachedContext(signal?: AbortSignal): ServerFnContext {
     const noRequest = (what: string): never => {
         throw new Error(
             `[sigx server] ${what} is not available on an in-process server-function call — ` +
-            `nothing supplied a request. Either hand one to this call, ` +
-            `fn.with({ context: request })(…), or render inside ` +
+            `nothing supplied a request. Either hand one to this call — ` +
+            `fn.with({ context: request })(…) — or render inside ` +
             `runWithServerFnContext(request, …) from '@sigx/server/node' so every call in ` +
-            `scope sees it. See docs/rfc-server.md §7.`
+            `scope sees it, or, in tests, build one with createTestServerFnContext() ` +
+            `from '@sigx/server/testing'. See docs/rfc-server.md §7.`
         );
     };
     return {
