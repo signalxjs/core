@@ -120,10 +120,13 @@ options form with an `input` schema. In dev, a function that receives wire
 input it has no validator for logs a once-per-function warning — the
 direct form always (its types are compile-time only), the options form
 when `input` is omitted. Declaring `input` is what resolves both.
-`serverStream` has an options form too — `use` and `unguarded`, so a stream
-can declare a guard chain (see below) — but deliberately no `input`: a stream
-takes many arguments and has no single-input shape to validate. Validate at the
-top of the generator (any Standard Schema validates standalone).
+`serverStream` has an options form too, in two shapes: declaring `input`
+selects the single-input shape — `serverFn`'s semantics exactly, validated
+after the guard chain and before the first chunk on every transport (a wire
+rejection is a buffered JSON 400, never a streamed byte) — while omitting it
+keeps the multi-argument shape (`use` and `unguarded` only), where many
+arguments have no single-input schema and validation belongs at the top of
+the generator (any Standard Schema validates standalone).
 
 ### Shared middleware — `serverFnPreset`
 
@@ -204,8 +207,8 @@ because it makes the open surface greppable:
 open endpoint, which is a list a security review can read.
 
 Since the declaration channel is the options form, a function that needs to
-declare uses the options form (`serverStream` has one for exactly this — `use`
-and `unguarded`, no `input`; validate stream arguments in the generator).
+declare uses the options form (`serverStream` has one too — `use` and
+`unguarded`, plus an optional single-input `input` shape, #572).
 Writing `unguarded: true` on a **preset-derived** function throws at
 definition time: the preset's guards still run, so the declaration would be
 false.
@@ -412,6 +415,27 @@ fires on disconnect too). Errors travel in-band: a mid-stream throw ends
 iteration with the branded wire error (masked in prod unless it's a
 `ServerFnError`). One caveat vs `serverFn`'s buffered JSON: response
 headers and status freeze at the **first yield** — set them before it.
+
+A stream whose argument shapes a query belongs in the single-input options
+form (#572) — `serverFn`'s `input` semantics exactly:
+
+```ts
+export const explain = serverStream({
+    input: ExplainKey,        // Standard Schema — Zod/Valibot/ArkType
+    handler: async function* (rq, key) {
+        // `key` is the VALIDATED value
+        for await (const token of llm.explain(key)) yield token;
+    }
+});
+```
+
+Validation runs after the guard chain and **before the first chunk**, on
+every transport: over the wire a rejection is a buffered JSON
+`400 { issues }` — headers still writable, no stream byte sent — and
+in-process it rejects on the first pull, exactly where a guard veto does.
+With `input` declared the stream takes one argument (extras are a 400).
+Multi-argument streams keep the `use`/`unguarded`-only options form and
+validate at the top of the generator.
 
 A stream carries the same `.with()` per-call channel as a `serverFn`
 (minus `fresh` — a stream is never HTTP-cached), so an SSR-time stream can
@@ -798,7 +822,7 @@ and `ServerFnError.data` — with no configuration:
 | plain objects, arrays, primitives | ✅ unchanged |
 | **circular structures** | ❌ an error — the one shape that fails LOUDLY |
 | class instances | ❌ arrive as plain objects, prototype gone (register a handler) |
-| `Uint8Array` / typed arrays / `ArrayBuffer` | ❌ arrive as `{"0":…,"1":…}` |
+| `Uint8Array` / typed arrays / `ArrayBuffer` | opt-in — register `bytesHandler` from `@sigx/serialize/bytes` (#569); unregistered they arrive as `{"0":…,"1":…}` |
 | `Error` | ❌ arrives as `{}` — message and stack are not own enumerable props |
 | `Promise` | ❌ arrives as `{}` (a missing `await`) |
 | `NaN` / `±Infinity` | ❌ arrive as `null` |
@@ -846,6 +870,14 @@ App-less contexts (an endpoint-only process, a zero-JS loader page) use
 `globalThis.__SIGX_SERVERFN_CODEC__` seam tag-keyed (the same global-seam
 pattern `$cache` uses, so the stub entry stays dependency-free; stamping
 the global directly still works).
+
+Binary is the one rich type that ships ready-made rather than built in:
+`bytesHandler` from `@sigx/serialize/bytes` (#569) round-trips `Uint8Array`
+(and every typed-array kind, `DataView`, bare `ArrayBuffer`) as base64 —
+add it to the same `types` array. Opt-in because the codec entry is
+size-budgeted into every client bundle; files still arrive inbound via
+`form: true` (a `File` reaches the handler), and with the handler
+registered the return path carries bytes too.
 
 The plugin also carries the stub transport (`configureServerFn`'s options,
 app-scoped with teardown): `serverPlugin({ transport: { endpoint, headers,

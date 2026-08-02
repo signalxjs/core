@@ -44,6 +44,7 @@ entry that `@sigx/resume` handler chunks replicate.
 | `Date`, `Map`, `Set`, `BigInt`, `URL`, `RegExp` | ✅ |
 | explicit `undefined` property or array slot | ✅ preserved, not dropped |
 | plain objects, arrays, primitives | ✅ unchanged |
+| `Uint8Array` / typed arrays / `ArrayBuffer` / `DataView` | opt-in via [`@sigx/serialize/bytes`](#binary-opt-in) — otherwise a dev-warned lossy plain object of indices |
 | class instances | prototype lost unless you register a handler |
 | circular structures | ❌ throws, same as `JSON.stringify` |
 | nesting beyond 256 levels | ❌ throws, on encode AND revive — the codec is recursive where `JSON.parse`/`stringify` are not, so it bounds its own stack; wire data is attacker-typable (#559) |
@@ -109,6 +110,41 @@ wire (#411). The wire's underlying seam is
 `globalThis.__SIGX_SERVERFN_CODEC__` — the same global-seam pattern `$cache`
 uses, which is what keeps the stub entry dependency-free; app-less contexts
 can stamp it via `registerWireTypeHandlers` (or directly).
+
+### Binary (opt-in)
+
+Binary is not built in — this entry is 1 KB-budgeted and bundled by the
+dependency-free fetch stubs, so a `$bytes` handler in the core vocabulary
+would tax every client bundle and silently start admitting binary into the
+SSR state blob. It ships as its own subpath instead; not registering it
+costs zero bytes:
+
+```ts
+import { bytesHandler } from '@sigx/serialize/bytes';
+
+// App/client side — the RPC wire AND the state/boundary registry, at once:
+app.use(serverPlugin({ transport, types: [bytesHandler] }));
+
+// Endpoint-only process (no app) — the RPC wire alone:
+registerWireTypeHandlers([bytesHandler]);   // from '@sigx/server/plugin'
+
+// SSR blob / boundary props without the server plugin:
+provideTypeHandlers(app._context, [bytesHandler]);
+```
+
+`Uint8Array` (including Node `Buffer`, which revives as a plain
+`Uint8Array`), every standard typed-array kind, `DataView`, and bare
+`ArrayBuffer` round-trip to their exact constructor. The wire form is
+base64 under one tag — `{"$bytes":"AQID"}` for `Uint8Array`,
+`{"$bytes":["Int32Array","…"]}` for everything else — roughly 33 % over
+raw; multi-megabyte payloads are better served as real file responses than
+through an RPC envelope. A view encodes its window (`byteOffset`/
+`byteLength`), never the whole backing buffer, and multi-byte kinds carry
+raw host-order bytes (the `structuredClone` trade). Out of scope: `Blob`/
+`File` (the codec is synchronous; they arrive inbound via `form: true` but
+cannot go outbound), `SharedArrayBuffer`, and `Float16Array` — those keep
+the dev warning, honestly. Registering the handler silences the encode
+warning for exactly what it claims (#565/#569).
 
 ## Wire format
 

@@ -21,6 +21,7 @@
       "@sigx/vite/ssr": ["./packages/vite/src/ssr.ts"],
       "@sigx/reactivity": ["./packages/reactivity/src/index.ts"],
       "@sigx/serialize": ["./packages/serialize/src/index.ts"],
+      "@sigx/serialize/bytes": ["./packages/serialize/src/bytes.ts"],
       "@sigx/reactivity/internals": ["./packages/reactivity/src/internals.ts"],
       "@sigx/runtime-core": ["./packages/runtime-core/src/index.ts"],
       "@sigx/runtime-core/internals": ["./packages/runtime-core/src/internals.ts"],
