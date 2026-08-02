@@ -108,6 +108,46 @@ export function invokeFunctionChildren(list: any[], scopedProps?: any, name?: st
 }
 
 /**
+ * The named slot a child routes to, or `null` when it belongs to the default
+ * slot — the ONE definition of the routing predicate. The client extractor and
+ * the server renderer's mirror both call it, so the two sides cannot drift on
+ * which children are routable (they must agree, or hydration mismatches).
+ *
+ * Only host children route: `slot` is the HTML attribute, and routing follows
+ * it. A COMPONENT child never routes — `slot` on a component is an ordinary
+ * (undeclared) prop, and the typed way to fill a named slot with a component
+ * is the `slots` prop, which is checked against the consumer's declared
+ * slots. Until #588 the predicate matched ANY object vnode carrying
+ * `props.slot`, so a cast could route a component child; that was accidental
+ * (the check predates the distinction, from the initial commit) and
+ * untypeable, so it is ignored rather than blessed. The component test is
+ * `typeof type === 'function'` — a `component()` factory or a plain function
+ * component; host elements are strings and `Fragment` is a symbol, so
+ * neither matches.
+ */
+export function namedSlotFor(child: any): string | null {
+    if (!(child && typeof child === 'object' && child.props && child.props.slot)) return null;
+    if (typeof child.type === 'function') {
+        if (__DEV__) {
+            // The slot name is user-controlled (may not be an identifier, may
+            // contain quotes/newlines) — JSON-quote it, and suggest the
+            // computed-key form so the snippet parses for any name. Same
+            // rationale as `invokeSlotFn`'s warning.
+            const quoted = JSON.stringify(String(child.props.slot));
+            const label = child.type.__name || child.type.name || 'Component';
+            console.warn(
+                `[slots] slot=${quoted} on a component child (<${label}>) does not fill a named slot — ` +
+                `the child renders in the default slot and \`slot\` reaches <${label}> as an ordinary prop. ` +
+                `Fill a named slot with a component via the slots prop instead: ` +
+                `slots={{ [${quoted}]: () => <${label} … /> }}.`
+            );
+        }
+        return null;
+    }
+    return child.props.slot;
+}
+
+/**
  * Internal slots object with tracking properties.
  *
  * A slot accessor is present (a callable) only when content was provided for
@@ -134,8 +174,12 @@ export interface InternalSlotsObject {
  * re-renders the consumer.
  *
  * Supports named slots via:
- * - `slots` prop object (e.g., `slots={{ header: () => <div>...</div> }}`)
- * - `slot` prop on children (e.g., `<div slot="header">...</div>`)
+ * - `slots` prop object (e.g., `slots={{ header: () => <div>...</div> }}`) —
+ *   the typed form, checked against the consumer's declared slots, and the
+ *   only way to fill a named slot with a component
+ * - `slot` prop on HOST-ELEMENT children (e.g., `<div slot="header">...</div>`,
+ *   mirroring the HTML attribute); on a component child `slot` is an ordinary
+ *   prop and does not route (see {@link namedSlotFor}, #588)
  *
  * A **function child** is a render-prop fill: it is invoked with the scoped
  * props the consumer passed to the accessor, and its result takes its place.
@@ -197,16 +241,17 @@ export function createSlots(children: any, slotsFromProps?: Record<string, any>)
         if (c != null) {
             const items = Array.isArray(c) ? c : [c];
             for (const child of items) {
-                if (child && typeof child === 'object' && child.props && child.props.slot) {
-                    const slotName = child.props.slot;
+                const slotName = namedSlotFor(child);
+                if (slotName) {
                     if (!namedSlots[slotName]) {
                         namedSlots[slotName] = [];
                     }
                     namedSlots[slotName].push(child);
                 } else if (child != null && child !== false && child !== true) {
                     // A function is `typeof 'function'`, never `'object'`, so it
-                    // can never satisfy the named-slot test above — a function
-                    // child always lands here, in `default`.
+                    // can never satisfy `namedSlotFor` — a function child always
+                    // lands here, in `default`. So does a COMPONENT child, even
+                    // one carrying a `slot` prop (see `namedSlotFor`).
                     if (typeof child === 'function') defaultHasFn = true;
                     defaultChildren.push(child);
                 }

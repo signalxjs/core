@@ -61,6 +61,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- **`slot=` on a COMPONENT child no longer routes it into a named slot
+  (#588).** The slot extractor matched *any* object vnode carrying
+  `props.slot` — a duck-check written for host elements (the HTML `slot`
+  attribute) that component vnodes satisfied by accident, from the first
+  commit. The JSX types have always rejected `slot=` on a component, so the
+  routing was reachable only through a cast (or from untyped JS), was never
+  documented, and had no typed contract to grow one from — the typed way to
+  fill a named slot with a component is the `slots` prop, which *is* checked
+  against the consumer's declared slots. Old vs new, per child shape:
+  `<div slot="header">` (host element) routes exactly as before; a Fragment
+  child with `slot=` routes as before; a function child never routed and
+  still doesn't; a **component** child with `slot=` used to fill the named
+  slot and now renders in the **default** slot, with `slot` reaching the
+  component as an ordinary (undeclared) prop and a `__DEV__` warning
+  pointing at `slots={{ … }}`. The pattern that breaks is
+  `<Card>{/* via cast */}<Chip slot="badge"/></Card>` — move the fill to
+  `<Card slots={{ badge: () => <Chip/> }}>`. The predicate now lives in one
+  shared helper (`namedSlotFor`, `sigx/internals`) used by both the client
+  extractor and the server renderer, so the two sides cannot drift.
+
 - **BREAKING: `@sigx/server`: declaring `cache` + `invalidates`, or
   `form` + `cache`, is now a definition-time error (#567).** Both pairs used to
   dev-warn and stay callable, and the endpoint then resolved the contradiction

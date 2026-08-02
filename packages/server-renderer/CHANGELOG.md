@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+**Changed: `slot=` on a COMPONENT child no longer routes it into a named slot (#588).**
+
+- Mirrors the client-side change (root `CHANGELOG.md`): the server's slot
+  extractor shared the client's accidental duck-check — any object vnode with
+  `props.slot` routed, so a component child reached a named slot despite the
+  JSX types rejecting it. Such a child now renders in the default slot with a
+  `__DEV__` warning, identically on both sides: the predicate is one shared
+  helper (`namedSlotFor` from `sigx/internals`), so server and client cannot
+  disagree on slot presence and hydration cannot mismatch over it. Host
+  element children with `slot=` are unaffected.
+
 **Fixed: only the component a streamed placeholder belongs to may hydrate inside it (#492).**
 
 - Follow-up to #478 below, found by reproducing that report's shape against
