@@ -1136,6 +1136,19 @@ SSR-time request an in-process generator otherwise has no way to receive),
 and `headers`. `fresh` is excluded from the type for the §4.1 reason below:
 a stream is always POST, so it can never be answered from an HTTP cache.
 
+Streams also carry `serverFn`'s declarative validation (#572): the options
+form's single-input shape — `serverStream({ input: Schema, handler })` —
+runs the schema after the guard chain and before the first chunk, on every
+transport. Over the wire a rejection is a *buffered* JSON
+`400 { issues }` (the endpoint awaits `invoke` before entering the NDJSON
+transport, so headers are still writable and no stream byte is sent);
+in-process it rejects on the first pull, where a guard veto surfaces. With
+`input` declared the stream takes one argument, matching the buffered
+form's arity gate. The multi-argument options form stays schema-less by
+design — many arguments have no single-input shape — and validates at the
+top of the generator; per-chunk/per-yield validation remains the
+generator's own concern, not a framework seam.
+
 ### 6.2 Server-declared cache directives
 
 The response envelope reserves `$cache`:

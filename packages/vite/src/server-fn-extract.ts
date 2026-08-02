@@ -672,8 +672,9 @@ export function extractServerFns(
             if (call === undefined) continue;
             const init = declarator.init as Node;
             const local = (declarator.id as Node).name as string;
-            // Explicit `id` is the OPTIONS form's field — serverStream is
-            // direct-form only, so only serverFn calls are probed.
+            // Explicit `id` stays a serverFn-only option — serverStream's
+            // options forms (#489/#572) don't carry it, so only serverFn
+            // calls are probed.
             const idOption =
                 call.kind === 'fn'
                     ? readServerFnIdOption(init)
