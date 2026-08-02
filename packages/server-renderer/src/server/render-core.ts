@@ -41,6 +41,7 @@ import {
     getProvided,
     invokeFunctionChildren,
     invokeSlotFn,
+    namedSlotFor,
     splitComponentProps,
     // Moved into @sigx/runtime-core when mergeProps needed the same parser.
     // Re-exported below so this module's surface is unchanged.
@@ -212,14 +213,17 @@ function createComponentState(
     if (children != null && typeof children !== 'boolean') {
         const items = Array.isArray(children) ? children : [children];
         for (const child of items) {
-            if (child && typeof child === 'object' && child.props && child.props.slot) {
-                const name = child.props.slot;
+            const name = namedSlotFor(child);
+            if (name) {
                 (elementNamed[name] ?? (elementNamed[name] = [])).push(child);
             } else if (child != null && child !== false && child !== true) {
                 // A function is `typeof 'function'`, never `'object'`, so it can
-                // never satisfy the named-slot test above — a render-prop child
-                // always lands here, in `default`. Recording it now keeps the
-                // ordinary element-children slot read a plain copy.
+                // never satisfy `namedSlotFor` — a render-prop child always
+                // lands here, in `default`, as does a COMPONENT child even when
+                // it carries a `slot` prop (#588; `namedSlotFor` is the shared
+                // predicate, so server and client cannot disagree). Recording
+                // the function now keeps the ordinary element-children slot
+                // read a plain copy.
                 if (typeof child === 'function') defaultHasFn = true;
                 defaultChildren.push(child);
             }

@@ -8,7 +8,7 @@
  * child carrying a slot= prop.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { component, signal, type Define, type JSXElement } from 'sigx';
 import { render } from '../src/index';
 
@@ -158,22 +158,24 @@ describe('structural slot shapes (client)', () => {
         expect(container.querySelectorAll('em').length).toBe(2);
     });
 
-    it('a COMPONENT child with a slot= prop fills the named slot', async () => {
+    it('a COMPONENT child with a slot= prop does NOT fill the named slot (#588)', async () => {
         const Chip = component<{ text: string }>((ctx) => {
             return () => <span class="chip">{ctx.props.text}</span>;
         }, { name: 'Chip' });
 
-        const Card = component<Define.Slot<'badge'>>((ctx) => {
+        const Card = component<Define.Slot<'badge'> & Define.Slot<'default'>>((ctx) => {
             return () => (
                 <div class="card">
                     <aside>{ctx.slots.badge?.() ?? 'no badge'}</aside>
-                    <main>body</main>
+                    <main>{ctx.slots.default?.() ?? 'body'}</main>
                 </div>
             );
         }, { name: 'CardBadge' });
 
-        // slot= on a COMPONENT child works at runtime but is not yet
-        // typeable (#588) — hence the cast.
+        // slot= on a component is rejected by the JSX types AND ignored by the
+        // runtime (#588: routing was accidental — the extractor matched any
+        // object vnode — and never typeable). The cast reproduces the only way
+        // a user could ever have written it.
         const ChipAny = Chip as any;
         const App = component(() => {
             return () => (
@@ -183,11 +185,21 @@ describe('structural slot shapes (client)', () => {
             );
         }, { name: 'App_ComponentSlotChild' });
 
-        render(<App />, container);
-        await tick();
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        try {
+            render(<App />, container);
+            await tick();
 
-        expect(container.querySelector('aside span.chip')!.textContent).toBe('new');
-        expect(container.querySelector('div.card')!.textContent).toContain('body');
-        expect(container.textContent).not.toContain('no badge');
+            // The chip lands in the DEFAULT slot; the named slot stays
+            // unfilled and shows its fallback.
+            expect(container.querySelector('main span.chip')!.textContent).toBe('new');
+            expect(container.querySelector('aside')!.textContent).toBe('no badge');
+            // The dev warning names the slot and points at the typed form.
+            expect(warn.mock.calls.some((c) =>
+                String(c[0]).includes('slot="badge" on a component child (<Chip>)')
+            )).toBe(true);
+        } finally {
+            warn.mockRestore();
+        }
     });
 });

@@ -12,7 +12,7 @@
  * survive that seam intact.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { component, signal, Defer, lazy, type Define, type JSXElement } from 'sigx';
 import { renderToString, renderToStream } from '../src/server/index';
 import { hydrate } from '../src/client/hydrate-core';
@@ -149,32 +149,43 @@ describe('structural slot shapes (SSR strings + round trips)', () => {
         expect(html).not.toContain('fallback');
     });
 
-    it('a COMPONENT child with slot= fills the named slot on the server', async () => {
+    it('a COMPONENT child with slot= does NOT fill the named slot on the server (#588)', async () => {
         const Chip = component<{ text: string }>((ctx) => {
             return () => <span class="chip">{ctx.props.text}</span>;
         }, { name: 'ChipSSR' });
 
-        const Card = component<Define.Slot<'badge'>>((ctx) => {
+        const Card = component<Define.Slot<'badge'> & Define.Slot<'default'>>((ctx) => {
             return () => (
                 <div class="card">
                     <aside>{ctx.slots.badge?.() ?? 'no badge'}</aside>
-                    <main>body</main>
+                    <main>{ctx.slots.default?.() ?? 'body'}</main>
                 </div>
             );
         }, { name: 'CardBadgeSSR' });
 
-        // slot= on a COMPONENT child works at runtime but is not yet
-        // typeable (#588) — hence the cast.
+        // slot= on a component is rejected by the JSX types AND ignored by the
+        // runtime (#588) — the shared `namedSlotFor` predicate keeps this in
+        // lockstep with the client extractor, so hydration cannot mismatch.
+        // The cast reproduces the only way a user could ever have written it.
         const ChipAny = Chip as any;
-        const html = await renderToString(
-            <Card>
-                <ChipAny slot="badge" text="new" />
-            </Card>
-        );
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        try {
+            const html = await renderToString(
+                <Card>
+                    <ChipAny slot="badge" text="new" />
+                </Card>
+            );
 
-        expect(html).toContain('<span class="chip">new</span>');
-        expect(html).toContain('<main>body</main>');
-        expect(html).not.toContain('no badge');
+            // The chip renders in the DEFAULT slot; the named slot stays
+            // unfilled and shows its fallback — matching the client.
+            expect(html).toContain('no badge');
+            expect(html).toMatch(/<main[^>]*>.*<span class="chip">new<\/span>.*<\/main>/);
+            expect(warn.mock.calls.some((c) =>
+                String(c[0]).includes('slot="badge" on a component child (<ChipSSR>)')
+            )).toBe(true);
+        } finally {
+            warn.mockRestore();
+        }
     });
 });
 
