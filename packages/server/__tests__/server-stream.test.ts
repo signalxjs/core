@@ -9,7 +9,13 @@
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { serverStream, serverFn, serverFnPreset, ServerFnError } from '../src/index';
+import {
+    serverStream,
+    serverFn,
+    serverFnPreset,
+    ServerFnError,
+    type StandardSchemaV1
+} from '../src/index';
 import { handleServerFnRequest } from '../src/server/index';
 import { __serverStreamStub, configureServerFn } from '../src/client/index';
 import { isServerFnError } from '../src/errors';
@@ -634,7 +640,7 @@ describe('serverStream — composition sanity', () => {
 /* ------------------------------------------------------------------ */
 
 describe('serverStream — unvalidated wire args (#412)', () => {
-    it('warns once on a wire call with args, pointing at in-body validation', async () => {
+    it('warns once on a wire call with args, pointing at the input form first', async () => {
         const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
         const s = serverStream(async function* (_rq, upTo: number) {
             for (let i = 1; i <= upTo; i++) yield i;
@@ -642,6 +648,11 @@ describe('serverStream — unvalidated wire args (#412)', () => {
         await post(s, '{"args":[2]}');
         expect(warn).toHaveBeenCalledOnce();
         expect(warn).toHaveBeenCalledWith(expect.stringContaining('serverStream'));
+        // The primary remedy is the single-input options form (#572)…
+        expect(warn).toHaveBeenCalledWith(
+            expect.stringContaining('serverStream({ input: Schema, handler })')
+        );
+        // …with generator-top validation kept as the multi-argument remedy.
         expect(warn).toHaveBeenCalledWith(expect.stringContaining('top of the generator'));
         await post(s, '{"args":[3]}');
         expect(warn).toHaveBeenCalledOnce();
@@ -823,5 +834,205 @@ describe('serverStream — options form', () => {
             }
         });
         await expect(collect(feed())).resolves.toEqual(['shorthand']);
+    });
+});
+
+/* ------------------------------------------------------------------ */
+/* the single-input options form (#572)                               */
+/* ------------------------------------------------------------------ */
+
+/** Coercing schema — proves the VALIDATED value (not the raw arg) reaches
+ *  the handler: trims, and rejects non-strings with issues. */
+const trimmed: StandardSchemaV1<string> = {
+    '~standard': {
+        version: 1,
+        vendor: 'test',
+        validate(value) {
+            if (typeof value !== 'string') {
+                return { issues: [{ message: 'must be a string' }] };
+            }
+            return { value: value.trim() };
+        }
+    }
+};
+
+describe('serverStream — options form with input (#572)', () => {
+    it('in-process: the handler receives the VALIDATED value', async () => {
+        const shout = serverStream({
+            input: trimmed,
+            handler: async function* (_rq, input) {
+                yield input.toUpperCase();
+            }
+        });
+        await expect(collect(shout('  hi  '))).resolves.toEqual(['HI']);
+    });
+
+    it('in-process: invalid input rejects on the first pull, not at the call', async () => {
+        const shout = serverStream({
+            input: trimmed,
+            handler: async function* (_rq, input) {
+                yield input;
+            }
+        });
+        // The call itself is synchronous and does not throw — parity with
+        // guard vetoes (F-B): the rejection surfaces where the wire path's
+        // pre-first-yield error surfaces.
+        const iterable = shout(42 as unknown as string);
+        const error = await collect(iterable).catch((e: unknown) => e);
+        expect(isServerFnError(error)).toBe(true);
+        expect((error as ServerFnError).status).toBe(400);
+        expect((error as ServerFnError).message).toBe('Invalid input');
+        expect((error as ServerFnError).data).toEqual({
+            issues: [{ message: 'must be a string' }]
+        });
+    });
+
+    it('guards run before validation — a veto means the schema never runs', async () => {
+        const validate = vi.fn((value: unknown) => ({ value: value as string }));
+        const feed = serverStream({
+            use: [
+                (): void => {
+                    throw new ServerFnError(401, 'sign in');
+                }
+            ],
+            input: { '~standard': { version: 1, vendor: 'test', validate } },
+            handler: async function* (_rq, input) {
+                yield input;
+            }
+        });
+        const error = await collect(feed('x')).catch((e: unknown) => e);
+        expect((error as ServerFnError).status).toBe(401);
+        expect(validate).not.toHaveBeenCalled();
+    });
+
+    it('over the WIRE, invalid input is a buffered JSON 400, not a stream', async () => {
+        const shout = serverStream({
+            input: trimmed,
+            handler: async function* (_rq, input) {
+                yield `secret:${input}`;
+            }
+        });
+        const res = await post(shout, '{"args":[42]}');
+        expect(res.status).toBe(400);
+        expect(res.headers.get('content-type')).toContain('application/json');
+        const body = await res.text();
+        expect(body).not.toContain('secret');
+        expect(JSON.parse(body).error.data.issues).toEqual([{ message: 'must be a string' }]);
+    });
+
+    it('over the WIRE, valid input streams NDJSON carrying the validated value', async () => {
+        const shout = serverStream({
+            input: trimmed,
+            handler: async function* (_rq, input) {
+                yield input.toUpperCase();
+            }
+        });
+        const res = await post(shout, '{"args":["  hi  "]}');
+        expect(res.status).toBe(200);
+        expect(res.headers.get('content-type')).toContain('application/x-ndjson');
+        await expect(lines(res)).resolves.toEqual([{ chunk: 'HI' }, { done: 1 }]);
+    });
+
+    it('extra wire args hit the arity gate with the stream-specific message', async () => {
+        const shout = serverStream({
+            input: trimmed,
+            handler: async function* (_rq, input) {
+                yield input;
+            }
+        });
+        const res = await post(shout, '{"args":["a","b"]}');
+        expect(res.status).toBe(400);
+        const body = (await res.json()) as { error: { message: string } };
+        expect(body.error.message).toBe(
+            'a serverStream with `input` takes a single input argument'
+        );
+    });
+
+    it('a zero-arg wire call validates undefined', async () => {
+        const shout = serverStream({
+            input: trimmed,
+            handler: async function* (_rq, input) {
+                yield input;
+            }
+        });
+        const res = await post(shout, '{"args":[]}');
+        expect(res.status).toBe(400);
+    });
+
+    it('an async schema is awaited', async () => {
+        const feed = serverStream({
+            input: {
+                '~standard': {
+                    version: 1,
+                    vendor: 'test',
+                    validate: async (value: unknown) =>
+                        typeof value === 'number'
+                            ? { value: value * 2 }
+                            : { issues: [{ message: 'not a number' }] }
+                }
+            },
+            handler: async function* (_rq, input: number) {
+                yield input;
+            }
+        });
+        await expect(collect(feed(21))).resolves.toEqual([42]);
+        const error = await collect(feed('x' as unknown as number)).catch((e: unknown) => e);
+        expect((error as ServerFnError).status).toBe(400);
+    });
+
+    it('composes with a preset — preset guards, own guards, then validation', async () => {
+        const trace: string[] = [];
+        const authed = serverFnPreset({
+            use: [
+                (): void => {
+                    trace.push('preset');
+                }
+            ]
+        });
+        const feed = authed.stream({
+            use: [
+                (): void => {
+                    trace.push('own');
+                }
+            ],
+            input: {
+                '~standard': {
+                    version: 1,
+                    vendor: 'test',
+                    validate(value: unknown) {
+                        trace.push('validate');
+                        return { value: value as string };
+                    }
+                }
+            },
+            handler: async function* (_rq, input: string) {
+                trace.push('body');
+                yield input;
+            }
+        });
+        await expect(collect(feed('x'))).resolves.toEqual(['x']);
+        expect(trace).toEqual(['preset', 'own', 'validate', 'body']);
+    });
+
+    it('no wire-arg warning fires when input is declared', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const shout = serverStream({
+            input: trimmed,
+            handler: async function* (_rq, input) {
+                yield input;
+            }
+        });
+        await post(shout, '{"args":["hi"]}');
+        expect(warn).not.toHaveBeenCalled();
+    });
+
+    it('gives the input-form handler `this` — method shorthand works', async () => {
+        const feed = serverStream({
+            input: trimmed,
+            async *handler(_rq, input) {
+                yield input;
+            }
+        });
+        await expect(collect(feed(' x '))).resolves.toEqual(['x']);
     });
 });
