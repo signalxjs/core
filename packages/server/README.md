@@ -585,7 +585,7 @@ const posted = createTestServerFnContext(new Request('https://example.com/cart')
 
 // Guard chains need NO new invoker — fn.with({ context }) runs the whole
 // in-process pipeline: preset guards, use chain, arity gate, input schema.
-await expect(secret.with({ context: anon })()).rejects.toMatchObject({ status: 401 });
+await expect(secret.with({ context: ctx })()).rejects.toMatchObject({ status: 401 });
 await expect(secret.with({ context: alice })()).resolves.toBe('data');
 
 // Assert what the handler did to the response:

@@ -158,10 +158,10 @@ export function createDetachedContext(signal?: AbortSignal): ServerFnContext {
     const noRequest = (what: string): never => {
         throw new Error(
             `[sigx server] ${what} is not available on an in-process server-function call — ` +
-            `nothing supplied a request. Either hand one to this call, ` +
-            `fn.with({ context: request })(…), render inside ` +
+            `nothing supplied a request. Either hand one to this call — ` +
+            `fn.with({ context: request })(…) — or render inside ` +
             `runWithServerFnContext(request, …) from '@sigx/server/node' so every call in ` +
-            `scope sees it, or — in tests — build one with createTestServerFnContext() ` +
+            `scope sees it, or, in tests, build one with createTestServerFnContext() ` +
             `from '@sigx/server/testing'. See docs/rfc-server.md §7.`
         );
     };
