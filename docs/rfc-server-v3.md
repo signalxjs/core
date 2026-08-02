@@ -680,6 +680,16 @@ a candidate to extend when the store lands.
   `guard` needed correcting: it fires for wire requests only, so it would ship a
   second transport-asymmetric mechanism weeks after §4 corrected the first, and
   would need retiring when real disposal lands (§2.6).
+- **A first-class rate-limit endpoint option** *(#571)* — declined on the
+  `onFinish` reasoning verbatim: any endpoint-level mechanism is wire-only by
+  construction, recreating the asymmetry §4 corrected. A rate limiter **is a
+  guard** (§1.3 already frames one that way — "a function guarded only by a
+  rate limiter is unauthenticated but not unguarded"), composed into `use:` /
+  `serverFnPreset`; the guard body owns the wire-only decision via the
+  documented discriminator `info.symbol === ''` (empty exactly when no
+  transport is involved), so SSR renders are never throttled by their own
+  budget. The README's "Rate limiting — a guard, not an option" section is the
+  concrete pattern.
 - **Around-middleware, chainable builders, classes/controllers, an app-DI
   bridge, a `createContext` hook** — unchanged from the parent RFC's non-goals.
   Nothing here re-opens them.
@@ -746,9 +756,12 @@ Each phase is independently mergeable, and owes the tests named beside it.
    the settling handler; and — the one that motivated all of it — that a
    **streamed edge response** disposes at end-of-body, not at the shell.
 
-One pin belongs to no phase and should land with the first: an explicit test
-that the endpoint `guard` does **not** run for an in-process call, citing §1.1,
-so the asymmetry is executable documentation and a future "fix" cannot change it
+One pin belonged to no phase and landed with the first: the explicit test that
+the endpoint `guard` does **not** run for an in-process call —
+`packages/server/__tests__/handler.test.ts`, "does NOT run for an in-process
+call — the endpoint guard is wire-only (§1.1/§4)" — pins BOTH halves (the same
+function unguarded in-process and guarded over the wire), citing §1.1, so the
+asymmetry is executable documentation and a future "fix" cannot change it
 silently.
 
 ---

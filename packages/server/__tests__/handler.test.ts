@@ -1052,3 +1052,102 @@ describe('handleServerFnRequest — direct-form wire-args warning (#412)', () =>
         }
     });
 });
+
+/* ------------------------------------------------------------------ */
+/* response cap — maxResponseBytes (#571)                             */
+/* ------------------------------------------------------------------ */
+
+describe('response cap — maxResponseBytes (#571)', () => {
+    it('no cap configured: a large response passes (the unlimited default)', async () => {
+        const res = await call('echo_fn_00000004', { args: ['x'.repeat(100_000)] });
+        expect(res.status).toBe(200);
+    });
+
+    it('under the cap the body is byte-identical to the uncapped JSON', async () => {
+        // Pins the bytes-as-body refactor: capping must not change a single
+        // byte of a response that fits.
+        const uncapped = await call('echo_fn_00000004', { args: [{ note: 'héllo wörld' }] });
+        const capped = await call(
+            'echo_fn_00000004',
+            { args: [{ note: 'héllo wörld' }] },
+            {},
+            { maxResponseBytes: 10_000 }
+        );
+        expect(capped.status).toBe(200);
+        expect(await capped.text()).toBe(await uncapped.text());
+    });
+
+    it('over the cap is a masked 500 and onError sees the cap error', async () => {
+        vi.stubEnv('NODE_ENV', 'production');
+        const seen: unknown[] = [];
+        try {
+            const res = await call(
+                'echo_fn_00000004',
+                { args: ['x'.repeat(2_000)] },
+                {},
+                { maxResponseBytes: 1_000, onError: (error) => void seen.push(error) }
+            );
+            expect(res.status).toBe(500);
+            const body = (await res.json()) as { error: { message: string } };
+            expect(body.error.message).toBe('Internal error');
+            expect(seen).toHaveLength(1);
+            expect(String(seen[0])).toContain('maxResponseBytes');
+        } finally {
+            vi.unstubAllEnvs();
+        }
+    });
+
+    it('measures UTF-8 bytes, not UTF-16 code units', async () => {
+        // 400 four-byte emoji = 800 code units but ~1.6 KB of UTF-8 — a
+        // .length metric would let this response through.
+        const seen: unknown[] = [];
+        const res = await call(
+            'echo_fn_00000004',
+            { args: ['🧨'.repeat(400)] },
+            {},
+            { maxResponseBytes: 1_200, onError: (error) => void seen.push(error) }
+        );
+        expect(res.status).toBe(500);
+        expect(seen).toHaveLength(1);
+    });
+
+    it('oversized ServerFnError.data is dropped — error kept, onError NOT fired', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const seen: unknown[] = [];
+        const bigData = serverFn(async () => {
+            throw new ServerFnError(422, 'too big to explain', { detail: 'x'.repeat(5_000) });
+        });
+        try {
+            const res = await call(
+                'add_fn_00000001',
+                { args: [] },
+                {},
+                {
+                    resolve: () => bigData,
+                    maxResponseBytes: 1_000,
+                    onError: (error) => void seen.push(error)
+                }
+            );
+            expect(res.status).toBe(422);
+            const body = (await res.json()) as { error: { message: string; data?: unknown } };
+            expect(body.error.message).toBe('too big to explain');
+            expect(body.error.data).toBeUndefined();
+            expect(seen).toHaveLength(0);
+            expect(warn.mock.calls.some(([m]) => String(m).includes('maxResponseBytes'))).toBe(true);
+        } finally {
+            warn.mockRestore();
+        }
+    });
+
+    it('a small ServerFnError.data survives under the cap', async () => {
+        const res = await call(
+            'polite_fn_00000003',
+            { args: [] },
+            {},
+            { maxResponseBytes: 10_000 }
+        );
+        expect(res.status).toBe(418);
+        const body = (await res.json()) as { error: { data: unknown } };
+        expect(body.error.data).toEqual({ hint: 'short and stout' });
+    });
+});
