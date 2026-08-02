@@ -17,6 +17,7 @@ import {
 import { asyncAssignmentJs } from '../src/server/state';
 import { createSSRContext } from '../src/server/context';
 import { provideTypeHandlers, TYPE_HANDLER_TOKEN } from 'sigx/internals';
+import { bytesHandler } from '@sigx/serialize/bytes';
 
 afterEach(() => {
     vi.restoreAllMocks();
@@ -156,6 +157,19 @@ describe('admitPayloadEntry — codec-aware admission (#420)', () => {
         expect(admitPayloadEntry('k', value, 'boundary prop', [])).toBe(false);
         warn.mockRestore();
         expect(admitPayloadEntry('k', value, 'boundary prop', [selfish])).toBe(true);
+    });
+
+    it('binary rides the SSR blob FAITHFULLY only with the opt-in handler (#569)', () => {
+        const value = { thumb: new Uint8Array([1, 2]) };
+        // Admission passes either way — without the handler it is the lossy
+        // plain-object-of-indices success #565 dev-warns about…
+        expect(admitPayloadEntry('k', value, 'boundary prop', [])).toBe(true);
+        expect(admitPayloadEntry('k', value, 'boundary prop', [bytesHandler])).toBe(true);
+        // …registering the handler is what changes the EMITTED blob: tagged
+        // real bytes instead of an index bag. Opt-in by design — a built-in
+        // $bytes would have flipped every existing blob's shape silently.
+        expect(stringifyWithHandlers(value, [])).toBe('{"thumb":{"0":1,"1":2}}');
+        expect(stringifyWithHandlers(value, [bytesHandler])).toBe('{"thumb":{"$bytes":"AQI="}}');
     });
 
     it('still rejects circular structures and dangerous keys with a warning', () => {

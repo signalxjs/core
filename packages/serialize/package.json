@@ -11,6 +11,12 @@
             "development": "./dist/index.js",
             "production": "./dist/index.prod.js",
             "import": "./dist/index.js"
+        },
+        "./bytes": {
+            "types": "./dist/bytes.d.ts",
+            "development": "./dist/bytes.js",
+            "production": "./dist/bytes.prod.js",
+            "import": "./dist/bytes.js"
         }
     },
     "files": [

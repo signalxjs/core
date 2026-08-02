@@ -4,6 +4,24 @@
 
 ### Added
 
+- **`@sigx/serialize/bytes` — an opt-in binary vocabulary (#569).** One
+  handler, `bytesHandler` (tag `$bytes`), round-trips `Uint8Array`
+  (including Node `Buffer`, which revives as a plain `Uint8Array`), every
+  standard typed-array kind, `DataView`, and bare `ArrayBuffer` to their
+  exact constructors, as base64 (`{"$bytes":"AQID"}` for `Uint8Array`, a
+  `[kind, base64]` tuple for the rest). A view encodes its window, never
+  the whole backing buffer; multi-byte kinds carry raw host-order bytes.
+  Opt-in rather than built-in, deliberately: the root entry is 1 KB-budgeted
+  with no ignore list possible and is bundled by `@sigx/server/client`'s
+  dependency-free stubs, so a built-in `$bytes` would tax every client
+  bundle — and would silently start admitting binary into the SSR state
+  blob. Registering it (`serverPlugin({ types: [bytesHandler] })`, or
+  `registerWireTypeHandlers` / `provideTypeHandlers` on a single seam)
+  silences the #565 encode warning for exactly what it claims; the warning
+  now also names the subpath as the remedy. `Blob`/`File` stay out of scope
+  (the codec is synchronous), as do `SharedArrayBuffer` and `Float16Array` —
+  those keep warning.
+
 - **Dev warning for values the codec cannot carry (#565).** Class instances
   lose their prototype, typed arrays and `ArrayBuffer` encode as
   `{"0":…,"1":…}`, `Error` and `Promise` and `WeakMap` as `{}`, and
