@@ -104,6 +104,51 @@ describe('disposeRequestValues', () => {
         await disposeRequestValues(ctx);
         expect(value(ctx)).toBe(2);
     });
+
+    it('a disposer-less disposal still marks the store — a late onDispose runs immediately', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const ctx = createDetachedContext();
+        const plain = perRequest(() => 'no disposer');
+        plain(ctx);
+        await disposeRequestValues(ctx); // nothing registered — must still mark disposed
+        let lateRan = false;
+        const late = perRequest((_rq, onDispose) => {
+            onDispose(() => void (lateRan = true));
+            return 1;
+        });
+        late(ctx);
+        await eventually(() => lateRan);
+        expect(warn.mock.calls.some(([m]) => String(m).includes('already disposed'))).toBe(true);
+    });
+
+    it('a claim after disposal clears straggler-repopulated memo values', async () => {
+        // Request A's straggler recomputes AFTER disposal (accessors memoize
+        // onto a disposed store); the value must not leak into request B,
+        // which begins at the next claim over the same reused bag.
+        let computed = 0;
+        let disposed = false;
+        const value = perRequest((_rq, onDispose) => {
+            onDispose(() => void (disposed = true));
+            return ++computed;
+        });
+        const fn = serverFn(async (rq) => value(rq));
+        const locals: Record<string, unknown> = {};
+        const request = new Request(`${ORIGIN}/page`);
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        void warn;
+        await runInScope({ request, locals }, async () => {
+            await expect(fn()).resolves.toBe(1);
+        });
+        await eventually(() => disposed); // render A's disposal completed
+        // The straggler: a late access on the dead request's bag — it
+        // recomputes (memo was cleared) and memoizes onto the dead store.
+        value({ locals } as unknown as ServerFnContext);
+        expect(computed).toBe(2);
+        // Request B over the SAME bag — the claim starts it clean.
+        await runInScope({ request, locals }, async () => {
+            await expect(fn()).resolves.toBe(3);
+        });
+    });
 });
 
 /* ------------------------------------------------------------------ */

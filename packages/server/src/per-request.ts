@@ -98,7 +98,13 @@ export function claimDisposalOwnership(locals: object): boolean {
     // disposal and the next claim the mark stays sticky, so a straggler
     // from the dead request (a fetcher settling after a client cancel)
     // registers into the run-immediately branch instead of parking forever.
-    state.disposed = false;
+    if (state.disposed) {
+        state.disposed = false;
+        // The same straggler may have REPOPULATED the memo after disposal
+        // cleared it (accessors happily memoize onto a disposed store) —
+        // a value the dead request computed must not leak into this one.
+        ((locals as Record<symbol, unknown>)[VALUES] as Map<object, unknown> | undefined)?.clear();
+    }
     return true;
 }
 
@@ -154,30 +160,32 @@ export function settleAndDispose(locals: object, settled: Promise<unknown>): voi
  */
 export async function disposeRequestValues(rq: Pick<ServerFnContext, 'locals'>): Promise<void> {
     const locals = rq.locals as object;
-    const state = disposalOf(locals, false);
+    // ALWAYS materialize the record: marking `disposed` must not depend on a
+    // disposer having been registered earlier — a late `onDispose` arriving
+    // after a disposer-less disposal still belongs in the run-immediately
+    // branch, not parked on a fresh-looking store.
+    const state = disposalOf(locals, true);
     const values = (locals as Record<symbol, unknown>)[VALUES] as
         | Map<object, unknown>
         | undefined;
-    if (state) {
-        if (state.disposed) return;
-        state.disposed = true;
-        // LIFO: a later value may hold a resource derived from an earlier
-        // one (a github client over a session), so teardown unwinds.
-        for (let i = state.disposers.length - 1; i >= 0; i--) {
-            try {
-                await state.disposers[i]();
-            } catch (error) {
-                if (__DEV__) {
-                    console.warn('[sigx server] a per-request disposer threw (ignored):', error);
-                }
+    if (state.disposed) return;
+    state.disposed = true;
+    // LIFO: a later value may hold a resource derived from an earlier
+    // one (a github client over a session), so teardown unwinds.
+    for (let i = state.disposers.length - 1; i >= 0; i--) {
+        try {
+            await state.disposers[i]();
+        } catch (error) {
+            if (__DEV__) {
+                console.warn('[sigx server] a per-request disposer threw (ignored):', error);
             }
         }
-        state.disposers.length = 0;
-        // Disposal ENDS the request: release ownership so the next scope
-        // entry over a deliberately reused bag claims afresh. `disposed`
-        // stays sticky until that claim — see claimDisposalOwnership.
-        state.owned = false;
     }
+    state.disposers.length = 0;
+    // Disposal ENDS the request: release ownership so the next scope
+    // entry over a deliberately reused bag claims afresh. `disposed`
+    // stays sticky until that claim — see claimDisposalOwnership.
+    state.owned = false;
     // The request is over: clear the memo so a deliberately reused locals
     // bag recomputes rather than serving a disposed value.
     values?.clear();
