@@ -13,6 +13,7 @@
 
 import { describe, it, expect, afterEach } from 'vitest';
 import { encodeWire, reviveWire, type TypeHandler } from '../src/wire-codec';
+import { bytesHandler } from '@sigx/serialize/bytes';
 
 type CodecGlobal = { __SIGX_SERVERFN_CODEC__?: unknown };
 
@@ -76,6 +77,15 @@ describe('wire-codec — a valid registry', () => {
         const revived = reviveWire(encoded) as { price: Money };
         expect(revived.price).toBeInstanceOf(Money);
         expect(revived.price.cents).toBe(1999);
+    });
+
+    it('carries the opt-in binary vocabulary (#569) when registered', () => {
+        (globalThis as CodecGlobal).__SIGX_SERVERFN_CODEC__ = [bytesHandler];
+        const encoded = encodeWire({ thumb: new Uint8Array([1, 2, 3]) });
+        expect(encoded).toEqual({ thumb: { $bytes: 'AQID' } });
+        const revived = reviveWire(encoded) as { thumb: Uint8Array };
+        expect(revived.thumb).toBeInstanceOf(Uint8Array);
+        expect(Array.from(revived.thumb)).toEqual([1, 2, 3]);
     });
 
     it('is read PER CALL, so a late install still applies', () => {

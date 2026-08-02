@@ -6,7 +6,10 @@ import { defineLibConfig } from '../vite/src/lib.js';
 // dependency here would land in the size-limited fetch-stub entry.
 export default defineLibConfig({
     entry: {
-        'index': 'src/index.ts'
+        'index': 'src/index.ts',
+        // Opt-in binary vocabulary (#569) — its own entry so `$bytes` stays
+        // out of the 1 KB root entry and the stub bundles that replicate it.
+        'bytes': 'src/bytes.ts'
     },
     external: [/^node:/],
     platform: 'neutral'

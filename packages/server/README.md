@@ -755,7 +755,7 @@ and `ServerFnError.data` — with no configuration:
 | plain objects, arrays, primitives | ✅ unchanged |
 | **circular structures** | ❌ an error — the one shape that fails LOUDLY |
 | class instances | ❌ arrive as plain objects, prototype gone (register a handler) |
-| `Uint8Array` / typed arrays / `ArrayBuffer` | ❌ arrive as `{"0":…,"1":…}` |
+| `Uint8Array` / typed arrays / `ArrayBuffer` | opt-in — register `bytesHandler` from `@sigx/serialize/bytes` (#569); unregistered they arrive as `{"0":…,"1":…}` |
 | `Error` | ❌ arrives as `{}` — message and stack are not own enumerable props |
 | `Promise` | ❌ arrives as `{}` (a missing `await`) |
 | `NaN` / `±Infinity` | ❌ arrive as `null` |
@@ -803,6 +803,14 @@ App-less contexts (an endpoint-only process, a zero-JS loader page) use
 `globalThis.__SIGX_SERVERFN_CODEC__` seam tag-keyed (the same global-seam
 pattern `$cache` uses, so the stub entry stays dependency-free; stamping
 the global directly still works).
+
+Binary is the one rich type that ships ready-made rather than built in:
+`bytesHandler` from `@sigx/serialize/bytes` (#569) round-trips `Uint8Array`
+(and every typed-array kind, `DataView`, bare `ArrayBuffer`) as base64 —
+add it to the same `types` array. Opt-in because the codec entry is
+size-budgeted into every client bundle; files still arrive inbound via
+`form: true` (a `File` reaches the handler), and with the handler
+registered the return path carries bytes too.
 
 The plugin also carries the stub transport (`configureServerFn`'s options,
 app-scoped with teardown): `serverPlugin({ transport: { endpoint, headers,
