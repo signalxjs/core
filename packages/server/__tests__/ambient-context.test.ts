@@ -34,11 +34,12 @@ describe('detached context — the default', () => {
         await expect(whereAmI()).rejects.toThrow(/rq\.url/);
     });
 
-    it('names both remedies — the error is where an author learns them', async () => {
+    it('names all three remedies — the error is where an author learns them', async () => {
         const error: unknown = await whoAmI().catch((e: unknown) => e);
         const message = error instanceof Error ? error.message : String(error);
         expect(message).toContain('fn.with({ context: request })');
         expect(message).toContain('runWithServerFnContext');
+        expect(message).toContain('createTestServerFnContext');
     });
 });
 

@@ -41,6 +41,12 @@
             "development": "./dist/plugin.js",
             "production": "./dist/plugin.prod.js",
             "import": "./dist/plugin.js"
+        },
+        "./testing": {
+            "types": "./dist/testing.d.ts",
+            "development": "./dist/testing.js",
+            "production": "./dist/testing.prod.js",
+            "import": "./dist/testing.js"
         }
     },
     "files": [
