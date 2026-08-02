@@ -838,6 +838,97 @@ describe('serverStream — options form', () => {
 });
 
 /* ------------------------------------------------------------------ */
+/* response cap — maxResponseBytes (#571)                             */
+/* ------------------------------------------------------------------ */
+
+describe('serverStream — maxResponseBytes (#571)', () => {
+    const capped = (
+        fn: unknown,
+        maxResponseBytes: number,
+        onError?: (error: unknown) => void
+    ): Promise<Response> =>
+        handleServerFnRequest(
+            new Request(`${ORIGIN}/_sigx/fn/s_fn_00000001`, {
+                method: 'POST',
+                headers: { 'content-type': 'application/json', origin: ORIGIN },
+                body: '{"args":[]}'
+            }),
+            { resolve: () => fn, maxResponseBytes, onError }
+        );
+
+    it('an oversized FIRST chunk is a buffered 500 and the generator is disposed', async () => {
+        vi.stubEnv('NODE_ENV', 'production');
+        let cleaned = false;
+        const seen: unknown[] = [];
+        const s = serverStream(async function* () {
+            try {
+                yield 'x'.repeat(2_000);
+                yield 'never';
+            } finally {
+                cleaned = true;
+            }
+        });
+        try {
+            const res = await capped(s, 500, (e) => void seen.push(e));
+            expect(res.status).toBe(500);
+            expect(res.headers.get('content-type')).toContain('application/json');
+            const body = await res.text();
+            expect(body).not.toContain('xxxx');
+            expect(cleaned).toBe(true);
+            expect(seen).toHaveLength(1);
+            expect(String(seen[0])).toContain('maxResponseBytes');
+        } finally {
+            vi.unstubAllEnvs();
+        }
+    });
+
+    it('a mid-stream breach delivers prior chunks, then the in-band masked error', async () => {
+        vi.stubEnv('NODE_ENV', 'production');
+        let cleaned = false;
+        const seen: unknown[] = [];
+        const s = serverStream(async function* () {
+            try {
+                yield 'small';
+                yield 'y'.repeat(2_000);
+            } finally {
+                cleaned = true;
+            }
+        });
+        try {
+            const res = await capped(s, 500, (e) => void seen.push(e));
+            expect(res.status).toBe(200);
+            const parsed = await lines(res);
+            expect(parsed[0]).toEqual({ chunk: 'small' });
+            expect(parsed[1]).toEqual({ error: { message: 'Internal error', status: 500 } });
+            expect(cleaned).toBe(true);
+            expect(seen).toHaveLength(1);
+        } finally {
+            vi.unstubAllEnvs();
+        }
+    });
+
+    it('the cap is CUMULATIVE — chunks individually under it still end the stream', async () => {
+        const s = serverStream(async function* () {
+            for (let i = 0; i < 10; i++) yield 'z'.repeat(100);
+        });
+        const res = await capped(s, 450);
+        const parsed = await lines(res);
+        // Each line is ~112 bytes; the fourth crosses 450 cumulative.
+        expect(parsed.filter((l) => (l as { chunk?: unknown }).chunk)).toHaveLength(3);
+        expect((parsed.at(-1) as { error?: unknown }).error).toBeDefined();
+    });
+
+    it('a stream under the cap is untouched', async () => {
+        const s = serverStream(async function* () {
+            yield 'a';
+            yield 'b';
+        });
+        const res = await capped(s, 10_000);
+        await expect(lines(res)).resolves.toEqual([{ chunk: 'a' }, { chunk: 'b' }, { done: 1 }]);
+    });
+});
+
+/* ------------------------------------------------------------------ */
 /* the single-input options form (#572)                               */
 /* ------------------------------------------------------------------ */
 

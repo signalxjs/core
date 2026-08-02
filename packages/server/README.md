@@ -697,13 +697,14 @@ A non-default `base` whose entry still calls `matchesServerFn(request)` is a
 build-time warning, and a request that reaches a handler its base does not
 describe is a `__DEV__` warning beside the 404.
 
-### Request caps — `maxBodyBytes` and `maxUrlBytes`
+### Size caps — `maxBodyBytes`, `maxUrlBytes`, and `maxResponseBytes`
 
 ```js
 createServerFnHandler({
     functions: serverFns,
     maxBodyBytes: 1_048_576,   // default 1 MiB — enforced WHILE reading; 413 over it
-    maxUrlBytes: 8_192         // default 8 KiB — a GET read's query string; 414 over it
+    maxUrlBytes: 8_192,        // default 8 KiB — a GET read's query string; 414 over it
+    maxResponseBytes: 5_242_880 // OUTBOUND cap — default unlimited (opt-in)
 });
 ```
 
@@ -715,10 +716,26 @@ diagnosable. The client stub independently warns in `__DEV__` above ~2 KiB of
 arguments — arguments that large make a poor cache key, which is the real signal
 to drop `cache` and let the read POST.
 
-`handleServerFnRequest` (WinterCG) enforces both directly. The two layers that
-WRAP it — `createServerFnHandler` (Node) and the `sigxServer()` dev middleware,
-which goes through that adapter — each hand-listed the options they passed
-down, and each silently dropped `maxUrlBytes` that way: #545/#547 at the
+`maxResponseBytes` (#571) is the outbound analog — the ceiling a fn that
+returns an unbounded result (an unfiltered query, a runaway generator)
+otherwise doesn't have. It measures actual UTF-8 bytes, and what happens
+over it depends on where the bytes were going:
+
+| Over the cap | The caller sees |
+|---|---|
+| buffered envelope (POST or GET read) | masked 500 — a server fault, surfaced to `onError` |
+| `ServerFnError.data` | the error intact, `data` dropped (dev-warned; `onError` NOT fired — the fn's own throw is still the story) |
+| stream chunks (cumulative) | first chunk: buffered 500; later: the in-band `{"error"}` line, generator disposed, `onError` fired |
+| form 303 | nothing — no body to cap |
+
+Default unlimited, deliberately: this is operator hygiene (memory, egress),
+not an attacker-facing defense, and an imposed default would break existing
+large reads.
+
+`handleServerFnRequest` (WinterCG) enforces all three directly. The two layers
+that WRAP it — `createServerFnHandler` (Node) and the `sigxServer()` dev
+middleware, which goes through that adapter — each hand-listed the options they
+passed down, and each silently dropped `maxUrlBytes` that way: #545/#547 at the
 adapter, #561 at the dev middleware. Both now derive their option type from
 `ServerFnRequestOptions` and forward by spread, so an option added to the
 endpoint reaches every mount without being copied anywhere.
@@ -744,6 +761,61 @@ app.use(createServerFnHandler({
 
 `ServerFnError`s are expected, client-visible errors — they do not fire
 `onError`. Prod masking is unchanged: the caller still sees a generic 500.
+
+### Rate limiting — a guard, not an option
+
+There is deliberately no `rateLimit` endpoint option, and there will not be
+one: anything mounted at the endpoint is **wire-only by construction** (an
+in-process SSR call never enters the handler), which is the exact transport
+asymmetry the definition-level guard chain exists to correct — the same
+reasoning that declined an `onFinish` endpoint hook (rfc-server-v3 §2.6).
+A rate limiter **is a guard**:
+
+```ts
+// src/guards.ts — a token bucket per principal, in module state
+const buckets = new Map<string, { tokens: number; at: number }>();
+
+export const rateLimit: ServerFnGuard = (rq, fn) => {
+    if (fn.symbol === '') return;          // in-process (SSR) call — never throttle your own renders
+    const user = rq.locals.user as string | undefined;
+    const key = `${user ?? 'anon'}:${fn.symbol}`;   // per-user, per-function
+    const now = Date.now();
+    const b = buckets.get(key) ?? { tokens: 10, at: now };
+    b.tokens = Math.min(10, b.tokens + ((now - b.at) / 1000) * 2);  // 2/s, burst 10
+    b.at = now;
+    if (b.tokens < 1) throw new ServerFnError(429, 'Too many requests');
+    b.tokens -= 1;
+    buckets.set(key, b);
+};
+
+const authed = serverFnPreset({ use: [requireUser, rateLimit] });
+```
+
+The pieces that make this correct:
+
+- **`fn.symbol === ''` is the transport discriminator** — a documented
+  contract, not a trick: the symbol exists only where a transport does.
+  `use:` chains run on EVERY transport (that is their point), so the
+  wire-only decision belongs *inside* the guard body. Without that line,
+  one SSR page rendering five cells burns five tokens of its own budget.
+  Auth guards must NOT carry this gate — auth holds everywhere.
+- **Key off `rq.locals`/`perRequest`** (seeded by an upstream auth guard)
+  for per-user limits; fold in `fn.symbol` for per-function buckets. For
+  unauthenticated surfaces, key off headers — read `rq.request` behind
+  `try/catch`, because a detached in-process context throws there and
+  fail-open is exactly right for renders.
+- **Streams are covered for free** — guards run before the first pull on
+  every transport, so admission-style limiting applies to `serverStream`
+  unchanged. A *concurrency* cap (increment on admit, decrement on finish)
+  has no framework release hook — guards are before-only; put the decrement
+  in the handler's/generator's own `finally`.
+- **Cost accounting**: a guard sees `(rq, fn)` but never the arguments
+  (deliberate — arguments are pre-validation there). Charge by input weight
+  at the top of the handler instead, debiting a `perRequest` bucket the
+  guard admitted.
+- The endpoint `guard` option remains the right place for a **wire-level
+  backstop** across every function this endpoint serves — it is documented
+  wire-only, and that is its job description.
 
 ### Cancellation — `.with({ signal })`
 

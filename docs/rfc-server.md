@@ -740,6 +740,12 @@ export interface ServerFnRequestOptions {
     maxBodyBytes?: number;                        // default 1_048_576, enforced while reading
     maxUrlBytes?: number;                         // default 8_192 — cap on a GET read's
                                                   // `args` query value (§4.1); 414 over it
+    maxResponseBytes?: number;                    // OUTBOUND body cap (#571): buffered
+                                                  // envelope → masked 500; ServerFnError.data
+                                                  // → dropped, error kept; stream chunk lines
+                                                  // → cumulative, in-band error once started.
+                                                  // Default unlimited — operator hygiene,
+                                                  // not attacker-facing defense
 }
 ```
 
@@ -977,7 +983,12 @@ attacker with `curl`. Defaults, in order of the failure they prevent:
 3. **Injection via 'captured' state** — structurally impossible: the
    imports-only rule (§1.2) means nothing crosses the boundary except typed
    arguments, and the `input` validator runs server-side on exactly those.
-4. **DoS** — `maxBodyBytes` enforced during body read, not after. The
+4. **DoS** — `maxBodyBytes` enforced during body read, not after. Outbound,
+   the opt-in `maxResponseBytes` (#571) bounds what a fn is allowed to SEND —
+   buffered envelope, error `data`, and cumulative stream chunks — surfacing
+   an unbounded query or runaway generator as a masked 500/`onError` signal
+   rather than as memory and egress; it defaults to unlimited because the
+   outbound side has no attacker to defend against by default. The
    boundary codec bounds its own recursion at 256 levels on both halves
    (#559) — `JSON.parse` is not recursive and admits trees far deeper than
    the stack survives, so encode/revive refuse rather than overflow; on

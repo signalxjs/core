@@ -290,3 +290,52 @@ describe('createServerFnHandler — onError/timeoutMs forwarding (#349/#350)', (
         expect((errors[0] as Error).message).toContain('timed out after 30ms');
     });
 });
+
+describe('createServerFnHandler forwards maxResponseBytes (#571)', () => {
+    // The #545/#547 regression class: an endpoint option silently dropped by
+    // a wrapping layer. The adapter forwards by spread, so the cap must bite
+    // through a real node:http round trip.
+    let server: Server;
+    let origin: string;
+
+    beforeAll(async () => {
+        const big = serverFn(async () => 'x'.repeat(5_000));
+        const handler = createServerFnHandler({
+            functions: { big_fn_00000009: async () => big },
+            maxResponseBytes: 1_000
+        });
+        server = createServer((req, res) => {
+            void handler(req, res, () => {
+                res.statusCode = 404;
+                res.end('fallthrough');
+            });
+        });
+        server.listen(0, '127.0.0.1');
+        await once(server, 'listening');
+        const address = server.address();
+        if (typeof address === 'string' || address === null) throw new Error('no port');
+        origin = `http://127.0.0.1:${address.port}`;
+    });
+
+    afterAll(async () => {
+        server.close();
+        server.closeAllConnections();
+        await once(server, 'close');
+    });
+
+    it('an over-cap response is a 500 through the adapter', async () => {
+        vi.stubEnv('NODE_ENV', 'production');
+        try {
+            const res = await fetch(`${origin}/_sigx/fn/big_fn_00000009`, {
+                method: 'POST',
+                headers: { 'content-type': 'application/json', origin },
+                body: '{"args":[]}'
+            });
+            expect(res.status).toBe(500);
+            const body = (await res.json()) as { error: { message: string } };
+            expect(body.error.message).toBe('Internal error');
+        } finally {
+            vi.unstubAllEnvs();
+        }
+    });
+});

@@ -4,6 +4,33 @@
 
 ### Added
 
+- **`maxResponseBytes` — an opt-in outbound size cap (#571).** The missing
+  analog of `maxBodyBytes`: a fn that returns an unbounded result (an
+  unfiltered query, a runaway generator) previously had no ceiling. The cap
+  measures actual UTF-8 bytes (never `.length` — code units undercount
+  multibyte payloads; the buffered path encodes once and reuses the bytes as
+  the body, so exactness costs nothing) and covers the buffered JSON
+  envelope (GET reads and `$cache`/`$boundaries` included — a breach is a
+  masked 500 through `onError`), a `ServerFnError`'s `data` (dropped with a
+  dev warning, error kept, `onError` NOT fired — the unencodable-data
+  posture), and NDJSON chunk lines (cumulative; a first-chunk breach is a
+  buffered 500, a later one the in-band `{"error"}` line with the generator
+  disposed). Form 303s have no body and are unaffected. Default unlimited —
+  operator hygiene, not attacker-facing defense. Forwards through the Node
+  adapter and the dev middleware automatically (both spread since
+  #545/#561), pinned by tests at each layer.
+
+- **Rate limiting documented as a guard, not an option (#571).** The README
+  gained "Rate limiting — a guard, not an option": a token-bucket
+  `ServerFnGuard` pattern with `fn.symbol === ''` as the documented
+  wire-only discriminator (never throttle your own SSR renders), per-user /
+  per-function keying, the try/catch header-keyed variant for
+  unauthenticated surfaces, stream admission coverage, and the
+  cost-accounting recipe. rfc-server-v3 records the declined first-class
+  endpoint option (wire-only by construction — the `onFinish` reasoning
+  verbatim) and marks the §5 guard-asymmetry pin as landed in
+  `handler.test.ts`.
+
 - **`@sigx/server/testing` — a public testing surface (#570).**
   `createTestServerFnContext(init?)` builds a real, Request-backed
   `ServerFnContext` (default `http://localhost/`) with zero ceremony:
