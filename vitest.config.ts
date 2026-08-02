@@ -48,6 +48,7 @@ export default defineConfig({
             '@sigx/server/client': resolve(__dirname, 'packages/server/src/client/index.ts'),
             '@sigx/server/server': resolve(__dirname, 'packages/server/src/server/index.ts'),
             '@sigx/server/node': resolve(__dirname, 'packages/server/src/node.ts'),
+            '@sigx/server/testing': resolve(__dirname, 'packages/server/src/testing.ts'),
             '@sigx/server': resolve(__dirname, 'packages/server/src/index.ts'),
             '@sigx/resume/server': resolve(__dirname, 'packages/resume/src/server/index.ts'),
             '@sigx/resume/client': resolve(__dirname, 'packages/resume/src/client/index.ts'),

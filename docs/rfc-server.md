@@ -1598,8 +1598,10 @@ option (revisit only if that proves painful).
   captive-dependency throw, `overrideServerService` (v3 §2.2 records why).
   Still deferred, deliberately: cross-module presets (plugin-level resolution
   over the extraction map — excluded from the per-file pure extractors),
-  preset-carried `cache`/`id` defaults, a `/testing` entry
-  (`createTestServerFnContext`), and an endpoint pre-seed option.
+  preset-carried `cache`/`id` defaults, and an endpoint pre-seed option.
+  The `/testing` entry (`createTestServerFnContext` + `stampServerFnKey`)
+  shipped with #570 — a context factory and the `useData` key stamp, with
+  `fn.with({ context })` as the documented invoker rather than a new one.
 - **Research**: bind extraction / write-without-upgrade (6.5), and a
   `serverComputed` sugar on top of it.
 

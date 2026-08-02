@@ -493,7 +493,8 @@ supplied one is a bug worth seeing, not a silent `undefined`.
 `context` accepts a `Request` or a partial `ServerFnContext` (to set `locals`,
 say). Passing `{ request, locals }` — the **same object** on each call — shares
 one request store across explicit calls; a fresh `Request` per call is its own
-store, which is how a test isolates two calls with no framework ceremony. A supplied `Request` also supplies `rq.abortSignal`, so wire its signal
+store, which is how a test isolates two calls with no framework ceremony
+(`createTestServerFnContext()` below builds those objects ready-made). A supplied `Request` also supplies `rq.abortSignal`, so wire its signal
 to the client disconnect (`res.once('close', …)` under Node) and SSR-time work
 stops when the client goes away. `rq.responseHeaders`/`rq.status()` stay inert
 either way: there is no
@@ -567,6 +568,48 @@ value too small or too transient to name, and the reason a guard can still
 write `rq.locals.x` and have the handler read it. Reach for a per-request value
 first: it types itself from its own setup, and the accessor is the only way to
 get at it, so there is nothing to cast.
+
+### Testing — `@sigx/server/testing`
+
+Two helpers close the two gaps unit tests hit; everything else already
+exists as public surface (#570):
+
+```ts
+import { createTestServerFnContext, stampServerFnKey } from '@sigx/server/testing';
+
+// A real, Request-backed context — rq.request/rq.url never throw, and
+// rq.status(code) RECORDS instead of warning:
+const ctx = createTestServerFnContext();                 // http://localhost/
+const alice = createTestServerFnContext({ locals: { user: 'alice' } });
+const posted = createTestServerFnContext(new Request('https://example.com/cart'));
+
+// Guard chains need NO new invoker — fn.with({ context }) runs the whole
+// in-process pipeline: preset guards, use chain, arity gate, input schema.
+await expect(secret.with({ context: anon })()).rejects.toMatchObject({ status: 401 });
+await expect(secret.with({ context: alice })()).resolves.toBe('data');
+
+// Assert what the handler did to the response:
+ctx.statusCode;                    // the last rq.status(code), or undefined
+ctx.responseHeaders.get('set-cookie');
+```
+
+Isolation is the store-identity rule above, ready-made: one factory context
+across several `fn.with({ context: ctx })` calls is **one** request
+(`perRequest` values shared, memoized once); two factory calls are two
+requests. Wire-path behavior (the endpoint `guard`, codecs, form parsing,
+status codes) is tested the way this repo tests it — hand a `Request` to
+`handleServerFnRequest` with a `resolve` that returns your function.
+
+`stampServerFnKey(fn, key?)` mints the build stamp `useData(fn)` requires
+(`__sigxKey`, defaulting to `test/<name>`, plus `__sigxGuardChecked`) on
+the SAME function — identity is load-bearing, so it mutates rather than
+wraps. Without it, `useData(fn)` dev-throws in unit tests because the key
+is stamped by the Vite transform, which a test run does not have. Streams
+are rejected: a stream is not a `useData` target.
+
+The helpers are test-*oriented*, not dev-only — they behave identically
+against the prod dists (only the defensive throws strip), so a test run
+against production bundles does not change context semantics.
 
 ## The endpoint
 
@@ -938,6 +981,8 @@ Every server function is a public HTTP endpoint; the defaults assume that:
 | `@sigx/server/client` | any client (browser, lynx, terminal) | the generated stubs' runtime + `configureServerFn` (dependency-free) |
 | `@sigx/server/server` | anywhere (WinterCG) | `handleServerFnRequest(request, options)` |
 | `@sigx/server/node` | Node | `createServerFnHandler(options)` — connect-style |
+| `@sigx/server/plugin` | app setup (any side) | `serverPlugin({ transport, types })` + `registerWireTypeHandlers` |
+| `@sigx/server/testing` | tests (server-side) | `createTestServerFnContext`, `stampServerFnKey` (#570) |
 
 The runnable example is `examples/resume` (the "server function from a
 resumed handler" card).

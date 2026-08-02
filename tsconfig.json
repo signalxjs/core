@@ -39,6 +39,7 @@
       "@sigx/server/client": ["./packages/server/src/client/index.ts"],
       "@sigx/server/server": ["./packages/server/src/server/index.ts"],
       "@sigx/server/node": ["./packages/server/src/node.ts"],
+      "@sigx/server/testing": ["./packages/server/src/testing.ts"],
       "@sigx/resume/server": ["./packages/resume/src/server/index.ts"],
       "@sigx/resume/client": ["./packages/resume/src/client/index.ts"],
       "@sigx/resume/loader": ["./packages/resume/src/loader/index.ts"],
