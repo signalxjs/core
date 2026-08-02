@@ -537,3 +537,33 @@ describe('__DEV__ warnings', () => {
         expect(warn).not.toHaveBeenCalled();
     });
 });
+
+/* ------------------------------------------------------------------ */
+/* response cap — maxResponseBytes (#571)                             */
+/* ------------------------------------------------------------------ */
+
+describe('GET reads — maxResponseBytes (#571)', () => {
+    it('an over-cap read is a masked 500 with no-store, never a cacheable partial', async () => {
+        vi.stubEnv('NODE_ENV', 'production');
+        try {
+            const res = await get(
+                'echo_fn_00000004',
+                [{ blob: 'x'.repeat(5_000) }],
+                {},
+                { maxResponseBytes: 1_000 }
+            );
+            expect(res.status).toBe(500);
+            expect(res.headers.get('cache-control')).toBe('no-store');
+            const body = (await res.json()) as { error: { message: string } };
+            expect(body.error.message).toBe('Internal error');
+        } finally {
+            vi.unstubAllEnvs();
+        }
+    });
+
+    it('an under-cap read keeps its Cache-Control declaration', async () => {
+        const res = await get('read_fn_00000001', [{ id: 'a' }], {}, { maxResponseBytes: 10_000 });
+        expect(res.status).toBe(200);
+        expect(res.headers.get('cache-control')).toContain('max-age=60');
+    });
+});

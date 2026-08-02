@@ -1,6 +1,6 @@
 import { defineLibConfig } from '../vite/src/lib.js';
 
-// @sigx/server has 5 entry points (rfc-server §2):
+// @sigx/server has 7 entry points (rfc-server §2):
 // - index: the isomorphic serverFn marker + error channel (server builds see
 //   the real pipeline; the `browser` export condition swaps in browser.js)
 // - browser: throwing serverFn variants — defense in depth for files the
@@ -12,6 +12,8 @@ import { defineLibConfig } from '../vite/src/lib.js';
 //   live only here, like @sigx/server-renderer/node)
 // - plugin: the app-plugin face (#413) — the only entry importing the sigx
 //   runtime, kept out of the dep-free client entry on purpose
+// - testing: createTestServerFnContext + stampServerFnKey (#570) — the
+//   public testing surface; server-side like ./server, no size-limit entry
 export default defineLibConfig({
     entry: {
         'index': 'src/index.ts',
@@ -19,7 +21,8 @@ export default defineLibConfig({
         'client/index': 'src/client/index.ts',
         'server/index': 'src/server/index.ts',
         'node': 'src/node.ts',
-        'plugin': 'src/plugin.ts'
+        'plugin': 'src/plugin.ts',
+        'testing': 'src/testing.ts'
     },
     external: ['sigx', /@sigx\/.*/, /^node:/],
     platform: 'neutral'

@@ -502,12 +502,16 @@ function assertNotLiveClient(name: string): void {
  * Carries the same `.with(options)` per-call channel as `serverFn` (#448),
  * minus `fresh` — a stream is never HTTP-cached.
  *
- * Two forms, like `serverFn`: the direct one above, and an options form
- * carrying `use` and `unguarded` (#489). A stream is a public endpoint too, so
+ * Two forms, like `serverFn`: the direct one above, and an options form (#489)
+ * that itself comes in two shapes (#572). A stream is a public endpoint too, so
  * `requireGuards` holds it to the same rule — and the options form is where it
- * declares. Deliberately NOT given `input`: a stream takes many arguments and
- * has no single-input shape to validate; validate at the top of the generator
- * (any Standard Schema validates standalone).
+ * declares. The multi-argument shape carries `use`/`unguarded` only — many
+ * arguments have no single-input schema, so validation belongs at the top of
+ * the generator (any Standard Schema validates standalone). Declaring `input`
+ * selects the single-input shape instead: `serverFn`'s exact semantics,
+ * validated before the first chunk on every transport. Unlike `serverFn`,
+ * omitting `input` never falls back to the handler's annotation — no `input`
+ * means the multi-argument form, deliberately.
  */
 export interface ServerStreamOptions<A extends unknown[], T> {
     /**
@@ -525,57 +529,126 @@ export interface ServerStreamOptions<A extends unknown[], T> {
      * because it makes the public surface greppable.
      */
     unguarded?: true;
+    /**
+     * Not accepted in the multi-argument form — declaring `input` selects the
+     * single-input form (`ServerStreamInputOptions`). This `undefined` member
+     * is the overload discriminant.
+     */
+    input?: undefined;
     /** The implementation. */
     handler(rq: ServerFnContext, ...args: A): AsyncGenerator<T>;
+}
+
+/**
+ * The single-input options form (#572) — `serverFn`'s validation shape for a
+ * stream. The schema runs after the guard chain and before the generator's
+ * first chunk, on every transport: over the wire a rejection is a buffered
+ * JSON 400 (headers still writable, no stream byte sent); in-process it
+ * surfaces on the first pull, exactly where a guard veto does. Per-chunk
+ * concerns stay the generator's own.
+ */
+export interface ServerStreamInputOptions<S, T> {
+    /**
+     * Input validator (Standard Schema — Zod/Valibot/ArkType all qualify) and
+     * the inference source for `S`; rejection throws
+     * `ServerFnError(400, 'Invalid input', { issues })` before the first
+     * chunk. With `input` declared the stream takes ONE argument — extra wire
+     * args are a 400, matching `serverFn`'s options form.
+     */
+    input: StandardSchemaV1<S>;
+    /** Definition-level middleware — same contract as the multi-argument form. */
+    use?: ServerFnGuard[];
+    /** Same declaration as the multi-argument form (#489). */
+    unguarded?: true;
+    /** The implementation — receives the VALIDATED input. */
+    handler(rq: ServerFnContext, input: S): AsyncGenerator<T>;
 }
 
 export function serverStream<A extends unknown[], T>(
     impl: (rq: ServerFnContext, ...args: A) => AsyncGenerator<T>
 ): ServerStreamCallable<A, T>;
+// The two options shapes CAN be separate overloads here — their discriminant
+// (`input`) is a plain data property, so resolution never hinges on the
+// context-sensitive handler the way serverFn's forms do (#451). `S = void`
+// mirrors serverFn (#454): a `z.void()`-style schema yields a zero-arg
+// callable.
+export function serverStream<S = void, T = unknown>(
+    options: ServerStreamInputOptions<S, T>
+): ServerStreamCallable<[S] extends [void] ? [] : [S], T>;
 export function serverStream<A extends unknown[], T>(
     options: ServerStreamOptions<A, T>
 ): ServerStreamCallable<A, T>;
 export function serverStream<A extends unknown[], T>(
-    arg: ((rq: ServerFnContext, ...args: A) => AsyncGenerator<T>) | ServerStreamOptions<A, T>
+    arg:
+        | ((rq: ServerFnContext, ...args: A) => AsyncGenerator<T>)
+        | ServerStreamOptions<A, T>
+        | ServerStreamInputOptions<unknown, T>
 ): ServerStreamCallable<A, T> {
     return createServerStream(arg);
 }
 
 /** `serverStream`'s body, plus a preset's already-copied guard array. */
 function createServerStream<A extends unknown[], T>(
-    arg: ((rq: ServerFnContext, ...args: A) => AsyncGenerator<T>) | ServerStreamOptions<A, T>,
+    arg:
+        | ((rq: ServerFnContext, ...args: A) => AsyncGenerator<T>)
+        | ServerStreamOptions<A, T>
+        | ServerStreamInputOptions<unknown, T>,
     baseUse: readonly ServerFnGuard[] = NO_GUARDS
 ): ServerStreamCallable<A, T> {
     const options = typeof arg === 'function' ? undefined : arg;
     // Kept unbound for its `.name`; `impl` is the callable, bound to the
     // options object so `this` inside a method-shorthand handler is the
     // literal — the same thing `serverFn`'s `options.handler(...)` call does.
-    const declared: (rq: ServerFnContext, ...args: A) => AsyncGenerator<T> =
-        typeof arg === 'function' ? arg : arg.handler;
+    // The cast unifies the two handler shapes; the single-input one is only
+    // ever called with the one validated argument below.
+    const declared = (typeof arg === 'function' ? arg : arg.handler) as (
+        rq: ServerFnContext,
+        ...args: A
+    ) => AsyncGenerator<T>;
     const impl = options ? declared.bind(options) : declared;
     const name = declared.name || '';
     if (options && baseUse.length > 0 && options.unguarded === true) {
         throw unguardedContradiction(name);
     }
+    const input = options?.input;
     // #412: same unvalidated-wire-args surface as serverFn's direct form,
-    // same once-per-fn dev signal — but streams have no options form, so the
-    // remedy is validating in the generator body.
+    // same once-per-fn dev signal. A declared `input` (#572) closes it, so
+    // the warning is gated on its absence.
     let warnedWire = false;
     // Async so transports get a settled value to marker-check; the resolved
     // value is the (not-yet-started) generator.
     const invoke: ServerFnInvoke = async (rq, info, args) => {
-        if (__DEV__ && !warnedWire && info.symbol !== '' && args.length > 0) {
+        if (__DEV__ && !warnedWire && !input && info.symbol !== '' && args.length > 0) {
             warnedWire = true;
             console.warn(
                 `[sigx server] serverStream "${info.name || info.symbol}" received ` +
-                `${args.length} wire argument(s) — wire arguments are attacker-controlled ` +
-                `and streams have no \`input\` option, so validate them at the top of the ` +
-                `generator before doing work (any Standard Schema validates standalone: ` +
-                `await Schema['~standard'].validate(arg)). Fires once per function.`
+                `${args.length} wire argument(s) with no declared input validator — ` +
+                `wire arguments are attacker-controlled; parameter types are ` +
+                `compile-time only. Declare validation with the single-input options ` +
+                `form: serverStream({ input: Schema, handler }) (Standard Schema — ` +
+                `Zod/Valibot/ArkType; #572). A multi-argument stream instead validates ` +
+                `at the top of the generator before doing work (any Standard Schema ` +
+                `validates standalone: await Schema['~standard'].validate(arg)). ` +
+                `Fires once per function.`
             );
         }
         for (const guard of baseUse) await guard(rq, info);
         for (const guard of options?.use ?? []) await guard(rq, info);
+        if (input) {
+            // The single-input form takes ONE argument (matching its
+            // signature) — extra wire args would silently bypass the declared
+            // shape. Both throws land before the generator starts: buffered
+            // 400 on the wire, first-pull rejection in-process.
+            if (args.length > 1) {
+                throw new ServerFnError(400, 'a serverStream with `input` takes a single input argument');
+            }
+            let result = input['~standard'].validate(args[0]);
+            if (result instanceof Promise) result = await result;
+            if (result.issues) {
+                throw new ServerFnError(400, 'Invalid input', { issues: result.issues });
+            }
+            return impl(rq, ...([result.value] as unknown as A));
+        }
         return impl(rq, ...(args as A));
     };
     /**
@@ -676,7 +749,10 @@ export function serverFnPreset(base: { use: ServerFnGuard[] }): ServerFnPreset {
         arg: ((rq: ServerFnContext, ...args: unknown[]) => unknown) | ServerFnOptions<unknown, unknown>
     ): ServerFnCallable<unknown[], unknown> => createServerFn(arg, use);
     const derivedStream = <A extends unknown[], T>(
-        arg: ((rq: ServerFnContext, ...args: A) => AsyncGenerator<T>) | ServerStreamOptions<A, T>
+        arg:
+            | ((rq: ServerFnContext, ...args: A) => AsyncGenerator<T>)
+            | ServerStreamOptions<A, T>
+            | ServerStreamInputOptions<unknown, T>
     ): ServerStreamCallable<A, T> => createServerStream(arg, use);
     // The casts RESTATE the overloads; they do not change the runtime. Each
     // derived function is literally its wrapper's IMPLEMENTATION signature,

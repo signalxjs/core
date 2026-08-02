@@ -740,6 +740,12 @@ export interface ServerFnRequestOptions {
     maxBodyBytes?: number;                        // default 1_048_576, enforced while reading
     maxUrlBytes?: number;                         // default 8_192 — cap on a GET read's
                                                   // `args` query value (§4.1); 414 over it
+    maxResponseBytes?: number;                    // OUTBOUND body cap (#571): buffered
+                                                  // envelope → masked 500; ServerFnError.data
+                                                  // → dropped, error kept; stream chunk lines
+                                                  // → cumulative, in-band error once started.
+                                                  // Default unlimited — operator hygiene,
+                                                  // not attacker-facing defense
 }
 ```
 
@@ -977,7 +983,12 @@ attacker with `curl`. Defaults, in order of the failure they prevent:
 3. **Injection via 'captured' state** — structurally impossible: the
    imports-only rule (§1.2) means nothing crosses the boundary except typed
    arguments, and the `input` validator runs server-side on exactly those.
-4. **DoS** — `maxBodyBytes` enforced during body read, not after. The
+4. **DoS** — `maxBodyBytes` enforced during body read, not after. Outbound,
+   the opt-in `maxResponseBytes` (#571) bounds what a fn is allowed to SEND —
+   buffered envelope, error `data`, and cumulative stream chunks — surfacing
+   an unbounded query or runaway generator as a masked 500/`onError` signal
+   rather than as memory and egress; it defaults to unlimited because the
+   outbound side has no attacker to defend against by default. The
    boundary codec bounds its own recursion at 256 levels on both halves
    (#559) — `JSON.parse` is not recursive and admits trees far deeper than
    the stack survives, so encode/revive refuse rather than overflow; on
@@ -1135,6 +1146,19 @@ A stream carries the `.with(options)` per-call channel too (#448) — `signal`
 SSR-time request an in-process generator otherwise has no way to receive),
 and `headers`. `fresh` is excluded from the type for the §4.1 reason below:
 a stream is always POST, so it can never be answered from an HTTP cache.
+
+Streams also carry `serverFn`'s declarative validation (#572): the options
+form's single-input shape — `serverStream({ input: Schema, handler })` —
+runs the schema after the guard chain and before the first chunk, on every
+transport. Over the wire a rejection is a *buffered* JSON
+`400 { issues }` (the endpoint awaits `invoke` before entering the NDJSON
+transport, so headers are still writable and no stream byte is sent);
+in-process it rejects on the first pull, where a guard veto surfaces. With
+`input` declared the stream takes one argument, matching the buffered
+form's arity gate. The multi-argument options form stays schema-less by
+design — many arguments have no single-input shape — and validates at the
+top of the generator; per-chunk/per-yield validation remains the
+generator's own concern, not a framework seam.
 
 ### 6.2 Server-declared cache directives
 
@@ -1598,8 +1622,10 @@ option (revisit only if that proves painful).
   captive-dependency throw, `overrideServerService` (v3 §2.2 records why).
   Still deferred, deliberately: cross-module presets (plugin-level resolution
   over the extraction map — excluded from the per-file pure extractors),
-  preset-carried `cache`/`id` defaults, a `/testing` entry
-  (`createTestServerFnContext`), and an endpoint pre-seed option.
+  preset-carried `cache`/`id` defaults, and an endpoint pre-seed option.
+  The `/testing` entry (`createTestServerFnContext` + `stampServerFnKey`)
+  shipped with #570 — a context factory and the `useData` key stamp, with
+  `fn.with({ context })` as the documented invoker rather than a new one.
 - **Research**: bind extraction / write-without-upgrade (6.5), and a
   `serverComputed` sugar on top of it.
 

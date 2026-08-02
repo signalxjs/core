@@ -140,6 +140,19 @@ describe('sigxServer — the dev endpoint forwards every endpoint option (#561)'
         });
     });
 
+    it('forwards maxResponseBytes — an over-cap response is a 500, not delivered (#571)', async () => {
+        const onError = vi.fn();
+        const dev = await mount({ maxResponseBytes: 16, onError });
+        const res = await fetch(`${dev.origin}/_sigx/fn/${dev.symbol('read')}`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', origin: dev.origin },
+            body: JSON.stringify({ args: ['a-long-enough-input-to-cross-sixteen-bytes'] })
+        });
+        expect(res.status).toBe(500);
+        expect(onError).toHaveBeenCalledTimes(1);
+        expect((onError.mock.calls[0][0] as Error).message).toContain('maxResponseBytes');
+    });
+
     it('forwards timeoutMs and onError — a hung handler 504s and reports once', async () => {
         const onError = vi.fn();
         const dev = await mount({ timeoutMs: 25, onError });

@@ -22,6 +22,66 @@
   `fn.with({ context })`/detached store has no owner (dev-warned) and the
   new public `disposeRequestValues(rq)` is the app's own trigger.
 
+- **`maxResponseBytes` — an opt-in outbound size cap (#571).** The missing
+  analog of `maxBodyBytes`: a fn that returns an unbounded result (an
+  unfiltered query, a runaway generator) previously had no ceiling. The cap
+  measures actual UTF-8 bytes (never `.length` — code units undercount
+  multibyte payloads; the buffered path encodes once and reuses the bytes as
+  the body, so exactness costs nothing) and covers the buffered JSON
+  envelope (GET reads and `$cache`/`$boundaries` included — a breach is a
+  masked 500 through `onError`), a `ServerFnError`'s `data` (dropped with a
+  dev warning, error kept, `onError` NOT fired — the unencodable-data
+  posture), and NDJSON chunk lines (cumulative; a first-chunk breach is a
+  buffered 500, a later one the in-band `{"error"}` line with the generator
+  disposed). Form 303s have no body and are unaffected. Default unlimited —
+  operator hygiene, not attacker-facing defense. Forwards through the Node
+  adapter and the dev middleware automatically (both spread since
+  #545/#561), pinned by tests at each layer.
+
+- **Rate limiting documented as a guard, not an option (#571).** The README
+  gained "Rate limiting — a guard, not an option": a token-bucket
+  `ServerFnGuard` pattern with `fn.symbol === ''` as the documented
+  wire-only discriminator (never throttle your own SSR renders), per-user /
+  per-function keying, the try/catch header-keyed variant for
+  unauthenticated surfaces, stream admission coverage, and the
+  cost-accounting recipe. rfc-server-v3 records the declined first-class
+  endpoint option (wire-only by construction — the `onFinish` reasoning
+  verbatim) and marks the §5 guard-asymmetry pin as landed in
+  `handler.test.ts`.
+
+- **`@sigx/server/testing` — a public testing surface (#570).**
+  `createTestServerFnContext(init?)` builds a real, Request-backed
+  `ServerFnContext` (default `http://localhost/`) with zero ceremony:
+  `rq.request`/`rq.url` never throw the detached error, `rq.status(code)`
+  records to a readable `.statusCode` instead of dev-warning, caller
+  `locals` keep their identity (one factory context across several
+  `fn.with({ context: ctx })` calls is ONE request store; two contexts are
+  two — the store-identity rule, now on public surface), and a previously
+  built context as `init` is copied with guarded reads so throwing getters
+  cannot crash it. `stampServerFnKey(fn, key?)` mints the build stamp
+  `useData(fn)` requires (`__sigxKey`, default `test/<name>`, plus
+  `__sigxGuardChecked`) on the SAME function — mutating because identity is
+  load-bearing; streams are rejected in dev. There is deliberately NO new
+  invoker: `fn.with({ context })(…)` already runs the whole in-process
+  pipeline (preset guards → `use` chain → arity gate → `input` validation),
+  and the README's new Testing section is that recipe. The detached-context
+  error now names the factory as its third remedy.
+
+- **`serverStream` gained a single-input options form — declarative `input`
+  validation for streams (#572).** Declaring `input` (any Standard Schema —
+  Zod/Valibot/ArkType) selects a `serverFn`-shaped single-input handler:
+  the schema runs after the guard chain and **before the first chunk**, on
+  every transport. Over the wire a rejection is a buffered JSON
+  `400 { issues }` (headers still writable, no stream byte sent); in-process
+  it rejects on the first pull, exactly where a guard veto surfaces. With
+  `input` declared the stream takes one argument — extra wire args are a
+  400 — and the validated value (not the raw wire arg) reaches the handler.
+  The multi-argument options form (`use`/`unguarded` only) is unchanged, and
+  omitting `input` never falls back to the handler's annotation: no `input`
+  means the multi-argument form. The once-per-fn unvalidated-wire-args dev
+  warning now names the `input` form as the primary remedy and no longer
+  fires for streams that declare one.
+
 ### Changed
 
 - **`runInScope` now disposes the request stores it owns at settle (#571).**

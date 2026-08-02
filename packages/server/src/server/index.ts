@@ -95,6 +95,19 @@ export interface ServerFnRequestOptions {
      */
     maxUrlBytes?: number;
     /**
+     * Cap on a response BODY's bytes (#571) — the outbound analog of
+     * `maxBodyBytes`. Covers the buffered JSON envelope (`$cache`/
+     * `$boundaries` and GET reads included), a `ServerFnError`'s `data`
+     * payload (dropped, error kept, like unencodable data), and NDJSON
+     * chunk lines (cumulative across the stream; `done`/`error` terminator
+     * lines are constant-size noise and uncounted). Exceeding it is a
+     * SERVER-side fault — an unbounded query, a runaway generator — so it
+     * surfaces as a masked 500 through `onError`, or as the in-band
+     * `{"error"}` line once a stream has started. A form 303 has no body
+     * and is never affected. Default: unlimited (opt-in).
+     */
+    maxResponseBytes?: number;
+    /**
      * Observability seam (#349): called for every MASKED failure — any
      * non-`ServerFnError` throw from guard/handler, timeouts included — in
      * dev AND prod, BEFORE the client response is built. `ServerFnError`s
@@ -645,7 +658,7 @@ export async function handleServerFnRequest(
         const info = { symbol, name: symbolName(symbol) };
         const ctx = createRequestContext(request);
         if (!isServerFnError(error)) await reportMasked(options, error, info, ctx);
-        const shape = wireErrorShape(error, info.name || symbol);
+        const shape = wireErrorShape(error, info.name || symbol, options.maxResponseBytes);
         return isForm
             ? formErrorResponse(shape.status, shape.message, shape.data, ctx.responseHeaders)
             : errorResponse(
@@ -969,7 +982,23 @@ export async function handleServerFnRequest(
                 }
             }
         }
-        return new Response(JSON.stringify(envelope), { status, headers });
+        const json = JSON.stringify(envelope);
+        const cap = options.maxResponseBytes;
+        if (cap === undefined) return new Response(json, { status, headers });
+        // The platform was going to UTF-8-encode this string anyway, so
+        // exact byte measurement is ~free: encode once, check, reuse the
+        // bytes as the body. `.length` counts UTF-16 code units and
+        // undercounts multibyte payloads — it cannot be the metric.
+        const bytes = new TextEncoder().encode(json);
+        if (bytes.byteLength > cap) {
+            // A server-side fault (an unbounded query) — flows to the catch
+            // below as a masked 500, through `onError`.
+            throw new Error(
+                `[sigx server] response for "${info.name || symbol}" exceeds ` +
+                `maxResponseBytes (${bytes.byteLength} > ${cap} bytes)`
+            );
+        }
+        return new Response(bytes, { status, headers });
     });
 
     // Disposal rides the WORK promise's real settle — never the timeout race:
@@ -1031,7 +1060,7 @@ export async function handleServerFnRequest(
         if (!isServerFnError(error)) {
             await reportMasked(options, error, info, ctx);
         }
-        const shape = wireErrorShape(error, info.name || symbol);
+        const shape = wireErrorShape(error, info.name || symbol, options.maxResponseBytes);
         return isForm
             ? formErrorResponse(shape.status, shape.message, shape.data, ctx.responseHeaders)
             : errorResponse(
@@ -1119,7 +1148,8 @@ async function reportMasked(
  */
 function wireErrorShape(
     error: unknown,
-    label: string
+    label: string,
+    maxResponseBytes?: number
 ): { message: string; status: number; data?: unknown } {
     if (isServerFnError(error)) {
         // `data` is user payload and may carry rich types like any result.
@@ -1136,6 +1166,23 @@ function wireErrorShape(
                     `[sigx server] "${label}" threw a ServerFnError whose \`data\` ` +
                     `cannot be encoded (circular?) — the error is sent without it.`
                 );
+            }
+        }
+        // The response cap applies to error payloads too (#571) — same
+        // posture as unencodable data: the expected, client-visible error
+        // survives, the oversized payload does not. Not a masked 500 and
+        // not an `onError` call — the fn's own throw is still the story.
+        if (data !== undefined && maxResponseBytes !== undefined) {
+            const size = new TextEncoder().encode(JSON.stringify(data)).byteLength;
+            if (size > maxResponseBytes) {
+                data = undefined;
+                if (__DEV__) {
+                    console.warn(
+                        `[sigx server] "${label}" threw a ServerFnError whose \`data\` ` +
+                        `exceeds maxResponseBytes (${size} > ${maxResponseBytes} bytes) — ` +
+                        `the error is sent without it.`
+                    );
+                }
             }
         }
         return { message: error.message, status: error.status, data };
@@ -1194,17 +1241,32 @@ async function streamResponse(
             .catch(() => {})
             .then(() => disposeRequestValues(ctx))
             .catch(() => {});
+    const cap = options.maxResponseBytes;
+    let sentBytes = 0;
     /** Encode one chunk line, rich types included (rfc-server §4). On values
      *  that still cannot be encoded (cycles) the generator is DISPOSED before
      *  the error propagates — an advanced generator must never leak its
-     *  `finally`. */
+     *  `finally`. The response cap (#571) is enforced here too, cumulatively
+     *  over chunk lines (the constant-size `done`/`error` terminators are
+     *  uncounted): a first-chunk breach lands in the caller's buffered catch,
+     *  a later one in the pull's in-band error path. */
     const chunkLine = (value: unknown): Uint8Array => {
+        let bytes: Uint8Array;
         try {
-            return line({ chunk: encodeWire(value) });
+            bytes = line({ chunk: encodeWire(value) });
         } catch (error) {
             dispose();
             throw error;
         }
+        sentBytes += bytes.byteLength;
+        if (cap !== undefined && sentBytes > cap) {
+            dispose();
+            throw new Error(
+                `[sigx server] stream "${label}" exceeded maxResponseBytes ` +
+                `(${sentBytes} > ${cap} bytes)`
+            );
+        }
+        return bytes;
     };
     let first: IteratorResult<unknown>;
     let firstLine: Uint8Array | null;
@@ -1257,7 +1319,7 @@ async function streamResponse(
                 }
                 let payload: Uint8Array;
                 try {
-                    payload = line({ error: wireErrorShape(error, label) });
+                    payload = line({ error: wireErrorShape(error, label, options.maxResponseBytes) });
                 } catch {
                     // Even the error shape was unserializable (ServerFnError
                     // data with a BigInt, …) — fall back to the masked form.

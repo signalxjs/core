@@ -120,10 +120,13 @@ options form with an `input` schema. In dev, a function that receives wire
 input it has no validator for logs a once-per-function warning — the
 direct form always (its types are compile-time only), the options form
 when `input` is omitted. Declaring `input` is what resolves both.
-`serverStream` has an options form too — `use` and `unguarded`, so a stream
-can declare a guard chain (see below) — but deliberately no `input`: a stream
-takes many arguments and has no single-input shape to validate. Validate at the
-top of the generator (any Standard Schema validates standalone).
+`serverStream` has an options form too, in two shapes: declaring `input`
+selects the single-input shape — `serverFn`'s semantics exactly, validated
+after the guard chain and before the first chunk on every transport (a wire
+rejection is a buffered JSON 400, never a streamed byte) — while omitting it
+keeps the multi-argument shape (`use` and `unguarded` only), where many
+arguments have no single-input schema and validation belongs at the top of
+the generator (any Standard Schema validates standalone).
 
 ### Shared middleware — `serverFnPreset`
 
@@ -204,8 +207,8 @@ because it makes the open surface greppable:
 open endpoint, which is a list a security review can read.
 
 Since the declaration channel is the options form, a function that needs to
-declare uses the options form (`serverStream` has one for exactly this — `use`
-and `unguarded`, no `input`; validate stream arguments in the generator).
+declare uses the options form (`serverStream` has one too — `use` and
+`unguarded`, plus an optional single-input `input` shape, #572).
 Writing `unguarded: true` on a **preset-derived** function throws at
 definition time: the preset's guards still run, so the declaration would be
 false.
@@ -413,6 +416,27 @@ iteration with the branded wire error (masked in prod unless it's a
 `ServerFnError`). One caveat vs `serverFn`'s buffered JSON: response
 headers and status freeze at the **first yield** — set them before it.
 
+A stream whose argument shapes a query belongs in the single-input options
+form (#572) — `serverFn`'s `input` semantics exactly:
+
+```ts
+export const explain = serverStream({
+    input: ExplainKey,        // Standard Schema — Zod/Valibot/ArkType
+    handler: async function* (rq, key) {
+        // `key` is the VALIDATED value
+        for await (const token of llm.explain(key)) yield token;
+    }
+});
+```
+
+Validation runs after the guard chain and **before the first chunk**, on
+every transport: over the wire a rejection is a buffered JSON
+`400 { issues }` — headers still writable, no stream byte sent — and
+in-process it rejects on the first pull, exactly where a guard veto does.
+With `input` declared the stream takes one argument (extras are a 400).
+Multi-argument streams keep the `use`/`unguarded`-only options form and
+validate at the top of the generator.
+
 A stream carries the same `.with()` per-call channel as a `serverFn`
 (minus `fresh` — a stream is never HTTP-cached), so an SSR-time stream can
 be handed the real request and a client stream can add one-off headers:
@@ -493,7 +517,8 @@ supplied one is a bug worth seeing, not a silent `undefined`.
 `context` accepts a `Request` or a partial `ServerFnContext` (to set `locals`,
 say). Passing `{ request, locals }` — the **same object** on each call — shares
 one request store across explicit calls; a fresh `Request` per call is its own
-store, which is how a test isolates two calls with no framework ceremony. A supplied `Request` also supplies `rq.abortSignal`, so wire its signal
+store, which is how a test isolates two calls with no framework ceremony
+(`createTestServerFnContext()` below builds those objects ready-made). A supplied `Request` also supplies `rq.abortSignal`, so wire its signal
 to the client disconnect (`res.once('close', …)` under Node) and SSR-time work
 stops when the client goes away. `rq.responseHeaders`/`rq.status()` stay inert
 either way: there is no
@@ -593,6 +618,48 @@ write `rq.locals.x` and have the handler read it. Reach for a per-request value
 first: it types itself from its own setup, and the accessor is the only way to
 get at it, so there is nothing to cast.
 
+### Testing — `@sigx/server/testing`
+
+Two helpers close the two gaps unit tests hit; everything else already
+exists as public surface (#570):
+
+```ts
+import { createTestServerFnContext, stampServerFnKey } from '@sigx/server/testing';
+
+// A real, Request-backed context — rq.request/rq.url never throw, and
+// rq.status(code) RECORDS instead of warning:
+const ctx = createTestServerFnContext();                 // http://localhost/
+const alice = createTestServerFnContext({ locals: { user: 'alice' } });
+const posted = createTestServerFnContext(new Request('https://example.com/cart'));
+
+// Guard chains need NO new invoker — fn.with({ context }) runs the whole
+// in-process pipeline: preset guards, use chain, arity gate, input schema.
+await expect(secret.with({ context: ctx })()).rejects.toMatchObject({ status: 401 });
+await expect(secret.with({ context: alice })()).resolves.toBe('data');
+
+// Assert what the handler did to the response:
+ctx.statusCode;                    // the last rq.status(code), or undefined
+ctx.responseHeaders.get('set-cookie');
+```
+
+Isolation is the store-identity rule above, ready-made: one factory context
+across several `fn.with({ context: ctx })` calls is **one** request
+(`perRequest` values shared, memoized once); two factory calls are two
+requests. Wire-path behavior (the endpoint `guard`, codecs, form parsing,
+status codes) is tested the way this repo tests it — hand a `Request` to
+`handleServerFnRequest` with a `resolve` that returns your function.
+
+`stampServerFnKey(fn, key?)` mints the build stamp `useData(fn)` requires
+(`__sigxKey`, defaulting to `test/<name>`, plus `__sigxGuardChecked`) on
+the SAME function — identity is load-bearing, so it mutates rather than
+wraps. Without it, `useData(fn)` dev-throws in unit tests because the key
+is stamped by the Vite transform, which a test run does not have. Streams
+are rejected: a stream is not a `useData` target.
+
+The helpers are test-*oriented*, not dev-only — they behave identically
+against the prod dists (only the defensive throws strip), so a test run
+against production bundles does not change context semantics.
+
 ## The endpoint
 
 `POST /_sigx/fn/<symbol>` with `{"args": [...]}` → `{"data": ...}` or
@@ -655,13 +722,14 @@ A non-default `base` whose entry still calls `matchesServerFn(request)` is a
 build-time warning, and a request that reaches a handler its base does not
 describe is a `__DEV__` warning beside the 404.
 
-### Request caps — `maxBodyBytes` and `maxUrlBytes`
+### Size caps — `maxBodyBytes`, `maxUrlBytes`, and `maxResponseBytes`
 
 ```js
 createServerFnHandler({
     functions: serverFns,
     maxBodyBytes: 1_048_576,   // default 1 MiB — enforced WHILE reading; 413 over it
-    maxUrlBytes: 8_192         // default 8 KiB — a GET read's query string; 414 over it
+    maxUrlBytes: 8_192,        // default 8 KiB — a GET read's query string; 414 over it
+    maxResponseBytes: 5_242_880 // OUTBOUND cap — default unlimited (opt-in)
 });
 ```
 
@@ -673,10 +741,26 @@ diagnosable. The client stub independently warns in `__DEV__` above ~2 KiB of
 arguments — arguments that large make a poor cache key, which is the real signal
 to drop `cache` and let the read POST.
 
-`handleServerFnRequest` (WinterCG) enforces both directly. The two layers that
-WRAP it — `createServerFnHandler` (Node) and the `sigxServer()` dev middleware,
-which goes through that adapter — each hand-listed the options they passed
-down, and each silently dropped `maxUrlBytes` that way: #545/#547 at the
+`maxResponseBytes` (#571) is the outbound analog — the ceiling a fn that
+returns an unbounded result (an unfiltered query, a runaway generator)
+otherwise doesn't have. It measures actual UTF-8 bytes, and what happens
+over it depends on where the bytes were going:
+
+| Over the cap | The caller sees |
+|---|---|
+| buffered envelope (POST or GET read) | masked 500 — a server fault, surfaced to `onError` |
+| `ServerFnError.data` | the error intact, `data` dropped (dev-warned; `onError` NOT fired — the fn's own throw is still the story) |
+| stream chunks (cumulative) | first chunk: buffered 500; later: the in-band `{"error"}` line, generator disposed, `onError` fired |
+| form 303 | nothing — no body to cap |
+
+Default unlimited, deliberately: this is operator hygiene (memory, egress),
+not an attacker-facing defense, and an imposed default would break existing
+large reads.
+
+`handleServerFnRequest` (WinterCG) enforces all three directly. The two layers
+that WRAP it — `createServerFnHandler` (Node) and the `sigxServer()` dev
+middleware, which goes through that adapter — each hand-listed the options they
+passed down, and each silently dropped `maxUrlBytes` that way: #545/#547 at the
 adapter, #561 at the dev middleware. Both now derive their option type from
 `ServerFnRequestOptions` and forward by spread, so an option added to the
 endpoint reaches every mount without being copied anywhere.
@@ -702,6 +786,63 @@ app.use(createServerFnHandler({
 
 `ServerFnError`s are expected, client-visible errors — they do not fire
 `onError`. Prod masking is unchanged: the caller still sees a generic 500.
+
+### Rate limiting — a guard, not an option
+
+There is deliberately no `rateLimit` endpoint option, and there will not be
+one: anything mounted at the endpoint is **wire-only by construction** (an
+in-process SSR call never enters the handler), which is the exact transport
+asymmetry the definition-level guard chain exists to correct — the same
+reasoning that declined an `onFinish` endpoint hook (rfc-server-v3 §2.6).
+A rate limiter **is a guard**:
+
+```ts
+// src/guards.ts — a token bucket per principal, in module state
+const buckets = new Map<string, { tokens: number; at: number }>();
+
+export const rateLimit: ServerFnGuard = (rq, fn) => {
+    if (fn.symbol === '') return;          // in-process (SSR) call — never throttle your own renders
+    const user = rq.locals.user as string | undefined;
+    const key = `${user ?? 'anon'}:${fn.symbol}`;   // per-user, per-function
+    const now = Date.now();
+    const b = buckets.get(key) ?? { tokens: 10, at: now };
+    b.tokens = Math.min(10, b.tokens + ((now - b.at) / 1000) * 2);  // 2/s, burst 10
+    b.at = now;
+    if (b.tokens < 1) throw new ServerFnError(429, 'Too many requests');
+    b.tokens -= 1;
+    buckets.set(key, b);
+};
+
+const authed = serverFnPreset({ use: [requireUser, rateLimit] });
+```
+
+The pieces that make this correct:
+
+- **`fn.symbol === ''` is the transport discriminator** — a documented
+  contract, not a trick: the symbol exists only where a transport does.
+  `use:` chains run on EVERY transport (that is their point), so the
+  wire-only decision belongs *inside* the guard body. Without that line,
+  one SSR page rendering five cells burns five tokens of its own budget.
+  Auth guards must NOT carry this gate — auth holds everywhere.
+- **Key off `rq.locals`/`perRequest`** (seeded by an upstream auth guard)
+  for per-user limits; fold in `fn.symbol` for per-function buckets. For
+  unauthenticated surfaces, key off headers — read `rq.request` behind
+  `try/catch`, because a detached in-process context throws there and
+  fail-open is exactly right for renders.
+- **Streams are covered for free** — guards run before the first pull on
+  every transport, so admission-style limiting applies to `serverStream`
+  unchanged. A *concurrency* cap (increment on admit, decrement on finish)
+  releases through `perRequest`'s `onDispose` (#571): admit in a setup,
+  register the decrement, and it fires when the response has fully flushed —
+  streams included (see *Per-request values*). A generator's own `finally`
+  still works where the cap lives entirely inside one handler.
+- **Cost accounting**: a guard sees `(rq, fn)` but never the arguments
+  (deliberate — arguments are pre-validation there). Charge by input weight
+  at the top of the handler instead, debiting a `perRequest` bucket the
+  guard admitted.
+- The endpoint `guard` option remains the right place for a **wire-level
+  backstop** across every function this endpoint serves — it is documented
+  wire-only, and that is its job description.
 
 ### Cancellation — `.with({ signal })`
 
@@ -780,7 +921,7 @@ and `ServerFnError.data` — with no configuration:
 | plain objects, arrays, primitives | ✅ unchanged |
 | **circular structures** | ❌ an error — the one shape that fails LOUDLY |
 | class instances | ❌ arrive as plain objects, prototype gone (register a handler) |
-| `Uint8Array` / typed arrays / `ArrayBuffer` | ❌ arrive as `{"0":…,"1":…}` |
+| `Uint8Array` / typed arrays / `ArrayBuffer` | opt-in — register `bytesHandler` from `@sigx/serialize/bytes` (#569); unregistered they arrive as `{"0":…,"1":…}` |
 | `Error` | ❌ arrives as `{}` — message and stack are not own enumerable props |
 | `Promise` | ❌ arrives as `{}` (a missing `await`) |
 | `NaN` / `±Infinity` | ❌ arrive as `null` |
@@ -828,6 +969,14 @@ App-less contexts (an endpoint-only process, a zero-JS loader page) use
 `globalThis.__SIGX_SERVERFN_CODEC__` seam tag-keyed (the same global-seam
 pattern `$cache` uses, so the stub entry stays dependency-free; stamping
 the global directly still works).
+
+Binary is the one rich type that ships ready-made rather than built in:
+`bytesHandler` from `@sigx/serialize/bytes` (#569) round-trips `Uint8Array`
+(and every typed-array kind, `DataView`, bare `ArrayBuffer`) as base64 —
+add it to the same `types` array. Opt-in because the codec entry is
+size-budgeted into every client bundle; files still arrive inbound via
+`form: true` (a `File` reaches the handler), and with the handler
+registered the return path carries bytes too.
 
 The plugin also carries the stub transport (`configureServerFn`'s options,
 app-scoped with teardown): `serverPlugin({ transport: { endpoint, headers,
@@ -963,6 +1112,8 @@ Every server function is a public HTTP endpoint; the defaults assume that:
 | `@sigx/server/client` | any client (browser, lynx, terminal) | the generated stubs' runtime + `configureServerFn` (dependency-free) |
 | `@sigx/server/server` | anywhere (WinterCG) | `handleServerFnRequest(request, options)` |
 | `@sigx/server/node` | Node | `createServerFnHandler(options)` — connect-style |
+| `@sigx/server/plugin` | app setup (any side) | `serverPlugin({ transport, types })` + `registerWireTypeHandlers` |
+| `@sigx/server/testing` | tests (server-side) | `createTestServerFnContext`, `stampServerFnKey` (#570) |
 
 The runnable example is `examples/resume` (the "server function from a
 resumed handler" card).
