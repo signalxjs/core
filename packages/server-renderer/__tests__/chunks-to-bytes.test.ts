@@ -53,3 +53,36 @@ describe('chunksToBytes', () => {
         await expect(reader.read()).rejects.toThrow('mid-stream');
     });
 });
+
+describe('chunksToBytes — onSettled (rfc-server-v3 §2.6, #571)', () => {
+    it('fires exactly once on normal close', async () => {
+        let settled = 0;
+        const stream = chunksToBytes(gen(['a', 'b']), () => void settled++);
+        await readAll(stream);
+        expect(settled).toBe(1);
+    });
+
+    it('fires exactly once on a generator error', async () => {
+        let settled = 0;
+        async function* failing(): AsyncGenerator<string> {
+            yield 'ok';
+            throw new Error('mid-stream');
+        }
+        const stream = chunksToBytes(failing(), () => void settled++);
+        await expect(readAll(stream)).rejects.toThrow('mid-stream');
+        expect(settled).toBe(1);
+    });
+
+    it('fires exactly once on cancel', async () => {
+        let settled = 0;
+        const stream = chunksToBytes(gen(['a', 'b', 'c']), () => void settled++);
+        const reader = stream.getReader();
+        await reader.read();
+        await reader.cancel();
+        expect(settled).toBe(1);
+    });
+
+    it('absent callback: behavior unchanged', async () => {
+        expect(await readAll(chunksToBytes(gen(['x'])))).toBe('x');
+    });
+});

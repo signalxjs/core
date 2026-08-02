@@ -20,6 +20,7 @@
  */
 
 import type { ServerFnContext, ServerFnContextInit } from './context';
+import { addScopeKeepAlive, claimDisposalOwnership, settleAndDispose } from './per-request';
 
 /** What a scope can be opened with. */
 export type ScopeSource = ServerFnContextInit | NodeRequestLike;
@@ -46,6 +47,17 @@ export interface NodeRequestLike {
  */
 export interface ServerFnScope {
     run<T>(source: ScopeSource, fn: () => T | Promise<T>): T | Promise<T>;
+    /**
+     * Extend the CURRENT scope's disposal past `run()`'s settle
+     * (rfc-server-v3 §2.6, phase 5, #571): request-value disposal waits for
+     * `until` too. The streaming fetch handler calls this with a promise
+     * resolved on body close/error/cancel, from inside `run()` before its
+     * `fn` resolves — the ALS store outlives `run()`'s settle, so run-settle
+     * alone is not a valid disposal trigger for a streamed edge response.
+     * No-op outside any scope or where no ALS store exists. Multiple calls
+     * accumulate; disposal waits for all of them.
+     */
+    keepAlive(until: Promise<unknown>): void;
 }
 
 /**
@@ -327,26 +339,98 @@ export function runInScope<T>(source: ScopeSource, fn: () => T | Promise<T>): T 
         return ensureContextStore().then((store) => {
             // No ALS: nothing encloses anything, so there is nothing to merge
             // and no notice to give — this runtime never had a scope to nest in.
-            if (!store) return fn();
-            return store.run(toScopeInit(source, store.getStore()), fn);
+            if (!store) return runUnscoped(source, fn);
+            return runOwning(store, toScopeInit(source, store.getStore()), fn);
         });
     }
+    if (_store === null) return runUnscoped(source, fn);
     // Only with a store: stamping in the `null` case would write `undefined`
     // over a seam some other copy of this module may legitimately own.
-    if (_store === null) return fn();
     stampResolver();
     // `getStore()` reads the CALLER's scope, which is what makes the nested
     // merge in `toScopeInit` work. Reading it synchronously is strictly more
     // faithful than the await this used to sit behind: AsyncLocalStorage
     // follows async continuations, so the value was the same either way, but
     // now there is no continuation between the caller and the read.
-    return _store.run(toScopeInit(source, _store.getStore()), fn);
+    return runOwning(_store, toScopeInit(source, _store.getStore()), fn);
+}
+
+/**
+ * Enter the store and, when this entry CLAIMED the request store, hang
+ * disposal off the work's real settle (rfc-server-v3 §2.6, phase 5).
+ *
+ * A nested merged scope reuses the enclosing `locals` (already claimed), so
+ * only the outermost entry — or an inner scope carrying its own bag —
+ * disposes. A store someone else claimed first (the endpoint's context) is
+ * left entirely alone. The side hook wraps the result without touching it:
+ * the `T | Promise<T>` sync-return contract (#544) is preserved, and
+ * `settleAndDispose` carries its own catch so it can never surface as an
+ * unhandled rejection.
+ */
+function runOwning<T>(
+    store: ContextStore,
+    init: Partial<ServerFnContext>,
+    fn: () => T | Promise<T>
+): T | Promise<T> {
+    const owns = init.locals ? claimDisposalOwnership(init.locals) : false;
+    let result: T | Promise<T>;
+    try {
+        result = store.run(init, fn);
+    } catch (error) {
+        if (owns) settleAndDispose(init.locals as object, Promise.resolve());
+        throw error;
+    }
+    if (owns) settleAndDispose(init.locals as object, Promise.resolve(result).then(() => undefined, () => undefined));
+    return result;
+}
+
+/**
+ * No ALS — the render runs unscoped, but a source that carries its OWN
+ * `locals` bag (the documented pre-seed recipe, the endpoint's context)
+ * still deserves disposal at settle: the values in that bag were computed
+ * for this request whether or not a scope propagated it.
+ */
+function runUnscoped<T>(source: ScopeSource, fn: () => T | Promise<T>): T | Promise<T> {
+    const init = toContextInit(source);
+    const locals = init instanceof Request ? undefined : init.locals;
+    const owns = locals ? claimDisposalOwnership(locals) : false;
+    let result: T | Promise<T>;
+    try {
+        result = fn();
+    } catch (error) {
+        if (owns) settleAndDispose(locals as object, Promise.resolve());
+        throw error;
+    }
+    if (owns) settleAndDispose(locals as object, Promise.resolve(result).then(() => undefined, () => undefined));
+    return result;
+}
+
+/**
+ * The seam's `keepAlive` — resolves the CURRENT scope's store off the ALS
+ * and extends its disposal. Deliberately forgiving: outside any scope, with
+ * no ALS, or before the store resolves it is a silent no-op (the caller is
+ * an optional pack reaching through a global; absence of effect is the
+ * documented degraded state, matching an older `@sigx/server` that has no
+ * `keepAlive` at all).
+ */
+function keepAliveScope(until: Promise<unknown>): void {
+    const locals = _store?.getStore()?.locals;
+    if (!locals) return;
+    addScopeKeepAlive(locals, until);
 }
 
 // The seam. Stamped at IMPORT, unlike `__SIGX_SERVERFN_CONTEXT__` (which
 // cannot exist before a scope does): `@sigx/server-renderer` must be able to
 // ask "can I open a scope?" on the first request, and every server entry
-// imports this module transitively.
-((globalThis as { __SIGX_SERVERFN_SCOPE__?: ServerFnScope }).__SIGX_SERVERFN_SCOPE__ ??= {
-    run: runInScope
-});
+// imports this module transitively. `keepAlive` is patched onto an already
+// stamped seam object too — in dev two module copies can race the stamp, and
+// the older copy's object must still grow the newer method (readers
+// feature-detect it either way; docs/seams.md).
+{
+    const seam = ((globalThis as { __SIGX_SERVERFN_SCOPE__?: ServerFnScope })
+        .__SIGX_SERVERFN_SCOPE__ ??= {
+        run: runInScope,
+        keepAlive: keepAliveScope
+    });
+    seam.keepAlive ??= keepAliveScope;
+}

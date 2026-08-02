@@ -32,6 +32,14 @@
  */
 interface ServerFnScope {
     run<T>(source: unknown, fn: () => T | Promise<T>): T | Promise<T>;
+    /**
+     * OPTIONAL — an older `@sigx/server` stamped a seam without it, and that
+     * pairing stays supported (its degraded state is exactly the pre-disposal
+     * behavior). Extends the current scope's request-value disposal past
+     * `run()`'s settle: disposal waits for `until` too (rfc-server-v3 §2.6,
+     * phase 5). Callers feature-detect; never assume presence.
+     */
+    keepAlive?(until: Promise<unknown>): void;
 }
 
 /**
@@ -51,6 +59,28 @@ interface ServerFnScope {
  * the scope is at fault and the render is retried unscoped — whether `run`
  * threw synchronously or rejected later.
  */
+/**
+ * Extend the CURRENT server-function scope's disposal until `until` settles
+ * (rfc-server-v3 §2.6, phase 5): the streaming fetch handler calls this with
+ * a promise resolved on body close/error/cancel, from inside the scope,
+ * BEFORE returning its Response — the scope's `run()` settles at the shell,
+ * and request values must outlive the shell by exactly the body.
+ *
+ * Feature-detecting pass-through: with no scope registered, or one from an
+ * older `@sigx/server` without `keepAlive`, this is a supported no-op — the
+ * degraded state is the pre-disposal behavior. Its own try/catch: a broken
+ * seam must never fail a document.
+ */
+export function keepAliveServerFnScope(until: Promise<unknown>): void {
+    const scope = (globalThis as { __SIGX_SERVERFN_SCOPE__?: ServerFnScope }).__SIGX_SERVERFN_SCOPE__;
+    if (!scope || typeof scope.keepAlive !== 'function') return;
+    try {
+        scope.keepAlive(until);
+    } catch {
+        // Absence of effect is the supported degraded state.
+    }
+}
+
 export async function withServerFnScope<T>(source: unknown, fn: () => T | Promise<T>): Promise<T> {
     const scope = (globalThis as { __SIGX_SERVERFN_SCOPE__?: ServerFnScope }).__SIGX_SERVERFN_SCOPE__;
     if (!scope) return fn();

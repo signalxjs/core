@@ -19,7 +19,7 @@ import type { DocumentOptions } from './document';
 import { defaultSSR } from './render-api';
 import { defaultIsBot } from './bot';
 import { chunksToBytes } from './bytes';
-import { withServerFnScope } from './serverfn-scope';
+import { keepAliveServerFnScope, withServerFnScope } from './serverfn-scope';
 
 export interface FetchHandlerOptions<TPlatform = unknown> {
     /**
@@ -160,7 +160,19 @@ export function createFetchHandler<TPlatform = unknown>(
                     });
                 }
 
-                return new Response(chunksToBytes(chunks), {
+                // Request-value disposal must wait for the BODY, not the
+                // shell: this scope's run() settles the moment the Response
+                // is constructed, while `useData` fetchers keep settling
+                // into the stream (rfc-server-v3 §2.6). keepAlive is
+                // registered BEFORE the Response leaves, and the promise
+                // resolves on whichever ending the body reaches — close,
+                // error, or client cancel. The redirect and shell-error
+                // branches register nothing: run()-settle disposal is
+                // correct where there is no body.
+                let settle!: () => void;
+                const until = new Promise<void>((resolve) => (settle = resolve));
+                keepAliveServerFnScope(until);
+                return new Response(chunksToBytes(chunks, settle), {
                     status: head.status,
                     headers: {
                         'content-type': 'text/html; charset=utf-8',

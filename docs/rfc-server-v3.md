@@ -526,6 +526,37 @@ token to the memoized value. Consequences:
 
 ### 2.6 Disposal is deferred from v1 — deliberately
 
+> **Status: SHIPPED as phase 5 (#571).** The design below landed exactly as
+> sketched, plus the pieces it left open, now decided and pinned by tests:
+>
+> - **Ownership is claim-based, first-claimer-wins, per store** (the `locals`
+>   bag). The endpoint claims its context before opening a scope, so it owns
+>   with or without AsyncLocalStorage; `runInScope` claims any unclaimed
+>   store it enters (a nested same-request merge reuses the enclosing bag —
+>   already claimed — so only the outermost entry disposes, and the
+>   documented pre-seed recipe gets disposal for free); a
+>   `fn.with({ context })`/detached store has no owner — GC only, dev-warned,
+>   with the public `disposeRequestValues(rq)` as the app's own trigger.
+>   Disposal releases ownership (a deliberately reused bag is claimed afresh
+>   by the next scope entry) but leaves `disposed` sticky until that claim,
+>   so a straggler from the dead request — a fetcher settling after a client
+>   cancel — runs its disposer immediately instead of parking forever.
+> - **`onDispose` is the setup's second parameter**:
+>   `perRequest((rq, onDispose) => { onDispose(() => conn.release()); … })` —
+>   additive, existing setups compile unchanged. Disposers run LIFO, each
+>   awaited, throws logged and swallowed; disposal clears the memo map.
+> - **Stream terminals dispose AFTER the generator's `return()` settles**, so
+>   a `finally` reading a per-request value never races its own teardown; a
+>   stream that lost the `timeoutMs` race has its body cancelled at the work
+>   promise's settle, which drives the same chain.
+>
+> Proof-tests: `packages/server/__tests__/disposal.test.ts`,
+> `packages/server-renderer/__tests__/disposal-keepalive.test.tsx` (the
+> motivating end-of-body pin, as a real cross-package integration), plus the
+> `chunks-to-bytes`/`serverfn-scope`/`node-adapter` additions. The section
+> below is preserved as the reasoning of record for WHY the shape is what it
+> is.
+
 Requirement 4 is where every hard part lives, and F-A means it cannot be
 delivered honestly yet:
 
@@ -738,13 +769,18 @@ Each phase is independently mergeable, and owes the tests named beside it.
    preset-derived / `use` / `unguarded` all pass; a `serverStream` is held to the
    same rule; the preset contradiction throws at definition time; `'warn'` warns
    without failing and `false` opts out.
-5. **Disposal + `keepAlive` (§2.6, F-A, F-C)** — only after the contract
-   extension exists.
-   *Proves:* disposal after a normal stream, an **empty** generator, a
-   mid-stream throw, and a cancel; after a buffered JSON response, a form 303, a
-   masked 500 and a guard veto; that a `timeoutMs` 504 does not dispose ahead of
-   the settling handler; and — the one that motivated all of it — that a
-   **streamed edge response** disposes at end-of-body, not at the shell.
+5. **Disposal + `keepAlive` (§2.6, F-A, F-C)** — LANDED (#571).
+   *Proved,* in `packages/server/__tests__/disposal.test.ts` and
+   `packages/server-renderer/__tests__/disposal-keepalive.test.tsx`:
+   disposal after a normal stream, an **empty** generator, a mid-stream
+   throw, and a cancel; after a buffered JSON response, a form 303, a
+   masked 500 and a guard veto; that a `timeoutMs` 504 does not dispose
+   ahead of the settling handler; and — the one that motivated all of it —
+   that a **streamed edge response** disposes at end-of-body, not at the
+   shell (a real cross-package integration, not a seam simulation). Plus
+   the ordering pin (a generator's `finally` completes before the store's
+   disposers) and the version-skew pin (a seam without `keepAlive` is a
+   supported no-op).
 
 One pin belongs to no phase and should land with the first: an explicit test
 that the endpoint `guard` does **not** run for an in-process call, citing §1.1,

@@ -222,12 +222,24 @@ can hold two copies of the same module — the same hazard that makes
 |---|---|
 | **Stamped by** | `server/src/scope.ts`, at IMPORT (every server entry pulls it) |
 | **Called by** | `server-renderer/src/server/serverfn-scope.ts` — both document handlers |
-| **Contract** | `{ run<T>(source: Request \| IncomingMessage \| Partial<ServerFnContext>, fn: () => T \| Promise<T>): T \| Promise<T> }` |
+| **Contract** | `{ run<T>(source: Request \| IncomingMessage \| Partial<ServerFnContext>, fn: () => T \| Promise<T>): T \| Promise<T>; keepAlive?(until: Promise<unknown>): void }` |
 
 The other half of the pair above: `__SIGX_SERVERFN_CONTEXT__` says what the
 ambient request IS, this one OPENS the scope that sets it. The handlers wrap
 each render in `run()`, so a `serverFn` called during SSR reads the real
 request with no wiring in the app.
+
+`keepAlive` (rfc-server-v3 §2.6, phase 5, #571) extends the CURRENT scope's
+request-value disposal past `run()`'s settle: the streaming fetch handler
+calls it — from inside `run()`, before returning its Response — with a
+promise resolved on body close/error/cancel, so disposal fires at
+end-of-body instead of at the shell. Calls accumulate per store; disposal
+waits for all of them. **OPTIONAL on both sides**: an older `@sigx/server`
+stamps a seam without it and a newer renderer feature-detects (that pairing
+degrades to pre-disposal behavior — supported); the newer stamp also patches
+`keepAlive` onto an already-stamped seam object, covering dev's dual-module
+copies. Outside any scope, or with no ALS store, `keepAlive` is a silent
+no-op.
 
 Stamped at import rather than on first scope, because the renderer has to know
 it can open one BEFORE any scope exists. **Absence is a supported state** —

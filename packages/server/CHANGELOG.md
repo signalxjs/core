@@ -2,6 +2,37 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Request-value disposal — `perRequest` `onDispose`, `disposeRequestValues`,
+  and the scope `keepAlive` seam (rfc-server-v3 §2.6, phase 5, #571).** A
+  setup's second parameter registers teardown
+  (`perRequest((rq, onDispose) => { onDispose(() => conn.release()); … })`);
+  disposers run LIFO, each awaited, throws logged and swallowed, when the
+  request is REALLY over: the endpoint disposes at the work promise's settle
+  (never the `timeoutMs` race — a 504 does not yank resources from a
+  still-settling handler), each of a stream's terminal paths disposes after
+  the generator's `return()` settles (a `finally` reading a per-request
+  value never races its own teardown), and a streamed edge response
+  disposes at END-OF-BODY: `__SIGX_SERVERFN_SCOPE__` gained an optional
+  `keepAlive(until)` the fetch handler calls with a body-settle promise
+  (docs/seams.md; absence stays supported — an older package beside a newer
+  renderer degrades to pre-disposal behavior, and vice versa). Ownership is
+  claim-based per store: endpoint first, then the outermost scope entry; a
+  `fn.with({ context })`/detached store has no owner (dev-warned) and the
+  new public `disposeRequestValues(rq)` is the app's own trigger.
+
+### Changed
+
+- **`runInScope` now disposes the request stores it owns at settle (#571).**
+  Disposal clears the `perRequest` memo, so an app that deliberately reuses
+  ONE `locals` bag across sequential scoped renders
+  (`runWithServerFnContext({ request, locals }, …)` in a loop) now sees
+  setups re-run per render instead of a single memoized value spanning all
+  of them — which is what "per-request" always claimed. Within one render,
+  nothing changes; workarounds that re-seeded a fresh bag per render keep
+  working unchanged.
+
 ### Fixed
 
 - **The browser entry's type re-export list was unreachable, and completing it

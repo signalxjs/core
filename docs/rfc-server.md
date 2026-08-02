@@ -361,10 +361,12 @@ Notes:
 > twin (`preset.stream`) and the direct form gains a guard seam it does not have
 > today, plus `unguarded: true` and the `requireGuards` build gate — which
 > defaults to **on** (#506), so every `serverFn` and `serverStream` must declare
-> a chain, a preset, or `unguarded: true`. The bullet below claiming post-handler
-> concerns "ride a request-scoped service whose `onDispose` fires when the
-> response has fully flushed" is **withdrawn** until disposal ships — see v3
-> §2.6, which also records why no wire-only `onFinish` fills the gap meanwhile.
+> a chain, a preset, or `unguarded: true`. The bullet below about post-handler
+> concerns is now TRUE again in its landed form (v3 §2.6, phase 5, #571):
+> `perRequest`'s `onDispose` fires when the response has fully flushed —
+> streams and edge bodies included, via the scope's `keepAlive` — on the
+> transports that own a store; `fn.with({ context })`/detached calls remain
+> owner-less (`disposeRequestValues` is the app's trigger there).
 
 The tRPC idiom everybody copies is `protectedProcedure` — a derived
 builder carrying the auth middleware. The sigx-shaped version is a
@@ -414,14 +416,12 @@ export function serverFnPreset(base: { use: ServerFnGuard[] }): typeof serverFn;
   Post-handler concerns are already structural — `invalidates`
   (§6.2/§6.3), `Cache-Control` (§4.1), `onError` + `timeoutMs`
   (endpoint options). Cross-cutting *around* needs (timing, tracing
-  spans) have **no framework answer today**: this bullet used to promise
-  they would ride a request-scoped service's `onDispose`, and that
-  mechanism is not shipping in the form described (`rfc-server-v3.md` §2.2
-  and §2.6 — the disposal contract could not be honored on WinterCG, where
-  the fetch handler settles its scope at the shell). Until request-value
-  disposal lands (v3 phase 5), teardown belongs in the app's own handler,
-  which already owns the request. Extending the guard signature stays off
-  the table either way.
+  spans) ride `perRequest`'s `onDispose` (v3 §2.6, phase 5, #571): start
+  the span in the setup, register its close, and disposal fires when the
+  response has fully flushed — WinterCG streams included, via the scope's
+  `keepAlive` — on the transports that own a store. Not the two-lifetime
+  `defineServerService` (§2.2 records why that stayed rejected), and
+  extending the guard signature stays off the table either way.
 - Companion guardrail (same milestone): the transform warns when a
   `serverFn({ … })` options literal contains a spread — `id`, `cache`,
   and `invalidates` inside a spread are invisible to the static reads
