@@ -98,6 +98,15 @@ const KINDS: readonly (readonly [string, ViewCtor])[] = [
 export type BytesWire = string | [kind: string, b64: string];
 export type Bytes = ArrayBuffer | ArrayBufferView;
 
+/**
+ * A view backed by a SharedArrayBuffer is NOT claimed: it would revive as an
+ * ArrayBuffer-backed view — bytes preserved, shared-ness silently lost — and
+ * claiming it would also silence the #565 warning for a value this module's
+ * own scope declares unsupported.
+ */
+const sharedBacked = (v: ArrayBufferView): boolean =>
+    typeof SharedArrayBuffer !== 'undefined' && v.buffer instanceof SharedArrayBuffer;
+
 export const bytesHandler = {
     name: 'bytes',
     tag: '$bytes',
@@ -105,7 +114,7 @@ export const bytesHandler = {
     // #565 warning flags, so anything still unclaimed keeps warning.
     test: (v: unknown): boolean =>
         v instanceof ArrayBuffer ||
-        (ArrayBuffer.isView(v) && KINDS.some(([, C]) => v instanceof C)),
+        (ArrayBuffer.isView(v) && !sharedBacked(v) && KINDS.some(([, C]) => v instanceof C)),
     serialize: (v: Bytes): BytesWire => {
         if (v instanceof ArrayBuffer) return ['ArrayBuffer', toBase64(new Uint8Array(v))];
         // The view's WINDOW, not the whole buffer.

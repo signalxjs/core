@@ -218,6 +218,11 @@ describe('degradation and structure', () => {
         expect(bytesHandler.test([1, 2])).toBe(false);
         if (typeof SharedArrayBuffer !== 'undefined') {
             expect(bytesHandler.test(new SharedArrayBuffer(4))).toBe(false);
+            // The sharper case: a VIEW backed by a SAB passes instanceof
+            // Uint8Array — claiming it would revive to an ArrayBuffer-backed
+            // view, silently losing shared-ness, and silence the #565 warning.
+            expect(bytesHandler.test(new Uint8Array(new SharedArrayBuffer(4)))).toBe(false);
+            expect(bytesHandler.test(new DataView(new SharedArrayBuffer(4)))).toBe(false);
         }
     });
 });
