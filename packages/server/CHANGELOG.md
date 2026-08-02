@@ -31,6 +31,21 @@
   verbatim) and marks the §5 guard-asymmetry pin as landed in
   `handler.test.ts`.
 
+- **`serverStream` gained a single-input options form — declarative `input`
+  validation for streams (#572).** Declaring `input` (any Standard Schema —
+  Zod/Valibot/ArkType) selects a `serverFn`-shaped single-input handler:
+  the schema runs after the guard chain and **before the first chunk**, on
+  every transport. Over the wire a rejection is a buffered JSON
+  `400 { issues }` (headers still writable, no stream byte sent); in-process
+  it rejects on the first pull, exactly where a guard veto surfaces. With
+  `input` declared the stream takes one argument — extra wire args are a
+  400 — and the validated value (not the raw wire arg) reaches the handler.
+  The multi-argument options form (`use`/`unguarded` only) is unchanged, and
+  omitting `input` never falls back to the handler's annotation: no `input`
+  means the multi-argument form. The once-per-fn unvalidated-wire-args dev
+  warning now names the `input` form as the primary remedy and no longer
+  fires for streams that declare one.
+
 ### Fixed
 
 - **The browser entry's type re-export list was unreachable, and completing it

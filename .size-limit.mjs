@@ -35,6 +35,15 @@ export default [
     limit: '1 KB',
   },
   {
+    // Opt-in binary vocabulary (#569). Its own entry pins the handler's size
+    // AND — because the root entry above is untouched — proves that NOT
+    // opting in still costs zero. No ignore list; the module is
+    // runtime-self-contained (type-only import of the root).
+    name: '@sigx/serialize/bytes (opt-in binary handler)',
+    path: 'packages/serialize/dist/bytes.prod.js',
+    limit: '1 KB',
+  },
+  {
     // public entry + /internals (createRenderer & co.) — see the fixture.
     name: '@sigx/runtime-core (incl. renderer internals)',
     path: 'scripts/size/runtime-core-with-internals.mjs',

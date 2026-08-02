@@ -6,6 +6,7 @@ import {
     BUILTIN_TYPE_HANDLERS,
     type TypeHandler,
 } from '../src/index';
+import { bytesHandler } from '../src/bytes';
 
 /** Encode → JSON → parse → revive: the actual wire path, not just the halves. */
 function roundTrip(value: unknown, handlers: readonly TypeHandler[] = []): unknown {
@@ -597,15 +598,9 @@ describe('dev warning for values the codec cannot carry (#565)', () => {
 
     it('says nothing about a value a REGISTERED handler claims', () => {
         // The check consults the same chain the encoder does, so an app that
-        // taught the codec its type does not get scolded for using it.
-        const bytes: TypeHandler = {
-            name: 'bytes',
-            tag: '$bytes',
-            test: (v): v is Uint8Array => v instanceof Uint8Array,
-            serialize: (v) => Array.from(v as Uint8Array),
-            revive: (raw) => new Uint8Array(raw as number[])
-        };
-        expect(warnOn({ thumb: new Uint8Array([1, 2]) }, [bytes])).toBe('');
+        // taught the codec its type does not get scolded for using it — the
+        // shipped opt-in handler (#569) is exactly that registration.
+        expect(warnOn({ thumb: new Uint8Array([1, 2]) }, [bytesHandler])).toBe('');
     });
 
     it('is silent in production', () => {

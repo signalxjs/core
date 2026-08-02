@@ -255,7 +255,7 @@ function warnUnencodable(root: unknown, custom: readonly TypeHandler[]): void {
         if (ArrayBuffer.isView(value) || value instanceof ArrayBuffer) {
             findings.push(
                 `${at()} is ${(value as object).constructor?.name ?? 'binary'} — it encodes as ` +
-                `a plain object of indices, not binary`
+                `a plain object of indices, not binary (opt-in handler: @sigx/serialize/bytes)`
             );
             return;
         }
