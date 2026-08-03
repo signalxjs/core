@@ -39,6 +39,12 @@ env:
   # the runner without adding it here makes this guard shut the VM down under
   # that repo's feet.
   BENCH_REPOS: 'signalxjs/core signalxjs/actors'
+  # Matched against each run's `path`, NOT its display name. Two reasons:
+  # names drift, and more importantly this workflow's own name also begins with
+  # "Bench" — matching on the name would make the guard see itself as in-flight
+  # and never deallocate anything. Paths absent from a given repo simply never
+  # match, which is how `actors` (bench.yml only) works without special-casing.
+  BENCH_RUN_PATHS: '(bench|bench-nightly|bench-baseline)\.yml$'
 
 jobs:
   deallocate-if-idle:
@@ -79,21 +85,25 @@ jobs:
             exit 0
           fi
 
+          # Every workflow that lands on the VM counts, not just bench.yml —
+          # bench-nightly.yml and bench-baseline.yml run there too, and a guard
+          # blind to them would deallocate mid-nightly.
           busy=0
           for repo in $BENCH_REPOS; do
-            # A repo that does not exist yet (actors before its transfer) or has
-            # no bench workflow must not be treated as "idle" by accident — but
-            # it must also not fail the guard, or the VM leaks whenever a repo
-            # is renamed. Count only what we can actually read, and say so.
             for status in in_progress queued; do
-              n=$(gh run list --repo "$repo" --workflow bench.yml --status "$status" \
-                    --json databaseId --jq 'length' 2>/dev/null || echo "unknown")
-              if [ "$n" = "unknown" ]; then
-                echo "  $repo ($status): unreadable — skipping this repo"
-                continue 2
+              # An UNREADABLE repo is treated as BUSY, never as idle. The two
+              # errors are not symmetric: a false "busy" leaves the VM up for
+              # one extra hour and costs pennies, while a false "idle" pulls the
+              # machine out from under a running benchmark and silently corrupts
+              # whatever was measuring at the time. Fail safe, not cheap.
+              if ! out=$(gh api "repos/$repo/actions/runs?status=$status&per_page=100" \
+                           --jq "[.workflow_runs[] | select(.path|test(\"$BENCH_RUN_PATHS\"))] | length" 2>&1); then
+                echo "::warning::Cannot read runs for $repo ($status) — assuming busy. $out"
+                busy=$(( busy + 1 ))
+                continue
               fi
-              echo "  $repo ($status): $n"
-              busy=$(( busy + n ))
+              echo "  $repo ($status): $out"
+              busy=$(( busy + out ))
             done
           done
 

@@ -70,11 +70,24 @@ jobs:
       # Fork PRs are excluded for the same reason they are excluded from
       # `runs-on` below, and they cannot read secrets anyway, so `azure/login`
       # would fail confusingly rather than cleanly.
+      #
+      # DEPENDABOT is excluded for a related but distinct reason. Its PRs come
+      # from a branch IN this repo, so the fork test above passes them — but a
+      # Dependabot-triggered run gets a read-only token and cannot see regular
+      # Actions secrets (they live in a separate Dependabot store). Without this
+      # clause every dependency bump would fail `wake` on empty credentials and
+      # paint a red X on a PR that has no business touching the bench VM.
+      #
+      # These conditions are written to FOLD to a single line — no continuation
+      # is indented past the first. A more-indented line in a `>-` scalar keeps
+      # its newline, and the expression then reaches Actions with a literal
+      # newline inside it.
       - uses: azure/login@v2
         if: >-
           github.event_name == 'workflow_dispatch' ||
           (github.event_name == 'pull_request' &&
-           github.event.pull_request.head.repo.full_name == github.repository)
+          github.event.pull_request.head.repo.full_name == github.repository &&
+          github.actor != 'dependabot[bot]')
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
@@ -86,7 +99,8 @@ jobs:
         if: >-
           github.event_name == 'workflow_dispatch' ||
           (github.event_name == 'pull_request' &&
-           github.event.pull_request.head.repo.full_name == github.repository)
+          github.event.pull_request.head.repo.full_name == github.repository &&
+          github.actor != 'dependabot[bot]')
         env:
           RG: ${{ secrets.AZURE_RG }}
           VM: ${{ secrets.AZURE_VM_NAME }}
@@ -151,11 +165,16 @@ jobs:
     # code execution inside our Azure subscription. Forks still get their A/B,
     # on the noisy box, which is exactly what they had before this change.
     #
+    # DEPENDABOT likewise stays on `ubuntu-latest`. Its PRs are same-repo, so
+    # the fork test passes them, but its runs get a read-only token and no
+    # access to Actions secrets — `wake` cannot start the VM for them, and a
+    # dependency bump does not need the quiet machine anyway.
+    #
     # Kept on ONE line on purpose: in a YAML folded scalar (`>-`) a line
     # indented further than the first is preserved verbatim, newline and all, so
     # a pretty-wrapped version of this reaches Actions with literal newlines in
     # it.
-    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","bench"]') || 'ubuntu-latest' }}
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]') && fromJSON('["self-hosted","linux","x64","bench"]') || 'ubuntu-latest' }}
     # Two installs, two builds, two suites. The ceiling is for a hang, not for a
     # slow run.
     timeout-minutes: 45
