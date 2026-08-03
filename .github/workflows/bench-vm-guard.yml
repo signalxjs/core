@@ -1,0 +1,106 @@
+name: Bench VM guard
+
+# Cost backstop for the shared bench VM.
+#
+# The VM deallocates itself after 20 idle minutes — a systemd timer on the box
+# that watches for a `Runner.Worker` process and shuts down via IMDS and its own
+# managed identity. That mechanism is repo-agnostic and is the primary control.
+# This workflow exists for the case where it cannot fire: the runner service
+# died, the timer was masked, or the VM booted and never picked up a job. A VM
+# that quietly stays up costs around 7 EUR a day for nothing, and a cancelled
+# run is the classic way it happens — `wake` starts the box, the PR is
+# force-pushed, `cancel-in-progress` kills the bench job, and nothing ever runs
+# to make the box look busy.
+#
+# ⚠️ THE VM IS SHARED. It is an ORG-LEVEL runner, so `actors` (and any future
+# sigx repo) queues on the same box. A guard that only inspected THIS repo's
+# runs would cheerfully deallocate the VM in the middle of an actors benchmark
+# — which does not merely fail that job, it silently corrupts the numbers of
+# whatever ran alongside the shutdown. Every repo that can reach the runner must
+# be listed in BENCH_REPOS below.
+#
+# This workflow should exist in exactly ONE repo. Two copies would race each
+# other, and each would be blind to the other's in-flight runs.
+on:
+  schedule:
+    # :23 — off the hour (GitHub's most contended slot) and off the other bench
+    # crons, so the guard never runs at the same instant as a wake.
+    - cron: '23 * * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: bench-vm-guard
+  cancel-in-progress: false
+
+env:
+  # Every repo whose workflows can land on the `bench` runner. Adding a repo to
+  # the runner without adding it here makes this guard shut the VM down under
+  # that repo's feet.
+  BENCH_REPOS: 'signalxjs/core signalxjs/actors'
+
+jobs:
+  deallocate-if-idle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      id-token: write
+      contents: read
+      actions: read
+    steps:
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # The busy check lives INSIDE the deallocating step, immediately before
+      # the deallocate call, rather than in an earlier step feeding an `if:`.
+      # Between two steps there is a window — the Azure login alone takes
+      # seconds — in which a PR can open, `wake` can start the box, and this job
+      # would then deallocate a VM a live run is about to use. Checking last
+      # shrinks that window to one API round-trip. It cannot close it entirely;
+      # if it ever does fire mid-run the bench job fails visibly and a re-run
+      # fixes it, which is the right way round for a cost guard.
+      - name: Deallocate the bench VM if nothing is using it
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RG: ${{ secrets.AZURE_RG }}
+          VM: ${{ secrets.AZURE_VM_NAME }}
+        run: |
+          set -euo pipefail
+
+          state=$(az vm get-instance-view -g "$RG" -n "$VM" \
+            --query "instanceView.statuses[?starts_with(code,'PowerState/')].code | [0]" -o tsv)
+          echo "power state: $state"
+          if [ "$state" != "PowerState/running" ]; then
+            echo "VM is not running — nothing to do."
+            exit 0
+          fi
+
+          busy=0
+          for repo in $BENCH_REPOS; do
+            # A repo that does not exist yet (actors before its transfer) or has
+            # no bench workflow must not be treated as "idle" by accident — but
+            # it must also not fail the guard, or the VM leaks whenever a repo
+            # is renamed. Count only what we can actually read, and say so.
+            for status in in_progress queued; do
+              n=$(gh run list --repo "$repo" --workflow bench.yml --status "$status" \
+                    --json databaseId --jq 'length' 2>/dev/null || echo "unknown")
+              if [ "$n" = "unknown" ]; then
+                echo "  $repo ($status): unreadable — skipping this repo"
+                continue 2
+              fi
+              echo "  $repo ($status): $n"
+              busy=$(( busy + n ))
+            done
+          done
+
+          if [ "$busy" -gt 0 ]; then
+            echo "A bench run is in flight ($busy) — leaving the VM up."
+            exit 0
+          fi
+
+          echo "VM is up with no bench run in flight across [$BENCH_REPOS] — deallocating."
+          az vm deallocate -g "$RG" -n "$VM"

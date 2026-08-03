@@ -1,25 +1,35 @@
 name: Bench
 
-# Informational only: benchmark numbers from shared runners are too noisy to
-# gate on, so nothing here runs with --enforce and nothing here fails on a
-# regression. (The micro suite's per-bench correctness guards DO fail hard — a
-# bench that cannot prove it is doing its work must not report a number.)
+# Informational only: nothing here runs with --enforce and nothing here fails on
+# a regression. (The micro suite's per-bench correctness guards DO fail hard — a
+# bench that cannot prove it is doing its work must not report a number.) The
+# gate against the committed baseline lives in bench-nightly.yml instead, where
+# it cannot block a merge.
 #
 # Two jobs, two shapes:
 #
 # - `bench-quick` (manual): one run of the current ref, results uploaded as an
 #   artifact for a human to read.
 # - `bench-ab` (perf-sensitive PRs): the PR's base ref and its head ref
-#   measured back to back ON THE SAME RUNNER, posted as a comment. Absolute
-#   numbers from a shared vCPU mean nothing, but the delta between two runs a
-#   few minutes apart on the same box does — that is what makes this readable
-#   where a comparison against the committed baseline is not (check-regression
-#   skips timing enforcement outright on a fingerprint mismatch, and CI never
-#   matches the machine that recorded the baseline).
+#   measured back to back ON THE SAME RUNNER, posted as a comment.
+#
+# BOTH NOW RUN ON THE DEDICATED BENCH VM (org-level self-hosted runner, label
+# `bench`). Three back-to-back quick runs there put every timing row above
+# ~0.1 ms within 0.45-4.1 %, against the ±5 % this workflow used to see on a
+# shared vCPU. What that does NOT fix is the sub-0.1 ms rows — `small-page`
+# still swings 50 % (0.012-0.018 ms, sample count jumping 12 → 19971 between
+# runs). That is timer resolution, not machine noise; no box fixes it, and
+# INFORMATIONAL_TIMINGS already covers it.
+#
+# `bench-ab` remains the base-vs-head comparison even on a stable machine,
+# because it is the measurement that needs no baseline at all and survives a
+# change of hardware. What the VM adds is that its deltas are now worth
+# believing at single-digit percentages.
 #
 # Deliberately NOT a required check and deliberately no `merge_group` trigger:
 # nothing here may block a merge, so there is no context to go missing on the
 # queue ref (cf. the comment in bundle-size.yml, which is the inverse case).
+# That also means the merge queue never waits on the VM.
 on:
   workflow_dispatch:
   pull_request:
@@ -37,9 +47,66 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Starts the bench VM, which sits deallocated between runs so compute is billed
+  # only while a benchmark is actually running.
+  #
+  # Runs on every event so the bench jobs can `needs:` it unconditionally — the
+  # Azure steps are what is conditional, and a job whose only steps are skipped
+  # still succeeds, so fork PRs pass through it in seconds.
+  #
+  # It WAITS for the VM rather than firing `--no-wait`. `timeout-minutes` does
+  # not apply to a job still queued for a runner label that never appears: that
+  # clock starts only once a runner picks the job up. A dead VM would therefore
+  # leave the PR pending until GitHub's 24-hour unpicked-job limit. Blocking here
+  # costs ~45s of hosted time and turns that into an immediate, visible failure.
+  wake:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      # OIDC only — no client secret exists for this app registration to leak.
+      id-token: write
+      contents: read
+    steps:
+      # Fork PRs are excluded for the same reason they are excluded from
+      # `runs-on` below, and they cannot read secrets anyway, so `azure/login`
+      # would fail confusingly rather than cleanly.
+      - uses: azure/login@v2
+        if: >-
+          github.event_name == 'workflow_dispatch' ||
+          (github.event_name == 'pull_request' &&
+           github.event.pull_request.head.repo.full_name == github.repository)
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # `az vm start` on an already-running VM is a successful no-op, so
+      # concurrent PRs racing to wake the same box is fine.
+      - name: Start the bench VM
+        if: >-
+          github.event_name == 'workflow_dispatch' ||
+          (github.event_name == 'pull_request' &&
+           github.event.pull_request.head.repo.full_name == github.repository)
+        env:
+          RG: ${{ secrets.AZURE_RG }}
+          VM: ${{ secrets.AZURE_VM_NAME }}
+        run: |
+          az vm start -g "$RG" -n "$VM"
+          state=$(az vm get-instance-view -g "$RG" -n "$VM" \
+            --query "instanceView.statuses[?starts_with(code,'PowerState/')].code | [0]" -o tsv)
+          echo "power state: $state"
+          [ "$state" = "PowerState/running" ] || {
+            echo "::error::Bench VM did not reach a running state ($state)."
+            exit 1
+          }
+
   bench-quick:
     if: github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
+    needs: wake
+    # `workflow_dispatch` requires write access on a branch of this repo, so
+    # there is no fork exposure here and this can take the VM unconditionally.
+    runs-on: [self-hosted, linux, x64, bench]
+    timeout-minutes: 45
     # The workflow-level `permissions: {}` leaves this job with a token that
     # cannot even clone — this job had no block at all before that line existed.
     permissions:
@@ -77,7 +144,21 @@ jobs:
 
   bench-ab:
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    needs: wake
+    # A PR from a branch of this repo goes to the bench VM; a PR from a FORK
+    # stays on `ubuntu-latest`, non-negotiably. Fork PRs run the workflow file
+    # *from the fork*, so a self-hosted runner on a public repo is arbitrary
+    # code execution inside our Azure subscription. Forks still get their A/B,
+    # on the noisy box, which is exactly what they had before this change.
+    #
+    # Kept on ONE line on purpose: in a YAML folded scalar (`>-`) a line
+    # indented further than the first is preserved verbatim, newline and all, so
+    # a pretty-wrapped version of this reaches Actions with literal newlines in
+    # it.
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","bench"]') || 'ubuntu-latest' }}
+    # Two installs, two builds, two suites. The ceiling is for a hang, not for a
+    # slow run.
+    timeout-minutes: 45
     permissions:
       contents: read
       pull-requests: write

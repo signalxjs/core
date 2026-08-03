@@ -1,0 +1,111 @@
+name: Bench nightly
+
+# The gate `bench-ab` structurally cannot be.
+#
+# `bench-ab` compares a PR against its own base, so it sees the cost of ONE
+# change. Ten PRs costing 2% each pass it individually while the absolute number
+# rots 22%. Only a comparison against a fixed baseline sees that, and that is
+# what runs here: `bench:quick:enforce`, against the committed
+# `benchmarks/results/baseline.json`.
+#
+# This has never been possible before. `check-regression.ts` drops every
+# `kind: 'time'` row when the machine fingerprint differs from the baseline —
+# CPU model string plus Node major, from `results.ts` — and the baseline used to
+# record a dev laptop, so CI's timing enforcement was disarmed by construction.
+# The baseline is now recorded ON the bench VM, which is also what runs this job.
+#
+# NIGHTLY, NOT PER-PR, on purpose:
+#   - it needs no per-PR baseline discipline;
+#   - it cannot wedge the merge queue;
+#   - drift is a daily-cadence problem, and a nightly failure names the day it
+#     started, which is usually enough to name the PR.
+#
+# When it goes red, the question is "which of yesterday's merges did this", not
+# "whose PR is blocked".
+on:
+  schedule:
+    # 03:12 UTC. Off the hour because the top of the hour is GitHub's most
+    # contended scheduler slot, and off any other sigx cron so two repos do not
+    # queue for the one shared runner at the same instant.
+    - cron: '12 3 * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: bench-nightly
+  cancel-in-progress: false
+
+jobs:
+  wake:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Start the bench VM
+        env:
+          RG: ${{ secrets.AZURE_RG }}
+          VM: ${{ secrets.AZURE_VM_NAME }}
+        run: |
+          az vm start -g "$RG" -n "$VM"
+          state=$(az vm get-instance-view -g "$RG" -n "$VM" \
+            --query "instanceView.statuses[?starts_with(code,'PowerState/')].code | [0]" -o tsv)
+          echo "power state: $state"
+          [ "$state" = "PowerState/running" ] || {
+            echo "::error::Bench VM did not reach a running state ($state)."
+            exit 1
+          }
+
+  enforce:
+    needs: wake
+    runs-on: [self-hosted, linux, x64, bench]
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          # MUST match the baseline's Node MAJOR. `check-regression` compares
+          # `nodeMajor(baselineMeta.node)` against the running version and skips
+          # every timing row on a mismatch — with a warning, not a failure. Bump
+          # this and the gate silently disarms itself while still reporting
+          # green, which is precisely the failure mode this workflow exists to
+          # end. Re-record the baseline in the same PR as any bump.
+          node-version: '24'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+
+      # --enforce implies --require-baseline-rows, so a quick bench added
+      # without a baseline entry fails here too rather than gating nothing.
+      #
+      # It also re-runs the whole quick suite once before failing on a timing,
+      # as a noise filter, and only exits 1 if the regression reproduces. That
+      # matters more here than anywhere: this job has no human watching it at
+      # 03:12, so a single flaky row must not open an issue's worth of noise.
+      - name: Enforce against the committed baseline
+        run: pnpm --filter @sigx/benchmarks bench:quick:enforce
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: bench-nightly-results
+          path: benchmarks/results/quick-latest.json
+          if-no-files-found: ignore

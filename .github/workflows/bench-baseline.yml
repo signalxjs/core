@@ -1,0 +1,138 @@
+name: Bench re-baseline
+
+# Re-records `benchmarks/results/baseline.json` ON THE BENCH VM and opens a PR
+# with the result.
+#
+# The point is not convenience, it is correctness. A baseline is only meaningful
+# to the machine that enforces against it: `check-regression` drops every timing
+# row when the CPU model or Node major differs. Re-baselining by hand meant "run
+# it on a quiet machine you trust", and the machine people trusted was a laptop
+# — which is how CI timing enforcement came to be disarmed without anyone
+# noticing. Recording it here means the numbers always come from the box that
+# judges them.
+#
+# `AGENTS.md`'s rule — "Add a quick bench => re-baseline in the SAME PR" —
+# becomes: run this workflow from your branch, then merge the PR it opens into
+# that branch.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Branch to record the baseline from (the PR targets this branch).'
+        required: true
+        default: 'main'
+
+permissions: {}
+
+concurrency:
+  group: bench-baseline
+  cancel-in-progress: false
+
+jobs:
+  wake:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Start the bench VM
+        env:
+          RG: ${{ secrets.AZURE_RG }}
+          VM: ${{ secrets.AZURE_VM_NAME }}
+        run: |
+          az vm start -g "$RG" -n "$VM"
+          state=$(az vm get-instance-view -g "$RG" -n "$VM" \
+            --query "instanceView.statuses[?starts_with(code,'PowerState/')].code | [0]" -o tsv)
+          echo "power state: $state"
+          [ "$state" = "PowerState/running" ] || {
+            echo "::error::Bench VM did not reach a running state ($state)."
+            exit 1
+          }
+
+  record:
+    needs: wake
+    runs-on: [self-hosted, linux, x64, bench]
+    # bench:baseline is the FULL suite — run-all (7 scenarios x 4 frameworks at
+    # mitata's full budget), run-stream, run-micro and quick — not the ~8s quick
+    # pass. Minutes, not seconds.
+    timeout-minutes: 90
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      # NOT checkout@v7 here, unlike every other job in this repo. The
+      # known-good pair for peter-evans/create-pull-request is
+      # actions/checkout@v5 + create-pull-request@v6 — newer checkout versions
+      # make the push fail with `Duplicate header: Authorization` (HTTP 400).
+      # Every core-sync.yml across the sigx repos pins this same pair for the
+      # same reason. Bump one without the other and this job breaks at the very
+      # last step, after the full suite has already run.
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref }}
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          # Recorded into the baseline's fingerprint and compared by MAJOR, so
+          # this must stay in step with bench-nightly.yml. If the two drift
+          # apart, nightly enforcement silently stops gating timings.
+          node-version: '24'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+
+      # Warm the machine and, more importantly, PROVE it is quiet before
+      # recording. benchmarks/README.md is emphatic that a baseline recorded
+      # under load bakes in slow numbers and hides real regressions — and a
+      # baseline is exactly the artefact where that damage is invisible
+      # afterwards, because everything is then judged against it.
+      - name: Quiet-machine check
+        run: |
+          uptime
+          load=$(cut -d' ' -f1 /proc/loadavg)
+          echo "1-minute load average: $load"
+          # 4 dedicated cores; anything approaching 1.0 before we start means
+          # something else is running and the recording is not trustworthy.
+          awk -v l="$load" 'BEGIN { if (l > 0.8) { print "::error::Machine is not quiet (load " l ") — refusing to record a baseline."; exit 1 } }'
+
+      - name: Record the baseline
+        run: pnpm bench:ssr:baseline
+
+      - name: Show what changed
+        run: git --no-pager diff --stat benchmarks/results/baseline.json
+
+      - uses: peter-evans/create-pull-request@v6
+        with:
+          base: ${{ inputs.ref }}
+          branch: bench/rebaseline-${{ inputs.ref }}
+          title: 'bench: re-record the baseline on the bench VM'
+          commit-message: |
+            bench: re-record baseline.json on the bench VM
+
+            Recorded by the Bench re-baseline workflow on the dedicated runner,
+            so the fingerprint matches the machine that enforces against it.
+          body: |
+            Recorded by **Bench re-baseline** on the dedicated bench VM, from `${{ inputs.ref }}`.
+
+            The fingerprint in `meta` is what makes `check-regression --enforce` gate at all:
+            it compares the baseline's CPU model and Node **major** against the running
+            machine and silently skips every timing row on a mismatch. Recording here keeps
+            that matched to the machine that runs `bench-nightly.yml`.
+
+            Before merging, read the diff rather than rubber-stamping it. A row that moved
+            in the baseline is a row whose regression will never be caught again.
+          add-paths: |
+            benchmarks/results/baseline.json
