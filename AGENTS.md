@@ -200,16 +200,32 @@ pnpm bench:ssr         # full comparative SSR bench: equivalence check, then sig
                        # informational). The benchmarks workspace has its OWN stricter tsconfig
                        # (`erasableSyntaxOnly` — these files run under node's strip-only type stripping) that the
                        # root `pnpm typecheck` does not cover; `pnpm --filter @sigx/benchmarks typecheck` does.
-                       # Enforce timings locally with
-                       # `pnpm --filter @sigx/benchmarks bench:quick:enforce`, and re-baseline on YOUR machine
-                       # with `pnpm bench:ssr:baseline` (check-regression refuses to enforce TIMINGS across
-                       # machines; payload-byte benches gate everywhere). Don't re-baseline from a machine
-                       # you haven't confirmed is quiet — recording under load bakes in slow numbers and
-                       # hides real regressions. PR-time NUMBERS come from bench.yml's `bench-ab` job
-                       # instead: it measures the PR's base ref and head ref back to back on ONE runner
-                       # and comments the delta, so it needs no baseline and no matching machine. It runs
-                       # automatically on PRs touching packages/**, benchmarks/** or the lockfile, and
-                       # never fails on a regression — read the table and decide.
+                       # THE BASELINE BELONGS TO THE BENCH VM, NOT TO YOUR MACHINE (#604).
+                       # `benchmarks/results/baseline.json` is recorded on the dedicated self-hosted
+                       # runner, because check-regression skips every TIMING row when the baseline's
+                       # CPU model or Node major differs from the running machine — so a baseline
+                       # recorded anywhere else disarms the gate silently while still printing a
+                       # table. Consequences:
+                       #   - Re-baseline with the **Bench re-baseline** workflow
+                       #     (`workflow_dispatch`, bench-baseline.yml). It records on the VM and
+                       #     opens a PR. "Add a quick bench => re-baseline in the SAME PR" now
+                       #     means: run it from your branch, merge the PR it opens into that branch.
+                       #     Do NOT commit a locally-recorded baseline.
+                       #   - `pnpm --filter @sigx/benchmarks bench:quick:enforce` still works
+                       #     locally, but on your machine it gates payload BYTES only and warns
+                       #     that timings were skipped. That is expected, not a bug.
+                       # Three signals, three places — keep them straight:
+                       #   - `bench-smoke` (ci.yml, hosted, merge queue): correctness only. Adapter
+                       #     rot, byte counts, --require-baseline-rows. Machine-independent, so it
+                       #     stays on a hosted runner and the queue never waits on the VM.
+                       #   - `bench-ab` (bench.yml, VM): the PR's base ref and head ref measured
+                       #     back to back, commented as a delta. Needs no baseline and survives a
+                       #     change of hardware. Never fails — read the table and decide.
+                       #   - `bench-nightly` (bench-nightly.yml, VM): `bench:quick:enforce` against
+                       #     the committed baseline. This is the only thing that catches DRIFT —
+                       #     bench-ab compares a PR to its own base, so ten PRs at +2% each pass
+                       #     individually while the absolute number rots 22%. Nightly, so it can
+                       #     never wedge the merge queue.
                        # Every bench script runs node --conditions production: sigx picks its dev/prod dist at
                        # module resolution, so a bare `node` measures the dev build (see benchmarks/README.md).
 pnpm dev:sigx    # watch-build the sigx package

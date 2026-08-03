@@ -213,6 +213,19 @@ against the `quick` section of `results/baseline.json`.
 `pnpm bench:ssr:baseline` produces (string + stream + micro + quick sections
 + meta).
 
+**The committed baseline belongs to the bench VM.** It is recorded on the
+dedicated self-hosted runner (`AMD EPYC 9V74`, Node 24), which is also the
+machine `bench-nightly.yml` enforces on. That pairing is the whole point: the
+fingerprint check below means a baseline recorded anywhere else silently
+disables timing enforcement while still printing a full delta table — which is
+exactly how it came to be disabled for months.
+
+So **do not commit a locally-recorded baseline.** Re-baseline with the
+**Bench re-baseline** workflow (`workflow_dispatch` → `bench-baseline.yml`),
+which records on the VM and opens a PR against your branch. Running
+`pnpm bench:ssr:baseline` locally is still useful for your own before/after
+comparisons; just don't commit the result.
+
 Re-baseline when: sigx SSR or request-path internals change intentionally, a
 competitor dependency is bumped, or the benchmark scenarios/payloads
 themselves change.
@@ -229,3 +242,30 @@ it is not. Before re-baselining, confirm the machine is quiet — run the suite
 twice and check that the rows your change does not touch land within a few
 percent of the existing baseline. If they don't, don't record; the `bench-ab`
 job compares base against head on one runner and needs no baseline at all.
+(`bench-baseline.yml` automates the quiet check: it refuses to record if the
+VM's 1-minute load average is above 0.8.)
+
+**What the VM does and does not fix.** Three back-to-back quick runs on it:
+
+| Row | spread |
+|---|---|
+| `large-table-1k` | 0.45 % |
+| `keymatch/gate 32x32 deps` | 0.58 % |
+| `serverfn/POST read 1k rows` | 1.1 % |
+| `escape-heavy` | 1.3 % |
+| `codec/parse+revive` | 1.7 % |
+| `refresh/boundary refresh x32` | 1.7 % |
+| `packs/large-table-1k resume` | 1.9 % |
+| `codec/encode+stringify` | 4.1 % |
+| every `(bytes)` row | bit-identical |
+
+Every timing row above ~0.1 ms lands in 0.45–4.1 %, against the ±5 % floor
+`bench-ab` saw on a shared runner. But `small-page` still swings 50 %
+(0.012–0.018 ms, its sample count jumping 12 → 19971 between runs), and stream
+TTFB 35 %. That is **timer resolution, not machine noise** — no box fixes it.
+Those rows need a bigger unit of work, and until they get one they belong in
+`INFORMATIONAL_TIMINGS`, where they already are.
+
+`DEFAULT_THRESHOLD_PCT` stays at 25 for now. The measured floor suggests ~10 is
+defensible, but that number should come from a few weeks of real runs on the
+box rather than from one afternoon's measurements.

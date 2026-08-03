@@ -1,0 +1,116 @@
+name: Bench VM guard
+
+# Cost backstop for the shared bench VM.
+#
+# The VM deallocates itself after 20 idle minutes — a systemd timer on the box
+# that watches for a `Runner.Worker` process and shuts down via IMDS and its own
+# managed identity. That mechanism is repo-agnostic and is the primary control.
+# This workflow exists for the case where it cannot fire: the runner service
+# died, the timer was masked, or the VM booted and never picked up a job. A VM
+# that quietly stays up costs around 7 EUR a day for nothing, and a cancelled
+# run is the classic way it happens — `wake` starts the box, the PR is
+# force-pushed, `cancel-in-progress` kills the bench job, and nothing ever runs
+# to make the box look busy.
+#
+# ⚠️ THE VM IS SHARED. It is an ORG-LEVEL runner, so `actors` (and any future
+# sigx repo) queues on the same box. A guard that only inspected THIS repo's
+# runs would cheerfully deallocate the VM in the middle of an actors benchmark
+# — which does not merely fail that job, it silently corrupts the numbers of
+# whatever ran alongside the shutdown. Every repo that can reach the runner must
+# be listed in BENCH_REPOS below.
+#
+# This workflow should exist in exactly ONE repo. Two copies would race each
+# other, and each would be blind to the other's in-flight runs.
+on:
+  schedule:
+    # :23 — off the hour (GitHub's most contended slot) and off the other bench
+    # crons, so the guard never runs at the same instant as a wake.
+    - cron: '23 * * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: bench-vm-guard
+  cancel-in-progress: false
+
+env:
+  # Every repo whose workflows can land on the `bench` runner. Adding a repo to
+  # the runner without adding it here makes this guard shut the VM down under
+  # that repo's feet.
+  BENCH_REPOS: 'signalxjs/core signalxjs/actors'
+  # Matched against each run's `path`, NOT its display name. Two reasons:
+  # names drift, and more importantly this workflow's own name also begins with
+  # "Bench" — matching on the name would make the guard see itself as in-flight
+  # and never deallocate anything. Paths absent from a given repo simply never
+  # match, which is how `actors` (bench.yml only) works without special-casing.
+  BENCH_RUN_PATHS: '(bench|bench-nightly|bench-baseline)\.yml$'
+
+jobs:
+  deallocate-if-idle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      id-token: write
+      contents: read
+      actions: read
+    steps:
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # The busy check lives INSIDE the deallocating step, immediately before
+      # the deallocate call, rather than in an earlier step feeding an `if:`.
+      # Between two steps there is a window — the Azure login alone takes
+      # seconds — in which a PR can open, `wake` can start the box, and this job
+      # would then deallocate a VM a live run is about to use. Checking last
+      # shrinks that window to one API round-trip. It cannot close it entirely;
+      # if it ever does fire mid-run the bench job fails visibly and a re-run
+      # fixes it, which is the right way round for a cost guard.
+      - name: Deallocate the bench VM if nothing is using it
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RG: ${{ secrets.AZURE_RG }}
+          VM: ${{ secrets.AZURE_VM_NAME }}
+        run: |
+          set -euo pipefail
+
+          state=$(az vm get-instance-view -g "$RG" -n "$VM" \
+            --query "instanceView.statuses[?starts_with(code,'PowerState/')].code | [0]" -o tsv)
+          echo "power state: $state"
+          if [ "$state" != "PowerState/running" ]; then
+            echo "VM is not running — nothing to do."
+            exit 0
+          fi
+
+          # Every workflow that lands on the VM counts, not just bench.yml —
+          # bench-nightly.yml and bench-baseline.yml run there too, and a guard
+          # blind to them would deallocate mid-nightly.
+          busy=0
+          for repo in $BENCH_REPOS; do
+            for status in in_progress queued; do
+              # An UNREADABLE repo is treated as BUSY, never as idle. The two
+              # errors are not symmetric: a false "busy" leaves the VM up for
+              # one extra hour and costs pennies, while a false "idle" pulls the
+              # machine out from under a running benchmark and silently corrupts
+              # whatever was measuring at the time. Fail safe, not cheap.
+              if ! out=$(gh api "repos/$repo/actions/runs?status=$status&per_page=100" \
+                           --jq "[.workflow_runs[] | select(.path|test(\"$BENCH_RUN_PATHS\"))] | length" 2>&1); then
+                echo "::warning::Cannot read runs for $repo ($status) — assuming busy. $out"
+                busy=$(( busy + 1 ))
+                continue
+              fi
+              echo "  $repo ($status): $out"
+              busy=$(( busy + out ))
+            done
+          done
+
+          if [ "$busy" -gt 0 ]; then
+            echo "A bench run is in flight ($busy) — leaving the VM up."
+            exit 0
+          fi
+
+          echo "VM is up with no bench run in flight across [$BENCH_REPOS] — deallocating."
+          az vm deallocate -g "$RG" -n "$VM"
