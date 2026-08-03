@@ -72,12 +72,14 @@ interface ServerFnScope {
  * seam must never fail a document.
  */
 export function keepAliveServerFnScope(until: Promise<unknown>): void {
-    const scope = (globalThis as { __SIGX_SERVERFN_SCOPE__?: ServerFnScope }).__SIGX_SERVERFN_SCOPE__;
-    if (!scope || typeof scope.keepAlive !== 'function') return;
     try {
-        scope.keepAlive(until);
+        // Optional call IS the feature detection; the catch covers a seam
+        // whose `keepAlive` is present but broken — absence of effect is the
+        // supported degraded state either way.
+        (globalThis as { __SIGX_SERVERFN_SCOPE__?: ServerFnScope }).__SIGX_SERVERFN_SCOPE__
+            ?.keepAlive?.(until);
     } catch {
-        // Absence of effect is the supported degraded state.
+        /* supported no-op */
     }
 }
 
