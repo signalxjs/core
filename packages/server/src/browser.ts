@@ -59,6 +59,14 @@ export function perRequest(): never {
     );
 }
 
+export function disposeRequestValues(): never {
+    throw new Error(
+        '[sigx server] disposeRequestValues() reached the browser unextracted — is the ' +
+        '@sigx/vite/server plugin configured, and does this file match its include pattern ' +
+        '(default **/*.server.{ts,tsx})?'
+    );
+}
+
 export function serverFnPreset(): never {
     throw new Error(
         '[sigx server] serverFnPreset() reached the browser unextracted — is the @sigx/vite/server ' +

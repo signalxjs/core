@@ -18,6 +18,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { component, useData } from 'sigx';
 import { createRequestHandler } from '../src/node';
 import { createFetchHandler } from '../src/server/fetch-handler';
+import { keepAliveServerFnScope } from '../src/server/serverfn-scope';
 
 const TEMPLATE = `<!doctype html><html><head></head><body><div id="app"><!--ssr-outlet--></div></body></html>`;
 
@@ -178,5 +179,47 @@ describe('a scope that cannot open', () => {
         await handler(new Request('https://shop.test/')).catch(() => {});
         // Retrying here would render the document twice.
         expect(renders).toBe(1);
+    });
+});
+
+describe('keepAliveServerFnScope (rfc-server-v3 §2.6, #571)', () => {
+    it('is a supported no-op with no seam registered', () => {
+        expect(() => keepAliveServerFnScope(Promise.resolve())).not.toThrow();
+    });
+
+    it('is a supported no-op against an OLDER seam without keepAlive — the version-skew pin', () => {
+        // An older @sigx/server stamped { run } only; the renderer must
+        // feature-detect, never assume.
+        seamHolder.__SIGX_SERVERFN_SCOPE__ = {
+            async run(_source, fn) {
+                return fn();
+            }
+        };
+        expect(() => keepAliveServerFnScope(Promise.resolve())).not.toThrow();
+    });
+
+    it('forwards to the seam when present', () => {
+        const seen: Promise<unknown>[] = [];
+        seamHolder.__SIGX_SERVERFN_SCOPE__ = {
+            async run(_source, fn) {
+                return fn();
+            },
+            keepAlive: (until: Promise<unknown>) => void seen.push(until)
+        } as Seam & { keepAlive(until: Promise<unknown>): void };
+        const until = Promise.resolve();
+        keepAliveServerFnScope(until);
+        expect(seen).toEqual([until]);
+    });
+
+    it('a throwing keepAlive never fails the caller', () => {
+        seamHolder.__SIGX_SERVERFN_SCOPE__ = {
+            async run(_source, fn) {
+                return fn();
+            },
+            keepAlive: () => {
+                throw new Error('broken seam');
+            }
+        } as Seam & { keepAlive(until: Promise<unknown>): void };
+        expect(() => keepAliveServerFnScope(Promise.resolve())).not.toThrow();
     });
 });

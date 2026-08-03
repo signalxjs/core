@@ -10,7 +10,7 @@ import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { createServer, type Server } from 'node:http';
 import { once } from 'node:events';
 import { createServerFnHandler } from '../src/node';
-import { serverFn, serverStream } from '../src/index';
+import { serverFn, serverStream, perRequest } from '../src/index';
 
 const twoCookies = serverFn(async (rq) => {
     rq.responseHeaders.append('set-cookie', 'a=1; Path=/');
@@ -337,5 +337,79 @@ describe('createServerFnHandler forwards maxResponseBytes (#571)', () => {
         } finally {
             vi.unstubAllEnvs();
         }
+    });
+});
+
+describe('createServerFnHandler — disposal through the adapter (#571)', () => {
+    let server: Server;
+    let origin: string;
+    let buffedDisposed = false;
+    let streamDisposed = false;
+
+    const tick = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+    const eventually = async (check: () => boolean): Promise<void> => {
+        for (let i = 0; i < 100 && !check(); i++) await tick();
+        expect(check()).toBe(true);
+    };
+
+    beforeAll(async () => {
+        const buffedValue = perRequest((_rq, onDispose) => {
+            onDispose(() => void (buffedDisposed = true));
+            return 'b';
+        });
+        const streamValue = perRequest((_rq, onDispose) => {
+            onDispose(() => void (streamDisposed = true));
+            return 's';
+        });
+        const buffered = serverFn(async (rq) => buffedValue(rq));
+        const stream = serverStream(async function* (rq) {
+            streamValue(rq);
+            yield 'a';
+            yield 'b';
+        });
+        const handler = createServerFnHandler({
+            functions: {
+                dbuf_fn_00000010: async () => buffered,
+                dstr_fn_00000011: async () => stream
+            }
+        });
+        server = createServer((req, res) => {
+            void handler(req, res, () => {
+                res.statusCode = 404;
+                res.end('fallthrough');
+            });
+        });
+        server.listen(0, '127.0.0.1');
+        await once(server, 'listening');
+        const address = server.address();
+        if (typeof address === 'string' || address === null) throw new Error('no port');
+        origin = `http://127.0.0.1:${address.port}`;
+    });
+
+    afterAll(async () => {
+        server.close();
+        server.closeAllConnections();
+        await once(server, 'close');
+    });
+
+    it('disposes after a buffered call over real node:http', async () => {
+        const res = await fetch(`${origin}/_sigx/fn/dbuf_fn_00000010`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', origin },
+            body: '{"args":[]}'
+        });
+        await expect(res.json()).resolves.toEqual({ data: 'b' });
+        await eventually(() => buffedDisposed);
+    });
+
+    it('disposes after a stream ends over real node:http', async () => {
+        const res = await fetch(`${origin}/_sigx/fn/dstr_fn_00000011`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', origin },
+            body: '{"args":[]}'
+        });
+        const text = await res.text();
+        expect(text).toContain('{"done":1}');
+        await eventually(() => streamDisposed);
     });
 });

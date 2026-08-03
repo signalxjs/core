@@ -41,7 +41,7 @@ import type {
 } from './types';
 
 export { ServerFnError, isServerFnError, type ServerFnErrorShape } from './errors';
-export { perRequest } from './per-request';
+export { perRequest, disposeRequestValues, type PerRequestDispose } from './per-request';
 export type { ServerFnContext } from './context';
 export type {
     InvalidatePattern,

@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+**Added: streamed responses extend the server-function scope to end-of-body (#571).**
+
+- `createFetchHandler`'s streaming return now registers a `keepAlive(until)`
+  on the `__SIGX_SERVERFN_SCOPE__` seam — feature-detected, so an older
+  `@sigx/server` without it stays a supported no-op — with a promise
+  `chunksToBytes` resolves on whichever ending the body reaches (close,
+  error, client cancel; the encoder gained an optional `onSettled`
+  callback). With a `keepAlive`-capable `@sigx/server`, request-value
+  disposal (`perRequest` `onDispose`) fires when the response has FULLY
+  FLUSHED instead of at the shell — the rfc-server-v3 §2.6 constraint that
+  deferred disposal from v1. The redirect and shell-error branches register
+  nothing (run-settle disposal is correct where there is no body), and the
+  Node handler needs no change (it awaits body end inside the scope).
+
 **Changed: `slot=` on a COMPONENT child no longer routes it into a named slot (#588).**
 
 - Mirrors the client-side change (root `CHANGELOG.md`): the server's slot

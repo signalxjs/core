@@ -20,6 +20,7 @@
  */
 
 import { createRequestContext, type ServerFnContext } from '../context';
+import { claimDisposalOwnership, disposeRequestValues } from '../per-request';
 import { runInScope } from '../scope';
 import { isServerFnError } from '../errors';
 import type { ServerFnGuard, ServerFnInfo, WrappedServerFn } from '../types';
@@ -812,6 +813,12 @@ export async function handleServerFnRequest(
         );
     }
     const ctx = createRequestContext(request);
+    // Disposal ownership (rfc-server-v3 §2.6, phase 5, #571): claimed HERE,
+    // before the scope opens, so the endpoint owns its request store with or
+    // without AsyncLocalStorage — the scope's own claim attempt then finds
+    // the store taken and stands down. Disposal hangs off the work promise's
+    // REAL settle (never the timeout race) below.
+    claimDisposalOwnership(ctx.locals);
     // #350: the timeout controller merges into the context's signal so a
     // cooperative handler cancels cleanly; the race below is what
     // guarantees the 504 when it doesn't. All construction is per-request
@@ -994,6 +1001,35 @@ export async function handleServerFnRequest(
         return new Response(bytes, { status, headers });
     });
 
+    // Disposal rides the WORK promise's real settle — never the timeout race:
+    // a 504 must not yank request values out of a still-settling handler
+    // (rfc-server-v3 §2.6/§5 phase 5). This hook also absorbs the old
+    // losing-work swallow: attaching handlers at creation means the losing
+    // promise can never become an unhandled rejection. `Promise.resolve`
+    // because a scope entered synchronously hands back a bare value (#544).
+    // Three shapes at settle:
+    //  - a DELIVERED stream Response: its terminal paths own disposal
+    //    (streamResponse below) — nothing to do here;
+    //  - a stream Response that LOST the timeout race: it was never handed
+    //    to the client, so nothing will ever pull or cancel it — cancel its
+    //    body here, which returns the generator (its `finally` runs) and
+    //    drives the stream's own chained disposal;
+    //  - everything else (buffered 200/500, form 303, guard veto, and every
+    //    rejection a non-stream path produced): dispose now. A rejection
+    //    from a STREAM-owned ctx already disposed inside streamResponse.
+    void Promise.resolve(work).then(
+        (response) => {
+            if (!STREAM_OWNED.has(ctx)) {
+                void disposeRequestValues(ctx);
+            } else if (timeoutError !== undefined && response.body) {
+                void response.body.cancel().catch(() => {});
+            }
+        },
+        () => {
+            if (!STREAM_OWNED.has(ctx)) void disposeRequestValues(ctx);
+        }
+    );
+
     try {
         if (timeoutMs === undefined) return await work;
         return await Promise.race([
@@ -1010,11 +1046,6 @@ export async function handleServerFnRequest(
         ]);
     } catch (error) {
         if (timeoutError !== undefined && error === timeoutError) {
-            // The losing work promise must never become an unhandled
-            // rejection when it eventually settles. `Promise.resolve` because
-            // a scope entered synchronously hands back a bare value (#544);
-            // for a native promise it returns that same promise, not a wrapper.
-            void Promise.resolve(work).catch(() => {});
             await reportMasked(options, timeoutError, info, ctx);
             return isForm
                 ? formErrorResponse(504, 'Server function timed out', undefined, ctx.responseHeaders)
@@ -1174,6 +1205,14 @@ function wireErrorShape(
  * cancels the body stream, which returns the generator (its `finally`
  * blocks run).
  */
+/**
+ * Contexts whose disposal a STREAM owns (rfc-server-v3 §2.6): stamped the
+ * moment `streamResponse` takes over, read by the work-settle hook so the
+ * two owners never double- or zero-dispose. A WeakSet, not a ctx property —
+ * the context is user-visible surface and this is endpoint bookkeeping.
+ */
+const STREAM_OWNED = new WeakSet<object>();
+
 async function streamResponse(
     gen: AsyncGenerator<unknown>,
     ctx: ReturnType<typeof createRequestContext>,
@@ -1181,14 +1220,27 @@ async function streamResponse(
     options: ServerFnRequestOptions,
     info: ServerFnInfo
 ): Promise<Response> {
-    const first = await gen.next();
-    const headers = new Headers(ctx.responseHeaders);
-    headers.set('content-type', 'application/x-ndjson');
+    // From here the stream owns ctx disposal — including the pre-Response
+    // failures below, which dispose in ORDER (generator `finally` first,
+    // request-value disposers after) before rethrowing to the buffered catch.
+    STREAM_OWNED.add(ctx);
     const encoder = new TextEncoder();
     const line = (obj: unknown): Uint8Array => encoder.encode(JSON.stringify(obj) + '\n');
     // Fire-and-forget generator cleanup: a no-op on a finished generator, and
     // a throwing `finally` must not become an unhandled rejection.
     const dispose = (): void => void gen.return(undefined).catch(() => {});
+    /**
+     * A stream terminal (rfc-server-v3 §2.6, F-C): release the generator,
+     * then — AFTER its `return()` settles, so a `finally` reading a
+     * per-request value never races its own teardown — run the request
+     * store's disposers. Every path below ends in exactly one of these.
+     */
+    const disposeAll = (): void =>
+        void gen
+            .return(undefined)
+            .catch(() => {})
+            .then(() => disposeRequestValues(ctx))
+            .catch(() => {});
     const cap = options.maxResponseBytes;
     let sentBytes = 0;
     /** Encode one chunk line, rich types included (rfc-server §4). On values
@@ -1216,15 +1268,32 @@ async function streamResponse(
         }
         return bytes;
     };
-    // Pre-encode the first line while a buffered error response is still
-    // possible — an unserializable FIRST chunk becomes an ordinary JSON
-    // error via the caller's catch.
-    const firstLine = first.done ? null : chunkLine(first.value);
+    let first: IteratorResult<unknown>;
+    let firstLine: Uint8Array | null;
+    try {
+        first = await gen.next();
+        // Pre-encode the first line while a buffered error response is still
+        // possible — an unserializable FIRST chunk becomes an ordinary JSON
+        // error via the caller's catch.
+        firstLine = first.done ? null : chunkLine(first.value);
+    } catch (error) {
+        // Pre-Response failure (a pre-first-yield throw, an unserializable
+        // first chunk): no stream ever started, so the buffered catch owns
+        // the RESPONSE — but this function owns the disposal, ordered.
+        await gen.return(undefined).catch(() => {});
+        await disposeRequestValues(ctx);
+        throw error;
+    }
+    const headers = new Headers(ctx.responseHeaders);
+    headers.set('content-type', 'application/x-ndjson');
     const body = new ReadableStream<Uint8Array>({
         start(controller) {
             if (firstLine === null) {
                 controller.enqueue(line({ done: 1 }));
                 controller.close();
+                // The empty generator already finished (its `finally` ran
+                // inside that first `next()`), so only the store remains.
+                disposeAll();
                 return;
             }
             controller.enqueue(firstLine);
@@ -1235,6 +1304,7 @@ async function streamResponse(
                 if (next.done) {
                     controller.enqueue(line({ done: 1 }));
                     controller.close();
+                    disposeAll();
                     return;
                 }
                 controller.enqueue(chunkLine(next.value));
@@ -1243,7 +1313,7 @@ async function streamResponse(
                 // the terminating NDJSON line (headers are long gone). The
                 // masked failure still reaches the observability seam
                 // (#349) — a mid-stream prod throw must not be invisible.
-                dispose();
+                disposeAll();
                 if (!isServerFnError(error)) {
                     await reportMasked(options, error, info, ctx as ServerFnContext);
                 }
@@ -1260,7 +1330,7 @@ async function streamResponse(
             }
         },
         cancel() {
-            dispose();
+            disposeAll();
         }
     });
     return new Response(body, { status: ctx._status ?? 200, headers });

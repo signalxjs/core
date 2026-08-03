@@ -582,10 +582,35 @@ composition API.
   `AsyncLocalStorage` (workerd with no `nodejs_compat`) there is no scope to
   share, so a value is computed per invocation — the guards and handler of one
   call still share it, exactly as before this existed.
-- **No disposal in v1.** `perRequest` has no `onDispose`: on WinterCG runtimes
-  the render's scope settles at the shell, so "released when the response has
-  flushed" would fire mid-stream. An app that needs teardown owns it in its own
-  handler, where it already has the request.
+- **Teardown rides `onDispose`** (rfc-server-v3 §2.6, #571) — the setup's
+  second parameter:
+
+  ```ts
+  export const db = perRequest((rq, onDispose) => {
+      const conn = pool.acquire();
+      onDispose(() => conn.release());   // register SYNCHRONOUSLY, before any await
+      return conn;
+  });
+  ```
+
+  Disposers run **when the response has fully flushed** — streamed edge
+  bodies included: the fetch handler extends the scope's disposal to
+  end-of-body via the `keepAlive` seam, so a `useData` fetcher settling
+  mid-stream never sees its own teardown. They run LIFO, each awaited,
+  throws logged and swallowed; a `timeoutMs` 504 does **not** dispose ahead
+  of the still-settling handler, and a stream's generator `finally` always
+  completes first. Registration after the setup's first `await` still
+  registers, with a dev warning. The store's owner is whoever opened the
+  request — the endpoint or the render scope; a context you hand to
+  `fn.with({ context })` (and a detached call) has **no owner**: nothing
+  runs its disposers automatically (dev-warned), and
+  `disposeRequestValues(rq)` — exported from the root — is your trigger
+  when that request is over. On Cloudflare, heavyweight disposers may need
+  your entry's `ctx.waitUntil` — the platform can cancel work after the
+  last body byte. Upgrade `@sigx/server` and `@sigx/server-renderer`
+  together for streamed-edge disposal: an older renderer never calls
+  `keepAlive`, so on that pairing a streamed body's disposers fire at the
+  shell instead.
 
 `rq.locals` is the other face of the same store — the **escape hatch**, for a
 value too small or too transient to name, and the reason a guard can still
@@ -807,8 +832,10 @@ The pieces that make this correct:
 - **Streams are covered for free** — guards run before the first pull on
   every transport, so admission-style limiting applies to `serverStream`
   unchanged. A *concurrency* cap (increment on admit, decrement on finish)
-  has no framework release hook — guards are before-only; put the decrement
-  in the handler's/generator's own `finally`.
+  releases through `perRequest`'s `onDispose` (#571): admit in a setup,
+  register the decrement, and it fires when the response has fully flushed —
+  streams included (see *Per-request values*). A generator's own `finally`
+  still works where the cap lives entirely inside one handler.
 - **Cost accounting**: a guard sees `(rq, fn)` but never the arguments
   (deliberate — arguments are pre-validation there). Charge by input weight
   at the top of the handler instead, debiting a `perRequest` bucket the
