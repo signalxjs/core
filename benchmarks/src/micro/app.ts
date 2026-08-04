@@ -10,8 +10,10 @@
  * and the default `requireAuthenticated` policy — while the authenticator
  * itself stays O(1) so the numbers keep measuring the FRAMEWORK's overhead,
  * not a cookie parser's. Timing rows shifted when this landed (the pipeline
- * is real work); the baseline was re-recorded on the bench VM in the same
- * change, per the AGENTS.md rule.
+ * is real work); the baseline was re-recorded on the bench VM immediately
+ * after, from main — the re-baseline workflow's Azure federated credential
+ * only matches main's OIDC subject, so AGENTS.md's "run it from your
+ * branch" cannot work until a branch-pattern credential is added.
  */
 import { createServerApp } from '@sigx/server/server';
 
