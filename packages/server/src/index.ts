@@ -27,14 +27,15 @@
  * server.)
  */
 
+import { runAuthorize, runServerPrelude } from './app-config';
 import { resolveInProcessContext, type ServerFnContext } from './context';
 import { ServerFnError } from './errors';
 import type {
     InvalidatePattern,
     ServerFnCallOptions,
     ServerFnCallable,
-    ServerFnGuard,
     ServerFnInvoke,
+    ServerPolicy,
     ServerStreamCallOptions,
     ServerStreamCallable,
     StandardSchemaV1
@@ -42,15 +43,23 @@ import type {
 
 export { ServerFnError, isServerFnError, type ServerFnErrorShape } from './errors';
 export { perRequest, disposeRequestValues, type PerRequestDispose } from './per-request';
+export {
+    principal,
+    requirePrincipal,
+    setPrincipal,
+    requireAuthenticated
+} from './app-config';
 export type { ServerFnContext } from './context';
 export type {
     InvalidatePattern,
     ServerFnCallOptions,
     ServerFnCallable,
-    ServerFnGuard,
     ServerFnInfo,
     ServerFnInvoke,
     ServerFnKeyRef,
+    ServerMiddleware,
+    ServerPolicy,
+    ServerPolicyOp,
     ServerStreamCallOptions,
     ServerStreamCallable,
     StandardSchemaV1,
@@ -103,27 +112,32 @@ export interface ServerFnOptions<S, R> {
      */
     input?: StandardSchemaV1<S>;
     /**
-     * Definition-level middleware — runs before the handler on EVERY
-     * transport (RPC, in-process SSR call), so it cannot be skipped the way
-     * route-level middleware can. Veto by throwing; hand off via `rq.locals`.
+     * This function's authorization requirement (rfc-server-v4 §1.2) —
+     * REPLACES the app default for this function (most-specific-wins);
+     * policies in an array AND together. Runs AFTER `input` validation, so a
+     * policy sees the validated input as the resource (`op.input`), and only
+     * ever a non-null principal unless {@link allowAnonymous} is declared.
+     * Presence is read statically by the build's `requireAuthorization`
+     * check; the values are runtime.
      */
-    use?: ServerFnGuard[];
+    authorize?: ServerPolicy | ServerPolicy[];
     /**
-     * Declares this function deliberately open (rfc-server-v3 §1.3, #489) —
-     * the mirror of the build's `requireGuards`, which requires every server
-     * function to be preset-derived, declare `use`, or say this.
+     * Waives ONLY the identity gate — this function is reachable without a
+     * principal (rfc-server-v4 §1.2). Middleware and authentication still
+     * run (an existing session still yields a principal, so rate limiting
+     * stays per-user and audit logs stay attributed), and any declared
+     * {@link authorize} policies still run, receiving a nullable principal.
      *
-     * Runtime-inert: the build reads the LITERAL `true` statically, the same
-     * discipline `form` has. It is spelled as a word rather than as absence
-     * because "I meant this to be public" and "I forgot the guard" must not
-     * look identical — and because it makes the open surface greppable
-     * (`grep -rn unguarded --include='*.server.ts' src/` prints every
-     * deliberately-open endpoint, a list a security review can read).
-     *
-     * Combining it with a preset is a definition-time error: the preset's
-     * guards still run, so the declaration would be a lie.
+     * Write the LITERAL `true` — the build reads it statically, the same
+     * discipline `form` has, and the runtime stamps `__sigxAnon` from it so
+     * the endpoint can gate before decoding attacker bytes. Spelled as a
+     * word rather than as absence because "deliberately open to anonymous
+     * callers" and "forgot to protect" must not look identical — and it
+     * makes the open surface greppable: `grep -rn allowAnonymous
+     * --include='*.server.ts' src/` prints every anonymous-reachable
+     * endpoint, a list a security review can read.
      */
-    unguarded?: true;
+    allowAnonymous?: true;
     /**
      * Server-declared cache invalidation (rfc-server §6.2): which cache
      * keys this mutation invalidates, computed WHERE the data changed so
@@ -198,61 +212,6 @@ export interface ServerFnOptions<S, R> {
     handler(rq: ServerFnContext, input: S): R | Promise<R>;
 }
 
-/**
- * The base chain of a plain `serverFn`/`serverStream` — one shared empty
- * array, so the non-preset path never allocates and the loops that read it
- * cost an iterator that stops immediately.
- */
-const NO_GUARDS: readonly ServerFnGuard[] = [];
-
-/**
- * `unguarded: true` on a preset-derived function is a lie — the preset's
- * guards still run — so it fails at module load (#489). NOT `__DEV__`-gated,
- * the same posture as the `form`-without-`input` throw: a definition-time
- * throw fails at boot or in CI, never per request, and a dev-only warning is
- * silent exactly where a security declaration being wrong matters.
- */
-/**
- * rfc-server-v3 §1.5's mitigation, runtime half. Under `requireGuards` the
- * build stamps `__sigxGuardChecked` on every function it analyzed; a
- * `*.server.ts` outside the plugin's `include`/`scan` is never analyzed, so an
- * unstamped function reaching a call is the only sign that the gate never saw
- * it. Absence is the alarm — which is why this warns rather than throws, and
- * why the check is dev-only: there is no honest prod signal here, and a false
- * failure would be worse than the gap.
- *
- * Silent when nothing is stamped at all (no transform: unit tests, hand-wired
- * non-Vite builds), so the warning means "some of this build was checked and
- * this was not", never "you are not using Vite".
- */
-function warnUnchecked(fn: object, name: string): boolean {
-    if (!__DEV__ || (fn as { __sigxGuardChecked?: boolean }).__sigxGuardChecked === true) {
-        return false;
-    }
-    if (!(globalThis as { __SIGX_GUARDS_CHECKED__?: boolean }).__SIGX_GUARDS_CHECKED__) {
-        return false;
-    }
-    console.warn(
-        `[sigx server] server function ${name ? `"${name}" ` : ''}was never analyzed by the ` +
-        `guard check — this build has \`requireGuards\` on, but its module is outside the ` +
-        `sigxServer() \`include\`/\`scan\` patterns, so nothing verified that it declares a ` +
-        `guard chain. Add its directory to \`scan\` (rfc-server-v3 §1.5). Fires once per function.`
-    );
-    // Latched by the caller: the stamp lands AFTER the wrapper is built, so
-    // this cannot be decided at definition time — but a hot function must not
-    // repeat it per call.
-    return true;
-}
-
-function unguardedContradiction(name: string): Error {
-    return new Error(
-        `[sigx server] ${name ? `"${name}" ` : ''}declares \`unguarded: true\` but derives from ` +
-        `a serverFnPreset, whose guards still run — the declaration would be false. Drop ` +
-        `\`unguarded\` to keep the preset's chain, or define this one with plain serverFn/` +
-        `serverStream if it really is open (rfc-server-v3 §1.3).`
-    );
-}
-
 /** Wrap a server-only function. Client callers get `(...args) => Promise<R>`. */
 export function serverFn<A extends unknown[], R>(
     impl: (rq: ServerFnContext, ...args: A) => R | Promise<R>
@@ -274,30 +233,32 @@ export function serverFn(
 }
 
 /**
- * The shared body of `serverFn` and of a preset's derived form (rfc-server
- * §2.1, amended by rfc-server-v3 §1.2).
- *
- * `baseUse` is the preset's ALREADY-COPIED guard array — empty for a plain
- * `serverFn`, so nothing on that path allocates. It is prepended INSIDE each
- * branch rather than by routing the direct form through the options-form
- * pipeline: that pipeline rejects `args.length > 1`, and a multi-argument
- * direct-form preset function is §2.1's headline example.
+ * The shared body of `serverFn` (rfc-server §2.1, pipeline order per
+ * rfc-server-v4 §1.3). The ownership contract: a WIRE transport runs the
+ * prelude (middleware → authenticate → identity gate) itself, before
+ * decoding arguments; `invoke` runs it here only for in-process calls —
+ * which is why every branch below starts with the same transport check.
+ * Authorization (phase B) is inside `invoke` on every transport, so the
+ * access decision never depends on the transport behaving.
  */
 function createServerFn(
-    arg: ((rq: ServerFnContext, ...args: unknown[]) => unknown) | ServerFnOptions<unknown, unknown>,
-    baseUse: readonly ServerFnGuard[] = NO_GUARDS
+    arg: ((rq: ServerFnContext, ...args: unknown[]) => unknown) | ServerFnOptions<unknown, unknown>
 ): ServerFnCallable<unknown[], unknown> {
     let invoke: ServerFnInvoke;
     let name: string;
+    const declared = typeof arg === 'function' ? undefined : arg.authorize;
+    const anon = typeof arg !== 'function' && arg.allowAnonymous === true;
 
     if (typeof arg === 'function') {
         // #412: the direct form has no validation seam — wire args (an
         // attacker-controlled array) spread straight into the impl. Surface
-        // that trade-off once per fn in dev; `info.symbol` is empty only for
-        // in-process calls, and zero-arg fns carry no attacker input.
+        // that trade-off once per fn in dev; zero-arg fns carry no attacker
+        // input. (No `authorize`/`allowAnonymous` either — the direct form
+        // has nowhere to declare, so it inherits the app default.)
         let warnedWire = false;
         invoke = async (rq, info, args) => {
-            if (__DEV__ && !warnedWire && info.symbol !== '' && args.length > 0) {
+            if (info.transport === 'in-process') await runServerPrelude(rq, info, anon);
+            if (__DEV__ && !warnedWire && info.transport === 'wire' && args.length > 0) {
                 warnedWire = true;
                 console.warn(
                     `[sigx server] serverFn "${info.name || info.symbol}" received ` +
@@ -308,11 +269,7 @@ function createServerFn(
                     `Zod/Valibot/ArkType; rfc-server §5). Fires once per function.`
                 );
             }
-            // The preset's chain — the direct form's only middleware seam
-            // (rfc-server-v3 §1.2). It had none at all before #398, so a
-            // preset-derived direct-form function was guarded on the wire and
-            // unguarded during SSR, which is P1 in miniature.
-            for (const guard of baseUse) await guard(rq, info);
+            await runAuthorize(rq, { fn: info, args }, declared, anon);
             return arg(rq, ...args);
         };
         name = arg.name || '';
@@ -324,7 +281,8 @@ function createServerFn(
         // `unknown` too. Same once-per-fn dev signal as the direct form.
         let warnedWire = false;
         invoke = async (rq, info, args) => {
-            if (__DEV__ && !warnedWire && !options.input && info.symbol !== '' && args.length > 0) {
+            if (info.transport === 'in-process') await runServerPrelude(rq, info, anon);
+            if (__DEV__ && !warnedWire && !options.input && info.transport === 'wire' && args.length > 0) {
                 warnedWire = true;
                 console.warn(
                     `[sigx server] serverFn "${info.name || info.symbol}" (options form) ` +
@@ -333,13 +291,6 @@ function createServerFn(
                     `only. Declare \`input\` (Standard Schema — Zod/Valibot/ArkType; ` +
                     `rfc-server §5). Fires once per function.`
                 );
-            }
-            // Preset guards run FIRST: app-wide policy establishes what the
-            // per-function chain then reads off `rq.locals`. "Prepended" is
-            // the RFC's word for it, and the order is pinned by a test.
-            for (const guard of baseUse) await guard(rq, info);
-            for (const guard of options.use ?? []) {
-                await guard(rq, info);
             }
             // The options form takes ONE input (matching its signature) —
             // extra wire args would silently bypass the declared shape.
@@ -358,12 +309,15 @@ function createServerFn(
             // Stash the VALIDATED input for the endpoint's `invalidates`
             // call (§6.2) — per-request context, so concurrency-safe.
             (rq as { _input?: unknown })._input = input;
+            // Phase B — after validation, so a policy's `op.input` is the
+            // trusted resource (rfc-server-v4 §1.3), immediately before the
+            // handler. Order pinned by test.
+            await runAuthorize(rq, { fn: info, input, args }, declared, anon);
             return options.handler(rq, input);
         };
         name = options.handler.name || '';
     }
 
-    let warnedUnchecked = false;
     // In-process (SSR-time) calls run the same pipeline against a detached
     // context — no network hop, and no transport symbol (rfc-server §7 v1).
     // `.with(options)` is the per-call options channel (#353): explicit, so
@@ -381,8 +335,11 @@ function createServerFn(
                     `apply it to. It only affects the client stub's fetch (#315).`
                 );
             }
-            if (__DEV__ && !warnedUnchecked) warnedUnchecked = warnUnchecked(wrapper, name);
-            return invoke(resolveInProcessContext(options?.signal, options?.context), { symbol: '', name }, args);
+            return invoke(
+                resolveInProcessContext(options?.signal, options?.context),
+                { symbol: '', name, transport: 'in-process' },
+                args
+            );
         };
     const wrapper = callWith();
     // The §6.2 seam for the ENDPOINT (wire-only — the wrapper above never
@@ -407,11 +364,23 @@ function createServerFn(
             `\`invalidates\` into its own serverFn.`
         );
     }
+    // Coherence check (rfc-server-v4 §1.4): a `public` cached read whose
+    // identity gate still applies would serve per-principal 200s under a
+    // shared-cache header — the §5.2a mistake, now statically visible. A
+    // public read's output depends only on its arguments, so it should also
+    // be reachable without a principal.
+    if (__DEV__ && cache?.public === true && !anon) {
+        console.warn(
+            `[sigx server] serverFn ${name ? `"${name}" ` : ''}declares \`cache.public\` ` +
+            `without \`allowAnonymous: true\` — a public Cache-Control header lets shared ` +
+            `caches store the response, but the identity gate still requires a principal, ` +
+            `so authenticated responses would be cached publicly (rfc-server §5.2a). A ` +
+            `public read depends only on its arguments; declare \`allowAnonymous: true\`, ` +
+            `or drop \`public\`.`
+        );
+    }
     // The §6.4 form-target marker: the endpoint's gate for accepting form
     // content-types, and the build's for stamping action/method.
-    if (baseUse.length > 0 && typeof arg !== 'function' && arg.unguarded === true) {
-        throw unguardedContradiction(name);
-    }
     const form = typeof arg === 'function' ? false : arg.form === true;
     if (form && !(arg as ServerFnOptions<unknown, unknown>).input) {
         // #412: NOT __DEV__-gated — the no-JS form transport delivers an
@@ -454,6 +423,7 @@ function createServerFn(
         __sigxFn: invoke,
         __sigxName: name,
         __sigxKey: '',
+        ...(anon ? { __sigxAnon: true } : {}),
         ...(invalidates ? { __sigxInvalidates: invalidates } : {}),
         ...(cache ? { __sigxGet: true, __sigxCacheControl: cacheControlValue(cache) } : {}),
         ...(form ? { __sigxForm: true } : {})
@@ -504,31 +474,32 @@ function assertNotLiveClient(name: string): void {
  *
  * Two forms, like `serverFn`: the direct one above, and an options form (#489)
  * that itself comes in two shapes (#572). A stream is a public endpoint too, so
- * `requireGuards` holds it to the same rule — and the options form is where it
- * declares. The multi-argument shape carries `use`/`unguarded` only — many
- * arguments have no single-input schema, so validation belongs at the top of
- * the generator (any Standard Schema validates standalone). Declaring `input`
- * selects the single-input shape instead: `serverFn`'s exact semantics,
- * validated before the first chunk on every transport. Unlike `serverFn`,
- * omitting `input` never falls back to the handler's annotation — no `input`
- * means the multi-argument form, deliberately.
+ * the build's `requireAuthorization` check holds it to the same rule — and the
+ * options form is where it declares. The multi-argument shape carries
+ * `authorize`/`allowAnonymous` only — many arguments have no single-input
+ * schema, so validation belongs at the top of the generator (any Standard
+ * Schema validates standalone). Declaring `input` selects the single-input
+ * shape instead: `serverFn`'s exact semantics, validated before the first
+ * chunk on every transport. Unlike `serverFn`, omitting `input` never falls
+ * back to the handler's annotation — no `input` means the multi-argument
+ * form, deliberately.
  */
 export interface ServerStreamOptions<A extends unknown[], T> {
     /**
-     * Definition-level middleware — runs before the generator on EVERY
-     * transport, wire and in-process alike. Veto by throwing; in-process the
-     * veto surfaces on the first pull, where the wire path's pre-first-yield
-     * error surfaces too.
+     * This stream's authorization requirement — same contract as
+     * `serverFn`'s (rfc-server-v4 §1.2): replaces the app default, ANDs in
+     * an array, runs before the first chunk on every transport. A veto
+     * surfaces in-process on the first pull, where the wire path's
+     * pre-first-yield error surfaces too. Note `op.input` is undefined in
+     * this multi-argument shape — policies see the raw `op.args`.
      */
-    use?: ServerFnGuard[];
+    authorize?: ServerPolicy | ServerPolicy[];
     /**
-     * Declares this stream deliberately open (#489) — the mirror of the build's
-     * `requireGuards`. Runtime-inert; the build reads the LITERAL `true`
-     * statically, the same discipline `form` has. Spelled as a word because an
-     * opt-out spelled as *absence* is indistinguishable from a mistake, and
-     * because it makes the public surface greppable.
+     * Waives ONLY the identity gate — middleware, authentication and any
+     * declared `authorize` policies still run (rfc-server-v4 §1.2). Write
+     * the LITERAL `true`; the build reads it statically.
      */
-    unguarded?: true;
+    allowAnonymous?: true;
     /**
      * Not accepted in the multi-argument form — declaring `input` selects the
      * single-input form (`ServerStreamInputOptions`). This `undefined` member
@@ -556,10 +527,14 @@ export interface ServerStreamInputOptions<S, T> {
      * args are a 400, matching `serverFn`'s options form.
      */
     input: StandardSchemaV1<S>;
-    /** Definition-level middleware — same contract as the multi-argument form. */
-    use?: ServerFnGuard[];
-    /** Same declaration as the multi-argument form (#489). */
-    unguarded?: true;
+    /**
+     * This stream's authorization requirement — same contract as the
+     * multi-argument form, and since this shape validates, a policy's
+     * `op.input` is the VALIDATED input (rfc-server-v4 §1.3).
+     */
+    authorize?: ServerPolicy | ServerPolicy[];
+    /** Same declaration as the multi-argument form. */
+    allowAnonymous?: true;
     /** The implementation — receives the VALIDATED input. */
     handler(rq: ServerFnContext, input: S): AsyncGenerator<T>;
 }
@@ -587,13 +562,12 @@ export function serverStream<A extends unknown[], T>(
     return createServerStream(arg);
 }
 
-/** `serverStream`'s body, plus a preset's already-copied guard array. */
+/** `serverStream`'s body — same ownership contract as `createServerFn`. */
 function createServerStream<A extends unknown[], T>(
     arg:
         | ((rq: ServerFnContext, ...args: A) => AsyncGenerator<T>)
         | ServerStreamOptions<A, T>
-        | ServerStreamInputOptions<unknown, T>,
-    baseUse: readonly ServerFnGuard[] = NO_GUARDS
+        | ServerStreamInputOptions<unknown, T>
 ): ServerStreamCallable<A, T> {
     const options = typeof arg === 'function' ? undefined : arg;
     // Kept unbound for its `.name`; `impl` is the callable, bound to the
@@ -601,24 +575,26 @@ function createServerStream<A extends unknown[], T>(
     // literal — the same thing `serverFn`'s `options.handler(...)` call does.
     // The cast unifies the two handler shapes; the single-input one is only
     // ever called with the one validated argument below.
-    const declared = (typeof arg === 'function' ? arg : arg.handler) as (
+    const handler = (typeof arg === 'function' ? arg : arg.handler) as (
         rq: ServerFnContext,
         ...args: A
     ) => AsyncGenerator<T>;
-    const impl = options ? declared.bind(options) : declared;
-    const name = declared.name || '';
-    if (options && baseUse.length > 0 && options.unguarded === true) {
-        throw unguardedContradiction(name);
-    }
+    const impl = options ? handler.bind(options) : handler;
+    const name = handler.name || '';
+    const policies = options?.authorize;
+    const anon = options?.allowAnonymous === true;
     const input = options?.input;
     // #412: same unvalidated-wire-args surface as serverFn's direct form,
     // same once-per-fn dev signal. A declared `input` (#572) closes it, so
     // the warning is gated on its absence.
     let warnedWire = false;
     // Async so transports get a settled value to marker-check; the resolved
-    // value is the (not-yet-started) generator.
+    // value is the (not-yet-started) generator. Everything here — prelude,
+    // validation, authorization — lands BEFORE the generator starts:
+    // buffered 400/401/403 on the wire, first-pull rejection in-process.
     const invoke: ServerFnInvoke = async (rq, info, args) => {
-        if (__DEV__ && !warnedWire && !input && info.symbol !== '' && args.length > 0) {
+        if (info.transport === 'in-process') await runServerPrelude(rq, info, anon);
+        if (__DEV__ && !warnedWire && !input && info.transport === 'wire' && args.length > 0) {
             warnedWire = true;
             console.warn(
                 `[sigx server] serverStream "${info.name || info.symbol}" received ` +
@@ -632,13 +608,10 @@ function createServerStream<A extends unknown[], T>(
                 `Fires once per function.`
             );
         }
-        for (const guard of baseUse) await guard(rq, info);
-        for (const guard of options?.use ?? []) await guard(rq, info);
         if (input) {
             // The single-input form takes ONE argument (matching its
             // signature) — extra wire args would silently bypass the declared
-            // shape. Both throws land before the generator starts: buffered
-            // 400 on the wire, first-pull rejection in-process.
+            // shape.
             if (args.length > 1) {
                 throw new ServerFnError(400, 'a serverStream with `input` takes a single input argument');
             }
@@ -647,8 +620,10 @@ function createServerStream<A extends unknown[], T>(
             if (result.issues) {
                 throw new ServerFnError(400, 'Invalid input', { issues: result.issues });
             }
+            await runAuthorize(rq, { fn: info, input: result.value, args }, policies, anon);
             return impl(rq, ...([result.value] as unknown as A));
         }
+        await runAuthorize(rq, { fn: info, args }, policies, anon);
         return impl(rq, ...(args as A));
     };
     /**
@@ -659,9 +634,8 @@ function createServerStream<A extends unknown[], T>(
      * that `break`s still runs its `finally`.
      */
     async function* pump(rq: ServerFnContext, args: A): AsyncGenerator<T> {
-        yield* (await invoke(rq, { symbol: '', name }, args)) as AsyncGenerator<T>;
+        yield* (await invoke(rq, { symbol: '', name, transport: 'in-process' }, args)) as AsyncGenerator<T>;
     }
-    let warnedUnchecked = false;
     // `.with(options)` — the same per-call channel as serverFn's, minus
     // `fresh` (#448). #362 left streams out on the strength of the signal
     // argument alone (consumer break/return already aborts), which said
@@ -685,13 +659,11 @@ function createServerStream<A extends unknown[], T>(
             // detached context's `request`/`url` throw descriptively. Resolved
             // HERE, at call time — the ambient scope belongs to whoever
             // called, not to whoever first pulls a chunk.
-            if (__DEV__ && !warnedUnchecked) warnedUnchecked = warnUnchecked(wrapper, name);
             const rq = resolveInProcessContext(options?.signal, options?.context);
             // rfc-server-v3 §1.2 (F-B): an in-process stream runs the SAME
-            // pipeline the wire does. It ran NO middleware at all before, so a
-            // guarded stream over RPC was an unguarded one during SSR. A veto
-            // now surfaces on the first pull — which is exactly where the wire
-            // path's pre-first-yield error surfaces too.
+            // pipeline the wire does. A veto surfaces on the first pull —
+            // which is exactly where the wire path's pre-first-yield error
+            // surfaces too.
             return pump(rq, args);
         };
     const wrapper = callWith();
@@ -699,67 +671,13 @@ function createServerStream<A extends unknown[], T>(
         with: callWith,
         __sigxFn: invoke,
         __sigxName: name,
-        __sigxStream: true as const
+        __sigxStream: true as const,
+        ...(anon ? { __sigxAnon: true } : {})
     });
 }
 
-/**
- * A preset's derived form: `serverFn`'s EXACT overloads, plus the
- * `serverStream` twin at `.stream`.
- *
- * NOT a builder — `preset.stream` is a second one-shot factory over the same
- * `use` array, never an accumulating chain. Chainable builders stay a non-goal
- * (rfc-server §2.1).
- */
-export type ServerFnPreset = typeof serverFn & { stream: typeof serverStream };
-
-/**
- * Shared per-module middleware (rfc-server §2.1, amended by rfc-server-v3
- * §1.2) — the answer to #489 that keeps the transport guarantee.
- *
- * A guard chain has to be DEFINITION-level to reach every transport: the
- * endpoint's `guard` is wire-only (§4/#493), a process registry would need a
- * `globalThis` seam whose miss is fail-open on the auth path, and the request
- * scope is absent by design without `AsyncLocalStorage`. What is captured in
- * the wrapper is read by the one `invoke` every transport shares — no lookup,
- * no ordering hazard, no platform dependency.
- *
- * The repetition #489 objects to is answered by sharing the guard ARRAY, so
- * the policy lives in one file and each server module spends one line:
- *
- * ```ts
- * // src/guards.ts
- * export const appGuards = [requireUser];
- *
- * // src/board.server.ts
- * const authed = serverFnPreset({ use: appGuards });
- * export const boardIssues = authed({ input: BoardKey, handler: async (rq, k) => … });
- * export const feed        = authed.stream(async function* (rq) { … });
- * ```
- *
- * SAME-MODULE only: the extractors are per-file by contract, so a preset
- * imported from another module is invisible where it is used and the functions
- * derived from it would not extract at all. Exporting one is a build warning.
- */
-export function serverFnPreset(base: { use: ServerFnGuard[] }): ServerFnPreset {
-    // Copied ONCE, at definition: a policy the app can push to afterwards is
-    // not a policy.
-    const use = base.use.slice();
-    const derived = (
-        arg: ((rq: ServerFnContext, ...args: unknown[]) => unknown) | ServerFnOptions<unknown, unknown>
-    ): ServerFnCallable<unknown[], unknown> => createServerFn(arg, use);
-    const derivedStream = <A extends unknown[], T>(
-        arg:
-            | ((rq: ServerFnContext, ...args: A) => AsyncGenerator<T>)
-            | ServerStreamOptions<A, T>
-            | ServerStreamInputOptions<unknown, T>
-    ): ServerStreamCallable<A, T> => createServerStream(arg, use);
-    // The casts RESTATE the overloads; they do not change the runtime. Each
-    // derived function is literally its wrapper's IMPLEMENTATION signature,
-    // and a single signature is never assignable to a two-overload type. They
-    // go on the TARGET so `Object.assign`'s `T & U` keeps every call signature
-    // — an intersection of call signatures IS an overload set.
-    return Object.assign(derived as unknown as typeof serverFn, {
-        stream: derivedStream as unknown as typeof serverStream
-    });
-}
+// `serverFnPreset` is gone (rfc-server-v4 §1.5): the app default
+// (`createServerApp({ authorize })`) answers #489's actual ask, and a
+// module-scope policy is one imported identifier per function
+// (`authorize: adminOnly`). The direct-form and stream-reroute fixes the
+// preset forced (#398) survive above as pipeline properties.

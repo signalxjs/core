@@ -28,25 +28,36 @@ import { serverFn } from '@sigx/server';
 import * as serverFnNode from '@sigx/server/node';
 import { sigxServer, type SigxServerOptions } from '../src/server-fn';
 
-/** What the fixture module looks like ON DISK — the extractor's input. */
+/** What the fixture module looks like ON DISK — the extractor's input.
+ *  `allowAnonymous: true` because the endpoint EXECUTES these under the
+ *  fail-closed runtime (rfc-server-v4): with no server app stamped, a bare
+ *  fn would 401 before any of the options this file is about could matter. */
 const API = `
 import { serverFn } from '@sigx/server';
 
 export const read = serverFn({
+    allowAnonymous: true,
     cache: { maxAge: 60 },
     handler: async (rq, id) => 'read:' + id
 });
 
-export const never = serverFn(async () => new Promise(() => {}));
+export const never = serverFn({
+    allowAnonymous: true,
+    handler: async () => new Promise(() => {})
+});
 `;
 
 /** …and the live module the fake \`ssrLoadModule\` resolves it to. */
 const liveModule = {
     read: serverFn({
+        allowAnonymous: true,
         cache: { maxAge: 60 },
         handler: async (_rq: unknown, id: string) => `read:${id}`
     }),
-    never: serverFn(async () => new Promise(() => {}))
+    never: serverFn({
+        allowAnonymous: true,
+        handler: async () => new Promise(() => {})
+    })
 };
 
 interface Mounted {

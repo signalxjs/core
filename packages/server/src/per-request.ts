@@ -234,10 +234,10 @@ function storeOf(rq: ServerFnContext): ValueStore {
  *     return createGitHubClient(s.token);
  * });
  *
- * // src/guards.ts
- * export const requireUser: ServerFnGuard = async (rq) => {
- *     if (!(await session(rq))) throw new ServerFnError(401, 'Sign in');
- * };
+ * // src/server-app.ts — the session IS the authenticator (rfc-server-v4):
+ * // resolved once per request through the same memo, and the identity gate
+ * // 401s anonymous callers so no per-function check is needed.
+ * export const app = createServerApp({ authenticate: (rq) => session(rq) });
  * ```
  *
  * Values compose by calling each other, with no composition API at all — which

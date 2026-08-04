@@ -6,6 +6,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING — `@sigx/server`: the guard system splits into middleware /
+  authentication / authorization, and the runtime is fail-closed
+  (rfc-server-v4 §1–§2, #607/#609, phase 1 of 4).** `use:` /
+  `unguarded: true` / `serverFnPreset` are removed: authorization is
+  `authorize: (principal, rq, op) => boolean` (run AFTER `input` validation,
+  strict-`true`-to-allow), the deliberate open surface is the literal
+  `allowAnonymous: true` (middleware + authentication still run for it — it
+  waives only the identity gate), and cross-cutting work is app `middleware`.
+  A function that declares nothing now **denies 401 on every transport**
+  unless an app default admits it — app config resolves through the
+  fail-closed `__SIGX_SERVER_APP__` seam, whose miss can only ever remove
+  permission. `ServerFnInfo` gains `transport: 'wire' | 'in-process'`,
+  retiring the `symbol === ''` discriminator contract; `ServerFnGuard` is
+  replaced by `ServerMiddleware` + `ServerPolicy`; `principal` /
+  `requirePrincipal` / `setPrincipal` / `requireAuthenticated` are new on
+  `@sigx/server`, and `@sigx/server/testing` gains
+  `createTestServerFnContext(init, { principal })` + `stubServerApp`. The
+  `__sigxGuardChecked`/`__SIGX_GUARDS_CHECKED__` machinery is deleted — the
+  fail-closed runtime closes rfc-server-v3 §1.5's unanalyzed-module gap it
+  existed to mitigate. The old→new observable table, per input shape, is in
+  `packages/server/CHANGELOG.md`; `createServerApp` (the platform value and
+  mounts) lands in phase 2 (#610), the sharpened `requireAuthorization`
+  build gate in phase 3 (#611).
+
 ### Added
 
 - **`@sigx/vite`: the server-fn registry exports the mount path it baked

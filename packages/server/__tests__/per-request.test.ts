@@ -6,11 +6,22 @@
  * promise included, reachable from every guard and handler on every transport.
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { perRequest, serverFn, ServerFnError, type ServerFnContext } from '../src/index';
 import { handleServerFnRequest } from '../src/server/index';
 import { runInScope } from '../src/scope';
 import { createDetachedContext } from '../src/context';
+import { stubServerApp } from '../src/testing';
+
+// The pipeline is fail-closed (rfc-server-v4 §2.1): stub an authenticated
+// app so the per-request store stays the subject.
+let restoreApp: () => void;
+beforeEach(() => {
+    restoreApp = stubServerApp({ authenticate: () => ({ id: 'tester' }) });
+});
+afterEach(() => {
+    restoreApp();
+});
 
 const ORIGIN = 'http://localhost';
 
@@ -74,12 +85,13 @@ describe('perRequest — one value per request', () => {
         });
 
         const promises: unknown[] = [];
+        // A policy and the handler of one invocation receive the same `rq` —
+        // the v4 shape of "the guard's decode is the handler's decode".
         const fn = serverFn({
-            use: [
-                (rq): void => {
-                    promises.push(session(rq));
-                }
-            ],
+            authorize: (_p, rq) => {
+                promises.push(session(rq));
+                return true;
+            },
             handler: async (rq) => {
                 promises.push(session(rq));
                 return 'ok';
@@ -100,11 +112,10 @@ describe('perRequest — one value per request', () => {
             return rq.request.headers.get('origin');
         });
         const fn = serverFn({
-            use: [
-                async (rq): Promise<void> => {
-                    await session(rq);
-                }
-            ],
+            authorize: async (_p, rq) => {
+                await session(rq);
+                return true;
+            },
             handler: async (rq) => session(rq)
         });
 
@@ -270,16 +281,15 @@ describe('perRequest — no AsyncLocalStorage (workerd without nodejs_compat)', 
                 return 'decoded';
             });
 
-            // The guards and the handler of ONE invocation receive the same
-            // `rq`, so the guard's decode is still the handler's decode.
+            // The policies and the handler of ONE invocation receive the same
+            // `rq`, so the policy's decode is still the handler's decode.
             let fromGuard: unknown;
             const fn = api.serverFn({
-                use: [
-                    async (rq): Promise<void> => {
-                        fromGuard = await session(rq);
-                    }
-                ],
-                handler: async (rq) => session(rq)
+                authorize: async (_p: unknown, rq: ServerFnContext) => {
+                    fromGuard = await session(rq);
+                    return true;
+                },
+                handler: async (rq: ServerFnContext) => session(rq)
             });
 
             // Runs UNSCOPED — that is a supported state, not an error.

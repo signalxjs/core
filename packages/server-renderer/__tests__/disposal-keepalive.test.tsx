@@ -10,20 +10,30 @@
  * @vitest-environment node
  */
 
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { component, useData } from 'sigx';
 import { createFetchHandler } from '../src/server/fetch-handler';
 import { createRequestHandler } from '../src/node';
 import { Writable } from 'node:stream';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { perRequest, serverFn } from '@sigx/server';
+import { stubServerApp } from '@sigx/server/testing';
 // The scope seam is stamped by the SERVER entries' import graph (scope.ts,
 // "stamped at IMPORT") — an edge deployment always has one of them loaded.
 import '@sigx/server/server';
 
 const TEMPLATE = `<!doctype html><html><head></head><body><div id="app"><!--ssr-outlet--></div></body></html>`;
 
+// The fixtures are DIRECT-form fns (nowhere to declare `allowAnonymous`),
+// and the fail-closed runtime (rfc-server-v4) would 401 them before any
+// disposal machinery ran — this file is about disposal, not access, so an
+// authenticated app makes the pipeline transparent.
+let restoreApp: () => void;
+beforeEach(() => {
+    restoreApp = stubServerApp({ authenticate: () => ({ id: 'tester' }) });
+});
 afterEach(() => {
+    restoreApp();
     vi.restoreAllMocks();
 });
 

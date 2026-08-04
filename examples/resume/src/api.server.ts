@@ -8,13 +8,17 @@ import { serverFn, ServerFnError } from '@sigx/server';
  */
 
 /**
- * Every function here says `unguarded: true` (rfc-server-v3 §1.3): the build's
- * `requireGuards` check is on by default, and each of these really is a public
- * endpoint — a demo with no sign-in. Declaring it is the point. An app with
- * auth writes `use: [requireUser]`, or one `serverFnPreset({ use })` per
- * module, and a `grep -rn unguarded` then prints its whole open surface.
+ * Every function here says `allowAnonymous: true` (rfc-server-v4 §1.2): the
+ * runtime is fail-closed — a function that declares nothing DENIES anonymous
+ * callers — and each of these really is open, a demo with no sign-in.
+ * Declaring it is the point: middleware and authentication would still run
+ * for these (nothing is configured here, so there is nothing to run), only
+ * the identity gate is waived, and a `grep -rn allowAnonymous` prints the
+ * app's whole anonymous-reachable surface. An app with auth configures
+ * `createServerApp({ authenticate })` once and writes `authorize:` only
+ * where a function needs more than "any signed-in user".
  *
- * It is also why three of these use the OPTIONS form for a one-line handler:
+ * It is also why these use the OPTIONS form even for a one-line handler:
  * the direct form has nowhere to declare.
  */
 const QUOTES = [
@@ -33,7 +37,7 @@ const QUOTES = [
  * RPC.
  */
 export const requestSummary = serverFn({
-    unguarded: true,
+    allowAnonymous: true,
     handler: async (rq) => `SSR request: ${rq.request.method} ${rq.url.pathname}`
 });
 
@@ -45,7 +49,7 @@ export const requestSummary = serverFn({
  * Set, and BigInt, not their JSON shadows.
  */
 export const getCatalog = serverFn({
-    unguarded: true,
+    allowAnonymous: true,
     cache: { maxAge: 60, staleWhileRevalidate: 300 },
     handler: async (_rq, section: string) => ({
         section,
@@ -68,10 +72,10 @@ export const getCatalog = serverFn({
  */
 let votes = 3;
 
-export const getVotes = serverFn({ unguarded: true, handler: async () => votes });
+export const getVotes = serverFn({ allowAnonymous: true, handler: async () => votes });
 
 export const vote = serverFn({
-    unguarded: true,
+    allowAnonymous: true,
     handler: async () => {
         votes += 1;
         return votes;
@@ -103,7 +107,7 @@ const FeedbackInput = {
  * plain RPC. One function, one validator, two transports.
  */
 export const submitFeedback = serverFn({
-    unguarded: true,
+    allowAnonymous: true,
     form: true,
     input: FeedbackInput,
     handler: async (_rq, input: { message: string }) => {
@@ -113,7 +117,7 @@ export const submitFeedback = serverFn({
 });
 
 export const getQuote = serverFn({
-    unguarded: true,
+    allowAnonymous: true,
     handler: async (rq, index: number) => {
         if (!Number.isInteger(index)) {
             throw new ServerFnError(400, 'index must be an integer');

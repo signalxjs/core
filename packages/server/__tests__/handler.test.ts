@@ -6,13 +6,26 @@
  * masking, and the prototype-pollution reviver.
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
     handleServerFnRequest,
     matchesServerFn,
     type ServerFnRequestOptions
 } from '../src/server/index';
 import { serverFn, ServerFnError } from '../src/index';
+import { stubServerApp } from '../src/testing';
+
+// The endpoint now runs the app pipeline's wire half (middleware →
+// authenticate → identity gate) before decoding; these tests are about the
+// ENDPOINT's own behavior, so an authenticated app makes the pipeline
+// transparent. The pipeline itself is pinned in app-pipeline.test.ts.
+let restoreApp: () => void;
+beforeEach(() => {
+    restoreApp = stubServerApp({ authenticate: () => ({ id: 'tester' }) });
+});
+afterEach(() => {
+    restoreApp();
+});
 
 const ORIGIN = 'http://localhost';
 
@@ -289,7 +302,7 @@ describe('handleServerFnRequest — stable symbols (rfc-server rev 2, N.3)', () 
         // resolve received every segment after the base, rejoined; the
         // guard's info.name is the last one, even though the id carries no
         // hashed tail.
-        expect(seen).toEqual([{ symbol: stable, name: 'addToCart' }]);
+        expect(seen).toEqual([{ symbol: stable, name: 'addToCart', transport: 'wire' }]);
     });
 
     it('a stable id containing a hashed-looking tail cannot misparse the name', async () => {
@@ -645,14 +658,15 @@ describe('handleServerFnRequest — guard seam', () => {
         });
     });
 
-    // The standing pin (rfc-server-v3 §5). `guard` lives INSIDE this handler,
-    // so it covers the wire transports and nothing else — an in-process
-    // (SSR-time) call never enters it. That asymmetry is documented (§4,
-    // #493) and deliberate (§1.1: the alternatives all fail open), so it is
-    // executable here and a future "fix" cannot change it silently. The
-    // transport-independent chain is the definition's `use:` /
-    // `serverFnPreset`.
-    it('does NOT run for an in-process call — the endpoint guard is wire-only (§1.1/§4)', async () => {
+    // `guard` lives INSIDE this handler, so it covers the wire transports
+    // and nothing else — an in-process (SSR-time) call never enters it.
+    // Under rfc-server-v4 that is exactly why the option is scheduled for
+    // removal (§3.1): the transport-COMPLETE mechanism is app middleware,
+    // whose in-process pin lives in app-pipeline.test.ts ("middleware DOES
+    // run for an in-process call" — the inverse of this one). Until phase 2
+    // deletes the option, its wire-only shape stays executable here so the
+    // removal is a deliberate diff, not a silent drift.
+    it('does NOT run for an in-process call — the endpoint guard option is wire-only', async () => {
         let guarded = 0;
         const secret = serverFn(async () => 'data');
         const options: Partial<ServerFnRequestOptions> = {

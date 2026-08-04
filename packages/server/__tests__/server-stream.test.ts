@@ -8,17 +8,17 @@
  * lazy start, abort on break, truncation detection).
  */
 
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import {
     serverStream,
     serverFn,
-    serverFnPreset,
     ServerFnError,
     type StandardSchemaV1
 } from '../src/index';
 import { handleServerFnRequest } from '../src/server/index';
 import { __serverStreamStub, configureServerFn } from '../src/client/index';
 import { isServerFnError } from '../src/errors';
+import { stubServerApp } from '../src/testing';
 
 const ORIGIN = 'http://localhost';
 
@@ -28,7 +28,16 @@ const collect = async <T,>(iterable: AsyncIterable<T>): Promise<T[]> => {
     return out;
 };
 
+// Streams ride the fail-closed pipeline too; an authenticated app makes it
+// transparent for the transport-focused tests here (app-pipeline.test.ts
+// owns the pipeline pins).
+let restoreApp: () => void;
+beforeEach(() => {
+    restoreApp = stubServerApp({ authenticate: () => ({ id: 'tester' }) });
+});
+
 afterEach(() => {
+    restoreApp();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
@@ -683,20 +692,22 @@ describe('serverStream — unvalidated wire args (#412)', () => {
 });
 
 /* ------------------------------------------------------------------ */
-/* preset.stream — the in-process reroute (#398, rfc-server-v3 §1.2)  */
+/* the in-process pipeline (F-B, rfc-server-v4 §1.3)                  */
 /* ------------------------------------------------------------------ */
 
 describe('serverStream — the in-process pipeline (F-B)', () => {
-    it('runs preset.stream guards before the first yield, in-process', async () => {
+    it('runs app middleware before the first yield, in-process', async () => {
         const trace: string[] = [];
-        const authed = serverFnPreset({
-            use: [
+        restoreApp();
+        restoreApp = stubServerApp({
+            middleware: [
                 (): void => {
-                    trace.push('guard');
+                    trace.push('middleware');
                 }
-            ]
+            ],
+            authenticate: () => ({ id: 'tester' })
         });
-        const feed = authed.stream(async function* () {
+        const feed = serverStream(async function* () {
             trace.push('body');
             yield 'a';
             yield 'b';
@@ -706,18 +717,20 @@ describe('serverStream — the in-process pipeline (F-B)', () => {
         const iterable = feed();
         expect(trace).toEqual([]);
         await expect(collect(iterable)).resolves.toEqual(['a', 'b']);
-        expect(trace).toEqual(['guard', 'body']);
+        expect(trace).toEqual(['middleware', 'body']);
     });
 
-    it('a vetoing guard rejects on the first pull, not at the call', async () => {
-        const authed = serverFnPreset({
-            use: [
+    it('a vetoing middleware rejects on the first pull, not at the call', async () => {
+        restoreApp();
+        restoreApp = stubServerApp({
+            middleware: [
                 (): void => {
                     throw new ServerFnError(401, 'sign in');
                 }
-            ]
+            ],
+            authenticate: () => ({ id: 'tester' })
         });
-        const feed = authed.stream(async function* () {
+        const feed = serverStream(async function* () {
             yield 'secret';
         });
         // The call does not throw — the wire path's pre-first-yield error
@@ -745,15 +758,17 @@ describe('serverStream — the in-process pipeline (F-B)', () => {
         expect(cleaned).toBe(true);
     });
 
-    it('a vetoing guard over the WIRE is a buffered JSON error, not a stream', async () => {
-        const authed = serverFnPreset({
-            use: [
+    it('a vetoing middleware over the WIRE is a buffered JSON error, not a stream', async () => {
+        restoreApp();
+        restoreApp = stubServerApp({
+            middleware: [
                 (): void => {
                     throw new ServerFnError(403, 'nope');
                 }
-            ]
+            ],
+            authenticate: () => ({ id: 'tester' })
         });
-        const feed = authed.stream(async function* () {
+        const feed = serverStream(async function* () {
             yield 'secret';
         });
         const response = await handleServerFnRequest(
@@ -775,12 +790,13 @@ describe('serverStream — the in-process pipeline (F-B)', () => {
 /* ------------------------------------------------------------------ */
 
 describe('serverStream — options form', () => {
-    it('runs its own use chain before the first yield', async () => {
+    it('runs its authorize policies before the first yield', async () => {
         const trace: string[] = [];
         const feed = serverStream({
-            use: [
-                (): void => {
-                    trace.push('guard');
+            authorize: [
+                (): true => {
+                    trace.push('policy');
+                    return true;
                 }
             ],
             handler: async function* () {
@@ -789,30 +805,31 @@ describe('serverStream — options form', () => {
             }
         });
         await expect(collect(feed())).resolves.toEqual(['a']);
-        expect(trace).toEqual(['guard', 'body']);
+        expect(trace).toEqual(['policy', 'body']);
     });
 
-    it('composes a preset chain with its own, preset first', async () => {
+    it('app middleware runs before the stream’s own policies', async () => {
         const trace: string[] = [];
-        const authed = serverFnPreset({
-            use: [
+        restoreApp();
+        restoreApp = stubServerApp({
+            middleware: [
                 (): void => {
-                    trace.push('preset');
-                }
-            ]
-        });
-        const feed = authed.stream({
-            use: [
-                (): void => {
-                    trace.push('own');
+                    trace.push('middleware');
                 }
             ],
+            authenticate: () => ({ id: 'tester' })
+        });
+        const feed = serverStream({
+            authorize: (): true => {
+                trace.push('policy');
+                return true;
+            },
             handler: async function* () {
                 yield 1;
             }
         });
         await collect(feed());
-        expect(trace).toEqual(['preset', 'own']);
+        expect(trace).toEqual(['middleware', 'policy']);
     });
 
     it('keeps the wrapper contract — brands, .with(), and multi-arg calls', async () => {
@@ -978,14 +995,21 @@ describe('serverStream — options form with input (#572)', () => {
         });
     });
 
-    it('guards run before validation — a veto means the schema never runs', async () => {
+    it('middleware runs before validation — a veto means the schema never runs', async () => {
+        // The pre-validation veto slot belongs to MIDDLEWARE now; a policy
+        // deliberately runs after validation so it can see `op.input`
+        // (rfc-server-v4 §1.3's two-phase split).
         const validate = vi.fn((value: unknown) => ({ value: value as string }));
-        const feed = serverStream({
-            use: [
+        restoreApp();
+        restoreApp = stubServerApp({
+            middleware: [
                 (): void => {
                     throw new ServerFnError(401, 'sign in');
                 }
             ],
+            authenticate: () => ({ id: 'tester' })
+        });
+        const feed = serverStream({
             input: { '~standard': { version: 1, vendor: 'test', validate } },
             handler: async function* (_rq, input) {
                 yield input;
@@ -1071,21 +1095,22 @@ describe('serverStream — options form with input (#572)', () => {
         expect((error as ServerFnError).status).toBe(400);
     });
 
-    it('composes with a preset — preset guards, own guards, then validation', async () => {
+    it('the single-input order: middleware, then validation, then policies, then the body', async () => {
         const trace: string[] = [];
-        const authed = serverFnPreset({
-            use: [
+        restoreApp();
+        restoreApp = stubServerApp({
+            middleware: [
                 (): void => {
-                    trace.push('preset');
-                }
-            ]
-        });
-        const feed = authed.stream({
-            use: [
-                (): void => {
-                    trace.push('own');
+                    trace.push('middleware');
                 }
             ],
+            authenticate: () => ({ id: 'tester' })
+        });
+        const feed = serverStream({
+            authorize: (_p, _rq, op): true => {
+                trace.push(`policy:${String(op.input)}`);
+                return true;
+            },
             input: {
                 '~standard': {
                     version: 1,
@@ -1102,7 +1127,8 @@ describe('serverStream — options form with input (#572)', () => {
             }
         });
         await expect(collect(feed('x'))).resolves.toEqual(['x']);
-        expect(trace).toEqual(['preset', 'own', 'validate', 'body']);
+        // The policy saw the VALIDATED input — the point of phase B's slot.
+        expect(trace).toEqual(['middleware', 'validate', 'policy:x', 'body']);
     });
 
     it('no wire-arg warning fires when input is declared', async () => {

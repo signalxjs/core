@@ -1,25 +1,32 @@
 /**
  * @sigx/server/testing — the public testing surface (#570, deferred from
- * rfc-server v3 and shipped here).
+ * rfc-server v3 and shipped there; extended by rfc-server-v4 §2.4).
  *
- * Two helpers close the two gaps unit tests hit:
+ * Three helpers close the gaps unit tests hit:
  *
  * - `createTestServerFnContext()` — a real, Request-backed `ServerFnContext`
  *   with zero ceremony, so `rq.request`/`rq.url` never throw the detached
- *   error and `rq.status()` records instead of warning. Hand it to
- *   `fn.with({ context })(…)`, which already runs the WHOLE in-process
- *   pipeline — preset guards, the `use` chain, arity gate, `input`
- *   validation — so there is deliberately no separate "invoker" helper.
+ *   error and `rq.status()` records instead of warning. Its `principal`
+ *   option seeds the identity memo, which is the correct unit-test shape:
+ *   you test a handler under an identity, not through the cookie parser.
+ *   Hand it to `fn.with({ context })(…)`, which already runs the WHOLE
+ *   in-process pipeline — middleware, authentication, the identity gate,
+ *   arity gate, `input` validation, authorization — so there is
+ *   deliberately no separate "invoker" helper.
+ * - `stubServerApp()` — stamp an app config (middleware / authenticate /
+ *   authorize) for integration-shaped tests; returns the restore.
  * - `stampServerFnKey()` — the build stamp `useData(fn)` requires, minted
  *   by the Vite transform in an app and therefore absent in a unit test.
  *
- * Test-ORIENTED, not dev-only: both helpers behave identically against the
+ * Test-ORIENTED, not dev-only: the helpers behave identically against the
  * prod dists (only the defensive `__DEV__` throws strip), so a test run
  * against production bundles does not silently change context semantics.
- * No module state, no globals — immune to the dual-module-copy hazard the
- * context seam itself has to defend against.
+ * The context helpers keep no module state; `stubServerApp` writes the ONE
+ * `__SIGX_SERVER_APP__` seam through the same accessor production uses —
+ * immune to the dual-module-copy hazard for the same reason.
  */
 
+import { setPrincipal, stampServerAppConfig, type ServerAppConfig } from './app-config';
 import {
     contextFrom,
     type ServerFnContext,
@@ -55,8 +62,18 @@ export interface TestServerFnContext extends ServerFnContext {
  * `rq.status(code)` records to `.statusCode` (readable, non-enumerable)
  * instead of dev-warning "inert" on every call — unless the caller supplied
  * their own `status`.
+ *
+ * `opts.principal` seeds the identity memo on the context's request store,
+ * so the app's `authenticate` never runs and the identity gate passes —
+ * inject `null` explicitly to pin the anonymous path. Omitting it leaves
+ * authentication to whatever `stubServerApp` configured (nothing configured
+ * ⇒ anonymous ⇒ non-`allowAnonymous` functions deny, the fail-closed
+ * default).
  */
-export function createTestServerFnContext(init?: ServerFnContextInit): TestServerFnContext {
+export function createTestServerFnContext(
+    init?: ServerFnContextInit,
+    opts?: { principal?: unknown }
+): TestServerFnContext {
     // Guarded per-key reads, NEVER a spread: a previously built context has
     // enumerable throwing `request`/`url` getters, and spreading it would
     // invoke them (the same discipline contextFrom itself documents).
@@ -99,16 +116,40 @@ export function createTestServerFnContext(init?: ServerFnContextInit): TestServe
         get: (): number | undefined => recorded,
         enumerable: false
     });
+    if (opts && 'principal' in opts) setPrincipal(ctx, opts.principal);
     return ctx;
+}
+
+/**
+ * Stamp an app config — middleware, `authenticate`, the default `authorize`
+ * — for integration-shaped tests, through the same `__SIGX_SERVER_APP__`
+ * accessor production uses. Returns the restore; call it in the test's
+ * teardown so a stamped config never leaks across tests (the seam is
+ * process-global, last-wins).
+ *
+ * ```ts
+ * const restore = stubServerApp({ authenticate: () => ({ id: 'u1' }) });
+ * try { await expect(boardIssues(key)).resolves.toEqual(…); }
+ * finally { restore(); }
+ * ```
+ *
+ * For a plain unit test of one handler, prefer
+ * `createTestServerFnContext(init, { principal })` — injecting the identity
+ * directly tests the handler, not the cookie parser.
+ */
+export function stubServerApp(config: ServerAppConfig): () => void {
+    const previous = stampServerAppConfig(config);
+    return () => {
+        stampServerAppConfig(previous);
+    };
 }
 
 /**
  * Stamp the build-provided markers a `useData(fn)` target needs.
  *
  * In an app the Vite transform appends `fn.__sigxKey = '<stableId>/<name>'`
- * (and `fn.__sigxGuardChecked = true`) to the server module; a unit test
- * has no transform, so `useData(fn)` dev-throws on the minted `''`
- * sentinel. This helper is that stamp, on the SAME function — mutating on
+ * to the server module; a unit test has no transform, so `useData(fn)`
+ * dev-throws on the minted `''` sentinel. This helper is that stamp, on the SAME function — mutating on
  * purpose, because identity is load-bearing: `useData` keys on the
  * reference, and a wrapper would break the brand checks and `.with()`.
  *
@@ -135,6 +176,5 @@ export function stampServerFnKey<F extends Partial<WrappedServerFn>>(fn: F, key?
         }
     }
     fn.__sigxKey = key ?? `test/${fn.__sigxName || 'fn'}`;
-    fn.__sigxGuardChecked = true;
     return fn;
 }

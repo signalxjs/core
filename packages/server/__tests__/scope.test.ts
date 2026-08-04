@@ -7,11 +7,22 @@
  * (they hold no `Request`), and the endpoint scoping its own invocation.
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { serverFn } from '../src/index';
 import { createDetachedContext } from '../src/context';
 import { handleServerFnRequest } from '../src/server/index';
 import { runInScope, toContextInit, toScopeInit, type ServerFnScope } from '../src/scope';
+import { stubServerApp } from '../src/testing';
+
+// The pipeline is fail-closed (rfc-server-v4 §2.1): stub an authenticated
+// app so scope semantics stay the subject.
+let restoreApp: () => void;
+beforeEach(() => {
+    restoreApp = stubServerApp({ authenticate: () => ({ id: 'tester' }) });
+});
+afterEach(() => {
+    restoreApp();
+});
 
 const post = (symbol: string, args: unknown[] = []): Request =>
     new Request(`http://localhost/_sigx/fn/${symbol}`, {

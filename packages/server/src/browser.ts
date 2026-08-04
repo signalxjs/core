@@ -67,10 +67,38 @@ export function disposeRequestValues(): never {
     );
 }
 
-export function serverFnPreset(): never {
+/**
+ * The identity accessors are server-only too: a component reads the user
+ * through props/loader data, never by importing the server package.
+ */
+export function principal(): never {
     throw new Error(
-        '[sigx server] serverFnPreset() reached the browser unextracted — is the @sigx/vite/server ' +
+        '[sigx server] principal() reached the browser unextracted — is the @sigx/vite/server ' +
         'plugin configured, and does this file match its include pattern ' +
         '(default **/*.server.{ts,tsx})?'
+    );
+}
+
+export function requirePrincipal(): never {
+    throw new Error(
+        '[sigx server] requirePrincipal() reached the browser unextracted — is the ' +
+        '@sigx/vite/server plugin configured, and does this file match its include pattern ' +
+        '(default **/*.server.{ts,tsx})?'
+    );
+}
+
+export function setPrincipal(): never {
+    throw new Error(
+        '[sigx server] setPrincipal() reached the browser unextracted — is the ' +
+        '@sigx/vite/server plugin configured, and does this file match its include pattern ' +
+        '(default **/*.server.{ts,tsx})?'
+    );
+}
+
+export function requireAuthenticated(): never {
+    throw new Error(
+        '[sigx server] requireAuthenticated (a server-side authorization policy) reached the ' +
+        'browser unextracted — is the @sigx/vite/server plugin configured, and does this file ' +
+        'match its include pattern (default **/*.server.{ts,tsx})?'
     );
 }

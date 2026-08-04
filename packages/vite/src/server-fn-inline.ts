@@ -37,6 +37,8 @@ import { parseAst } from 'vite';
 import {
     hasServerFnOptionsSpread,
     missingGuardError,
+    readServerFnAllowAnonymousOption,
+    readServerFnAuthorizeOption,
     mintSymbols,
     optionsSpreadWarning,
     readServerFnUnguardedOption,
@@ -571,12 +573,14 @@ export function extractInlineServerFns(
             }
             if (idOption.id !== undefined) warnIfIdRewritten(warnings, name, idOption.id);
             if (!stream && hasServerFnOptionsSpread(call)) warnings.push(optionsSpreadWarning(name));
-            // The guard gate (#489). An inline server function is extracted and
-            // is a public endpoint like any other, so it is held to the same
-            // rule — minus the preset remedy, which is file-form only, so the
-            // message here names the two that apply.
+            // The access gate (#489, sharpened by rfc-server-v4 §5). An
+            // inline server function is extracted and is a public endpoint
+            // like any other, so it is held to the same rule; the pre-v4
+            // spellings pass transitionally, as in the file extractor.
             if (
                 requireGuards !== false &&
+                !readServerFnAuthorizeOption(call) &&
+                !readServerFnAllowAnonymousOption(call) &&
                 !readServerFnUseOption(call) &&
                 !readServerFnUnguardedOption(call)
             ) {

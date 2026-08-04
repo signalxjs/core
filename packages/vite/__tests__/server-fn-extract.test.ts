@@ -689,7 +689,7 @@ export const b = serverFn(async () => 1);
 });
 
 /* ------------------------------------------------------------------ */
-/* requireGuards (#489, rfc-server-v3 §1.4)                            */
+/* requireGuards (#489, sharpened by rfc-server-v4 §5)                 */
 /* ------------------------------------------------------------------ */
 
 describe('extractServerFns — requireGuards', () => {
@@ -703,10 +703,10 @@ export const feed = serverStream(async function* (rq) { yield 1; });
         const result = extractServerFns(BARE, '/src/x.server.ts', opts('src/x.server.ts'));
         expect(result.errors).toHaveLength(2);
         for (const error of result.errors) {
-            // All three remedies, so the message is actionable on its own.
-            expect(error.message).toContain('serverFnPreset');
-            expect(error.message).toContain('use: [...]');
-            expect(error.message).toContain('unguarded: true');
+            // Both remedies, so the message is actionable on its own.
+            expect(error.message).toContain('has no decided access policy');
+            expect(error.message).toContain('authorize: [...]');
+            expect(error.message).toContain('allowAnonymous: true');
             expect(error.offset).toBeGreaterThan(0);
         }
         expect(result.errors[0].message).toContain('serverFn "read"');
@@ -716,7 +716,20 @@ export const feed = serverStream(async function* (rq) { yield 1; });
         expect(result.stubModule).toContain('__serverFnStub(');
     });
 
-    it('accepts all three remedies, on both wrappers', () => {
+    it('accepts the v4 declarations — authorize presence and the allowAnonymous literal, on both wrappers', () => {
+        const code = `
+import { serverFn, serverStream } from '@sigx/server';
+export const a = serverFn({ authorize: [adminOnly], handler: async () => 1 });
+export const b = serverFn({ allowAnonymous: true, handler: async () => 1 });
+export const c = serverStream({ authorize: adminOnly, handler: async function* () { yield 1; } });
+export const d = serverStream({ allowAnonymous: true, handler: async function* () { yield 1; } });
+`;
+        const result = extractServerFns(code, '/src/x.server.ts', opts('src/x.server.ts'));
+        expect(result.errors).toEqual([]);
+        expect(result.fns.map((fn) => fn.name).sort()).toEqual(['a', 'b', 'c', 'd']);
+    });
+
+    it('TRANSITIONAL: the pre-v4 spellings (preset-derived, use, unguarded) still pass, so a migrating tree fails on the runtime’s clear removal errors, not the gate', () => {
         const code = `
 import { serverFn, serverStream, serverFnPreset } from '@sigx/server';
 const authed = serverFnPreset({ use: [requireUser] });
@@ -740,7 +753,7 @@ export const f = serverStream({ unguarded: true, handler: async function* () { y
         );
         expect(warned.errors).toEqual([]);
         expect(warned.warnings).toHaveLength(2);
-        expect(warned.warnings[0]).toContain('declares no guard chain');
+        expect(warned.warnings[0]).toContain('has no decided access policy');
 
         const off = extractServerFns(
             BARE,
@@ -751,13 +764,26 @@ export const f = serverStream({ unguarded: true, handler: async function* () { y
         expect(off.warnings).toEqual([]);
     });
 
-    it('demands the LITERAL true — a variable does not silence the gate', () => {
-        const code = `
+    it('demands the LITERAL true — a variable silences neither spelling', () => {
+        const transitional = extractServerFns(
+            `
 import { serverFn } from '@sigx/server';
 export const read = serverFn({ unguarded: isPublic, handler: async () => 1 });
-`;
-        const result = extractServerFns(code, '/src/x.server.ts', opts('src/x.server.ts'));
-        expect(result.errors).toHaveLength(1);
+`,
+            '/src/x.server.ts',
+            opts('src/x.server.ts')
+        );
+        expect(transitional.errors).toHaveLength(1);
+
+        const v4 = extractServerFns(
+            `
+import { serverFn } from '@sigx/server';
+export const read = serverFn({ allowAnonymous: isPublic, handler: async () => 1 });
+`,
+            '/src/x.server.ts',
+            opts('src/x.server.ts')
+        );
+        expect(v4.errors).toHaveLength(1);
     });
 
     it('stamps __sigxGuardChecked on what it checked, streams included', () => {

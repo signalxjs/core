@@ -1,23 +1,30 @@
 /**
  * @vitest-environment node
  *
- * serverFn() — the wrapper pipeline (rfc-server §2): direct and options
- * forms, `use` guards, `input` validation, and the detached in-process
- * context.
+ * serverFn() — the wrapper pipeline (rfc-server §2, order per
+ * rfc-server-v4 §1.3): direct and options forms, `authorize` policies,
+ * `input` validation, and the detached in-process context. The app
+ * pipeline itself (middleware / authentication / the identity gate /
+ * fail-closed misses) is pinned in app-pipeline.test.ts; tests here run
+ * under a stubbed authenticated app so the pipeline is transparent.
  */
 
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import {
     serverFn,
-    serverFnPreset,
-    serverStream,
     ServerFnError,
     isServerFnError,
     type StandardSchemaV1
 } from '../src/index';
 import { createRequestContext } from '../src/context';
+import { stubServerApp } from '../src/testing';
 
+let restoreApp: () => void;
+beforeEach(() => {
+    restoreApp = stubServerApp({ authenticate: () => ({ id: 'tester' }) });
+});
 afterEach(() => {
+    restoreApp();
     vi.restoreAllMocks();
 });
 
@@ -54,7 +61,7 @@ describe('serverFn — direct form', () => {
         const ctx = createRequestContext(
             new Request('http://localhost/_sigx/fn/x', { method: 'POST' })
         );
-        await expect(fn.__sigxFn(ctx, { symbol: 's', name: 'fn' }, [21])).resolves.toBe(42);
+        await expect(fn.__sigxFn(ctx, { symbol: 's', name: 'fn', transport: 'wire' as const }, [21])).resolves.toBe(42);
         expect(ctx._status).toBe(201);
     });
 });
@@ -62,7 +69,7 @@ describe('serverFn — direct form', () => {
 describe('serverFn — direct-form unvalidated wire args (#412)', () => {
     const wireCtx = () =>
         createRequestContext(new Request('http://localhost/_sigx/fn/x', { method: 'POST' }));
-    const wireInfo = { symbol: 'quote_fn_12345678', name: 'quote' };
+    const wireInfo = { symbol: 'quote_fn_12345678', name: 'quote', transport: 'wire' } as const;
 
     it('warns once, naming the fn and pointing at the options form', async () => {
         const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -113,7 +120,7 @@ describe('serverFn — direct-form unvalidated wire args (#412)', () => {
 describe('serverFn — options-form unvalidated wire input (#437)', () => {
     const wireCtx = () =>
         createRequestContext(new Request('http://localhost/_sigx/fn/x', { method: 'POST' }));
-    const wireInfo = { symbol: 'save_fn_12345678', name: 'save' };
+    const wireInfo = { symbol: 'save_fn_12345678', name: 'save', transport: 'wire' } as const;
 
     it('warns once when no `input` schema is declared, teaching `input`', async () => {
         const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -173,26 +180,40 @@ describe('serverFn — options form', () => {
         });
     });
 
-    it('runs use guards before validation, in order, on every transport', async () => {
+    it('runs authorize policies AFTER validation, in order, with the validated input (rfc-server-v4 §1.3)', async () => {
         const order: string[] = [];
+        const seen: unknown[] = [];
         const fn = serverFn({
-            use: [
-                async (rq) => {
-                    order.push('auth');
-                    rq.locals.user = 'u1';
+            authorize: [
+                (principal, _rq, op) => {
+                    order.push('policy-a');
+                    seen.push(principal, op.input);
+                    return true;
                 },
-                async () => {
-                    order.push('rate');
+                () => {
+                    order.push('policy-b');
+                    return true;
                 }
             ],
-            input: schema,
-            handler: async (rq, input) => `${rq.locals.user}:${input.id}`
+            input: {
+                '~standard': {
+                    version: 1,
+                    vendor: 'test',
+                    validate(value) {
+                        order.push('validate');
+                        return { value: { id: (value as { id: string }).id } };
+                    }
+                }
+            } satisfies StandardSchemaV1<{ id: string }>,
+            handler: async (_rq, input) => {
+                order.push('handler');
+                return input.id;
+            }
         });
-        const ctx = createRequestContext(
-            new Request('http://localhost/_sigx/fn/x', { method: 'POST' })
-        );
-        await expect(fn.__sigxFn(ctx, { symbol: '', name: '' }, [{ id: 'a' }])).resolves.toBe('u1:a');
-        expect(order).toEqual(['auth', 'rate']);
+        await expect(fn({ id: 'a' })).resolves.toBe('a');
+        expect(order).toEqual(['validate', 'policy-a', 'policy-b', 'handler']);
+        // The policy saw the non-null principal and the VALIDATED input.
+        expect(seen).toEqual([{ id: 'tester' }, { id: 'a' }]);
     });
 
     it('rejects extra wire arguments (single-input signature)', async () => {
@@ -201,24 +222,49 @@ describe('serverFn — options form', () => {
             new Request('http://localhost/_sigx/fn/x', { method: 'POST' })
         );
         const error = await fn
-            .__sigxFn(ctx, { symbol: '', name: '' }, [{ id: 'a' }, 'smuggled'])
+            .__sigxFn(ctx, { symbol: '', name: '', transport: 'in-process' as const }, [{ id: 'a' }, 'smuggled'])
             .catch((e: unknown) => e);
         expect(isServerFnError(error)).toBe(true);
         expect((error as ServerFnError).status).toBe(400);
     });
 
-    it('a throwing guard vetoes the call', async () => {
+    it('a policy returning anything but the literal true denies with a masked 403 — strict, fail-closed', async () => {
+        for (const result of [false, undefined, 1, 'yes']) {
+            const fn = serverFn({
+                authorize: () => result as boolean,
+                handler: async () => 'never'
+            });
+            const error = await fn().catch((e: unknown) => e);
+            expect(isServerFnError(error)).toBe(true);
+            expect((error as ServerFnError).status).toBe(403);
+            expect((error as ServerFnError).message).toBe('Forbidden');
+        }
+    });
+
+    it('a throwing policy passes its ServerFnError through verbatim', async () => {
         const fn = serverFn({
-            use: [
-                async () => {
-                    throw new ServerFnError(401, 'sign in first');
-                }
-            ],
+            authorize: () => {
+                throw new ServerFnError(451, 'unavailable for legal reasons');
+            },
             handler: async () => 'never'
         });
         const error = await fn().catch((e: unknown) => e);
         expect(isServerFnError(error)).toBe(true);
-        expect((error as ServerFnError).status).toBe(401);
+        expect((error as ServerFnError).status).toBe(451);
+    });
+
+    it('a declared authorize REPLACES the app default — most-specific-wins', async () => {
+        const appDefault = vi.fn(() => true);
+        restoreApp();
+        restoreApp = stubServerApp({
+            authenticate: () => ({ id: 'tester' }),
+            authorize: appDefault
+        });
+        const own = vi.fn(() => true);
+        const fn = serverFn({ authorize: own, handler: async () => 'ok' });
+        await expect(fn()).resolves.toBe('ok');
+        expect(own).toHaveBeenCalledOnce();
+        expect(appDefault).not.toHaveBeenCalled();
     });
 });
 
@@ -359,224 +405,110 @@ describe('serverFn — options form with an input-less handler (#451)', () => {
     });
 });
 
-describe('serverFnPreset — shared per-module middleware (#398)', () => {
-    const trace: string[] = [];
-    const record =
-        (label: string) =>
-        (): void => {
-            trace.push(label);
-        };
-
-    afterEach(() => {
-        trace.length = 0;
-    });
-
-    it('runs its guards on the IN-PROCESS path — the seam the direct form never had', async () => {
-        const authed = serverFnPreset({ use: [record('preset')] });
-        const fn = authed(async (_rq, a: number, b: number) => a + b);
-        // No transport, no endpoint: a plain call, which is what `useData`
-        // does during SSR. Before #398 this ran nothing.
+describe('the app default policy — the direct form inherits it (rfc-server-v4 §1.2)', () => {
+    it('a direct-form fn runs the app default with the raw args as op.args', async () => {
+        const appDefault = vi.fn(() => true);
+        restoreApp();
+        restoreApp = stubServerApp({
+            authenticate: () => ({ id: 'tester' }),
+            authorize: appDefault
+        });
+        const fn = serverFn(async (_rq, a: number, b: number) => a + b);
         await expect(fn(2, 3)).resolves.toBe(5);
-        expect(trace).toEqual(['preset']);
+        expect(appDefault).toHaveBeenCalledOnce();
+        const [principal, , op] = appDefault.mock.calls[0] as unknown as [
+            unknown,
+            unknown,
+            { args: unknown[]; input?: unknown }
+        ];
+        expect(principal).toEqual({ id: 'tester' });
+        expect(op.args).toEqual([2, 3]);
+        expect(op.input).toBeUndefined();
     });
 
-    it('a multi-arg direct-form preset fn survives a WIRE-shaped invoke (F-B)', async () => {
-        // The regression the RFC calls out: routing the direct form through
-        // the options-form pipeline would 400 here on `args.length > 1`.
+    it('a multi-arg direct-form fn survives a WIRE-shaped invoke (F-B)', async () => {
+        // The regression rfc-server-v3 §1.2 calls out: routing the direct
+        // form through the options-form pipeline would 400 on
+        // `args.length > 1`.
         const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-        const authed = serverFnPreset({ use: [record('preset')] });
-        const fn = authed(async (_rq, sku: string, qty: number) => `${sku}x${qty}`);
+        const fn = serverFn(async (_rq, sku: string, qty: number) => `${sku}x${qty}`);
         const ctx = createRequestContext(new Request('https://x.test/_sigx/fn/add_fn_1'));
         await expect(
-            fn.__sigxFn(ctx, { symbol: 'add_fn_1', name: 'add' }, ['sku', 2])
+            fn.__sigxFn(ctx, { symbol: 'add_fn_1', name: 'add', transport: 'wire' }, ['sku', 2])
         ).resolves.toBe('skux2');
-        expect(trace).toEqual(['preset']);
         warn.mockRestore();
     });
-
-    it('runs preset guards BEFORE the function’s own use chain, and both before validation', async () => {
-        const authed = serverFnPreset({ use: [record('preset-a'), record('preset-b')] });
-        const fn = authed({
-            use: [record('own')],
-            input: {
-                '~standard': {
-                    version: 1,
-                    vendor: 'test',
-                    validate(value) {
-                        trace.push('validate');
-                        return { value: value as { id: string } };
-                    }
-                }
-            } satisfies StandardSchemaV1<{ id: string }>,
-            handler: async (_rq, input) => {
-                trace.push('handler');
-                return input.id;
-            }
-        });
-        await expect(fn({ id: 'a' })).resolves.toBe('a');
-        expect(trace).toEqual(['preset-a', 'preset-b', 'own', 'validate', 'handler']);
-    });
-
-    it('a throwing preset guard vetoes both forms', async () => {
-        const authed = serverFnPreset({
-            use: [
-                (): void => {
-                    throw new ServerFnError(401, 'sign in');
-                }
-            ]
-        });
-        const direct = authed(async () => 'never');
-        const options = authed({ handler: async () => 'never' });
-        for (const fn of [direct, options]) {
-            const error = await fn().catch((e: unknown) => e);
-            expect(isServerFnError(error)).toBe(true);
-            expect((error as ServerFnError).status).toBe(401);
-        }
-    });
-
-    it('runs its guards through .with({ context }) and hands them the supplied request', async () => {
-        let seen: string | undefined;
-        const authed = serverFnPreset({
-            use: [
-                (rq): void => {
-                    seen = rq.request.url;
-                }
-            ]
-        });
-        const fn = authed(async (rq) => rq.url.pathname);
-        const request = new Request('https://x.test/board?tab=open');
-        await expect(fn.with({ context: request })()).resolves.toBe('/board');
-        expect(seen).toBe('https://x.test/board?tab=open');
-    });
-
-    it('copies the guard array once — a policy the app can mutate is not a policy', async () => {
-        const guards = [record('initial')];
-        const authed = serverFnPreset({ use: guards });
-        const before = authed(async () => 'ok');
-        guards.push(record('smuggled'));
-        const after = authed(async () => 'ok');
-        await before();
-        await after();
-        expect(trace).toEqual(['initial', 'initial']);
-    });
-
-    it('carries every definition-level mark through the derived options form', async () => {
-        const authed = serverFnPreset({ use: [record('preset')] });
-        const read = authed({ cache: { maxAge: 60 }, handler: async () => 'r' });
-        expect(read.__sigxGet).toBe(true);
-        expect(read.__sigxCacheControl).toBe('private, max-age=60');
-
-        const mutation = authed({ handler: async () => 'm', invalidates: () => ['cart'] });
-        expect(typeof mutation.__sigxInvalidates).toBe('function');
-
-        const action = authed({ form: true, input: schema, handler: async () => 'a' });
-        expect(action.__sigxForm).toBe(true);
-    });
-
-    it('still throws at definition time for `form` without `input` (#412)', () => {
-        const authed = serverFnPreset({ use: [] });
-        expect(() => authed({ form: true, handler: async () => 'x' })).toThrow(
-            /declares `form` without `input`/
-        );
-    });
-
-    it('types the derived callable exactly as serverFn does', () => {
-        const authed = serverFnPreset({ use: [] });
-
-        const two: (sku: string, qty: number) => Promise<string> = authed(
-            async (_rq, sku: string, qty: number) => `${sku}${qty}`
-        );
-        void two;
-
-        const zero: () => Promise<number> = authed({ handler: async () => 1 });
-        void zero;
-
-        const one: (input: { id: string }) => Promise<string> = authed({
-            input: schema,
-            handler: async (_rq, input) => input.id
-        });
-        void one;
-
-        // @ts-expect-error — a declared input is required, exactly as on serverFn
-        const bad: () => Promise<string> = one;
-        void bad;
-
-        const stream: typeof serverStream = authed.stream;
-        void stream;
-    });
 });
 
-describe('unguarded — the deliberate opt-out (#489)', () => {
-    it('is runtime-inert on a plain function', async () => {
-        const open = serverFn({ unguarded: true, handler: async () => 'ok' });
+describe('allowAnonymous — the per-fn identity-gate waiver (rfc-server-v4 §1.2)', () => {
+    it('waives the gate: the fn runs with NO app configured at all', async () => {
+        restoreApp();               // nothing stamped — the zero-config demo app
+        const open = serverFn({ allowAnonymous: true, handler: async () => 'ok' });
         await expect(open()).resolves.toBe('ok');
+        restoreApp = () => {};
     });
 
-    it('contradicting a preset throws at DEFINITION time, not per request', () => {
-        const authed = serverFnPreset({ use: [() => {}] });
-        // Not __DEV__-gated: a security declaration that is false must fail at
-        // boot or in CI, where a dev-only warning would be silent.
-        expect(() => authed({ unguarded: true, handler: async () => 1 })).toThrow(
-            /declares `unguarded: true` but derives from a serverFnPreset/
-        );
-        expect(() =>
-            authed.stream({ unguarded: true, handler: async function* () { yield 1; } })
-        ).toThrow(/declares `unguarded: true` but derives from a serverFnPreset/);
+    it('stamps __sigxAnon so a wire transport can gate before decoding', () => {
+        const open = serverFn({ allowAnonymous: true, handler: async () => 'ok' });
+        expect((open as { __sigxAnon?: boolean }).__sigxAnon).toBe(true);
+        const closed = serverFn({ handler: async () => 'ok' });
+        expect((closed as { __sigxAnon?: boolean }).__sigxAnon).toBeUndefined();
     });
 
-    it('a preset-derived function without the contradiction is unaffected', async () => {
-        const authed = serverFnPreset({ use: [() => {}] });
-        await expect(authed({ handler: async () => 'ok' })()).resolves.toBe('ok');
+    it('declared policies still run, receiving a NULL principal when anonymous', async () => {
+        restoreApp();
+        restoreApp = stubServerApp({ authenticate: () => null });
+        const seen: unknown[] = [];
+        const fn = serverFn({
+            allowAnonymous: true,
+            authorize: (principal) => {
+                seen.push(principal);
+                return true;
+            },
+            handler: async () => 'ok'
+        });
+        await expect(fn()).resolves.toBe('ok');
+        expect(seen).toEqual([null]);
     });
-});
 
-describe('the unchecked-function warning (#489, §1.5)', () => {
-    const CHECKED = '__SIGX_GUARDS_CHECKED__';
-    const setBuildChecked = (value: boolean | undefined): void => {
-        if (value === undefined) delete (globalThis as Record<string, unknown>)[CHECKED];
-        else (globalThis as Record<string, unknown>)[CHECKED] = value;
-    };
+    it('a denying policy on an anonymous call is a 401, not a 403', async () => {
+        restoreApp();
+        restoreApp = stubServerApp({ authenticate: () => null });
+        const fn = serverFn({
+            allowAnonymous: true,
+            authorize: () => false,
+            handler: async () => 'never'
+        });
+        const error = await fn().catch((e: unknown) => e);
+        expect(isServerFnError(error)).toBe(true);
+        expect((error as ServerFnError).status).toBe(401);
+    });
 
-    afterEach(() => setBuildChecked(undefined));
+    it('does NOT skip the app default by accident: a bare allowAnonymous fn skips policies entirely, deliberately', async () => {
+        // The defaults would re-deny the anonymity the literal granted
+        // (requireAuthenticated over a null principal), so a bare
+        // allowAnonymous declaration means "no requirement" (§1.3's table).
+        const appDefault = vi.fn(() => false);
+        restoreApp();
+        restoreApp = stubServerApp({ authenticate: () => null, authorize: appDefault });
+        const fn = serverFn({ allowAnonymous: true, handler: async () => 'ok' });
+        await expect(fn()).resolves.toBe('ok');
+        expect(appDefault).not.toHaveBeenCalled();
+    });
 
-    it('fires ONCE per function, not once per call', async () => {
+    it('warns at definition time on cache.public without allowAnonymous — the shared-cache coherence check', () => {
         const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-        setBuildChecked(true);
-        const fn = serverFn({ unguarded: true, handler: async () => 'ok' });
-
-        await fn();
-        await fn();
-        await fn();
-
-        const notices = warn.mock.calls
-            .map(([m]) => String(m))
-            .filter((m) => m.includes('never analyzed by the guard check'));
-        expect(notices).toHaveLength(1);
-    });
-
-    it('says nothing when the build stamped the function', async () => {
-        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-        setBuildChecked(true);
-        const fn = serverFn({ unguarded: true, handler: async () => 'ok' });
-        // What the transform appends to the SSR module.
-        (fn as unknown as { __sigxGuardChecked?: boolean }).__sigxGuardChecked = true;
-
-        await fn();
-        expect(
-            warn.mock.calls.filter(([m]) => String(m).includes('never analyzed'))
-        ).toHaveLength(0);
-    });
-
-    it('says nothing when NO build did the checking — absence is the alarm', async () => {
-        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-        // No marker: a unit test or a hand-wired non-Vite build. Warning here
-        // would mean "you are not using Vite", which is not a defect.
-        setBuildChecked(undefined);
-        const fn = serverFn({ unguarded: true, handler: async () => 'ok' });
-
-        await fn();
-        expect(
-            warn.mock.calls.filter(([m]) => String(m).includes('never analyzed'))
-        ).toHaveLength(0);
+        serverFn({
+            cache: { maxAge: 60, public: true },
+            handler: async () => 'r'
+        });
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining('`cache.public`'));
+        warn.mockClear();
+        serverFn({
+            allowAnonymous: true,
+            cache: { maxAge: 60, public: true },
+            handler: async () => 'r'
+        });
+        expect(warn).not.toHaveBeenCalled();
     });
 });

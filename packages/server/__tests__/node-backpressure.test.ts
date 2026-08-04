@@ -15,12 +15,20 @@
  * short of that produces actual backpressure.
  */
 
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, beforeEach } from 'vitest';
 import { createServer, request as httpRequest, type Server } from 'node:http';
 import { once } from 'node:events';
 import type { AddressInfo } from 'node:net';
 import { createServerFnHandler } from '../src/node';
 import { serverStream } from '../src/index';
+import { stubServerApp } from '../src/testing';
+
+// The pipeline is fail-closed (rfc-server-v4 §2.1): stub an authenticated
+// app so backpressure stays the subject.
+let restoreApp: () => void;
+beforeEach(() => {
+    restoreApp = stubServerApp({ authenticate: () => ({ id: 'tester' }) });
+});
 
 /** Big enough that a paused client backpressures well before the end. */
 const CHUNK = 'x'.repeat(256 * 1024);

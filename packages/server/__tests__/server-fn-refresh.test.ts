@@ -7,10 +7,21 @@
  * collect/apply through the `__SIGX_SERVERFN_BOUNDARIES__` seam.
  */
 
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { serverFn } from '../src/index';
 import { handleServerFnRequest, type BoundaryRefreshDescriptor } from '../src/server/index';
 import { __serverFnStub, type BoundaryRefreshSeam } from '../src/client/index';
+import { stubServerApp } from '../src/testing';
+
+// The pipeline is fail-closed (rfc-server-v4 §2.1): stub an authenticated
+// app so boundary refresh stays the subject.
+let restoreApp: () => void;
+beforeEach(() => {
+    restoreApp = stubServerApp({ authenticate: () => ({ id: 'tester' }) });
+});
+afterEach(() => {
+    restoreApp();
+});
 
 const ORIGIN = 'http://localhost';
 const BASE = 1 << 20;

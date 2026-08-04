@@ -282,9 +282,34 @@ export function optionsSpreadWarning(name: string): string {
  * Statically detect a `use:` chain (#489) — presence only, like `cache`: the
  * guards are runtime values the pipeline reads off the definition, and the
  * gate's question is "did you declare one?", not "is it any good".
+ *
+ * TRANSITIONAL (rfc-server-v4): `use:` no longer exists at runtime; this
+ * reader survives only so the gate's message — not a type error alone —
+ * tells a migrating app what replaced it. Deleted in the phase-3 gate
+ * rename (`requireAuthorization`).
  */
 export function readServerFnUseOption(call: Node): boolean {
     return hasServerFnOptionKey(call, 'use');
+}
+
+/**
+ * Statically detect an `authorize:` declaration (rfc-server-v4 §1.2) —
+ * presence only, like `cache`: the policies are runtime values the pipeline
+ * reads off the definition, and the gate's question is "is this function's
+ * access decided?".
+ */
+export function readServerFnAuthorizeOption(call: Node): boolean {
+    return hasServerFnOptionKey(call, 'authorize');
+}
+
+/**
+ * Statically detect `allowAnonymous: true` (rfc-server-v4 §1.2) — the
+ * LITERAL only, the same discipline `form` and `unguarded` have: this bit
+ * stands between a function and a build error, so a non-literal that
+ * happened to be truthy at runtime must not silence it.
+ */
+export function readServerFnAllowAnonymousOption(call: Node): boolean {
+    return readLiteralTrueOption(call, 'allowAnonymous');
 }
 
 /**
@@ -311,20 +336,38 @@ export function readServerFnUnguardedOption(call: Node): boolean {
 }
 
 /**
- * The message the gate fails with. It names all three remedies, because the
- * check verifies DECLARATION, not correctness — the honest limit (§1.5) is
- * that it converts "silently unguarded" into "a list a human wrote", which is
- * the unit a review can act on.
+ * The message the gate fails with. It names the remedies, because the check
+ * verifies DECLARATION, not correctness — it converts "silently undecided"
+ * into "a list a human wrote", which is the unit a review can act on.
  */
 export function missingGuardError(name: string, stream: boolean): string {
     const wrapper = stream ? 'serverStream' : 'serverFn';
     return (
-        `${wrapper} "${name}" declares no guard chain. Every server function is a public ` +
-        `endpoint reachable on every transport, so it must either derive from a ` +
-        `serverFnPreset({ use }), declare its own \`use: [...]\`, or say \`unguarded: true\` ` +
-        `if it is deliberately open (rfc-server-v3 §1.3-1.4). Turn this check off with ` +
+        `${wrapper} "${name}" has no decided access policy. Every server function is a ` +
+        `public endpoint reachable on every transport, so it must declare ` +
+        `\`authorize: [...]\`, or say \`allowAnonymous: true\` if it is deliberately open ` +
+        `to anonymous callers — middleware and authentication still run for it ` +
+        `(rfc-server-v4 §1.2, §5). Turn this check off with ` +
         `sigxServer({ requireGuards: false }), or down with 'warn' while migrating.`
     );
+}
+
+/** The literal `true` on a non-computed key — the `form` discipline. */
+function readLiteralTrueOption(call: Node, keyName: string): boolean {
+    const args = (call.arguments as Node[]) ?? [];
+    if (args.length !== 1 || args[0]?.type !== 'ObjectExpression') return false;
+    for (const prop of (args[0].properties as Node[]) ?? []) {
+        if (prop.type !== 'Property' || prop.computed === true) continue;
+        const key = prop.key as Node;
+        const name =
+            key.type === 'Identifier' ? (key.name as string)
+            : key.type === 'Literal' ? String(key.value)
+            : '';
+        if (name !== keyName) continue;
+        const value = prop.value as Node;
+        return value.type === 'Literal' && value.value === true;
+    }
+    return false;
 }
 
 /** Presence of a non-computed key on the single object-literal argument. */
@@ -690,12 +733,18 @@ export function extractServerFns(
             if (call.kind === 'fn' && hasServerFnOptionsSpread(init)) {
                 warnings.push(optionsSpreadWarning(local));
             }
-            // The guard gate (#489). Preset-derived counts — that IS the
-            // declaration — as does `use`, as does saying `unguarded: true`.
+            // The access gate (#489, sharpened by rfc-server-v4 §5):
+            // `authorize` or the literal `allowAnonymous: true` is the
+            // declaration. The pre-v4 spellings (preset-derived, `use`,
+            // `unguarded`) still pass TRANSITIONALLY so a migrating tree
+            // fails on the runtime's clear removal errors, not a wall of
+            // build errors first — the phase-3 gate rename deletes them.
             // A stream is held to the same rule: it is a public endpoint too.
             if (
                 requireGuards !== false &&
                 call.presetSource === undefined &&
+                !readServerFnAuthorizeOption(init) &&
+                !readServerFnAllowAnonymousOption(init) &&
                 !readServerFnUseOption(init) &&
                 !readServerFnUnguardedOption(init)
             ) {

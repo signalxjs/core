@@ -9,7 +9,7 @@
  * `finally`.
  */
 
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import {
     serverFn,
     serverStream,
@@ -21,10 +21,19 @@ import { handleServerFnRequest, type ServerFnRequestOptions } from '../src/serve
 import { runInScope } from '../src/scope';
 import { createDetachedContext } from '../src/context';
 import type { ServerFnContext } from '../src/context';
+import { stubServerApp } from '../src/testing';
 
 const ORIGIN = 'http://localhost';
 
+// The pipeline is fail-closed (rfc-server-v4 §2.1): stub an authenticated
+// app so disposal timing stays the subject.
+let restoreApp: () => void;
+beforeEach(() => {
+    restoreApp = stubServerApp({ authenticate: () => ({ id: 'tester' }) });
+});
+
 afterEach(() => {
+    restoreApp();
     vi.restoreAllMocks();
     vi.unstubAllEnvs();
 });
@@ -355,15 +364,15 @@ describe('handleServerFnRequest — disposal at settle', () => {
         await eventually(d.isDisposed);
     });
 
-    it('after a guard veto (401) and after a masked 500', async () => {
+    it('after a policy veto (401) and after a masked 500', async () => {
         const d = disposable();
+        // A vetoing policy is the v4 analog of the vetoing guard: it runs
+        // inside the request scope, so a value it touched still disposes.
         const veto = serverFn({
-            use: [
-                (rq): void => {
-                    d.value(rq);
-                    throw new ServerFnError(401, 'no');
-                }
-            ],
+            authorize: (_p, rq) => {
+                d.value(rq);
+                throw new ServerFnError(401, 'no');
+            },
             handler: async () => 'never'
         });
         expect((await post(veto)).status).toBe(401);

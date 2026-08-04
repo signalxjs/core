@@ -1,31 +1,39 @@
 /**
  * @vitest-environment node
  *
- * @sigx/server/testing (#570) — the public testing surface. The factory is
- * the third remedy the detached-context error names; the stamp is the build
- * marker `useData(fn)` needs. Guard-chain testing deliberately has NO new
- * invoker — `fn.with({ context })(…)` runs the whole in-process pipeline,
- * and two cases below are that recipe, executable.
+ * @sigx/server/testing (#570, extended by rfc-server-v4 §2.4) — the public
+ * testing surface. The factory is the third remedy the detached-context
+ * error names; the stamp is the build marker `useData(fn)` needs;
+ * `stubServerApp` is the integration-shaped app stamp. Pipeline testing
+ * deliberately has NO new invoker — `fn.with({ context })(…)` runs the
+ * whole in-process pipeline, and the cases below are that recipe,
+ * executable.
  */
 
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import {
     createTestServerFnContext,
     stampServerFnKey,
+    stubServerApp,
     type TestServerFnContext
 } from '../src/testing';
 import {
     serverFn,
     serverStream,
-    serverFnPreset,
     perRequest,
+    principal,
     ServerFnError,
     type StandardSchemaV1
 } from '../src/index';
 import { createDetachedContext } from '../src/context';
 import { runWithServerFnContext } from '../src/node';
 
+let restoreApp: () => void;
+beforeEach(() => {
+    restoreApp = stubServerApp({ authenticate: () => ({ id: 'tester' }) });
+});
 afterEach(() => {
+    restoreApp();
     vi.restoreAllMocks();
 });
 
@@ -139,21 +147,51 @@ describe('createTestServerFnContext — the store-identity rule', () => {
     });
 });
 
-describe('guard chains through the public surface — no invoker needed', () => {
-    const requireUser = (rq: { locals: Record<string, unknown> }): void => {
-        if (!rq.locals.user) throw new ServerFnError(401, 'sign in first');
-    };
+describe('the pipeline through the public surface — no invoker needed', () => {
+    it('fn.with({ context }) runs the identity gate — a seeded null principal rejects 401', async () => {
+        const secret = serverFn({ handler: async () => 'data' });
 
-    it('fn.with({ context }) runs preset + use guards — a veto rejects 401', async () => {
-        const authed = serverFnPreset({ use: [requireUser] });
-        const secret = authed(async () => 'data');
-
-        const anon = createTestServerFnContext();
+        const anon = createTestServerFnContext(undefined, { principal: null });
         const error = await secret.with({ context: anon })().catch((e: unknown) => e);
         expect((error as ServerFnError).status).toBe(401);
 
-        const alice = createTestServerFnContext({ locals: { user: 'alice' } });
+        const alice = createTestServerFnContext(undefined, { principal: { id: 'alice' } });
         await expect(secret.with({ context: alice })()).resolves.toBe('data');
+    });
+
+    it('the seeded principal is what the handler and its policies see; authenticate never runs', async () => {
+        const authenticate = vi.fn(() => ({ id: 'from-cookie' }));
+        restoreApp();
+        restoreApp = stubServerApp({ authenticate });
+        const seen: unknown[] = [];
+        const whoami = serverFn({
+            authorize: (p) => {
+                seen.push(p);
+                return true;
+            },
+            handler: async (rq) => (await principal<{ id: string }>(rq))?.id
+        });
+        const ctx = createTestServerFnContext(undefined, { principal: { id: 'seeded' } });
+        await expect(whoami.with({ context: ctx })()).resolves.toBe('seeded');
+        expect(seen).toEqual([{ id: 'seeded' }]);
+        expect(authenticate).not.toHaveBeenCalled();
+    });
+
+    it('stubServerApp stamps and its restore un-stamps — nothing leaks across tests', async () => {
+        const open = serverFn({ allowAnonymous: true, handler: async () => 'ok' });
+        const inner = stubServerApp({
+            middleware: [
+                () => {
+                    throw new ServerFnError(429, 'limited');
+                }
+            ],
+            authenticate: () => ({ id: 'x' })
+        });
+        const error = await open().catch((e: unknown) => e);
+        expect((error as ServerFnError).status).toBe(429);
+        inner();
+        // Back to the file-level stub: no middleware, so the call runs.
+        await expect(open()).resolves.toBe('ok');
     });
 
     it('…and input validation — invalid input rejects 400 with issues', async () => {
@@ -180,14 +218,13 @@ describe('guard chains through the public surface — no invoker needed', () => 
 });
 
 describe('stampServerFnKey', () => {
-    it('returns the SAME fn with a non-empty key and the guard-checked stamp', () => {
+    it('returns the SAME fn with a non-empty key', () => {
         const getVotes = serverFn(async function getVotes() {
             return 42;
         });
         const stamped = stampServerFnKey(getVotes);
         expect(stamped).toBe(getVotes);
         expect(stamped.__sigxKey).toBe('test/getVotes');
-        expect(stamped.__sigxGuardChecked).toBe(true);
     });
 
     it('an explicit key wins verbatim', () => {

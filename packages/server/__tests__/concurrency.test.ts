@@ -15,9 +15,20 @@
  * rather than hopeful: A enters, B runs to completion, then A resumes.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { perRequest, serverFn, type ServerFnContext } from '../src/index';
 import { handleServerFnRequest, type ServerFnRequestOptions } from '../src/server/index';
+import { stubServerApp } from '../src/testing';
+
+// The pipeline is fail-closed (rfc-server-v4 §2.1): stub an authenticated
+// app so the interleaving under test stays the subject.
+let restoreApp: () => void;
+beforeEach(() => {
+    restoreApp = stubServerApp({ authenticate: () => ({ id: 'tester' }) });
+});
+afterEach(() => {
+    restoreApp();
+});
 
 const ORIGIN = 'http://localhost';
 

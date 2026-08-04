@@ -9,8 +9,8 @@ import { describe, it, expect, vi } from 'vitest';
 import {
     serverFn,
     serverStream,
-    serverFnPreset,
     perRequest,
+    principal,
     isServerFnError,
     ServerFnError
 } from '../src/browser';
@@ -26,8 +26,10 @@ describe('@sigx/server browser entry', () => {
         expect(() => serverStream()).toThrow(/serverStream\(\) reached the browser unextracted/);
     });
 
-    it('serverFnPreset throws the same way (#398)', () => {
-        expect(() => serverFnPreset()).toThrow(/serverFnPreset\(\) reached the browser unextracted/);
+    it('principal throws the same way (rfc-server-v4)', () => {
+        // A component reads the user through props/loader data, never by
+        // importing the server package's identity accessors.
+        expect(() => principal()).toThrow(/principal\(\) reached the browser unextracted/);
     });
 
     it('perRequest throws the same way (#494)', () => {
