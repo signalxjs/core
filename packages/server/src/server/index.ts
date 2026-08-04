@@ -1574,3 +1574,33 @@ export function createServerApp<P = unknown>(options: ServerAppOptions<P>): Serv
         }
     };
 }
+
+/**
+ * The server-only pipeline accessors, re-exported here as well as from the
+ * package root.
+ *
+ * Not a convenience. The root entry carries a `browser` condition, and any
+ * bundler targeting a browser-like runtime resolves it to the throwing
+ * stubs — which includes **workerd**: `wrangler` bundles Workers with the
+ * `browser` condition, so a Cloudflare deployment importing these from the
+ * root got `serverFeature() reached the browser unextracted` at runtime,
+ * on a genuine server.
+ *
+ * These five have no client half by construction: they run middleware,
+ * resolve identity, and decide access. This entry has no `browser` branch,
+ * so a pack whose runtime is server-only everywhere — `@sigx/actors` on
+ * Durable Objects is the case that surfaced it — imports them from here and
+ * resolves the real module on every server, browser-condition or not.
+ *
+ * The root exports stay: an app's own `*.server.ts` files are extracted by
+ * the build and never reach a client bundle, so the root is still the right
+ * door for user code, and `browser.ts`'s stubs still catch an unextracted
+ * import with a message that explains itself.
+ */
+export {
+    principal,
+    requirePrincipal,
+    setPrincipal,
+    requireAuthenticated,
+    serverFeature
+} from '../app-config';

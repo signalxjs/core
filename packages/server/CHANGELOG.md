@@ -2,6 +2,34 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **The pipeline accessors were unreachable on workerd (#629).**
+  `serverFeature`, `principal`, `requirePrincipal`, `setPrincipal` and
+  `requireAuthenticated` were exported only from the package root, which
+  carries a `browser` condition — and `wrangler` bundles Workers with that
+  condition, so a Cloudflare deployment got *"serverFeature() reached the
+  browser unextracted"* at runtime, on a genuine server. They are now
+  re-exported from `@sigx/server/server`, which has no `browser` branch,
+  for packs whose runtime is server-only everywhere (`@sigx/actors` on
+  Durable Objects is the case that surfaced it). The root exports are
+  unchanged: an app's own `*.server.ts` files are extracted by the build
+  and never reach a client bundle, so the root stays the right door for
+  user code, and the stubs still catch an unextracted import.
+
+- **The pipeline accessors are unreachable on workerd from the package root
+  (#629).** , , ,
+   and  were exported only from the
+  root, which carries a  condition — and  bundles
+  Workers with that condition, so a Cloudflare deployment got
+   at runtime, on a
+  genuine server. They are now re-exported from ,
+  which has no  branch, for packs whose runtime is server-only
+  everywhere ( on Durable Objects is the case that surfaced
+  it). The root exports are unchanged: an app's own  files
+  are extracted by the build and never reach a client bundle, so the root
+  stays the right door for user code.
+
 ## [0.15.1] - 2026-08-04
 
 ### Added
