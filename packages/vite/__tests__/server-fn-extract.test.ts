@@ -729,6 +729,26 @@ export const d = serverStream({ allowAnonymous: true, handler: async function* (
         expect(result.fns.map((fn) => fn.name).sort()).toEqual(['a', 'b', 'c', 'd']);
     });
 
+    it('reads a string-literal allowAnonymous key, and never a computed one', () => {
+        // The reader accepts both key spellings (`allowAnonymous:` and
+        // `'allowAnonymous':`) like every other static option, and a
+        // computed key is invisible by design — a name assembled at runtime
+        // cannot satisfy a statically-read security declaration.
+        const quoted = `
+import { serverFn } from '@sigx/server';
+export const a = serverFn({ 'allowAnonymous': true, handler: async () => 1 });
+`;
+        expect(extractServerFns(quoted, '/src/x.server.ts', opts('src/x.server.ts')).errors).toEqual([]);
+        const computed = `
+import { serverFn } from '@sigx/server';
+const key = 'allowAnonymous';
+export const a = serverFn({ [key]: true, handler: async () => 1 });
+`;
+        const result = extractServerFns(computed, '/src/x.server.ts', opts('src/x.server.ts'));
+        expect(result.errors).toHaveLength(1);
+        expect(result.errors[0].message).toContain('has no decided access policy');
+    });
+
     it('TRANSITIONAL: the pre-v4 spellings (preset-derived, use, unguarded) still pass, so a migrating tree fails on the runtime’s clear removal errors, not the gate', () => {
         const code = `
 import { serverFn, serverStream, serverFnPreset } from '@sigx/server';
