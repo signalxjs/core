@@ -846,8 +846,8 @@ middleware** — app-wide, never per-function-disableable, which is the point:
 
 ```ts
 // src/server-app.ts — a token bucket per principal, in module state
-import { createServerApp, type ServerMiddleware } from '@sigx/server/server';
-import { principal, ServerFnError } from '@sigx/server';
+import { createServerApp } from '@sigx/server/server';
+import { principal, ServerFnError, type ServerMiddleware } from '@sigx/server';
 
 const buckets = new Map<string, { tokens: number; at: number }>();
 

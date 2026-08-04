@@ -34,7 +34,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   mount and bare `handleServerFnRequest` call, explicit values winning.
   Plus `authorizeBoundary` — per-boundary refresh authorization under the
   request's principal, closing rfc-server §6.3's client-supplied-props gap.
-  `@sigx/vite` gains `sigxServer({ serverApp: './src/server-app.ts' })`:
+  `@sigx/vite` gains `sigxServer({ serverApp: '/src/server-app.ts' })`:
   dev loads it eagerly through the SSR module runner and re-evaluates it
   after edits; production builds inject one side-effect import at the top
   of `virtual:sigx-server-fns` (pulled forward from #611 so dev never loses
