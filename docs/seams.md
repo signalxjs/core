@@ -272,8 +272,8 @@ what breaks.
 | | |
 |---|---|
 | **Stamped by** | `createServerApp()` (`@sigx/server/server`) — the app's server-app module, at evaluation; `/testing`'s `stubServerApp` in tests. Last-wins (HMR-safe), `dispose()` releases only its own stamp |
-| **Read by** | `server/src/app-config.ts` — `resolveServerAppConfig()`, the only accessor; consulted lazily per call by the endpoint and by `invoke` |
-| **Contract** | `{ middleware?, authenticate?, authorize?, posture?, codec? }` (`ServerAppConfig`) |
+| **Read by** | `server/src/app-config.ts` — `resolveServerAppConfig()`, the only accessor; consulted lazily per call by the endpoint, by `invoke`, and by every `ServerFeatureContext` member (#625) |
+| **Contract** | `{ middleware?, authenticate?, authorize?, posture?, codec?, claimedBases? }` (`ServerAppConfig`) |
 
 The app-wide server pipeline (rfc-server-v4 §2/#607): middleware,
 authentication, the default authorization policy, the endpoint posture, and
@@ -285,6 +285,19 @@ chain, authenticator absent is a `null` principal (the identity gate then
 it.** Rule 4 (swallow far-side throws) deliberately does NOT apply: a
 throwing policy or authenticator is a deny or an error, never swallowed —
 swallowing here would be the fail-open the class forbids.
+
+Since #625 this seam also backs the **endpoint-family seam**
+(`ServerFeatureContext`, rfc-server-v4 §3.2): `serverFeature()` reads it per
+call, which is what lets a second family — `@sigx/actors` — run the pipeline
+from call sites that hold a request context but no platform value. Same
+fail-closed mapping, because they are the same functions.
+
+`claimedBases` is the one entry that is **not** a control: it is mount-time
+namespace bookkeeping (#543 — everything after the base IS the symbol), so
+its miss is a no-op rather than a deny. It lives on the config so
+`createServerApp`'s own mounts and a feature's mounts claim against ONE
+registry; scope stays per-app, since stamping a new app brings a fresh
+array.
 
 (`__SIGX_GUARDS_CHECKED__`, the previous holder of this section, retired
 with rfc-server-v4: the fail-closed runtime closed the unanalyzed-module gap

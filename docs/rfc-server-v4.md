@@ -506,6 +506,29 @@ directly, and it stays correct without an app because the pipeline rides
 
 ### 3.2 The extension seam — what a future endpoint family gets
 
+> **Promoted in #625.** `@sigx/actors` (§7) is the second feature, so the
+> shape below shipped as `ServerFeatureContext` — exported from the `.`
+> entry as the free `serverFeature()` accessor, and as `app.feature()` on
+> `ServerApp`. Three deviations from the sketch, each forced by the first
+> real consumer:
+>
+> - **`prelude(rq, fn, o?)` joins `enter(request, fn, o?)`.** `enter` is the
+>   wire shape; actors' in-process entry points (`index.ts:174`/`:222`) hold
+>   a `ServerFnContext` and never a `Request`, so the recorded member alone
+>   could not serve them. Both funnel to `runServerPrelude` — one pipeline,
+>   as promised. `enter` also gained `fn`, without which it cannot run
+>   middleware at all.
+> - **`codec` split in two.** The sketch's `codec` was the WIRE codec
+>   (`__SIGX_SERVERFN_CODEC__`); §7's propagation needs the app's
+>   **principal** codec, which is a different value with a different trust
+>   story. Exposed as `principalCodec`; conflating the two would let a
+>   request-supplied value decode into a principal.
+> - **No app handle required.** Every member resolves
+>   `__SIGX_SERVER_APP__` per call, so a feature holds one context at module
+>   scope and still sees the live app. `claimBase` accordingly moved its
+>   registry from `createServerApp`'s closure onto `ServerAppConfig`
+>   (per-app scope preserved: a fresh stamp brings a fresh array).
+
 Internal in v1 — `serverFns` is its first and only consumer; promoted to a
 public export when the second feature ships, with the shape recorded now so
 that feature does not get to invent it:

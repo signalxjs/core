@@ -20,7 +20,9 @@
  */
 
 import {
+    claimAppBase,
     resolveServerAppConfig,
+    serverFeature,
     stampServerAppConfig,
     runServerPrelude,
     type ServerAppConfig
@@ -31,6 +33,7 @@ import { runInScope } from '../scope';
 import { isServerFnError } from '../errors';
 import type {
     EndpointPosture,
+    ServerFeatureContext,
     ServerFnInfo,
     ServerMiddleware,
     ServerPolicy,
@@ -1482,6 +1485,14 @@ export interface ServerApp<P = unknown> {
      * down the live one.
      */
     dispose(): void;
+    /**
+     * The endpoint-family seam (rfc-server-v4 §3.2, promoted in #625) — the
+     * pipeline, posture, principal codec and base bookkeeping an endpoint
+     * family other than `serverFns` needs. Identical to the free
+     * `serverFeature()` accessor, which a feature whose call sites have no
+     * app in scope uses instead; both resolve the app per call.
+     */
+    feature(): ServerFeatureContext<P>;
     /** Phantom — carries P so `createServerApp<User>` is not erased. */
     readonly __principal?: P;
 }
@@ -1497,10 +1508,11 @@ export interface ServerApp<P = unknown> {
  * gets a `__DEV__` note, since outside HMR that is usually two entries
  * fighting over one process.
  *
- * The future endpoint-family seam (`ServerFeatureContext`, rfc-server-v4
- * §3.2) is deliberately NOT exported: `serverFns` is its only consumer in
- * v1, and the second feature promotes it rather than inventing its own —
- * `claimBase` below is its first piece.
+ * The endpoint-family seam (`ServerFeatureContext`, rfc-server-v4 §3.2) is
+ * exposed as `app.feature()` since #625, when `@sigx/actors` became the
+ * second feature and promoted it. A feature whose call sites have no app in
+ * scope uses the free `serverFeature()` accessor instead; both resolve the
+ * app per call, so they are the same seam.
  */
 export function createServerApp<P = unknown>(options: ServerAppOptions<P>): ServerApp<P> {
     const posture: EndpointPosture = {};
@@ -1528,27 +1540,19 @@ export function createServerApp<P = unknown>(options: ServerAppOptions<P>): Serv
             're-evaluated); anywhere else, two entries are fighting over one process.'
         );
     }
-    /** Base prefixes this app's mounts claimed — overlap is a boot throw. */
-    const claimedBases: string[] = [];
-    const claimBase = (base: string): void => {
-        const prefix = fnPathPrefix(base);
-        for (const existing of claimedBases) {
-            if (prefix.startsWith(existing) || existing.startsWith(prefix)) {
-                // At MOUNT time — boot/CI, never per request: "everything
-                // after `base` is the symbol" (#543) means two families
-                // sharing a prefix would slice each other's symbols.
-                throw new Error(
-                    `[sigx server] mount base "${base}" overlaps an existing mount ` +
-                    `("${existing}" vs "${prefix}") — every mount needs its own path ` +
-                    `namespace, because everything after the base IS the symbol (#543).`
-                );
-            }
-        }
-        claimedBases.push(prefix);
-    };
+    // Base claiming lives on the config (`claimAppBase`), so this app's
+    // mounts and any FEATURE mount (#625) claim against one registry —
+    // two families sharing a prefix would slice each other's symbols
+    // (#543), and two implementations of the overlap test would disagree
+    // about when. Scope is still per-app: the array rides the config that
+    // was just stamped, so a fresh app starts empty.
     return {
         serverFns(mount: ServerFnMount): (request: Request) => Promise<Response> {
-            claimBase(mount.base ?? DEFAULT_FN_BASE);
+            // THIS app's registry, not the stamped one: a mount on a stale
+            // handle (dev HMR having since stamped a newer app) must claim
+            // where its own siblings live, or it would invent an overlap
+            // against a different app's bases — or miss its own.
+            claimAppBase(mount.base ?? DEFAULT_FN_BASE, config);
             // Mount-level posture overrides ride the options object
             // directly: `withAppPosture` inherits only what is undefined,
             // so an explicit mount value wins over the app's.
@@ -1561,6 +1565,9 @@ export function createServerApp<P = unknown>(options: ServerAppOptions<P>): Serv
                 ...overrides
             };
             return (request: Request) => handleServerFnRequest(request, requestOptions);
+        },
+        feature(): ServerFeatureContext<P> {
+            return serverFeature<P>();
         },
         dispose(): void {
             if (resolveServerAppConfig() === config) stampServerAppConfig(undefined);

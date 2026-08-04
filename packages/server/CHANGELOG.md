@@ -2,6 +2,31 @@
 
 ## [Unreleased]
 
+### Added
+
+- **`ServerFeatureContext` — the endpoint-family seam, promoted
+  (rfc-server-v4 §3.2, #625).** §3.2 held this internal until a second
+  endpoint family shipped, "with the shape recorded now so that feature does
+  not get to invent it"; `@sigx/actors` (§7) is that feature. It is the
+  pipeline an endpoint family other than `serverFns` runs so the two cannot
+  drift apart on the auth path: `prelude` (middleware → authenticate →
+  identity gate) and `enter` (the same, from a raw `Request`), `authorize`
+  (phase B, carrying `op.resource` for per-instance policies), plus the
+  app's `posture`, its `principalCodec`, and `claimBase`. Reached as
+  `serverFeature()` from the package root, or `app.feature()` from a
+  `ServerApp` — both resolve `__SIGX_SERVER_APP__` per call, so a feature
+  can hold one at module scope and a call site with no platform value in
+  scope still runs the whole pipeline. Fail-closed throughout: they are the
+  same functions the serverFn path runs, not a second implementation.
+
+### Changed
+
+- **Mount base claiming moved onto the app config (#625).** `createServerApp`
+  and any feature mount now claim against ONE registry (`claimAppBase`)
+  rather than a closure the feature could not reach — two implementations of
+  the overlap test would disagree about when two families collide (#543).
+  Scope is unchanged: per app, so a fresh stamp starts with a clean slate.
+
 ## [0.15.0] - 2026-08-04
 
 ### Added

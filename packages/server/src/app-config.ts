@@ -18,10 +18,13 @@
  * invariant: **a miss may only ever remove permission, never add it.**
  */
 
-import type { ServerFnContext } from './context';
+import { createRequestContext, type ServerFnContext } from './context';
 import { ServerFnError } from './errors';
+import { fnPathPrefix } from './fn-url-decode';
 import type {
     EndpointPosture,
+    ServerFeatureContext,
+    ServerFeatureOp,
     ServerFnInfo,
     ServerMiddleware,
     ServerPolicy,
@@ -45,6 +48,15 @@ export interface ServerAppConfig {
      * it plays no role in this package's own pipeline.
      */
     codec?: { encode(principal: unknown): string; decode(encoded: string): unknown | null };
+    /**
+     * Base prefixes this app's mounts have claimed (#543 — everything after
+     * the base IS the symbol, so two families cannot share one). Lives on
+     * the config rather than in `createServerApp`'s closure so the promoted
+     * feature seam (#625) can claim without an app handle, while keeping
+     * the scope per-APP: stamping a new app brings a fresh array, which is
+     * what lets a test suite build many apps over one process.
+     */
+    claimedBases?: string[];
 }
 
 /** The seam, typed at the single accessor (`docs/seams.md` rule 2). */
@@ -247,4 +259,86 @@ export async function runAuthorize(
                 : new ServerFnError(403, 'Forbidden');
         }
     }
+}
+
+/**
+ * Claim a mount's base prefix on an app's registry (#543). Exported so
+ * `createServerApp` and the feature seam share ONE implementation — two
+ * versions of "do these bases overlap" is how the second family would get a
+ * different answer from the first.
+ *
+ * `config` names WHICH app's registry, and the distinction matters:
+ * `createServerApp` passes the config it captured, so `app.serverFns(...)`
+ * claims on THAT app even when a later app (dev HMR re-evaluating the
+ * server-app module) has since taken the stamp — otherwise a mount on a
+ * stale handle would record against the live app and invent or miss an
+ * overlap. The feature seam resolves per call instead, because a feature
+ * holds its context at module scope and means "the app in force now".
+ *
+ * A no-op when there is no app: nothing to collide with, and base claiming
+ * is mount-time bookkeeping rather than permission, so the fail-closed rule
+ * ("a miss may only remove permission") does not apply to it.
+ */
+export function claimAppBase(
+    base: string,
+    config: ServerAppConfig | undefined = resolveServerAppConfig()
+): void {
+    if (config === undefined) return;
+    const prefix = fnPathPrefix(base);
+    const claimed = (config.claimedBases ??= []);
+    for (const existing of claimed) {
+        if (prefix.startsWith(existing) || existing.startsWith(prefix)) {
+            // At MOUNT time — boot/CI, never per request.
+            throw new Error(
+                `[sigx server] mount base "${base}" overlaps an existing mount ` +
+                `("${existing}" vs "${prefix}") — every mount needs its own path ` +
+                `namespace, because everything after the base IS the symbol (#543).`
+            );
+        }
+    }
+    claimed.push(prefix);
+}
+
+/**
+ * The endpoint-family seam (rfc-server-v4 §3.2, promoted in #625) — see
+ * {@link ServerFeatureContext}.
+ *
+ * Takes no app: every member resolves `__SIGX_SERVER_APP__` per call, so
+ * one of these held at module scope always sees the live app, and a
+ * feature whose entry points have no platform value in scope (an
+ * `@sigx/actors` `actor()` call anywhere in a request) still runs the whole
+ * pipeline. `ServerApp.feature()` returns one of these too, for a consumer
+ * that does have the app to hand.
+ */
+export function serverFeature<P = unknown>(): ServerFeatureContext<P> {
+    return {
+        async enter(request, fn, options) {
+            const rq = createRequestContext(request);
+            await runServerPrelude(rq, fn, options?.allowAnonymous === true);
+            return rq;
+        },
+        prelude(rq, fn, options) {
+            return runServerPrelude(rq, fn, options?.allowAnonymous === true);
+        },
+        authorize(rq, op: ServerFeatureOp<P>) {
+            return runAuthorize(
+                rq,
+                {
+                    fn: op.fn,
+                    ...(op.input !== undefined ? { input: op.input } : {}),
+                    args: op.args ?? [],
+                    ...(op.resource !== undefined ? { resource: op.resource } : {})
+                },
+                op.policies as ServerPolicy | readonly ServerPolicy[] | undefined,
+                op.allowAnonymous === true
+            );
+        },
+        get posture(): Readonly<EndpointPosture> {
+            return resolveServerAppConfig()?.posture ?? {};
+        },
+        get principalCodec() {
+            return resolveServerAppConfig()?.codec;
+        },
+        claimBase: claimAppBase
+    };
 }
