@@ -816,7 +816,22 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
                 // costs a map lookup) and the endpoint resolves the config
                 // lazily anyway. It runs in the SSR graph, which shares
                 // `globalThis` with this process — one seam, both worlds.
-                if (options.serverApp) await devServer.ssrLoadModule(options.serverApp);
+                // A load FAILURE (mid-edit syntax error) must not abort the
+                // request: log it and continue — the runtime keeps the last
+                // stamped pipeline, or denies fail-closed with nothing
+                // stamped. Either is honest; a crashed endpoint is neither.
+                if (options.serverApp) {
+                    try {
+                        await devServer.ssrLoadModule(options.serverApp);
+                    } catch (err) {
+                        const message = err instanceof Error ? err.message : String(err);
+                        devServer.config.logger.error(
+                            `[sigx:server] serverApp module "${options.serverApp}" failed to ` +
+                            `load — serving with the last stamped pipeline (or denying, ` +
+                            `fail-closed, if none): ${message}`
+                        );
+                    }
+                }
                 const refreshModule = options.renderBoundaries
                     ? await devServer.ssrLoadModule(options.renderBoundaries)
                     : undefined;

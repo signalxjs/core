@@ -1491,10 +1491,11 @@ export interface ServerApp<P = unknown> {
  * where `invoke` and the endpoint resolve it lazily per call (fail-closed:
  * `app-config.ts`). LAST-WINS, never a throw: dev HMR re-evaluates the
  * user's server-app module, and a re-evaluation is indistinguishable from
- * a genuine second app — the process is the unit, the
- * `__SIGX_SERVERFN_CODEC__` posture. Replacing a DIFFERENT live app gets a
- * `__DEV__` note, since outside HMR that is usually two entries fighting
- * over one process.
+ * a genuine second app — the process is the unit, the same last-wins
+ * one-per-process stance the `__SIGX_SERVERFN_CODEC__` seam (a different
+ * seam — wire type handlers) already takes. Replacing a DIFFERENT live app
+ * gets a `__DEV__` note, since outside HMR that is usually two entries
+ * fighting over one process.
  *
  * The future endpoint-family seam (`ServerFeatureContext`, rfc-server-v4
  * §3.2) is deliberately NOT exported: `serverFns` is its only consumer in
