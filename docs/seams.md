@@ -267,26 +267,29 @@ back whatever `fn` returned (#544). Await the result, as all three call sites
 do; treating it as a thenable without awaiting (`.then(…)` straight on it) is
 what breaks.
 
-### `__SIGX_GUARDS_CHECKED__`
+### `__SIGX_SERVER_APP__`
 
 | | |
 |---|---|
-| **Stamped by** | `@sigx/vite`'s server-fn transform, in the SSR-side stamp block, when `sigxServer({ requireGuards })` is not `false` |
-| **Read by** | `server/src/index.ts` — the `__DEV__` unchecked-function warning |
-| **Contract** | `true` when this build ran the guard-declaration gate |
+| **Stamped by** | `createServerApp()` (`@sigx/server/server`) — the app's server-app module, at evaluation; `/testing`'s `stubServerApp` in tests. Last-wins (HMR-safe), `dispose()` releases only its own stamp |
+| **Read by** | `server/src/app-config.ts` — `resolveServerAppConfig()`, the only accessor; consulted lazily per call by the endpoint and by `invoke` |
+| **Contract** | `{ middleware?, authenticate?, authorize?, posture?, codec? }` (`ServerAppConfig`) |
 
-The build-wide half of rfc-server-v3 §1.5's mitigation for its own residual
-gap (#489). The gate can only check `*.server.ts` modules the plugin's
-`include`/`scan` reaches, so a module outside them ships unanalyzed and
-silently unguarded. Each checked function is stamped `__sigxGuardChecked`, and
-this global says the build was doing the checking at all — together they let
-the runtime tell "checked build, unchecked function" (warn) from "no transform
-here" (say nothing, which is every unit test and hand-wired non-Vite build).
+The app-wide server pipeline (rfc-server-v4 §2/#607): middleware,
+authentication, the default authorization policy, the endpoint posture, and
+the principal codec. The registry's first **fail-closed control seam** —
+each reader maps absence to its layer's deny: middleware absent is an empty
+chain, authenticator absent is a `null` principal (the identity gate then
+401s everything not `allowAnonymous`), default policy absent is
+`requireAuthenticated`. **A miss may only ever remove permission, never add
+it.** Rule 4 (swallow far-side throws) deliberately does NOT apply: a
+throwing policy or authenticator is a deny or an error, never swallowed —
+swallowing here would be the fail-open the class forbids.
 
-**Absence is the alarm, so a miss degrades to silence, never a false pass** —
-the inverse of the usual seam rule, and deliberate: a seam whose absence
-asserted "guarded" would be exactly the fail-open the RFC rejects. Dev-only;
-production builds are not covered, which §1.5 records rather than papers over.
+(`__SIGX_GUARDS_CHECKED__`, the previous holder of this section, retired
+with rfc-server-v4: the fail-closed runtime closed the unanalyzed-module gap
+it mitigated — an unanalyzed `*.server.ts` now denies instead of running
+open — so the build stamps nothing and the runtime reads nothing.)
 
 ### `__SIGX_LIVE_CLIENT__`
 
@@ -337,5 +340,13 @@ app context. Then:
    both ends copy; the two ends cannot share an import — a type-only import
    across the gap is a dependency edge by another name.
 3. Make a missing seam a no-op, never a throw — the reader must work with the
-   other package absent.
+   other package absent. **Exception: a fail-closed control seam** — one
+   whose absence must *deny a capability rather than grant one*
+   (`__SIGX_SERVER_APP__` is the first). Its accessor still never throws on
+   a miss — it returns `undefined`, and each reader maps absence to its
+   layer's deny. The invariant is directional: **a miss may only ever remove
+   permission, never add it.** A seam whose miss would grant remains
+   forbidden.
 4. Swallow throws from the far side. A pack bug must not break the caller.
+   (Fail-closed control seams invert this too, deliberately: a throwing
+   policy is a deny or an error, never swallowed.)

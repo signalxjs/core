@@ -34,7 +34,7 @@ function extract(
     return extractInlineServerFns(code, file, {
         // Extraction mechanics, not the guard gate (#489, default ON) — its
         // own behaviour is covered in its own describe below.
-        requireGuards: false,
+        requireAuthorization: false,
         stableId: file.slice(1),
         endpoint: BASE,
         ...extra
@@ -528,54 +528,29 @@ export const Widget = () => submit;
     });
 });
 
-describe('extractInlineServerFns — serverFnPreset is file-form only (#398)', () => {
-    const PRESET = `
+describe('extractInlineServerFns — a leftover serverFnPreset (rfc-server-v4 §1.5)', () => {
+    it('extracts nothing from a preset-only component file — the runtime import failure is the loud signal', () => {
+        // `serverFnPreset` no longer exists, so the extractor no longer
+        // recognizes (or errors on) it: `authed(...)` is just a call. The
+        // module fails at IMPORT time instead (`serverFnPreset` is not an
+        // export of @sigx/server anymore) — loud, and named after the thing
+        // that was removed.
+        const code = `
 import { component } from 'sigx';
-import { serverFn, serverFnPreset } from '@sigx/server';
+import { serverFnPreset } from '@sigx/server';
 
 const authed = serverFnPreset({ use: [requireUser] });
 const load = authed(async (rq) => 1);
-const feed = authed.stream(async function* (rq) { yield 1; });
 
 export const Panel = component((ctx) => {
     return () => <button onClick={() => load()} />;
 });
 `;
-
-    it('errors at every preset call site and emits no modules', () => {
-        const result = extract(PRESET, '/src/Panel.tsx');
-        // The declaration and both derived call sites — the author sees all
-        // of them at once rather than one per rebuild.
-        expect(result.errors).toHaveLength(3);
-        for (const error of result.errors) {
-            expect(error.message).toContain('*.server.ts');
-            expect(error.message).toContain('serverFnPreset()');
-        }
+        const result = extract(code, '/src/Panel.tsx');
+        expect(result.errors).toEqual([]);
         expect(result.fns).toEqual([]);
         expect(result.clientModule).toBeNull();
         expect(result.ssrModule).toBeNull();
-    });
-
-    it('reaches the error in a file that imports ONLY the preset', () => {
-        // Without the widened early return this returned empty before
-        // anything could be reported.
-        const code = `
-import { serverFnPreset } from '@sigx/server';
-const authed = serverFnPreset({ use: [] });
-`;
-        const result = extract(code, '/src/guards.ts');
-        expect(result.errors).toHaveLength(1);
-        expect(result.errors[0].message).toContain('serverFnPreset()');
-    });
-
-    it('covers the namespace form too', () => {
-        const code = `
-import * as srv from '@sigx/server';
-const authed = srv.serverFnPreset({ use: [] });
-const load = authed(async () => 1);
-`;
-        const result = extract(code, '/src/Panel.tsx');
-        expect(result.errors).toHaveLength(2);
     });
 });
 

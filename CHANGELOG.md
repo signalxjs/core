@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING — `@sigx/vite`: `requireGuards` is `requireAuthorization`, and
+  the gate is sharpened (rfc-server-v4 §5, #607/#611, phase 3 of 4).** The
+  gate's question upgrades from "did you declare a chain?" to "is this
+  function's access decided?": a `serverFn`/`serverStream` passes with an
+  `authorize:` declaration, the literal `allowAnonymous: true`, or a
+  configured `sigxServer({ serverApp })` (the app default decides undeclared
+  functions, fail-closed at runtime). The transitional pre-v4 acceptance
+  (`use:` keys, `unguarded: true`, `serverFnPreset`-derived calls) is
+  deleted, along with all `serverFnPreset` build machinery (call scanning,
+  hash-seed mixing, the exported-preset warning) and the now-inert
+  `__sigxGuardChecked`/`__SIGX_GUARDS_CHECKED__` stamp emission — the
+  fail-closed runtime closed the gap they mitigated. `docs/seams.md` gains
+  the fail-closed control seam class and the `__SIGX_SERVER_APP__` row; the
+  `__SIGX_GUARDS_CHECKED__` row retires.
+
 ### Added
 
 - **`@sigx/server`: `createServerApp` — the server platform value

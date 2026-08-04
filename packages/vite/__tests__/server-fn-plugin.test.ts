@@ -33,7 +33,7 @@ function makeProject(
     // These tests are about EXTRACTION mechanics — symbols, stubs, registry
     // keys — so the guard gate (#489, default ON) is opt-in here rather than
     // noise on every fixture. Its own behaviour is covered below.
-    const plugin = sigxServer({ requireGuards: false, ...options }) as any;
+    const plugin = sigxServer({ requireAuthorization: false, ...options }) as any;
     plugin.configResolved({ root, command });
     return { plugin, root };
 }
@@ -379,14 +379,14 @@ describe('sigxServer — inline extraction (non-matching files)', () => {
         ).toThrow(/module-scope binding "T"/);
     });
 
-    it('requireGuards fails the build with a file and line (#489)', () => {
+    it('requireAuthorization fails the build with a file and line (#489/#611)', () => {
         const bare =
             `import { serverFn } from '@sigx/server';\n` +
             `export const read = serverFn(async (rq) => 1);`;
         const { plugin: gated, root: gatedRoot } = makeProject(
             { 'src/api.server.ts': bare },
             'build',
-            { requireGuards: true }
+            { requireAuthorization: true }
         );
         try {
             expect(() =>
@@ -397,14 +397,14 @@ describe('sigxServer — inline extraction (non-matching files)', () => {
         }
     });
 
-    it("requireGuards 'warn' reports without failing (#489)", () => {
+    it("requireAuthorization 'warn' reports without failing (#489)", () => {
         const bare =
             `import { serverFn } from '@sigx/server';\n` +
             `export const read = serverFn(async (rq) => 1);`;
         const { plugin: warned, root: warnRoot } = makeProject(
             { 'src/api.server.ts': bare },
             'build',
-            { requireGuards: 'warn' }
+            { requireAuthorization: 'warn' }
         );
         try {
             const warnings: string[] = [];
@@ -420,25 +420,43 @@ describe('sigxServer — inline extraction (non-matching files)', () => {
         }
     });
 
-    it('a preset in a component file is a hard error — the gate reaches it (#398)', () => {
-        // The whole point of widening `callsServerFn`: a file whose only
-        // `@sigx/server` call is a preset used to be skipped before parsing,
-        // so the error never fired and the module went through untouched.
-        const bad =
+    it('a configured serverApp passes a bare fn — the app default decides it (rfc-server-v4 §5)', () => {
+        const bare =
+            `import { serverFn } from '@sigx/server';\n` +
+            `export const read = serverFn(async (rq) => 1);`;
+        const { plugin: withApp, root: appRoot } = makeProject(
+            { 'src/api.server.ts': bare },
+            'build',
+            { requireAuthorization: true, serverApp: '/src/server-app.ts' }
+        );
+        try {
+            const result = withApp.transform.call(
+                ctx('client'),
+                bare,
+                join(appRoot, 'src/api.server.ts')
+            );
+            expect(result.code).toContain('__serverFnStub(');
+        } finally {
+            rmSync(appRoot, { recursive: true, force: true });
+        }
+    });
+
+    it('a leftover preset component file is skipped untouched — nothing recognizes it anymore (rfc-server-v4 §1.5)', () => {
+        // The quick-scan patterns list only serverFn/serverStream now: a
+        // file whose only `@sigx/server` value import is the (removed)
+        // `serverFnPreset` never reaches the inline extractor, and the
+        // module fails loudly at IMPORT time instead — `serverFnPreset` is
+        // not an export of @sigx/server.
+        const leftover =
             `import { serverFnPreset } from '@sigx/server';\n` +
             `const authed = serverFnPreset({ use: [] });\n` +
             `export const load = authed(async (rq) => 1);`;
-        expect(() =>
-            plugin.transform.call(ctx('client'), bad, join(root, 'src/Preset.tsx'))
-        ).toThrow(/serverFnPreset\(\) is only supported in a \*\.server\.ts module/);
-
-        const namespaced =
-            `import * as srv from '@sigx/server';\n` +
-            `const authed = srv.serverFnPreset({ use: [] });\n` +
-            `export const load = authed(async (rq) => 1);`;
-        expect(() =>
-            plugin.transform.call(ctx('client'), namespaced, join(root, 'src/PresetNs.tsx'))
-        ).toThrow(/serverFnPreset\(\)/);
+        const result = plugin.transform.call(
+            ctx('client'),
+            leftover,
+            join(root, 'src/Preset.tsx')
+        );
+        expect(result ?? null).toBeNull();
     });
 
     it('serverFn inside a component is a hard error with a location', () => {

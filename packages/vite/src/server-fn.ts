@@ -133,36 +133,35 @@ export interface SigxServerOptions
      */
     serverApp?: string;
     /**
-     * The guard-declaration gate (rfc-server-v3 §1.4, #489). Every extracted
-     * `serverFn` and `serverStream` must be preset-derived, declare `use`, or
-     * declare `unguarded: true`; a bare one is a build error naming all three
-     * remedies, with its file and line.
+     * The access gate (rfc-server-v4 §5, #489/#611 — `requireGuards` until
+     * the split). Every extracted `serverFn` and `serverStream` must have a
+     * DECIDED access policy: declare `authorize: [...]`, declare the literal
+     * `allowAnonymous: true`, or inherit the app default (a configured
+     * {@link serverApp} — undeclared functions then resolve fail-closed at
+     * runtime). A bare one with no app is a build error naming the remedies,
+     * with its file and line.
      *
-     * **Default `true`.** The endpoint's `guard` above is wire-only, so a
-     * chain that must hold everywhere lives in the definition — and a new
-     * `*.server.ts` that forgets one is silently unguarded on every transport.
-     * Runtime cannot restore that guarantee without a registry whose miss
-     * would be fail-open; the build can. Shipping it off by default would ship
-     * it to nobody.
+     * **Default `true`.** The runtime is fail-closed, so the stakes here are
+     * AVAILABILITY, not security — "forgot `allowAnonymous` on the sign-in
+     * endpoint" should be a build error, not a production lockout — and
+     * default-on is still right: the gate is most valuable to the app that
+     * never reads an RFC. `'warn'` lists them without failing (the migration
+     * rung); `false` opts out deliberately.
      *
-     * `'warn'` lists them without failing (the migration rung); `false` opts
-     * out deliberately, for an app that authorizes inside handler bodies.
-     *
-     * The check verifies **declaration, not correctness**: `use: [logRequest]`
-     * passes. That is the honest limit — it converts "silently unguarded" into
-     * a list a human wrote, which is the unit a review can act on. And a
-     * `*.server.ts` outside `include`/`scan` is never analyzed at all, so
-     * under this flag the SSR stamp carries a `__sigxGuardChecked` marker and
-     * `__DEV__` warns when a function without one is invoked: absence is the
-     * alarm, so a missing signal degrades to silence rather than a false pass.
+     * The check verifies **declaration, not correctness**:
+     * `authorize: [() => true]` passes. That is the honest limit — it
+     * converts "silently undecided" into a list a human wrote, which is the
+     * unit a review can act on. An unanalyzed `*.server.ts` outside
+     * `include`/`scan` needs no stamp mitigation anymore: it DENIES at
+     * runtime instead of running open (the v3 §1.5 gap, closed).
      */
-    requireGuards?: boolean | 'warn';
+    requireAuthorization?: boolean | 'warn';
     /**
      * Dev boundary refresh (rfc-server §6.3): a Vite-root-relative module
      * exporting `renderBoundaries`, forwarded to the dev endpoint — the
      * same shape `createBoundaryRefresh` (`@sigx/resume/server`) builds for
      * prod entries, so single-flight refresh works identically in dev.
-     * Loaded through the SSR module runner per request, like `guard`.
+     * Loaded through the SSR module runner per request, like `serverApp`.
      */
     renderBoundaries?: string;
 }
@@ -193,19 +192,9 @@ const REGEX_SPECIALS = /[.*+?^${}()|[\]\\]/g;
 const escapeRe = (name: string): string => name.replace(REGEX_SPECIALS, '\\$&');
 
 /**
- * Call-site patterns for `serverFn`/`serverStream`/`serverFnPreset` as
- * value-imported from '@sigx/server' — named (aliased or not) and namespace
- * imports. Best-effort dev lint, not an analysis: re-exports and indirections
- * are out of scope.
- *
- * `serverFnPreset` is here so a component file that only uses a preset still
- * reaches the inline extractor, which reports it as an error (#398) — the gate
- * runs before any parsing, so a miss here is silence, not a fallback. No
- * pattern is needed for the DERIVED call (`authed(…)`): presets are
- * same-module, so the file that calls one also declares it.
- * `\bserverFn\b` cannot match inside `serverFnPreset` (no word boundary
- * between `n` and `P`), so the two never cross-contaminate; the namespace
- * alternation lists `FnPreset` first for the same reason.
+ * Call-site patterns for `serverFn`/`serverStream` as value-imported from
+ * '@sigx/server' — named (aliased or not) and namespace imports. Best-effort
+ * dev lint, not an analysis: re-exports and indirections are out of scope.
  */
 function serverFnCallPatterns(code: string): RegExp[] {
     const patterns: RegExp[] = [];
@@ -215,12 +204,12 @@ function serverFnCallPatterns(code: string): RegExp[] {
         if (namespace) {
             patterns.push(
                 new RegExp(
-                    `(?<![\\w$.])${escapeRe(namespace[1])}\\s*\\.\\s*server(?:FnPreset|Fn|Stream)\\s*\\(`
+                    `(?<![\\w$.])${escapeRe(namespace[1])}\\s*\\.\\s*server(?:Fn|Stream)\\s*\\(`
                 )
             );
             continue;
         }
-        for (const wrapper of ['serverFnPreset', 'serverFn', 'serverStream']) {
+        for (const wrapper of ['serverFn', 'serverStream']) {
             if (new RegExp(`\\btype\\s+${wrapper}\\b`).test(clause)) continue; // inline type import
             const spec = new RegExp(`\\b${wrapper}\\b(?:\\s+as\\s+([\\w$]+))?`).exec(clause);
             if (spec) {
@@ -297,7 +286,10 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
         stableId: computeStableId(file, root, pkgCache),
         endpoint,
         stubSymbols: role === 'client' ? 'stable' : 'hashed',
-        requireGuards: options.requireGuards
+        requireAuthorization: options.requireAuthorization,
+        // The app default decides undeclared fns (rfc-server-v4 §5's third
+        // rung) — the gate's question is answered by configuration.
+        hasServerApp: options.serverApp !== undefined
     });
 
     /** Is FILE inside the Vite root? (Scanned packages may not be.) */
@@ -699,10 +691,7 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
             // key identically on both sides). Marker-guarded: rolldown may
             // re-run the transform over its own stamped output.
             if (extraction && !code.includes(KEY_STAMP_MARKER)) {
-                const stamps = serverFnKeyStamps(
-                    extraction.fns,
-                    (options.requireGuards ?? true) !== false
-                );
+                const stamps = serverFnKeyStamps(extraction.fns);
                 if (stamps) return { code: code + stamps, map: null };
             }
             return null;
@@ -844,7 +833,7 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
                     // here drifts from an interface this package does not own —
                     // which is how `maxUrlBytes`, `onError` and `timeoutMs`
                     // became unreachable in dev (#561). The plugin's own keys
-                    // (include/exclude/endpoint/role/scan/requireGuards) ride
+                    // (include/exclude/endpoint/role/scan/requireAuthorization) ride
                     // along inert: the endpoint reads only what it declares.
                     // The three below are overridden with the resolved values.
                     ...options,

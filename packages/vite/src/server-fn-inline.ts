@@ -36,13 +36,11 @@
 import { parseAst } from 'vite';
 import {
     hasServerFnOptionsSpread,
-    missingGuardError,
+    missingAuthorizationError,
     readServerFnAllowAnonymousOption,
     readServerFnAuthorizeOption,
     mintSymbols,
     optionsSpreadWarning,
-    readServerFnUnguardedOption,
-    readServerFnUseOption,
     readServerFnCacheOption,
     readServerFnFormOption,
     readServerFnIdOption,
@@ -355,9 +353,6 @@ export function extractInlineServerFns(
     // -- module scan: serverFn aliases, imports, module-scope locals --
     const wrapperLocals = new Map<string, 'fn' | 'stream'>();
     const namespaceLocals = new Set<string>();
-    /** Locals bound to `serverFnPreset` — file-form only, so every call site
-     *  reached from here is an error rather than an extraction (#398). */
-    const presetFactoryLocals = new Set<string>();
     /** import local → typeOnly */
     const imports = new Map<string, boolean>();
     const moduleLocals = new Set<string>();
@@ -377,7 +372,6 @@ export function extractInlineServerFns(
                     const imported = (spec.imported as Node).name as string;
                     if (imported === 'serverFn') wrapperLocals.set(local, 'fn');
                     else if (imported === 'serverStream') wrapperLocals.set(local, 'stream');
-                    else if (imported === 'serverFnPreset') presetFactoryLocals.add(local);
                 }
                 if (spec.type === 'ImportNamespaceSpecifier') namespaceLocals.add(local);
             }
@@ -435,63 +429,14 @@ export function extractInlineServerFns(
     };
     const isServerFnCallee = (callee: Node): boolean => calleeKind(callee) !== undefined;
 
-    /** `serverFnPreset(...)` / `srv.serverFnPreset(...)`. */
-    const isPresetFactoryCallee = (callee: Node): boolean => {
-        if (callee.type === 'Identifier') return presetFactoryLocals.has(callee.name as string);
-        return (
-            callee.type === 'MemberExpression' &&
-            callee.computed !== true &&
-            (callee.object as Node).type === 'Identifier' &&
-            namespaceLocals.has(((callee.object as Node).name as string) ?? '') &&
-            isNode(callee.property) &&
-            ((callee.property as Node).name as string) === 'serverFnPreset'
-        );
-    };
-    // Locals a preset was assigned to, so `authed(…)` and `authed.stream(…)`
-    // are reported at their own call sites rather than only at the preset's.
-    const presetLocals = new Set<string>();
-    if (presetFactoryLocals.size > 0 || namespaceLocals.size > 0) {
-        for (const stmt of program.body as Node[]) {
-            const decl =
-                stmt.type === 'ExportNamedDeclaration' && isNode(stmt.declaration)
-                    ? (stmt.declaration as Node)
-                    : stmt;
-            if (decl.type !== 'VariableDeclaration') continue;
-            for (const declarator of decl.declarations as Node[]) {
-                const init = declarator.init;
-                if (!isNode(init) || init.type !== 'CallExpression' || !isNode(init.callee)) continue;
-                if (!isPresetFactoryCallee(init.callee as Node)) continue;
-                if ((declarator.id as Node).type !== 'Identifier') continue;
-                presetLocals.add((declarator.id as Node).name as string);
-            }
-        }
-    }
-    /** A call reaching a preset in ANY of its three shapes. */
-    const isPresetCallee = (callee: Node): boolean => {
-        if (isPresetFactoryCallee(callee)) return true;
-        if (callee.type === 'Identifier') return presetLocals.has(callee.name as string);
-        return (
-            callee.type === 'MemberExpression' &&
-            callee.computed !== true &&
-            (callee.object as Node).type === 'Identifier' &&
-            presetLocals.has(((callee.object as Node).name as string) ?? '')
-        );
-    };
-
-    if (
-        wrapperLocals.size === 0 &&
-        namespaceLocals.size === 0 &&
-        // Without this a preset-only component file returns before anything
-        // can be reported, and the error below never fires.
-        presetFactoryLocals.size === 0
-    ) {
+    if (wrapperLocals.size === 0 && namespaceLocals.size === 0) {
         return { fns: [], errors: [], warnings: [], clientModule: null, ssrModule: null };
     }
 
     // -- find module-scope declarations and misplaced calls --
     const fns: InlineServerFn[] = [];
     const errors: InlineExtractionError[] = [];
-    const requireGuards = options.requireGuards ?? true;
+    const requireAuthorization = options.requireAuthorization ?? true;
     const warnings: string[] = [];
     const clientSplices: Splice[] = [];
     /** Call nodes accepted as module-scope declarations. */
@@ -573,19 +518,17 @@ export function extractInlineServerFns(
             }
             if (idOption.id !== undefined) warnIfIdRewritten(warnings, name, idOption.id);
             if (!stream && hasServerFnOptionsSpread(call)) warnings.push(optionsSpreadWarning(name));
-            // The access gate (#489, sharpened by rfc-server-v4 §5). An
-            // inline server function is extracted and is a public endpoint
-            // like any other, so it is held to the same rule; the pre-v4
-            // spellings pass transitionally, as in the file extractor.
+            // The access gate (#489, rfc-server-v4 §5). An inline server
+            // function is extracted and is a public endpoint like any other,
+            // so it is held to the same rule as the file form.
             if (
-                requireGuards !== false &&
+                requireAuthorization !== false &&
+                !options.hasServerApp &&
                 !readServerFnAuthorizeOption(call) &&
-                !readServerFnAllowAnonymousOption(call) &&
-                !readServerFnUseOption(call) &&
-                !readServerFnUnguardedOption(call)
+                !readServerFnAllowAnonymousOption(call)
             ) {
-                const message = missingGuardError(name, stream);
-                if (requireGuards === 'warn') warnings.push(message);
+                const message = missingAuthorizationError(name, stream);
+                if (requireAuthorization === 'warn') warnings.push(message);
                 else errors.push({ offset: call.start, message });
             }
             const isGet = !stream && readServerFnCacheOption(call);
@@ -627,23 +570,6 @@ export function extractInlineServerFns(
     // nested expression, …) — a hard error, per the module-scope-only rule.
     walk(program, (node) => {
         if (node.type !== 'CallExpression' || !isNode(node.callee)) return;
-        // Presets are FILE-form only (#398): the preset const is module scope
-        // by construction, which the inline form forbids capturing, and a
-        // preset cannot be shared across modules either. Reported per site so
-        // the author sees all of them at once.
-        if (isPresetCallee(node.callee as Node)) {
-            errors.push({
-                offset: node.start,
-                message:
-                    'serverFnPreset() is only supported in a *.server.ts module. An inline ' +
-                    '(component-file) server function may capture only imports and globals ' +
-                    '(rfc-server §1.2), and the preset const is module scope by construction — ' +
-                    'nor can a preset be shared across modules. Move these functions into a ' +
-                    '*.server.ts module, or declare the guards per function with ' +
-                    'serverFn({ use: [...] }).'
-            });
-            return;
-        }
         if (isServerFnCallee(node.callee as Node) && !accepted.has(node)) {
             errors.push({
                 offset: node.start,

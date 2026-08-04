@@ -15,9 +15,13 @@ import {
 } from '../src/server-fn-extract';
 
 const BASE = '/_sigx/fn';
+// Gate OFF by default: this file's non-gate suites use bare fixtures on
+// purpose (extraction mechanics, not access policy). The access gate has its
+// own describe below, with its own helper that keeps the true default.
 const opts = (stableId: string, extra?: Partial<ServerFnExtractOptions>): ServerFnExtractOptions => ({
     stableId,
     endpoint: BASE,
+    requireAuthorization: false,
     ...extra
 });
 
@@ -72,10 +76,10 @@ describe('extractServerFns — basics', () => {
 
     // The wire contract, pinned to a LITERAL. A hashed symbol is what an
     // installed client calls, so any change to the seed silently 404s every
-    // deployed stub until the client is rebuilt. `serverFnPreset` (#398) mixes
-    // the preset's source into the seed for DERIVED functions; this test is
-    // the proof that a plain function's seed is untouched by that work — it
-    // was written and green BEFORE the preset changes landed.
+    // deployed stub until the client is rebuilt. This literal has survived
+    // both the preset seed-mixing era (#398) and its removal (rfc-server-v4
+    // §1.5): a plain function's seed was always just the call source, and
+    // this test is the proof nothing else ever leaked in.
     it('pins a plain function’s hashed symbol byte-for-byte', () => {
         const result = extractServerFns(CART, '/src/cart.server.ts', opts('src/cart.server.ts'));
         expect(result.fns[0].symbol).toBe('addToCart_fn_5b3c4824');
@@ -520,147 +524,29 @@ export const ticks = serverStream(async function* (rq) { yield 1; });
 });
 
 /* ------------------------------------------------------------------ */
-/* serverFnPreset (#398)                                              */
+/* serverFnPreset is GONE (rfc-server-v4 §1.5)                        */
 /* ------------------------------------------------------------------ */
 
-const PRESET = `
-import { serverFn, serverFnPreset } from '@sigx/server';
-import { requireUser } from './guards';
-
-const authed = serverFnPreset({ use: [requireUser] });
-
-export const boardIssues = authed({ input: BoardKey, handler: async (rq, k) => k });
-export const addTwo = authed(async (rq, sku: string, qty: number) => sku + qty);
-export const feed = authed.stream(async function* (rq) { yield 1; });
-export const open = serverFn(async () => 'public');
-`;
-
-describe('extractServerFns — serverFnPreset', () => {
-    it('extracts preset-derived functions exactly like plain ones', () => {
-        const result = extractServerFns(PRESET, '/src/board.server.ts', opts('src/board.server.ts'));
-
-        expect(result.fns.map((f) => f.name).sort()).toEqual([
-            'addTwo',
-            'boardIssues',
-            'feed',
-            'open'
-        ]);
-        // The preset local itself is not a server function — it becomes a
-        // server-only stub, so the client can never call it.
-        expect(result.serverOnly).toEqual([]);
-        expect(result.warnings).toEqual([]);
-
-        const feed = result.fns.find((f) => f.name === 'feed');
-        expect(feed?.stream).toBe(true);
-        expect(result.stubModule).toContain('export const feed = __serverStreamStub(');
-        expect(result.stubModule).toContain('export const addTwo = __serverFnStub(');
-        // A stream is not a useData target — no stable-key argument.
-        expect(serverFnKeyStamps(result.fns)).not.toContain('feed.__sigxKey');
-    });
-
-    it('mixes the preset source into the derived seed — and ONLY the derived one', () => {
-        const before = extractServerFns(PRESET, '/src/board.server.ts', opts('src/board.server.ts'));
-        const edited = PRESET.replace('use: [requireUser]', 'use: [requireUser, rateLimit]');
-        const after = extractServerFns(edited, '/src/board.server.ts', opts('src/board.server.ts'));
-
-        const symbolOf = (r: typeof before, name: string): string | undefined =>
-            r.fns.find((f) => f.name === name)?.symbol;
-
-        // Editing the shared chain re-mints every function derived from it…
-        for (const name of ['boardIssues', 'addTwo', 'feed']) {
-            expect(symbolOf(after, name)).not.toBe(symbolOf(before, name));
-        }
-        // …and nothing else. A plain fn in the same file is untouched.
-        expect(symbolOf(after, 'open')).toBe(symbolOf(before, 'open'));
-        // Stable symbols never move — an installed client keeps its route.
-        for (const fn of before.fns) {
-            const twin = after.fns.find((f) => f.name === fn.name);
-            expect(twin?.stableSymbol).toBe(fn.stableSymbol);
-        }
-    });
-
-    it('reads the statically-read options off a derived call site', () => {
+describe('extractServerFns — a leftover serverFnPreset module', () => {
+    it('degrades to server-only stubs, never to silent extraction', () => {
+        // The preset and everything derived from it are no longer server
+        // functions to this extractor. The exports become `__serverOnly`
+        // throwing stubs — so a client touching them fails LOUDLY — and the
+        // SSR module fails at import time (`serverFnPreset` is not an
+        // export of @sigx/server anymore). Neither failure is silent, which
+        // is what this pin is for.
         const code = `
-import { serverFnPreset } from '@sigx/server';
-const authed = serverFnPreset({ use: [] });
-export const read = authed({ id: 'board/read', cache: { maxAge: 60 }, handler: async () => 1 });
-export const write = authed({ handler: async () => 1, invalidates: () => ['b'] });
-export const action = authed({ form: true, input: S, handler: async () => 1 });
+import { serverFn, serverFnPreset } from '@sigx/server';
+const authed = serverFnPreset({ use: [requireUser] });
+export const boardIssues = authed({ handler: async (rq) => 1 });
+export const feed = authed.stream(async function* (rq) { yield 1; });
+export const open = serverFn({ allowAnonymous: true, handler: async () => 'public' });
 `;
         const result = extractServerFns(code, '/src/board.server.ts', opts('src/board.server.ts'));
-        const byName = Object.fromEntries(result.fns.map((f) => [f.name, f]));
-        expect(byName.read.get).toBe(true);
-        expect(byName.read.stableSymbol).toBe('board/read/read');
-        expect(byName.write.invalidates).toBe(true);
-        expect(byName.action.form).toBe(true);
-    });
-
-    it('classifies a preset declared AFTER its uses (the pre-pass)', () => {
-        const code = `
-import { serverFnPreset } from '@sigx/server';
-export const first = authed(async () => 1);
-const authed = serverFnPreset({ use: [] });
-`;
-        const result = extractServerFns(code, '/src/x.server.ts', opts('src/x.server.ts'));
-        expect(result.fns.map((f) => f.name)).toEqual(['first']);
-    });
-
-    it('recognizes namespace and aliased preset imports', () => {
-        const namespaced = `
-import * as srv from '@sigx/server';
-const authed = srv.serverFnPreset({ use: [] });
-export const a = authed(async () => 1);
-export const b = authed.stream(async function* () { yield 1; });
-`;
-        const one = extractServerFns(namespaced, '/src/n.server.ts', opts('src/n.server.ts'));
-        expect(one.fns.map((f) => f.name).sort()).toEqual(['a', 'b']);
-        expect(one.fns.find((f) => f.name === 'b')?.stream).toBe(true);
-
-        const aliased = `
-import { serverFnPreset as guarded } from '@sigx/server';
-const authed = guarded({ use: [] });
-export const a = authed(async () => 1);
-`;
-        const two = extractServerFns(aliased, '/src/a.server.ts', opts('src/a.server.ts'));
-        expect(two.fns.map((f) => f.name)).toEqual(['a']);
-    });
-
-    it('does not treat an arbitrary member call on a preset as a server function', () => {
-        const code = `
-import { serverFnPreset } from '@sigx/server';
-const authed = serverFnPreset({ use: [] });
-export const nope = authed.somethingElse(async () => 1);
-`;
-        const result = extractServerFns(code, '/src/x.server.ts', opts('src/x.server.ts'));
-        expect(result.fns).toHaveLength(0);
-        expect(result.serverOnly).toEqual(['nope']);
-    });
-
-    it('warns when a preset is exported, and stubs it server-only', () => {
-        const declaration = `
-import { serverFnPreset } from '@sigx/server';
-export const authed = serverFnPreset({ use: [] });
-`;
-        const one = extractServerFns(declaration, '/src/g.server.ts', opts('src/g.server.ts'));
-        expect(one.serverOnly).toEqual(['authed']);
-        expect(one.warnings).toHaveLength(1);
-        expect(one.warnings[0]).toContain('per-MODULE construct');
-        expect(one.stubModule).toContain('export const authed = __serverOnly("authed"');
-
-        const specifier = `
-import { serverFnPreset } from '@sigx/server';
-const authed = serverFnPreset({ use: [] });
-export { authed };
-`;
-        const two = extractServerFns(specifier, '/src/g.server.ts', opts('src/g.server.ts'));
-        expect(two.warnings[0]).toContain('per-MODULE construct');
-
-        const asDefault = `
-import { serverFnPreset } from '@sigx/server';
-export default serverFnPreset({ use: [] });
-`;
-        const three = extractServerFns(asDefault, '/src/g.server.ts', opts('src/g.server.ts'));
-        expect(three.warnings[0]).toContain('per-MODULE construct');
+        expect(result.fns.map((f) => f.name)).toEqual(['open']);
+        expect(result.serverOnly.sort()).toEqual(['boardIssues', 'feed']);
+        expect(result.stubModule).toContain('export const boardIssues = __serverOnly(');
+        expect(result.stubModule).toContain('export const feed = __serverOnly(');
     });
 });
 
@@ -689,24 +575,33 @@ export const b = serverFn(async () => 1);
 });
 
 /* ------------------------------------------------------------------ */
-/* requireGuards (#489, sharpened by rfc-server-v4 §5)                 */
+/* requireAuthorization (#489, rfc-server-v4 §5, renamed in #611)      */
 /* ------------------------------------------------------------------ */
 
-describe('extractServerFns — requireGuards', () => {
+describe('extractServerFns — requireAuthorization', () => {
+    // No requireAuthorization default here, unlike the file-wide `opts`:
+    // this suite is ABOUT the gate, and "on by default" must stay honest.
+    const gateOpts = (extra?: Partial<ServerFnExtractOptions>): ServerFnExtractOptions => ({
+        stableId: 'src/x.server.ts',
+        endpoint: BASE,
+        ...extra
+    });
     const BARE = `
 import { serverFn, serverStream } from '@sigx/server';
 export const read = serverFn(async (rq) => 1);
 export const feed = serverStream(async function* (rq) { yield 1; });
 `;
 
-    it('is ON by default — a bare serverFn and a bare serverStream both fail', () => {
-        const result = extractServerFns(BARE, '/src/x.server.ts', opts('src/x.server.ts'));
+    it('is ON by default — a bare serverFn and a bare serverStream both fail, naming every remedy', () => {
+        const result = extractServerFns(BARE, '/src/x.server.ts', gateOpts());
         expect(result.errors).toHaveLength(2);
         for (const error of result.errors) {
-            // Both remedies, so the message is actionable on its own.
+            // Every remedy, so the message is actionable on its own.
             expect(error.message).toContain('has no decided access policy');
             expect(error.message).toContain('authorize: [...]');
             expect(error.message).toContain('allowAnonymous: true');
+            expect(error.message).toContain('serverApp');
+            expect(error.message).toContain('requireAuthorization: false');
             expect(error.offset).toBeGreaterThan(0);
         }
         expect(result.errors[0].message).toContain('serverFn "read"');
@@ -724,9 +619,27 @@ export const b = serverFn({ allowAnonymous: true, handler: async () => 1 });
 export const c = serverStream({ authorize: adminOnly, handler: async function* () { yield 1; } });
 export const d = serverStream({ allowAnonymous: true, handler: async function* () { yield 1; } });
 `;
-        const result = extractServerFns(code, '/src/x.server.ts', opts('src/x.server.ts'));
+        const result = extractServerFns(code, '/src/x.server.ts', gateOpts());
         expect(result.errors).toEqual([]);
         expect(result.fns.map((fn) => fn.name).sort()).toEqual(['a', 'b', 'c', 'd']);
+    });
+
+    it('passes a bare fn when a serverApp is configured — the app default decides it (§5, third rung)', () => {
+        const withApp = extractServerFns(
+            BARE,
+            '/src/x.server.ts',
+            gateOpts({ hasServerApp: true })
+        );
+        expect(withApp.errors).toEqual([]);
+        expect(withApp.warnings).toEqual([]);
+        expect(withApp.fns.map((fn) => fn.name).sort()).toEqual(['feed', 'read']);
+        // 'warn' with an app configured has nothing to warn about either.
+        const warned = extractServerFns(
+            BARE,
+            '/src/x.server.ts',
+            gateOpts({ requireAuthorization: 'warn', hasServerApp: true })
+        );
+        expect(warned.warnings).toEqual([]);
     });
 
     it('reads a string-literal allowAnonymous key, and never a computed one', () => {
@@ -738,38 +651,40 @@ export const d = serverStream({ allowAnonymous: true, handler: async function* (
 import { serverFn } from '@sigx/server';
 export const a = serverFn({ 'allowAnonymous': true, handler: async () => 1 });
 `;
-        expect(extractServerFns(quoted, '/src/x.server.ts', opts('src/x.server.ts')).errors).toEqual([]);
+        expect(extractServerFns(quoted, '/src/x.server.ts', gateOpts()).errors).toEqual([]);
         const computed = `
 import { serverFn } from '@sigx/server';
 const key = 'allowAnonymous';
 export const a = serverFn({ [key]: true, handler: async () => 1 });
 `;
-        const result = extractServerFns(computed, '/src/x.server.ts', opts('src/x.server.ts'));
+        const result = extractServerFns(computed, '/src/x.server.ts', gateOpts());
         expect(result.errors).toHaveLength(1);
         expect(result.errors[0].message).toContain('has no decided access policy');
     });
 
-    it('TRANSITIONAL: the pre-v4 spellings (preset-derived, use, unguarded) still pass, so a migrating tree fails on the runtime’s clear removal errors, not the gate', () => {
+    it('the pre-v4 spellings no longer count — `use:`/`unguarded:` fns are undecided (#611)', () => {
+        // The transitional acceptance is gone with the runtime that read
+        // it: these keys are unknown options now, and unknown options are
+        // not access declarations.
         const code = `
-import { serverFn, serverStream, serverFnPreset } from '@sigx/server';
-const authed = serverFnPreset({ use: [requireUser] });
-export const a = authed(async (rq) => 1);
-export const b = authed.stream(async function* (rq) { yield 1; });
+import { serverFn, serverStream } from '@sigx/server';
 export const c = serverFn({ use: [requireUser], handler: async () => 1 });
 export const d = serverFn({ unguarded: true, handler: async () => 1 });
 export const e = serverStream({ use: [requireUser], handler: async function* () { yield 1; } });
 export const f = serverStream({ unguarded: true, handler: async function* () { yield 1; } });
 `;
-        const result = extractServerFns(code, '/src/x.server.ts', opts('src/x.server.ts'));
-        expect(result.errors).toEqual([]);
-        expect(result.fns.map((fn) => fn.name).sort()).toEqual(['a', 'b', 'c', 'd', 'e', 'f']);
+        const result = extractServerFns(code, '/src/x.server.ts', gateOpts());
+        expect(result.errors).toHaveLength(4);
+        for (const error of result.errors) {
+            expect(error.message).toContain('has no decided access policy');
+        }
     });
 
     it("'warn' lists them without failing, and false opts out entirely", () => {
         const warned = extractServerFns(
             BARE,
             '/src/x.server.ts',
-            opts('src/x.server.ts', { requireGuards: 'warn' })
+            gateOpts({ requireAuthorization: 'warn' })
         );
         expect(warned.errors).toEqual([]);
         expect(warned.warnings).toHaveLength(2);
@@ -778,52 +693,42 @@ export const f = serverStream({ unguarded: true, handler: async function* () { y
         const off = extractServerFns(
             BARE,
             '/src/x.server.ts',
-            opts('src/x.server.ts', { requireGuards: false })
+            gateOpts({ requireAuthorization: false })
         );
         expect(off.errors).toEqual([]);
         expect(off.warnings).toEqual([]);
     });
 
-    it('demands the LITERAL true — a variable silences neither spelling', () => {
-        const transitional = extractServerFns(
-            `
-import { serverFn } from '@sigx/server';
-export const read = serverFn({ unguarded: isPublic, handler: async () => 1 });
-`,
-            '/src/x.server.ts',
-            opts('src/x.server.ts')
-        );
-        expect(transitional.errors).toHaveLength(1);
-
+    it('demands the LITERAL true — a variable does not silence the gate', () => {
         const v4 = extractServerFns(
             `
 import { serverFn } from '@sigx/server';
 export const read = serverFn({ allowAnonymous: isPublic, handler: async () => 1 });
 `,
             '/src/x.server.ts',
-            opts('src/x.server.ts')
+            gateOpts()
         );
         expect(v4.errors).toHaveLength(1);
     });
 
-    it('stamps __sigxGuardChecked on what it checked, streams included', () => {
+    it('the key-stamp block carries ONLY __sigxKey lines — the guard-checked markers are retired', () => {
+        // rfc-server-v4 retired `__sigxGuardChecked`/`__SIGX_GUARDS_CHECKED__`:
+        // the fail-closed runtime closed the unanalyzed-module gap they
+        // mitigated, so an emission here would be dead weight in every SSR
+        // module.
         const code = `
 import { serverFn, serverStream } from '@sigx/server';
-export const read = serverFn({ unguarded: true, handler: async () => 1 });
-export const feed = serverStream({ unguarded: true, handler: async function* () { yield 1; } });
+export const read = serverFn({ allowAnonymous: true, handler: async () => 1 });
+export const feed = serverStream({ allowAnonymous: true, handler: async function* () { yield 1; } });
 `;
-        const result = extractServerFns(code, '/src/x.server.ts', opts('src/x.server.ts'));
-        const stamps = serverFnKeyStamps(result.fns, true);
-        expect(stamps).toContain('globalThis.__SIGX_GUARDS_CHECKED__ = true;');
-        expect(stamps).toContain('read.__sigxGuardChecked = true;');
-        // A stream gets the marker but never a data key.
-        expect(stamps).toContain('feed.__sigxGuardChecked = true;');
-        expect(stamps).not.toContain('feed.__sigxKey');
-
-        // With the gate off, nothing claims to have been checked — absence is
-        // the alarm, so a false "checked" would be the worst outcome.
-        expect(serverFnKeyStamps(result.fns)).not.toContain('__sigxGuardChecked');
-        expect(serverFnKeyStamps(result.fns)).not.toContain('__SIGX_GUARDS_CHECKED__');
+        const result = extractServerFns(code, '/src/x.server.ts', gateOpts());
+        const stamps = serverFnKeyStamps(result.fns);
+        expect(stamps).toContain('read.__sigxKey =');
+        // A stream is not a useData target — no key, and nothing else left
+        // to stamp for it.
+        expect(stamps).not.toContain('feed.');
+        expect(stamps).not.toContain('__sigxGuardChecked');
+        expect(stamps).not.toContain('__SIGX_GUARDS_CHECKED__');
     });
 });
 

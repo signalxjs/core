@@ -123,24 +123,27 @@ export interface ServerFnExtractOptions {
     /** Which symbol stubs carry: hashed (web, default) or stable (`role: 'client'`). */
     stubSymbols?: 'hashed' | 'stable';
     /**
-     * The guard-declaration gate (rfc-server-v3 §1.4, #489). Every extracted
-     * `serverFn` and `serverStream` must be preset-derived, declare `use`, or
-     * declare `unguarded: true` — a bare one is a build error naming all three
-     * remedies.
+     * The access gate (rfc-server-v4 §5, #489/#611). Every extracted
+     * `serverFn` and `serverStream` must have a DECIDED access policy:
+     * declare `authorize: [...]`, declare the literal `allowAnonymous: true`,
+     * or inherit the app default — {@link hasServerApp} says a `serverApp`
+     * module is configured, so undeclared functions resolve fail-closed at
+     * runtime. A bare one with no app is a build error naming the remedies.
      *
-     * **Defaults to `true`.** A `use:` chain is the only mechanism that runs
-     * on every transport, so forgetting one on a new server module is silently
-     * unguarded on all five. Runtime cannot restore that guarantee without a
-     * fail-open registry; the build can. There is no installed base to wall
-     * in, and a guarantee shipped off by default ships to nobody — least of
-     * all to the apps that most need "you forgot a guard here", which are the
-     * ones that will never read an RFC and flip a flag.
-     *
-     * `'warn'` is the migration rung: it lists them without failing. `false`
-     * opts out deliberately — an app that authorizes inside handler bodies is
-     * a legitimate shape.
+     * **Defaults to `true`.** The runtime is fail-closed, so the stakes here
+     * are AVAILABILITY, not security — "forgot `allowAnonymous` on the
+     * sign-in endpoint" should be a build error, not a production lockout —
+     * and default-on is still right: the gate is most valuable to the app
+     * that never reads an RFC. `'warn'` lists without failing; `false` opts
+     * out deliberately.
      */
-    requireGuards?: boolean | 'warn';
+    requireAuthorization?: boolean | 'warn';
+    /**
+     * True when the build configured `sigxServer({ serverApp })` — the app
+     * default decides undeclared functions, so the gate passes them
+     * (rfc-server-v4 §5's third rung).
+     */
+    hasServerApp?: boolean;
 }
 
 /** A located build failure. Shared by both extractors. */
@@ -172,9 +175,9 @@ export interface ServerFnExtraction {
      */
     serverOnlyValues: Array<{ name: string; kind: 'value' | 'class' }>;
     /**
-     * HARD failures — the build must not proceed. Empty unless `requireGuards`
-     * is on. The stub module is still produced: the client must never receive
-     * the real module, whatever else is wrong.
+     * HARD failures — the build must not proceed. Empty unless
+     * `requireAuthorization` is on. The stub module is still produced: the
+     * client must never receive the real module, whatever else is wrong.
      */
     errors: ServerFnExtractionError[];
     /** Constructs the extraction cannot represent client-side (re-exports…). */
@@ -195,14 +198,9 @@ const LANG_BY_EXT: Record<string, 'ts' | 'tsx' | 'js' | 'jsx'> = {
 /** Statement types that only exist at compile time — never stubbed. */
 const TYPE_ONLY_DECLS = new Set(['TSTypeAliasDeclaration', 'TSInterfaceDeclaration']);
 
-/**
- * What a module-level `const x = …(…)` resolved to: a server function, a
- * stream, and — when it came through a `serverFnPreset` local — the preset
- * call's source text, which the derived function's hash seed mixes in (#398).
- */
+/** What a module-level `const x = …(…)` resolved to. */
 interface CallKind {
     kind: 'fn' | 'stream';
-    presetSource?: string;
 }
 
 /**
@@ -279,20 +277,6 @@ export function optionsSpreadWarning(name: string): string {
 }
 
 /**
- * Statically detect a `use:` chain (#489) — presence only, like `cache`: the
- * guards are runtime values the pipeline reads off the definition, and the
- * gate's question is "did you declare one?", not "is it any good".
- *
- * TRANSITIONAL (rfc-server-v4): `use:` no longer exists at runtime; this
- * reader survives only so the gate's message — not a type error alone —
- * tells a migrating app what replaced it. Deleted in the phase-3 gate
- * rename (`requireAuthorization`).
- */
-export function readServerFnUseOption(call: Node): boolean {
-    return hasServerFnOptionKey(call, 'use');
-}
-
-/**
  * Statically detect an `authorize:` declaration (rfc-server-v4 §1.2) —
  * presence only, like `cache`: the policies are runtime values the pipeline
  * reads off the definition, and the gate's question is "is this function's
@@ -313,42 +297,21 @@ export function readServerFnAllowAnonymousOption(call: Node): boolean {
 }
 
 /**
- * Statically detect `unguarded: true` (#489) — the LITERAL only, the same
- * discipline `form` has. This bit stands between a function and a build error
- * that exists to catch a forgotten guard, so a non-literal that happened to be
- * falsy at runtime must not silence it.
- */
-export function readServerFnUnguardedOption(call: Node): boolean {
-    const args = (call.arguments as Node[]) ?? [];
-    if (args.length !== 1 || args[0]?.type !== 'ObjectExpression') return false;
-    for (const prop of (args[0].properties as Node[]) ?? []) {
-        if (prop.type !== 'Property' || prop.computed === true) continue;
-        const key = prop.key as Node;
-        const keyName =
-            key.type === 'Identifier' ? (key.name as string)
-            : key.type === 'Literal' ? String(key.value)
-            : '';
-        if (keyName !== 'unguarded') continue;
-        const value = prop.value as Node;
-        return value.type === 'Literal' && value.value === true;
-    }
-    return false;
-}
-
-/**
- * The message the gate fails with. It names the remedies, because the check
+ * The message the gate fails with. It names every remedy, because the check
  * verifies DECLARATION, not correctness — it converts "silently undecided"
  * into "a list a human wrote", which is the unit a review can act on.
  */
-export function missingGuardError(name: string, stream: boolean): string {
+export function missingAuthorizationError(name: string, stream: boolean): string {
     const wrapper = stream ? 'serverStream' : 'serverFn';
     return (
         `${wrapper} "${name}" has no decided access policy. Every server function is a ` +
         `public endpoint reachable on every transport, so it must declare ` +
-        `\`authorize: [...]\`, or say \`allowAnonymous: true\` if it is deliberately open ` +
-        `to anonymous callers — middleware and authentication still run for it ` +
-        `(rfc-server-v4 §1.2, §5). Turn this check off with ` +
-        `sigxServer({ requireGuards: false }), or down with 'warn' while migrating.`
+        `\`authorize: [...]\`, say \`allowAnonymous: true\` if it is deliberately open ` +
+        `to anonymous callers (middleware and authentication still run for it), or ` +
+        `inherit the app default by configuring sigxServer({ serverApp }) + ` +
+        `createServerApp({ authenticate, … }) (rfc-server-v4 §1.2, §5). Turn this check ` +
+        `off with sigxServer({ requireAuthorization: false }), or down with 'warn' ` +
+        `while migrating.`
     );
 }
 
@@ -521,44 +484,21 @@ export const KEY_STAMP_MARKER = '/*! sigx:server-fn-keys */';
  * two names mints two symbols — the FIRST export's key wins here, matching
  * the stub whose key a client actually calls through first.
  */
-export function serverFnKeyStamps(fns: ExtractedServerFn[], guardChecked = false): string {
+export function serverFnKeyStamps(fns: ExtractedServerFn[]): string {
+    // rfc-server-v4 retired the `__sigxGuardChecked`/`__SIGX_GUARDS_CHECKED__`
+    // halves this block used to emit: the fail-closed runtime closed the
+    // unanalyzed-module gap they mitigated (an unanalyzed module now DENIES
+    // instead of running open), so there is nothing left to mark.
     const seen = new Set<string>();
     const lines: string[] = [];
     for (const fn of fns) {
-        if (!fn.local || seen.has(fn.local)) continue;
+        if (!fn.local || seen.has(fn.local) || fn.stream) continue;
         seen.add(fn.local);
-        // Streams are not `useData` targets, so they get no key — but they ARE
-        // held to the guard gate, so they still get the checked marker.
-        if (!fn.stream) lines.push(`${fn.local}.__sigxKey = ${JSON.stringify(fn.stableSymbol)};`);
-        // The §1.5 mitigation: a `*.server.ts` outside `include`/`scan` is
-        // never analyzed, so the gate cannot see it and a prod build would be
-        // silently unguarded. Marking what WAS checked makes absence the
-        // alarm — a missing signal degrades to silence, never a false pass.
-        if (guardChecked) lines.push(`${fn.local}.__sigxGuardChecked = true;`);
+        // Streams are not `useData` targets, so they get no key.
+        lines.push(`${fn.local}.__sigxKey = ${JSON.stringify(fn.stableSymbol)};`);
     }
     if (lines.length === 0) return '';
-    // One build-wide marker beside the per-fn ones: it is what lets the
-    // runtime tell "checked build, unchecked function" (warn) from "no
-    // transform at all" (say nothing) — see `__SIGX_GUARDS_CHECKED__` in
-    // docs/seams.md.
-    if (guardChecked) lines.unshift('globalThis.__SIGX_GUARDS_CHECKED__ = true;');
     return `\n${KEY_STAMP_MARKER}\n${lines.join('\n')}\n`;
-}
-
-/**
- * Exporting a `serverFnPreset` looks like the way to share one policy across
- * modules, and it silently is not: the extractors are per-file by contract
- * (rfc-server N.5), so the importing module cannot see that the local is a
- * preset and every function derived from it there extracts as nothing.
- */
-function exportedPresetWarning(name: string): string {
-    return (
-        `serverFnPreset "${name}" is exported — a preset is a per-MODULE construct. The ` +
-        `extractors analyze one file at a time, so a preset imported elsewhere is invisible ` +
-        `there and the functions derived from it would not extract at all; this export becomes ` +
-        `a server-only stub. Share the guard ARRAY instead and declare one ` +
-        `serverFnPreset({ use }) per *.server.ts module (rfc-server-v3 §1.2).`
-    );
 }
 
 /**
@@ -579,10 +519,6 @@ export function extractServerFns(
     // namespace imports) and their module-level declarations --
     const wrapperLocals = new Map<string, 'fn' | 'stream'>();
     const namespaceLocals = new Set<string>();
-    /** Locals bound to `serverFnPreset` itself (#398) — kept separate from
-     *  `wrapperLocals` so a third kind never leaks into `wrapperKind`'s
-     *  return type, which every classification site reads. */
-    const presetFactoryLocals = new Set<string>();
     for (const stmt of program.body as Node[]) {
         if (stmt.type !== 'ImportDeclaration') continue;
         if (((stmt.source as Node).value as string) !== '@sigx/server') continue;
@@ -599,59 +535,15 @@ export function extractServerFns(
                 wrapperLocals.set((spec.local as Node).name as string, 'fn');
             } else if (imported === 'serverStream') {
                 wrapperLocals.set((spec.local as Node).name as string, 'stream');
-            } else if (imported === 'serverFnPreset') {
-                presetFactoryLocals.add((spec.local as Node).name as string);
             }
-        }
-    }
-
-    /** Is this init a `serverFnPreset(...)` / `srv.serverFnPreset(...)` call? */
-    const isPresetFactoryCall = (init: unknown): init is Node => {
-        if (!isNode(init) || init.type !== 'CallExpression' || !isNode(init.callee)) return false;
-        const callee = init.callee as Node;
-        if (callee.type === 'Identifier') {
-            return presetFactoryLocals.has((callee.name as string) ?? '');
-        }
-        return (
-            callee.type === 'MemberExpression' &&
-            callee.computed !== true &&
-            (callee.object as Node).type === 'Identifier' &&
-            namespaceLocals.has(((callee.object as Node).name as string) ?? '') &&
-            isNode(callee.property) &&
-            ((callee.property as Node).name as string) === 'serverFnPreset'
-        );
-    };
-
-    // -- pass 1b: preset locals (#398). Its own pass, not folded into the
-    // declaration loop below: `wrapperKind` is also consulted by pass 2's
-    // `export default` probe, so preset knowledge has to be COMPLETE before
-    // any classification runs. Source order happens to suffice today (using a
-    // module-level const above its declaration is a TDZ error, so it cannot
-    // legally occur), but that is an accident to not depend on.
-    /** preset local → the preset call's source text, the hash-seed prefix. */
-    const presetLocals = new Map<string, string>();
-    for (const stmt of program.body as Node[]) {
-        const decl =
-            stmt.type === 'ExportNamedDeclaration' && isNode(stmt.declaration)
-                ? (stmt.declaration as Node)
-                : stmt;
-        if (decl.type !== 'VariableDeclaration') continue;
-        for (const declarator of decl.declarations as Node[]) {
-            if ((declarator.id as Node).type !== 'Identifier') continue;
-            if (!isPresetFactoryCall(declarator.init)) continue;
-            const init = declarator.init as Node;
-            presetLocals.set(
-                (declarator.id as Node).name as string,
-                code.slice(init.start, init.end)
-            );
         }
     }
 
     const warnings: string[] = [];
     const errors: ServerFnExtractionError[] = [];
     // Default ON: forgetting is the failure mode worth catching, and declining
-    // is a word you type once in the function it applies to (§1.4).
-    const requireGuards = options.requireGuards ?? true;
+    // is a word you type once in the function it applies to (§5).
+    const requireAuthorization = options.requireAuthorization ?? true;
 
     /** local name → wrapped call source + kind + explicit stable id + GET
      *  mark, for `export { x }` resolution. */
@@ -672,12 +564,8 @@ export function extractServerFns(
         }
         const callee = init.callee as Node;
         if (callee.type === 'Identifier') {
-            const name = (callee.name as string) ?? '';
-            const direct = wrapperLocals.get(name);
-            if (direct !== undefined) return { kind: direct };
-            // `authed(...)` — a preset's derived serverFn.
-            const presetSource = presetLocals.get(name);
-            return presetSource === undefined ? undefined : { kind: 'fn', presetSource };
+            const direct = wrapperLocals.get((callee.name as string) ?? '');
+            return direct === undefined ? undefined : { kind: direct };
         }
         if (
             callee.type === 'MemberExpression' &&
@@ -687,13 +575,6 @@ export function extractServerFns(
         ) {
             const object = ((callee.object as Node).name as string) ?? '';
             const prop = (callee.property as Node).name as string;
-            // `authed.stream(...)` — a preset's derived serverStream. Anything
-            // else on a preset is NOT a server function: falling through to
-            // 'fn' would let the option readers probe a generator argument.
-            const presetSource = presetLocals.get(object);
-            if (presetSource !== undefined) {
-                return prop === 'stream' ? { kind: 'stream', presetSource } : undefined;
-            }
             // Namespace form: `srv.serverFn(...)` / `srv.serverStream(...)`.
             if (namespaceLocals.has(object)) {
                 if (prop === 'serverFn') return { kind: 'fn' };
@@ -733,38 +614,24 @@ export function extractServerFns(
             if (call.kind === 'fn' && hasServerFnOptionsSpread(init)) {
                 warnings.push(optionsSpreadWarning(local));
             }
-            // The access gate (#489, sharpened by rfc-server-v4 §5):
-            // `authorize` or the literal `allowAnonymous: true` is the
-            // declaration. The pre-v4 spellings (preset-derived, `use`,
-            // `unguarded`) still pass TRANSITIONALLY so a migrating tree
-            // fails on the runtime's clear removal errors, not a wall of
-            // build errors first — the phase-3 gate rename deletes them.
+            // The access gate (#489, rfc-server-v4 §5): a function passes
+            // when its access is DECIDED — `authorize` declared, the literal
+            // `allowAnonymous: true`, or a configured `serverApp` whose
+            // default decides undeclared functions (fail-closed at runtime).
             // A stream is held to the same rule: it is a public endpoint too.
             if (
-                requireGuards !== false &&
-                call.presetSource === undefined &&
+                requireAuthorization !== false &&
+                !options.hasServerApp &&
                 !readServerFnAuthorizeOption(init) &&
-                !readServerFnAllowAnonymousOption(init) &&
-                !readServerFnUseOption(init) &&
-                !readServerFnUnguardedOption(init)
+                !readServerFnAllowAnonymousOption(init)
             ) {
-                const message = missingGuardError(local, call.kind === 'stream');
-                if (requireGuards === 'warn') warnings.push(message);
+                const message = missingAuthorizationError(local, call.kind === 'stream');
+                if (requireAuthorization === 'warn') warnings.push(message);
                 else errors.push({ offset: init.start, message });
             }
             const callSource = code.slice(init.start, init.end);
             localFnSources.set(local, {
-                // A derived function's seed mixes the PRESET's source text
-                // ahead of the call's, so editing the shared guard chain
-                // re-mints every symbol derived from it (#398). `\0` is
-                // already this seed's field separator. A plain function takes
-                // the call source unchanged — its symbol is byte-identical to
-                // what it was before presets existed, which a pinned literal
-                // hash in the tests proves.
-                source:
-                    call.presetSource === undefined
-                        ? callSource
-                        : `${call.presetSource}\0${callSource}`,
+                source: callSource,
                 stream: call.kind === 'stream',
                 explicitId: idOption.id,
                 get: call.kind === 'fn' && readServerFnCacheOption(init),
@@ -828,7 +695,6 @@ export function extractServerFns(
                 local: localName
             });
         } else {
-            if (presetLocals.has(localName)) warnings.push(exportedPresetWarning(localName));
             serverOnly.push(exportedName);
             const kind = localKinds.get(localName);
             if (kind) serverOnlyValues.push({ name: exportedName, kind });
@@ -845,9 +711,6 @@ export function extractServerFns(
             continue;
         }
         if (stmt.type === 'ExportDefaultDeclaration') {
-            if (isPresetFactoryCall(stmt.declaration)) {
-                warnings.push(exportedPresetWarning('default'));
-            }
             if (isServerFnCall(stmt.declaration)) {
                 warnings.push(
                     'default-exported serverFn is not extracted — the transport symbol needs a ' +
