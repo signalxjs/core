@@ -95,6 +95,20 @@ export function setPrincipal(): never {
     );
 }
 
+/**
+ * The endpoint-family seam is server-only by construction: it runs
+ * middleware, authentication and authorization, none of which exist on a
+ * client.
+ */
+export function serverFeature(): never {
+    throw new Error(
+        '[sigx server] serverFeature() reached the browser unextracted — the endpoint-family ' +
+        'seam runs the server pipeline (middleware, authentication, authorization) and has ' +
+        'no client half. A pack built on it must keep its host/endpoint code out of the ' +
+        'client bundle.'
+    );
+}
+
 export function requireAuthenticated(): never {
     throw new Error(
         '[sigx server] requireAuthenticated (a server-side authorization policy) reached the ' +

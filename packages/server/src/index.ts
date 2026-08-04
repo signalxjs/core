@@ -47,11 +47,15 @@ export {
     principal,
     requirePrincipal,
     setPrincipal,
-    requireAuthenticated
+    requireAuthenticated,
+    serverFeature
 } from './app-config';
 export type { ServerFnContext } from './context';
 export type {
+    EndpointPosture,
     InvalidatePattern,
+    ServerFeatureContext,
+    ServerFeatureOp,
     ServerFnCallOptions,
     ServerFnCallable,
     ServerFnInfo,

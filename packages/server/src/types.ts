@@ -100,6 +100,97 @@ export interface EndpointPosture {
 }
 
 /**
+ * One operation a {@link ServerFeatureContext.authorize} call decides — the
+ * feature-facing spelling of {@link ServerPolicyOp} plus what the endpoint
+ * normally reads off the wrapper (`policies`, `allowAnonymous`).
+ */
+export interface ServerFeatureOp<P = unknown> {
+    fn: ServerFnInfo;
+    /** This operation's declared chain; absent means the app default. */
+    policies?: ServerPolicy<P> | readonly ServerPolicy<P>[];
+    /** Waives ONLY the identity gate — the `allowAnonymous` literal. */
+    allowAnonymous?: boolean;
+    /** Validated input, where the feature has one. */
+    input?: unknown;
+    /** The raw argument list. */
+    args?: readonly unknown[];
+    /** The instance an operation targets — `@sigx/actors` fills this. */
+    resource?: ServerPolicyOp['resource'];
+}
+
+/**
+ * The endpoint-family seam (rfc-server-v4 §3.2, promoted in #625).
+ *
+ * A "feature" is an endpoint family other than `serverFns` — `@sigx/actors`
+ * is the first — that owns its own wire shape but must run the SAME
+ * pipeline: one middleware chain, one authenticator, one authorization
+ * decision, one posture. It exists so a second family inherits those
+ * instead of inventing them, which on the auth path is how transports drift
+ * apart (the v3 §1.1 defect this whole RFC corrects).
+ *
+ * Every member resolves the app through the `__SIGX_SERVER_APP__` seam per
+ * call, so a feature holds one of these at module scope and still sees the
+ * live app — and, critically, needs no app handle at all: `@sigx/actors`
+ * runs this pipeline from `actor()` call sites that have a context but no
+ * platform entry in scope.
+ *
+ * Fail-closed throughout: no app configured means no middleware, a `null`
+ * principal, and therefore a deny for anything not `allowAnonymous`.
+ */
+export interface ServerFeatureContext<P = unknown> {
+    /**
+     * Wire entry: build the request context, then run middleware →
+     * authenticate → the identity gate for one operation. For a feature
+     * that owns a raw `Request`; one that already holds a context (an
+     * in-process call) uses {@link ServerFeatureContext.prelude}.
+     */
+    enter(
+        request: Request,
+        fn: ServerFnInfo,
+        options?: { allowAnonymous?: boolean }
+    ): Promise<ServerFnContext>;
+    /**
+     * The same prelude over a context the feature already has — middleware
+     * → authenticate (memoized per request store) → identity gate. Throws
+     * `ServerFnError(401)` when the operation needs a principal and there
+     * is none.
+     */
+    prelude(
+        rq: ServerFnContext,
+        fn: ServerFnInfo,
+        options?: { allowAnonymous?: boolean }
+    ): Promise<void>;
+    /**
+     * Phase B — the authorization decision for one operation, run after the
+     * feature has validated whatever it validates. Strict-`true`; throws
+     * `ServerFnError` 403, or 401 when the principal is null.
+     */
+    authorize(rq: ServerFnContext, op: ServerFeatureOp<P>): Promise<void>;
+    /** The app's merged endpoint posture; `{}` when no app is configured. */
+    readonly posture: Readonly<EndpointPosture>;
+    /**
+     * The app's principal codec — the cross-hop propagation contract
+     * (rfc-server-v4 §7). `undefined` when the app declares none, which a
+     * feature must treat as "propagate nothing", never as "trust the hop".
+     *
+     * NOT the wire codec (`__SIGX_SERVERFN_CODEC__`): that one round-trips
+     * arguments, this one round-trips identity, and conflating them would
+     * make a request-supplied value decode into a principal.
+     */
+    readonly principalCodec:
+        | { encode(principal: unknown): string; decode(encoded: string): unknown | null }
+        | undefined;
+    /**
+     * Namespace bookkeeping — NOT routing. "Everything after `base` is the
+     * symbol" (#543) means two families cannot share a base; claiming an
+     * overlapping prefix throws at mount time, naming both. Scoped to the
+     * currently stamped app, so a fresh app starts with a clean slate; a
+     * no-op when none is configured, there being nothing to collide with.
+     */
+    claimBase(base: string): void;
+}
+
+/**
  * The full invocation pipeline stamped on every wrapped function as
  * `__sigxFn`: for an in-process call it runs everything — middleware →
  * authenticate → identity gate → arity → `input` validation → authorize →
