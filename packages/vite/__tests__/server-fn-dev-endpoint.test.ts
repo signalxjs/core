@@ -96,10 +96,13 @@ async function mount(
         middlewares: { use: (fn: typeof middleware) => (middleware = fn) },
         watcher: { add: () => {} },
         config: { logger: { warn: () => {}, error: () => {} } },
-        ssrLoadModule: (id: string) =>
-            Promise.resolve(
-                id === '@sigx/server/node' ? serverFnNode : (modules[id] ?? liveModule)
-            )
+        ssrLoadModule: (id: string) => {
+            if (id === '@sigx/server/node') return Promise.resolve(serverFnNode);
+            const mod = modules[id] ?? liveModule;
+            // An Error VALUE in the module map models a module that fails to
+            // evaluate (mid-edit syntax error): ssrLoadModule rejects.
+            return mod instanceof Error ? Promise.reject(mod) : Promise.resolve(mod);
+        }
     });
     if (!middleware) throw new Error('configureServer mounted no middleware');
 
@@ -242,5 +245,27 @@ describe('sigxServer — the dev endpoint forwards every endpoint option (#561)'
             // file keeps its no-app posture.
             app?.dispose();
         }
+    });
+
+    it('a BROKEN serverApp module is logged, never a crashed request — the fallback is fail-closed', async () => {
+        // Mid-edit the module can be a syntax error (ssrLoadModule rejects);
+        // the per-request load must log and continue so the runtime denies
+        // fail-closed (nothing stamped here) instead of aborting the RPC
+        // through next(err).
+        const dev = await mount(
+            { serverApp: '/src/server-app.ts' },
+            { '/src/server-app.ts': new Error('mid-edit syntax error') }
+        );
+        const res = await fetch(`${dev.origin}/_sigx/fn/${dev.symbol('read')}`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', origin: dev.origin },
+            body: JSON.stringify({ args: ['p1'] })
+        });
+        // Served, not crashed: with nothing stamped the pipeline denies
+        // fail-closed — a 401 envelope, not the harness's 500 'error' body.
+        expect(res.status).toBe(401);
+        await expect(res.json()).resolves.toEqual({
+            error: { message: 'Authentication required', status: 401 }
+        });
     });
 });
