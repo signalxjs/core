@@ -288,8 +288,10 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
         stubSymbols: role === 'client' ? 'stable' : 'hashed',
         requireAuthorization: options.requireAuthorization,
         // The app default decides undeclared fns (rfc-server-v4 §5's third
-        // rung) — the gate's question is answered by configuration.
-        hasServerApp: options.serverApp !== undefined
+        // rung) — the gate's question is answered by configuration. TRUTHY,
+        // matching every load site (`if (options.serverApp)`): an empty
+        // specifier loads nothing, so it must not pass the gate either.
+        hasServerApp: !!options.serverApp
     });
 
     /** Is FILE inside the Vite root? (Scanned packages may not be.) */
