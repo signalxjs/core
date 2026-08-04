@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.15.2] - 2026-08-05
+
 ### Fixed
 
 - **The pipeline accessors were unreachable on workerd (#630).**
