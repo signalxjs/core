@@ -6,7 +6,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- **`@sigx/server`: `createServerApp` — the server platform value
+  (rfc-server-v4 §3, #607/#610, phase 2 of 4).** App-wide pipeline +
+  endpoint posture + principal codec in one user-owned value;
+  `app.serverFns(mount)` hands back plain handlers (routing stays in the
+  entry — `matchesServerFn` remains the predicate); mounts claim base
+  namespaces with a boot throw on overlap; posture is inherited by every
+  mount and bare `handleServerFnRequest` call, explicit values winning.
+  Plus `authorizeBoundary` — per-boundary refresh authorization under the
+  request's principal, closing rfc-server §6.3's client-supplied-props gap.
+  `@sigx/vite` gains `sigxServer({ serverApp: './src/server-app.ts' })`:
+  dev loads it eagerly through the SSR module runner and re-evaluates it
+  after edits; production builds inject one side-effect import at the top
+  of `virtual:sigx-server-fns` (pulled forward from #611 so dev never loses
+  its app-wide hook mid-migration).
+
 ### Changed
+
+- **BREAKING — `@sigx/server`: the endpoint `guard` option is removed
+  (rfc-server-v4 §3.1, #610)**, and `@sigx/vite`'s dev `guard`
+  module-specifier with it. App middleware runs at the same pre-decode slot
+  and additionally reaches in-process calls; wire-only behavior is a
+  `fn.transport !== 'wire'` check in the middleware body.
 
 - **BREAKING — `@sigx/server`: the guard system splits into middleware /
   authentication / authorization, and the runtime is fail-closed

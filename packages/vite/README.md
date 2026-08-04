@@ -146,7 +146,7 @@ export default defineConfig({
 ```ts
 // src/api.server.ts — never shipped to the browser
 export const getProduct = serverFn({
-  unguarded: true,
+  allowAnonymous: true,
   handler: async (rq, id: string) => db.get(id)
 });
 ```
@@ -185,8 +185,8 @@ if (matchesServerFn(request, serverFnBase)) {
 | `endpoint` | `string` | `base` | The **fetch target** baked into stubs; an absolute URL for a build that calls a remote server. Call-time precedence: `configureServerFn` > this > `base`. |
 | `role` | `'auto' \| 'client'` | `'auto'` | `'auto'` swaps stubs in the Vite `client` environment only. `'client'` declares the whole build a remote-server client (lynx, terminal): every environment gets stubs, baked with **stable** symbols, and no registry is emitted — there is no server in this build. |
 | `scan` | `string[]` | `[]` | Extra directories scanned for server modules — shared workspace packages outside the Vite root. |
-| `guard` | `string` | — | A Vite-root-relative module (`'/src/fn-guard.ts'`) whose `guard` export is forwarded to the **dev** endpoint, so dev and prod enforce the same wire-level backstop. Like its production twin it runs for endpoint requests only — an in-process (SSR-time) call never reaches it. |
-| `requireGuards` | `boolean \| 'warn'` | `true` | The guard-declaration gate: every extracted `serverFn`/`serverStream` must be preset-derived, declare `use`, or declare `unguarded: true`. A bare one is a build error naming its file, line and all three remedies. `'warn'` lists them without failing; `false` opts out deliberately. |
+| `serverApp` | `string` | — | The app's server-app module (`'/src/server-app.ts'`) — it calls `createServerApp(...)` at module scope (rfc-server-v4 §3.4). Dev loads it eagerly through the SSR module runner and re-evaluates it after edits, so middleware/authentication/authorization/posture apply to the dev endpoint AND in-process SSR calls without a restart; a production build injects one side-effect import of it at the top of `virtual:sigx-server-fns`. Without it the fail-closed runtime denies rather than opens. |
+| `requireGuards` | `boolean \| 'warn'` | `true` | The access gate: every extracted `serverFn`/`serverStream` must declare `authorize: [...]` or the literal `allowAnonymous: true`. A bare one is a build error naming its file, line and the remedies. `'warn'` lists them without failing; `false` opts out deliberately. (Renamed `requireAuthorization` in phase 3, #611.) |
 | `renderBoundaries` | `string` | — | A Vite-root-relative module exporting `renderBoundaries` — the value `createBoundaryRefresh` (`@sigx/resume/server`) builds for production entries — forwarded to the **dev** endpoint so single-flight boundary refresh behaves identically in dev. |
 | `origin` | `'same-origin' \| 'verify-when-present' \| string[] \| false` | `'same-origin'` | Origin policy forwarded to the dev endpoint. |
 | `maxBodyBytes` | `number` | `1_048_576` | Body cap forwarded to the dev endpoint. |
@@ -196,11 +196,11 @@ if (matchesServerFn(request, serverFnBase)) {
 
 The last five come from `ServerFnRequestOptions` by inheritance rather than by
 being copied, so an option added to the endpoint is reachable in dev the day it
-ships. `guard` and `renderBoundaries` are the two that differ from their
-production twins by necessity: they are **module specifiers** here, loaded
-through the SSR module runner per request so edits apply without a restart,
-where a production entry passes the functions themselves. Everything about what
-those values *mean* lives in [`@sigx/server`](../server/README.md).
+ships. `serverApp` and `renderBoundaries` differ from their production twins by
+necessity: they are **module specifiers** here, loaded through the SSR module
+runner so edits apply without a restart, where a production entry imports the
+modules itself. Everything about what those values *mean* lives in
+[`@sigx/server`](../server/README.md).
 
 ### Inline server functions
 

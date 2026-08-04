@@ -78,6 +78,28 @@ export interface ServerPolicyOp {
 }
 
 /**
+ * The endpoint posture (rfc-server-v4 §3.1) — the wire-facing limits and
+ * hooks an app states ONCE on `createServerApp` and every mount inherits;
+ * an explicit per-mount/per-handler value wins over the app's. The keys are
+ * `ServerFnRequestOptions`' wire knobs, split out so the platform value can
+ * carry them without the endpoint's `resolve`/`base` plumbing.
+ */
+export interface EndpointPosture {
+    /** Origin policy — `ServerFnRequestOptions.origin`'s exact contract. */
+    origin?: 'same-origin' | 'verify-when-present' | string[] | false;
+    /** Request body cap in bytes. Default 1 MiB. */
+    maxBodyBytes?: number;
+    /** GET read query-string cap in bytes (414). Default 8 KiB. */
+    maxUrlBytes?: number;
+    /** Outbound response-body cap in bytes (#571). Default unlimited. */
+    maxResponseBytes?: number;
+    /** Upper bound on pipeline + handler (+ first chunk) in ms (504). */
+    timeoutMs?: number;
+    /** Observability seam (#349) — called for every MASKED failure. */
+    onError?(error: unknown, info: ServerFnInfo, ctx: ServerFnContext): void | Promise<void>;
+}
+
+/**
  * The full invocation pipeline stamped on every wrapped function as
  * `__sigxFn`: for an in-process call it runs everything — middleware →
  * authenticate → identity gate → arity → `input` validation → authorize →

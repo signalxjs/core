@@ -74,10 +74,10 @@ import type { ServerFnRequestOptions } from '@sigx/server/server';
  *   a user-supplied one would bypass HMR.
  * - `base` — here it is the SERVER MOUNT path, split from `endpoint` (the fetch
  *   target baked into stubs) since rev 2.
- * - `guard` / `renderBoundaries` — module SPECIFIERS, not functions. A Vite
- *   config cannot hand the dev endpoint a live function and keep it editable;
- *   these are loaded through the SSR module runner per request, so edits apply
- *   without a restart. Production passes the functions themselves.
+ * - `serverApp` / `renderBoundaries` — module SPECIFIERS, not functions. A
+ *   Vite config cannot hand the dev server a live value and keep it editable;
+ *   these are loaded through the SSR module runner, so edits apply without a
+ *   restart. Production imports the modules itself.
  *
  * The `@sigx/server` type dependency is deliberate, and only on THIS subpath:
  * a build with no `@sigx/server` has no server functions either (the stubs this
@@ -85,7 +85,7 @@ import type { ServerFnRequestOptions } from '@sigx/server/server';
  * unusable without it. `@sigx/vite`'s other entries stay free of it.
  */
 export interface SigxServerOptions
-    extends Omit<ServerFnRequestOptions, 'resolve' | 'base' | 'guard' | 'renderBoundaries'> {
+    extends Omit<ServerFnRequestOptions, 'resolve' | 'base' | 'renderBoundaries'> {
     /** Which modules are server modules. Default: `**` + `/*.server.{ts,tsx}`. */
     include?: string | string[];
     /** Excluded from matching. Default: node_modules and dist. */
@@ -115,16 +115,23 @@ export interface SigxServerOptions
      */
     scan?: string[];
     /**
-     * Dev guard: a Vite-root-relative module (e.g. '/src/fn-guard.ts') whose
-     * `guard` export is forwarded to the dev endpoint, so dev and prod enforce
-     * the same WIRE-level backstop (rfc-server §5).
+     * The app's server-app module (rfc-server-v4 §3.4): a Vite-root-relative
+     * module (e.g. '/src/server-app.ts') that calls `createServerApp(...)` at
+     * module scope. In dev it is eagerly loaded through the SSR module runner
+     * at server start and RE-loaded on hot update, so the app's middleware /
+     * authenticate / authorize / posture apply to the dev endpoint AND to
+     * in-process SSR calls without a restart. In a production build, one
+     * side-effect import of this module is injected at the top of
+     * `virtual:sigx-server-fns`, so any entry importing the registry evaluates
+     * the config before serving.
      *
-     * Like its production twin it runs for endpoint requests only — an
-     * in-process (SSR-time) call never reaches the endpoint, in dev or in prod
-     * (rfc-server-v3 §4, #493). A chain that must run on every transport goes
-     * in the function's definition (`use:` / `serverFnPreset`).
+     * Hardening, not a dependency: the runtime never requires the build — an
+     * un-imported server-app module DENIES (fail-closed), it does not open.
+     * (Replaces the pre-v4 `guard` specifier, whose endpoint option was
+     * removed — app middleware runs at the same pre-decode slot and reaches
+     * in-process calls too.)
      */
-    guard?: string;
+    serverApp?: string;
     /**
      * The guard-declaration gate (rfc-server-v3 §1.4, #489). Every extracted
      * `serverFn` and `serverStream` must be preset-derived, declare `use`, or
@@ -274,6 +281,8 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
     let root = process.cwd();
     let isServe = false;
     let bundledServerBuild = false;
+    /** The dev server, for the hotUpdate serverApp re-load (§3.4). */
+    let devServerRef: ViteDevServer | undefined;
     /** Latest extraction per absolute module path (matching files only). */
     const extractions = new Map<string, ServerFnExtraction>();
     /** Inline extractions per absolute module path (non-matching files). */
@@ -465,6 +474,14 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
         load(id) {
             if (id !== RESOLVED_VIRTUAL_ID) return;
             const lines: string[] = [
+                // The app-config import rides the registry (rfc-server-v4
+                // §3.4): any entry importing `serverFns` evaluates the
+                // user's `createServerApp(...)` module before serving, so
+                // the pipeline is stamped before the first request. One
+                // injection point, side-effect import — hardening, not a
+                // dependency: without it (a hand-wired non-registry entry)
+                // the runtime denies rather than opens.
+                ...(options.serverApp ? [`import ${JSON.stringify(options.serverApp)};`] : []),
                 'export const serverFns = {',
                 // Null prototype (#555): a wire symbol like "__proto__" or
                 // "constructor" must never resolve to an inherited
@@ -706,9 +723,27 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
             }
             const mod = this.environment.moduleGraph.getModuleById(RESOLVED_VIRTUAL_ID);
             if (mod) this.environment.moduleGraph.invalidateModule(mod);
+            // Re-evaluate the server-app module after EVERY edit wave
+            // (rfc-server-v4 §3.4): Vite already invalidated it if the edit
+            // touched it or anything it imports, so this is a cache hit when
+            // unaffected and a fresh `createServerApp` stamp when it was —
+            // document renders between edits and the next RPC both see the
+            // new pipeline. An edit that made it throw is loud.
+            if (options.serverApp && devServerRef) {
+                const spec = options.serverApp;
+                void devServerRef.ssrLoadModule(spec).catch((err: unknown) => {
+                    const message = err instanceof Error ? err.message : String(err);
+                    devServerRef?.config.logger.error(
+                        `[sigx:server] serverApp module "${spec}" failed to re-evaluate ` +
+                        `after an edit — every non-allowAnonymous server function keeps ` +
+                        `the LAST stamped pipeline until it loads: ${message}`
+                    );
+                });
+            }
         },
 
         configureServer(server) {
+            devServerRef = server;
             // Out-of-root scanned packages are outside Vite's default watch
             // scope — add them so hotUpdate sees their edits.
             for (const dir of scanDirs()) server.watcher.add(dir);
@@ -736,6 +771,24 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
                     `called during SSR will not see the request: ${message}`
                 );
             });
+            // The server-app module, just as eagerly (rfc-server-v4 §3.4):
+            // a DOCUMENT request usually comes before the first RPC, and its
+            // in-process calls must see the app's pipeline — lazy loading
+            // would make dev deny (fail-closed) where prod, whose entry
+            // imports the module at boot, allows. The #304 divergence
+            // lesson, applied to the new seam. A failure here is loud: an
+            // app that configured `serverApp` expects it to run.
+            if (options.serverApp) {
+                const spec = options.serverApp;
+                void server.ssrLoadModule(spec).catch((err: unknown) => {
+                    const message = err instanceof Error ? err.message : String(err);
+                    server.config.logger.error(
+                        `[sigx:server] could not load serverApp module "${spec}" — every ` +
+                        `non-allowAnonymous server function will DENY until it evaluates ` +
+                        `(fail-closed): ${message}`
+                    );
+                });
+            }
             const prefix = mountPrefix(base);
             server.middlewares.use(async (req, res, next) => {
                 if (!req.url?.startsWith(prefix)) return next();
@@ -757,11 +810,13 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
                 // module instances (see ./ssr.ts for the same concern).
                 const nodeEntry = (await devServer.ssrLoadModule('@sigx/server/node')) as unknown as
                     typeof import('@sigx/server/node');
-                const guardModule = options.guard
-                    ? await devServer.ssrLoadModule(options.guard)
-                    : undefined;
-                const guard = guardModule?.guard as
-                    import('@sigx/server/node').ServerFnHandlerOptions['guard'];
+                // The app module stamps `__SIGX_SERVER_APP__` at evaluation
+                // (rfc-server-v4 §3.4); loading it per request keeps HMR
+                // edits live (the runner caches, so an unchanged module
+                // costs a map lookup) and the endpoint resolves the config
+                // lazily anyway. It runs in the SSR graph, which shares
+                // `globalThis` with this process — one seam, both worlds.
+                if (options.serverApp) await devServer.ssrLoadModule(options.serverApp);
                 const refreshModule = options.renderBoundaries
                     ? await devServer.ssrLoadModule(options.renderBoundaries)
                     : undefined;
@@ -776,10 +831,9 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
                     // became unreachable in dev (#561). The plugin's own keys
                     // (include/exclude/endpoint/role/scan/requireGuards) ride
                     // along inert: the endpoint reads only what it declares.
-                    // The four below are overridden with the resolved values.
+                    // The three below are overridden with the resolved values.
                     ...options,
                     base,
-                    guard,
                     renderBoundaries,
                     resolve: async (symbol: string) => {
                         const record = findSymbol(symbol);

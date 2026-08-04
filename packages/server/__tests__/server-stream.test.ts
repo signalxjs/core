@@ -385,9 +385,18 @@ describe('serverStream — endpoint NDJSON', () => {
         await vi.waitFor(() => expect(finallyRan).toBe(true));
     });
 
-    it('the guard still runs before a stream (a veto is a buffered error)', async () => {
+    it('app middleware still runs before a stream (a veto is a buffered error)', async () => {
         const s = serverStream(async function* () {
             yield 'never';
+        });
+        restoreApp();
+        restoreApp = stubServerApp({
+            middleware: [
+                () => {
+                    throw new ServerFnError(401, 'sign in first');
+                }
+            ],
+            authenticate: () => ({ id: 'tester' })
         });
         const res = await handleServerFnRequest(
             new Request(`${ORIGIN}/_sigx/fn/s_fn_00000001`, {
@@ -395,12 +404,7 @@ describe('serverStream — endpoint NDJSON', () => {
                 headers: { 'content-type': 'application/json', origin: ORIGIN },
                 body: '{"args":[]}'
             }),
-            {
-                resolve: () => s,
-                guard: () => {
-                    throw new ServerFnError(401, 'sign in first');
-                }
-            }
+            { resolve: () => s }
         );
         expect(res.status).toBe(401);
         await expect(res.json()).resolves.toEqual({

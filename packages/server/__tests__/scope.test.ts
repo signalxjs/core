@@ -245,13 +245,19 @@ describe('the per-request store', () => {
         ).resolves.toBe(true);
     });
 
-    it('the endpoint’s own context stays the store — guard writes reach the handler', async () => {
+    it('the endpoint’s own context stays the store — middleware writes reach the handler', async () => {
         const whoami = serverFn(async (rq) => rq.locals.user);
+        restoreApp();
+        restoreApp = stubServerApp({
+            middleware: [
+                (rq) => {
+                    rq.locals.user = 'andy';
+                }
+            ],
+            authenticate: () => ({ id: 'tester' })
+        });
         const res = await handleServerFnRequest(post('who_fn_1'), {
-            resolve: () => whoami,
-            guard: (rq) => {
-                rq.locals.user = 'andy';
-            }
+            resolve: () => whoami
         });
         await expect(res.json()).resolves.toEqual({ data: 'andy' });
     });

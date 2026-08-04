@@ -19,12 +19,23 @@
  * by construction.
  */
 
-import { runServerPrelude } from '../app-config';
+import {
+    resolveServerAppConfig,
+    stampServerAppConfig,
+    runServerPrelude,
+    type ServerAppConfig
+} from '../app-config';
 import { createRequestContext, type ServerFnContext } from '../context';
 import { claimDisposalOwnership, disposeRequestValues } from '../per-request';
 import { runInScope } from '../scope';
 import { isServerFnError } from '../errors';
-import type { ServerFnInfo, ServerMiddleware, WrappedServerFn } from '../types';
+import type {
+    EndpointPosture,
+    ServerFnInfo,
+    ServerMiddleware,
+    ServerPolicy,
+    WrappedServerFn
+} from '../types';
 import { encodeWire, reviveWire } from '../wire-codec';
 import {
     decodeFnPath,
@@ -59,16 +70,6 @@ export interface ServerFnRequestOptions {
      * `matchesServerFn`.
      */
     base?: string;
-    /**
-     * A wire-only pre-decode hook for THIS endpoint, running immediately
-     * before the app pipeline's wire prelude.
-     *
-     * SCHEDULED FOR REMOVAL (rfc-server-v4 §3.1, phase 2 of the split): app
-     * middleware (`createServerApp({ middleware })`) runs at this exact slot
-     * AND reaches in-process calls; a wire-only concern is one
-     * `fn.transport !== 'wire'` early-return inside the middleware body.
-     */
-    guard?: ServerMiddleware;
     /**
      * Origin policy. Default `'same-origin'`: the `Origin` header must match
      * the request URL's origin (browsers always send it on POST).
@@ -142,6 +143,22 @@ export interface ServerFnRequestOptions {
         base: number,
         rq: ServerFnContext
     ): ReadonlyArray<unknown> | Promise<ReadonlyArray<unknown>>;
+    /**
+     * Authorize ONE boundary re-render under this request's principal
+     * (rfc-server-v4 §3.1 — closes the §6.3 gap: a refresh re-renders
+     * server components with CLIENT-SUPPLIED props under only the
+     * mutation's authorization). Runs per admitted descriptor, after the
+     * deps ∩ `invalidates` gate and before `renderBoundaries`; strict-true
+     * — anything else drops that descriptor silently, and the client
+     * converges through `$cache` one round trip later (refresh stays
+     * best-effort, the mutation is never affected). A throw drops the
+     * WHOLE refresh via the existing catch. Read the caller's identity with
+     * `principal(rq)`; `boundary.props` is untrusted encoded client input.
+     */
+    authorizeBoundary?(
+        rq: ServerFnContext,
+        boundary: BoundaryRefreshDescriptor
+    ): boolean | Promise<boolean>;
 }
 
 /**
@@ -555,6 +572,11 @@ export async function handleServerFnRequest(
     request: Request,
     options: ServerFnRequestOptions
 ): Promise<Response> {
+    // Posture inheritance (rfc-server-v4 §3.1): any wire knob this call's
+    // options leave undefined falls back to the app's posture — stated once
+    // on `createServerApp`, consulted lazily per request so the handler
+    // stays correct with no app at all (the built-in defaults are last).
+    options = withAppPosture(options);
     const isGet = request.method === 'GET';
     if (request.method !== 'POST' && !isGet) {
         // Pre-resolution the target's methods are unknowable, so this 405
@@ -840,7 +862,6 @@ export async function handleServerFnRequest(
     // what registers `__SIGX_SERVERFN_CONTEXT__` on an RPC-only deployment.
     // Unscoped where the runtime has no AsyncLocalStorage; nothing else moves.
     const work = runInScope(ctx as ServerFnContext, async (): Promise<Response> => {
-        await options.guard?.(ctx as ServerFnContext, info);
         // The pipeline's wire half (rfc-server-v4 §1.3, steps 1–3): app
         // middleware → authenticate → the identity gate, HERE so an
         // anonymous caller is refused before attacker bytes reach the codec
@@ -969,9 +990,25 @@ export async function handleServerFnRequest(
                     // that made a single mutation pay tens of thousands of
                     // JSON.stringify calls (#469).
                     const prepared = patterns.map(preparePattern);
-                    const admitted = sidecar.refresh.filter((d) =>
+                    let admitted = sidecar.refresh.filter((d) =>
                         d.deps.some((dep) => prepared.some((p) => p.match(dep)))
                     );
+                    // Per-boundary authorization (rfc-server-v4 §3.1),
+                    // AFTER the deps gate so a policy only ever pays for
+                    // descriptors the mutation actually admitted.
+                    // Strict-true, like every policy; a deny drops the one
+                    // descriptor, a throw lands in the catch below and
+                    // drops the whole refresh — both leave the mutation
+                    // untouched.
+                    if (options.authorizeBoundary && admitted.length > 0) {
+                        const allowed: BoundaryRefreshDescriptor[] = [];
+                        for (const d of admitted) {
+                            if ((await options.authorizeBoundary(ctx as ServerFnContext, d)) === true) {
+                                allowed.push(d);
+                            }
+                        }
+                        admitted = allowed;
+                    }
                     if (admitted.length > 0) {
                         const entries = await options.renderBoundaries(
                             admitted,
@@ -1351,3 +1388,181 @@ async function streamResponse(
 // make the JSON-only wire's silent corruption visible in dev, and the wire
 // now carries those types for real (rfc-server §4). The one shape still
 // unsupported — a circular structure — surfaces as an error, not a warning.
+
+/** The posture keys `withAppPosture` inherits — one list, one loop. */
+const POSTURE_KEYS = [
+    'origin',
+    'maxBodyBytes',
+    'maxUrlBytes',
+    'maxResponseBytes',
+    'timeoutMs',
+    'onError'
+] as const;
+
+/**
+ * Fill any wire knob the caller left undefined from the app's posture
+ * (rfc-server-v4 §3.1). Explicit wins — including an explicit `false`
+ * (`origin: false` is a real value), so the test is `undefined`, never
+ * falsiness. Returns the caller's object untouched when there is nothing
+ * to inherit.
+ */
+function withAppPosture(options: ServerFnRequestOptions): ServerFnRequestOptions {
+    const posture = resolveServerAppConfig()?.posture;
+    if (!posture) return options;
+    let merged: ServerFnRequestOptions | undefined;
+    for (const key of POSTURE_KEYS) {
+        if (options[key] === undefined && posture[key] !== undefined) {
+            merged ??= { ...options };
+            (merged as unknown as Record<string, unknown>)[key] = posture[key];
+        }
+    }
+    return merged ?? options;
+}
+
+/**
+ * The server platform value (rfc-server-v4 §3) — the ONE place app-wide
+ * policy lives: the pipeline (middleware / authenticate / the default
+ * authorize), the endpoint posture, and the principal codec. Mount
+ * factories hand back plain handlers; ROUTING stays in the platform entry
+ * (`matchesServerFn` is still the predicate — rfc-deploy's line: the app
+ * decides what every operation passes through, never which handler answers
+ * a URL).
+ *
+ * ```ts
+ * // src/server-app.ts — user-owned
+ * export const app = createServerApp<User>({
+ *     middleware: [requestId, rateLimit],
+ *     authenticate: sessionFromCookie,
+ *     timeoutMs: 10_000,
+ * });
+ *
+ * // entry — routing stays visible
+ * const fns = app.serverFns({ resolve, base: serverFnBase });
+ * if (matchesServerFn(request, serverFnBase)) return fns(request);
+ * ```
+ */
+export interface ServerAppOptions<P = unknown> extends EndpointPosture {
+    /**
+     * App middleware, in order — every transport, before-only, never
+     * per-function-disableable. Copied once at creation: a policy the app
+     * can push to afterwards is not a policy.
+     */
+    middleware?: ServerMiddleware[];
+    /** Resolves the request's principal; `null` is anonymous. */
+    authenticate?: (rq: ServerFnContext) => P | null | Promise<P | null>;
+    /**
+     * The app default policy chain — applies where a definition declares
+     * nothing. Always receives a non-null principal: anonymity is granted
+     * only by the per-fn `allowAnonymous` literal, never by the default.
+     */
+    authorize?: ServerPolicy<P> | ServerPolicy<P>[];
+    /**
+     * Round-trips a principal as a string — required only for cross-hop
+     * propagation (`@sigx/actors`, rfc-server-v4 §7). `decode` returning
+     * null means anonymous.
+     */
+    codec?: { encode(principal: P): string; decode(encoded: string): P | null };
+}
+
+/** One server-fn endpoint mount, bound to the app's pipeline + posture. */
+export interface ServerFnMount extends EndpointPosture {
+    resolve(symbol: string): unknown | Promise<unknown>;
+    /** The mount path — claims its namespace on the app (boot throw on overlap). */
+    base?: string;
+    renderBoundaries?: ServerFnRequestOptions['renderBoundaries'];
+    authorizeBoundary?: ServerFnRequestOptions['authorizeBoundary'];
+}
+
+export interface ServerApp<P = unknown> {
+    /** The server-fn endpoint handler for one mount. */
+    serverFns(mount: ServerFnMount): (request: Request) => Promise<Response>;
+    /**
+     * Release the process seam (test teardown). A no-op when another app
+     * has since replaced the stamp — disposing an old app must not tear
+     * down the live one.
+     */
+    dispose(): void;
+    /** Phantom — carries P so `createServerApp<User>` is not erased. */
+    readonly __principal?: P;
+}
+
+/**
+ * Create the app and stamp its config on the `__SIGX_SERVER_APP__` seam,
+ * where `invoke` and the endpoint resolve it lazily per call (fail-closed:
+ * `app-config.ts`). LAST-WINS, never a throw: dev HMR re-evaluates the
+ * user's server-app module, and a re-evaluation is indistinguishable from
+ * a genuine second app — the process is the unit, the
+ * `__SIGX_SERVERFN_CODEC__` posture. Replacing a DIFFERENT live app gets a
+ * `__DEV__` note, since outside HMR that is usually two entries fighting
+ * over one process.
+ *
+ * The future endpoint-family seam (`ServerFeatureContext`, rfc-server-v4
+ * §3.2) is deliberately NOT exported: `serverFns` is its only consumer in
+ * v1, and the second feature promotes it rather than inventing its own —
+ * `claimBase` below is its first piece.
+ */
+export function createServerApp<P = unknown>(options: ServerAppOptions<P>): ServerApp<P> {
+    const posture: EndpointPosture = {};
+    for (const key of POSTURE_KEYS) {
+        if (options[key] !== undefined) {
+            (posture as Record<string, unknown>)[key] = options[key];
+        }
+    }
+    const config: ServerAppConfig = {
+        ...(options.middleware ? { middleware: options.middleware.slice() } : {}),
+        ...(options.authenticate
+            ? { authenticate: options.authenticate as ServerAppConfig['authenticate'] }
+            : {}),
+        ...(options.authorize
+            ? { authorize: options.authorize as ServerAppConfig['authorize'] }
+            : {}),
+        ...(options.codec ? { codec: options.codec as ServerAppConfig['codec'] } : {}),
+        posture
+    };
+    const previous = stampServerAppConfig(config);
+    if (__DEV__ && previous !== undefined && previous !== config) {
+        console.warn(
+            '[sigx server] createServerApp() replaced an already-stamped server app — ' +
+            'last-wins, one app per process. Expected under dev HMR (the server-app module ' +
+            're-evaluated); anywhere else, two entries are fighting over one process.'
+        );
+    }
+    /** Base prefixes this app's mounts claimed — overlap is a boot throw. */
+    const claimedBases: string[] = [];
+    const claimBase = (base: string): void => {
+        const prefix = fnPathPrefix(base);
+        for (const existing of claimedBases) {
+            if (prefix.startsWith(existing) || existing.startsWith(prefix)) {
+                // At MOUNT time — boot/CI, never per request: "everything
+                // after `base` is the symbol" (#543) means two families
+                // sharing a prefix would slice each other's symbols.
+                throw new Error(
+                    `[sigx server] mount base "${base}" overlaps an existing mount ` +
+                    `("${existing}" vs "${prefix}") — every mount needs its own path ` +
+                    `namespace, because everything after the base IS the symbol (#543).`
+                );
+            }
+        }
+        claimedBases.push(prefix);
+    };
+    return {
+        serverFns(mount: ServerFnMount): (request: Request) => Promise<Response> {
+            claimBase(mount.base ?? DEFAULT_FN_BASE);
+            // Mount-level posture overrides ride the options object
+            // directly: `withAppPosture` inherits only what is undefined,
+            // so an explicit mount value wins over the app's.
+            const { resolve, base, renderBoundaries, authorizeBoundary, ...overrides } = mount;
+            const requestOptions: ServerFnRequestOptions = {
+                resolve,
+                ...(base !== undefined ? { base } : {}),
+                ...(renderBoundaries ? { renderBoundaries } : {}),
+                ...(authorizeBoundary ? { authorizeBoundary } : {}),
+                ...overrides
+            };
+            return (request: Request) => handleServerFnRequest(request, requestOptions);
+        },
+        dispose(): void {
+            if (resolveServerAppConfig() === config) stampServerAppConfig(undefined);
+        }
+    };
+}
