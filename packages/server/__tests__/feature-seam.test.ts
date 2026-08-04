@@ -194,4 +194,22 @@ describe('serverFeature() — posture, codec, base claiming', () => {
         expect(() => serverFeature().claimBase('/_sigx/actor')).not.toThrow();
         expect(() => serverFeature().claimBase('/_sigx/actor')).not.toThrow();
     });
+
+    it('a mount on a STALE app claims on its own registry, not the live one', () => {
+        // Dev HMR: the server-app module re-evaluates, so `second` holds the
+        // stamp while `first` is still reachable. A mount on `first` must
+        // record against `first` — claiming on the stamped app would both
+        // invent overlaps against a stranger's bases and lose its own.
+        const first = createServerApp({});
+        const second = createServerApp({});
+        restore = () => second.dispose();
+        first.serverFns({ resolve: () => null, base: '/_sigx/fn' });
+        // Landed on `first`: the live app never saw it, so a feature may
+        // still claim that prefix now…
+        expect(() => second.feature().claimBase('/_sigx/fn')).not.toThrow();
+        // …while `first` remembers its own, and re-mounting there collides.
+        expect(() => first.serverFns({ resolve: () => null, base: '/_sigx/fn' })).toThrow(
+            /overlaps/
+        );
+    });
 });

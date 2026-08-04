@@ -1548,7 +1548,11 @@ export function createServerApp<P = unknown>(options: ServerAppOptions<P>): Serv
     // was just stamped, so a fresh app starts empty.
     return {
         serverFns(mount: ServerFnMount): (request: Request) => Promise<Response> {
-            claimAppBase(mount.base ?? DEFAULT_FN_BASE);
+            // THIS app's registry, not the stamped one: a mount on a stale
+            // handle (dev HMR having since stamped a newer app) must claim
+            // where its own siblings live, or it would invent an overlap
+            // against a different app's bases — or miss its own.
+            claimAppBase(mount.base ?? DEFAULT_FN_BASE, config);
             // Mount-level posture overrides ride the options object
             // directly: `withAppPosture` inherits only what is undefined,
             // so an explicit mount value wins over the app's.

@@ -108,7 +108,18 @@ export interface ServerFeatureOp<P = unknown> {
     fn: ServerFnInfo;
     /** This operation's declared chain; absent means the app default. */
     policies?: ServerPolicy<P> | readonly ServerPolicy<P>[];
-    /** Waives ONLY the identity gate — the `allowAnonymous` literal. */
+    /**
+     * The `allowAnonymous` literal. It does three things, not one, and a
+     * feature author who reads it as "waives the identity gate" will
+     * mis-declare an operation:
+     *
+     * 1. the gate in `prelude`/`enter` no longer 401s a `null` principal;
+     * 2. in `authorize`, an operation declaring NO `policies` skips the
+     *    app default and `requireAuthenticated` entirely — the defaults
+     *    would re-deny exactly the anonymity this granted;
+     * 3. declared `policies` still run, and now see a nullable principal,
+     *    so they must handle `null` rather than assume an identity.
+     */
     allowAnonymous?: boolean;
     /** Validated input, where the feature has one. */
     input?: unknown;

@@ -262,17 +262,27 @@ export async function runAuthorize(
 }
 
 /**
- * Claim a mount's base prefix on the stamped app (#543). Exported so
- * `createServerApp` and the feature seam share ONE registry — two
- * implementations of "do these bases overlap" is how the second family
- * would get a different answer from the first.
+ * Claim a mount's base prefix on an app's registry (#543). Exported so
+ * `createServerApp` and the feature seam share ONE implementation — two
+ * versions of "do these bases overlap" is how the second family would get a
+ * different answer from the first.
  *
- * A no-op with no app stamped: there is nothing to collide with, and base
- * claiming is bookkeeping rather than permission, so the fail-closed rule
+ * `config` names WHICH app's registry, and the distinction matters:
+ * `createServerApp` passes the config it captured, so `app.serverFns(...)`
+ * claims on THAT app even when a later app (dev HMR re-evaluating the
+ * server-app module) has since taken the stamp — otherwise a mount on a
+ * stale handle would record against the live app and invent or miss an
+ * overlap. The feature seam resolves per call instead, because a feature
+ * holds its context at module scope and means "the app in force now".
+ *
+ * A no-op when there is no app: nothing to collide with, and base claiming
+ * is mount-time bookkeeping rather than permission, so the fail-closed rule
  * ("a miss may only remove permission") does not apply to it.
  */
-export function claimAppBase(base: string): void {
-    const config = resolveServerAppConfig();
+export function claimAppBase(
+    base: string,
+    config: ServerAppConfig | undefined = resolveServerAppConfig()
+): void {
     if (config === undefined) return;
     const prefix = fnPathPrefix(base);
     const claimed = (config.claimedBases ??= []);
