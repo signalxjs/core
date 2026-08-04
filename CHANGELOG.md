@@ -34,7 +34,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   mount and bare `handleServerFnRequest` call, explicit values winning.
   Plus `authorizeBoundary` — per-boundary refresh authorization under the
   request's principal, closing rfc-server §6.3's client-supplied-props gap.
-  `@sigx/vite` gains `sigxServer({ serverApp: './src/server-app.ts' })`:
+  `@sigx/vite` gains `sigxServer({ serverApp: '/src/server-app.ts' })`:
   dev loads it eagerly through the SSR module runner and re-evaluates it
   after edits; production builds inject one side-effect import at the top
   of `virtual:sigx-server-fns` (pulled forward from #611 so dev never loses
@@ -68,9 +68,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   `__sigxGuardChecked`/`__SIGX_GUARDS_CHECKED__` machinery is deleted — the
   fail-closed runtime closes rfc-server-v3 §1.5's unanalyzed-module gap it
   existed to mitigate. The old→new observable table, per input shape, is in
-  `packages/server/CHANGELOG.md`; `createServerApp` (the platform value and
-  mounts) lands in phase 2 (#610), the sharpened `requireAuthorization`
-  build gate in phase 3 (#611).
+  `packages/server/CHANGELOG.md`; **the migration guide — including the
+  three-cut recipe for a conflated pre-v4 guard — is
+  [`docs/migrations/0.15-guard-split.md`](docs/migrations/0.15-guard-split.md)**;
+  `createServerApp` (the platform value and mounts) lands in phase 2 (#610),
+  the sharpened `requireAuthorization` build gate in phase 3 (#611).
 
 ### Added
 

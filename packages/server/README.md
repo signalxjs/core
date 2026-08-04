@@ -2,7 +2,9 @@
 
 Server functions (RPC) for SignalX — typed client↔server calls, extracted at
 build time by `@sigx/vite/server`. The design RFC is
-[`docs/rfc-server.md`](../../docs/rfc-server.md).
+[`docs/rfc-server.md`](../../docs/rfc-server.md); the access model
+(middleware / authentication / authorization, `createServerApp`) is
+[`docs/rfc-server-v4.md`](../../docs/rfc-server-v4.md).
 
 Not to be confused with `@sigx/server-renderer`, which renders documents —
 this package is how your app **talks to** the server.
@@ -17,17 +19,20 @@ invocation. Same import, both sides, types flow through untouched.
 
 ```ts
 // src/cart.server.ts
-import { serverFn, ServerFnError } from '@sigx/server';
+import { serverFn, requirePrincipal } from '@sigx/server';
 import { db } from './db';
-import { sessionFrom } from './auth';
 
 // productId/qty arrive from the wire — see "Validation and the two forms"
 export const addToCart = serverFn(async (rq, productId: string, qty: number) => {
-    const user = await sessionFrom(rq.request);
-    if (!user) throw new ServerFnError(401, 'sign in first');
+    const user = await requirePrincipal<User>(rq);   // resolved by the app's authenticate
     return db.cart.add(user.id, productId, qty);
 });
 ```
+
+No hand-rolled session check: the runtime is **fail-closed** — an anonymous
+caller was already refused with a 401 before this body ran (see *The server
+app* below), and `requirePrincipal` is only the typed accessor for the
+identity the pipeline resolved.
 
 ```tsx
 // any component — it's just an async function
@@ -81,14 +86,17 @@ There is **no closure serialization** — data crosses the boundary only as
 typed arguments (I consider Qwik's captured-value round-trip an injection
 surface, not a convenience). Validate them: the options form takes a
 [Standard Schema](https://standardschema.dev) validator that always runs
-server-side, plus a per-function middleware chain no transport can skip:
+server-side, plus a per-function authorization requirement no transport can
+skip:
 
 ```ts
 export const quote = serverFn({
     input: QuoteInput,            // Zod/Valibot/ArkType — rejects with a 400
-    use: [requireAuth],           // runs on EVERY transport
+    // Runs AFTER validation, so op.input is the trusted resource; only the
+    // literal `true` allows (strict, fail-closed). Replaces the app default.
+    authorize: (principal, rq, op) => canQuote(principal, op.input),
     async handler(rq, input) {
-        return priceQuote(rq.locals.user, input);
+        return priceQuote(await requirePrincipal(rq), input);
     }
 });
 ```
@@ -122,106 +130,127 @@ direct form always (its types are compile-time only), the options form
 when `input` is omitted. Declaring `input` is what resolves both.
 `serverStream` has an options form too, in two shapes: declaring `input`
 selects the single-input shape — `serverFn`'s semantics exactly, validated
-after the guard chain and before the first chunk on every transport (a wire
-rejection is a buffered JSON 400, never a streamed byte) — while omitting it
-keeps the multi-argument shape (`use` and `unguarded` only), where many
-arguments have no single-input schema and validation belongs at the top of
-the generator (any Standard Schema validates standalone).
+after the pipeline's prelude and before the first chunk on every transport
+(a wire rejection is a buffered JSON 400, never a streamed byte) — while
+omitting it keeps the multi-argument shape (`authorize` and `allowAnonymous`
+only), where many arguments have no single-input schema and validation
+belongs at the top of the generator (any Standard Schema validates
+standalone).
 
-### Shared middleware — `serverFnPreset`
+### The server app — `createServerApp`
 
-A `use:` chain runs on **every** transport, which is what makes it the place
-app-wide auth belongs (the endpoint's `guard` is wire-only — see *Security
-defaults*). The cost is repetition: every function in every server module
-repeats the same line. `serverFnPreset` removes it without giving up the
-guarantee.
+App-wide policy lives in **one user-owned value** (rfc-server-v4 §3): the
+pipeline (middleware, authentication, the default authorization), the
+endpoint posture, and the principal codec. Every transport runs it — a wire
+POST and an in-process SSR call see the same middleware, the same
+authenticator, the same policies.
 
 ```ts
-// src/guards.ts — the policy lives in ONE place
-export const appGuards = [requireUser];
+// src/server-app.ts — the ONE place policy lives
+import { createServerApp } from '@sigx/server/server';
 
-// src/board.server.ts — one line per server module
-import { serverFnPreset } from '@sigx/server';
-import { appGuards } from './guards';
-
-const authed = serverFnPreset({ use: appGuards });
-
-export const boardIssues = authed({ input: BoardKey, handler: async (rq, k) => … });
-export const addItem     = authed(async (rq, sku: string, qty: number) => …);
-export const feed        = authed.stream(async function* (rq) { … });
+export const app = createServerApp<User>({
+    middleware: [requestId, rateLimit],        // always runs, every transport, in order
+    authenticate: async (rq) =>                // → User | null; null is anonymous
+        decodeSession(rq.request.headers.get('cookie')),
+    // authorize: the app DEFAULT policy — omitted, it is requireAuthenticated
+    timeoutMs: 10_000,                         // endpoint posture, stated once
+});
 ```
 
-The derived form is `serverFn` exactly — both authoring forms, the same
-options (`id`, `input`, `use`, `invalidates`, `cache`, `form`), the same
-`.with()` channel, the same wire. `preset.stream` is the `serverStream` twin.
-Preset guards run **first**, then the function's own `use:` chain.
+The pipeline order is pinned: **middleware → authenticate → the identity
+gate → arity → `input` validation → `authorize` → handler**. Authentication
+is memoized once per request store, so one SSR render with five cells
+decodes the session once. On the wire the first three run **before** the
+codec ever touches attacker bytes — an anonymous caller never reaches the
+revive step or your validator.
 
-- **Not a builder.** `preset.stream` is a second one-shot factory over the
-  same `use` array, never an accumulating chain — a preset carries `use` and
-  nothing else, and cannot derive another preset.
-- **The array is copied at definition.** Pushing to `appGuards` afterwards
-  changes nothing: a policy the app can mutate is not a policy.
-- **Same module only.** The build analyzes one file at a time, so a preset
-  imported from another module is invisible where it is used and the
-  functions derived from it would not extract at all. Exporting one is a
-  build warning; share the guard **array** instead, as above. For the same
-  reason a preset cannot be used in the inline (component-file) form — that
-  is a build error naming the remedy.
-- **Editing the shared chain re-mints the hashed symbols** of every function
-  derived from it (the preset's source is part of their content hash), the
-  way editing a function body already does. Stable symbols (`<id>/<name>`)
-  never move, so installed clients keep their routes.
+Wire it up once:
 
-### The guard gate — `requireGuards` and `unguarded`
+- **Dev** — `sigxServer({ serverApp: '/src/server-app.ts' })`: the plugin
+  loads the module eagerly through the SSR module runner and re-evaluates it
+  after edits, so pipeline changes apply without a restart.
+- **Prod** — the build injects one side-effect import of the module at the
+  top of `virtual:sigx-server-fns`, so any entry importing the registry
+  evaluates it before serving. A hand-wired entry just imports the module
+  itself. Either way this is hardening, not a dependency: an un-imported
+  server-app module **denies** (fail-closed), it never opens.
 
-A preset per module is a mechanism, not a guarantee: a new `*.server.ts` that
-forgets the line is unguarded on **every** transport, and no runtime check can
-restore that without a registry whose miss would fail open. The build can, so
-it does — **on by default**:
+What the app hands back:
+
+- **`app.serverFns(mount)`** — the endpoint handler for one mount
+  (`{ resolve, base?, renderBoundaries?, authorizeBoundary?, …posture }`),
+  inheriting the app's posture with per-mount overrides winning. Each mount
+  claims its `base` namespace; overlapping prefixes throw at mount time
+  (everything after the base IS the symbol). Routing still lives in your
+  entry — `matchesServerFn` stays a predicate.
+- **Posture inheritance everywhere** — a bare `handleServerFnRequest` call
+  inherits the app posture too (`origin`, `maxBodyBytes`, `maxUrlBytes`,
+  `maxResponseBytes`, `timeoutMs`, `onError`), with any explicit value
+  winning, `origin: false` included.
+- **`codec`** — `{ encode(principal): string, decode(string): principal | null }`,
+  the cross-hop propagation contract packs like `@sigx/actors` consume.
+- **`dispose()`** — releases the process seam (test teardown); a superseded
+  app's dispose never tears down its replacement. Stamping is last-wins, so
+  dev HMR re-evaluation is safe.
+
+Per-function requirements stay in the definition: `authorize:` **replaces**
+the app default for that function (most-specific-wins; arrays AND), and the
+identity gate is the un-replaceable floor. Middleware is deliberately
+app-only — never per-function-attachable or -disableable, which is exactly
+what makes a rate limiter belong there (below). A module-scope shared policy
+is one imported identifier per function (`authorize: adminOnly`).
+
+### The access gate — `requireAuthorization` and `allowAnonymous`
+
+The runtime is fail-closed — a function that declares nothing **denies**
+anonymous callers on every transport — so the build gate's job is catching
+the availability mistake, not the security one: "forgot `allowAnonymous` on
+the sign-in endpoint" should be a build error, not a production lockout.
+**On by default:**
 
 ```js
 // vite.config.js — nothing to write; this is the default
 sigxServer()
 
-sigxServer({ requireGuards: 'warn' })    // migration rung: list them, don't fail
-sigxServer({ requireGuards: false })     // opt OUT, deliberately
+sigxServer({ requireAuthorization: 'warn' })    // migration rung: list, don't fail
+sigxServer({ requireAuthorization: false })     // opt OUT, deliberately
 ```
 
 Every extracted `serverFn` **and `serverStream`** — streams are public
-endpoints too — must be preset-derived, declare `use`, or say so:
+endpoints too — must have a *decided* access policy: declare `authorize:`,
+inherit the app default (a configured `serverApp` counts), or say so:
 
 ```ts
 export const submitPat = serverFn({
-    unguarded: true,          // deliberate: this IS the sign-in
+    allowAnonymous: true,     // deliberate: this IS the sign-in
     form: true,
     input: PatSchema,
     handler: async (rq, pat) => …
 });
 ```
 
-A bare `serverFn(async (rq) => …)` is a build error naming all three remedies,
-with its file and line. `unguarded` is a word rather than an omission because
-"I meant this to be public" and "I forgot" must not look identical — and
-because it makes the open surface greppable:
-`grep -rn unguarded --include='*.server.ts' src/` prints every deliberately
-open endpoint, which is a list a security review can read.
-
-Since the declaration channel is the options form, a function that needs to
-declare uses the options form (`serverStream` has one too — `use` and
-`unguarded`, plus an optional single-input `input` shape, #572).
-Writing `unguarded: true` on a **preset-derived** function throws at
-definition time: the preset's guards still run, so the declaration would be
-false.
+A bare `serverFn(async (rq) => …)` with no `serverApp` configured is a build
+error naming every remedy, with its file and line. `allowAnonymous` is a
+word rather than an omission because "I meant this to be open" and "I
+forgot" must not look identical — and it makes the open surface greppable:
+`grep -rn allowAnonymous --include='*.server.ts' src/` prints every
+anonymous-reachable endpoint, which is a list a security review can read.
+Unlike the old `unguarded`, the word waives **only the identity gate**:
+middleware and authentication still run (a signed-in caller still resolves a
+principal, so rate limiting stays per-user and audit logs stay attributed),
+and any declared `authorize` policies still run, receiving a nullable
+principal.
 
 Two limits, stated rather than implied:
 
-- **It checks declaration, not correctness.** `use: [logRequest]` passes. What
-  it buys is converting "silently unguarded" into a list a human wrote.
-- **A module outside `include`/`scan` is never analyzed**, so it ships
-  unchecked. Under the flag the build stamps what it *did* check and dev warns
-  when an unstamped function is called — absence is the alarm, so a missing
-  signal degrades to silence rather than to a false pass. A production build
-  with an unanalyzed module stays unguarded; add its directory to `scan`.
+- **It checks declaration, not correctness.** `authorize: [() => true]`
+  passes. What it buys is converting "silently undecided" into a list a
+  human wrote.
+- **A module outside `include`/`scan` is never analyzed** — and no longer
+  needs to be caught: an unanalyzed function **denies at runtime** instead
+  of running open. The gap the old stamp machinery mitigated is closed by
+  the fail-closed runtime, so the machinery is gone.
 
 ### Server-declared invalidation
 
@@ -282,7 +311,7 @@ export const track = serverFn({
 const tracker = useData(getTracker);
 
 // in the deploy entry:
-handleServerFnRequest(request, { resolve, renderBoundaries });
+handleServerFnRequest(request, { resolve, renderBoundaries, authorizeBoundary });
 ```
 
 Admission uses the cache pack's `keyMatches` semantics (exact string, or
@@ -292,6 +321,14 @@ read). Everything is best-effort by design: a boundary that cannot be
 re-rendered (or a renderer failure) is simply omitted and the UI converges
 through `$cache` invalidation — the same declaration is that fallback.
 Wire-only, like the `$cache` sidecar; meaningless with `cache`.
+
+A refresh re-renders server components with **client-supplied props**, under
+only the mutation's authorization — which is why the optional
+`authorizeBoundary(rq, boundary)` hook exists (rfc-server-v4 §3.1): it runs
+per admitted descriptor, after the deps gate, under the request's principal
+(`principal(rq)`). Strict-`true` like every policy; a deny drops that one
+descriptor silently (the client converges through `$cache` a round trip
+later), a throw drops the whole refresh — the mutation is never affected.
 
 ### Zero-JS form actions — `form: true`
 
@@ -429,13 +466,14 @@ export const explain = serverStream({
 });
 ```
 
-Validation runs after the guard chain and **before the first chunk**, on
-every transport: over the wire a rejection is a buffered JSON
+Validation runs after the pipeline's prelude and **before the first
+chunk**, on every transport: over the wire a rejection is a buffered JSON
 `400 { issues }` — headers still writable, no stream byte sent — and
-in-process it rejects on the first pull, exactly where a guard veto does.
-With `input` declared the stream takes one argument (extras are a 400).
-Multi-argument streams keep the `use`/`unguarded`-only options form and
-validate at the top of the generator.
+in-process it rejects on the first pull, exactly where a middleware or
+policy veto does. With `input` declared the stream takes one argument
+(extras are a 400). Multi-argument streams keep the
+`authorize`/`allowAnonymous`-only options form and validate at the top of
+the generator.
 
 A stream carries the same `.with()` per-call channel as a `serverFn`
 (minus `fresh` — a stream is never HTTP-cached), so an SSR-time stream can
@@ -462,7 +500,7 @@ serverFn(async (rq, ...args) => {
     rq.abortSignal;      // fires on client disconnect (never a reactive signal)
     rq.responseHeaders;  // mutable response headers
     rq.status(201);      // success status override
-    rq.locals;           // guard hand-off — ONE bag per request (see below)
+    rq.locals;           // middleware/policy hand-off — ONE bag per request (see below)
 });
 ```
 
@@ -551,15 +589,12 @@ export const github = perRequest(async (rq) => {
     return createGitHubClient(s.token);
 });
 
-// src/guards.ts
-export const requireUser: ServerFnGuard = async (rq) => {
-    if (!(await session(rq))) throw new ServerFnError(401, 'Sign in');
-};
+// src/server-app.ts — the session IS the authenticator: same memo, same
+// store, and the identity gate 401s anonymous callers app-wide.
+export const app = createServerApp({ authenticate: (rq) => session(rq) });
 
-// src/board.server.ts
-const authed = serverFnPreset({ use: [requireUser] });
-
-export const boardIssues = authed({
+// src/board.server.ts — nothing to repeat: the app default protects it.
+export const boardIssues = serverFn({
     input: BoardKey,
     handler: async (rq, key) => (await github(rq)).issues(key),   // no decode, no cast
 });
@@ -570,7 +605,7 @@ The accessor takes `rq` — no ambient lookup at the call site, the same rule
 composition API.
 
 - **The value is memoized, promise included.** An async setup memoizes the
-  *promise*, so a guard and a handler racing on first touch share one in-flight
+  *promise*, so a middleware and a handler racing on first touch share one in-flight
   decode. There is never a second code path.
 - **A failed setup stays failed for that request.** Retrying a failed session
   decode once per cell would be a footgun, not a feature.
@@ -580,7 +615,7 @@ composition API.
   the wire, the one the scope normalized in-process, the object you handed
   `.with({ context })`, and per call when nothing supplied either. Without
   `AsyncLocalStorage` (workerd with no `nodejs_compat`) there is no scope to
-  share, so a value is computed per invocation — the guards and handler of one
+  share, so a value is computed per invocation — the pipeline and handler of one
   call still share it, exactly as before this existed.
 - **Teardown rides `onDispose`** (rfc-server-v3 §2.6, #571) — the setup's
   second parameter:
@@ -613,48 +648,59 @@ composition API.
   shell instead.
 
 `rq.locals` is the other face of the same store — the **escape hatch**, for a
-value too small or too transient to name, and the reason a guard can still
+value too small or too transient to name, and the reason a middleware can still
 write `rq.locals.x` and have the handler read it. Reach for a per-request value
 first: it types itself from its own setup, and the accessor is the only way to
 get at it, so there is nothing to cast.
 
 ### Testing — `@sigx/server/testing`
 
-Two helpers close the two gaps unit tests hit; everything else already
-exists as public surface (#570):
+Three helpers close the gaps unit tests hit; everything else already
+exists as public surface (#570, rfc-server-v4 §2.4):
 
 ```ts
-import { createTestServerFnContext, stampServerFnKey } from '@sigx/server/testing';
+import {
+    createTestServerFnContext,
+    stubServerApp,
+    stampServerFnKey
+} from '@sigx/server/testing';
 
 // A real, Request-backed context — rq.request/rq.url never throw, and
-// rq.status(code) RECORDS instead of warning:
-const ctx = createTestServerFnContext();                 // http://localhost/
-const alice = createTestServerFnContext({ locals: { user: 'alice' } });
-const posted = createTestServerFnContext(new Request('https://example.com/cart'));
+// rq.status(code) RECORDS instead of warning. The `principal` option seeds
+// the identity memo, so the app's authenticate never runs — you test the
+// handler under an identity, not through the cookie parser:
+const anon  = createTestServerFnContext(undefined, { principal: null });
+const alice = createTestServerFnContext(undefined, { principal: { id: 'alice' } });
 
-// Guard chains need NO new invoker — fn.with({ context }) runs the whole
-// in-process pipeline: preset guards, use chain, arity gate, input schema.
-await expect(secret.with({ context: ctx })()).rejects.toMatchObject({ status: 401 });
+// The pipeline needs NO new invoker — fn.with({ context }) runs the whole
+// in-process pipeline: middleware, authentication, the identity gate,
+// arity gate, input schema, authorize.
+await expect(secret.with({ context: anon })()).rejects.toMatchObject({ status: 401 });
 await expect(secret.with({ context: alice })()).resolves.toBe('data');
 
+// Integration-shaped tests stamp an app config and restore it after:
+const restore = stubServerApp({ authenticate: () => ({ id: 'tester' }) });
+try { /* … */ } finally { restore(); }
+
 // Assert what the handler did to the response:
-ctx.statusCode;                    // the last rq.status(code), or undefined
-ctx.responseHeaders.get('set-cookie');
+alice.statusCode;                  // the last rq.status(code), or undefined
+alice.responseHeaders.get('set-cookie');
 ```
 
 Isolation is the store-identity rule above, ready-made: one factory context
 across several `fn.with({ context: ctx })` calls is **one** request
-(`perRequest` values shared, memoized once); two factory calls are two
-requests. Wire-path behavior (the endpoint `guard`, codecs, form parsing,
-status codes) is tested the way this repo tests it — hand a `Request` to
-`handleServerFnRequest` with a `resolve` that returns your function.
+(`perRequest` values shared, authentication memoized once); two factory
+calls are two requests. Wire-path behavior (the pipeline's wire half,
+codecs, form parsing, status codes) is tested the way this repo tests it —
+hand a `Request` to `handleServerFnRequest` with a `resolve` that returns
+your function.
 
 `stampServerFnKey(fn, key?)` mints the build stamp `useData(fn)` requires
-(`__sigxKey`, defaulting to `test/<name>`, plus `__sigxGuardChecked`) on
-the SAME function — identity is load-bearing, so it mutates rather than
-wraps. Without it, `useData(fn)` dev-throws in unit tests because the key
-is stamped by the Vite transform, which a test run does not have. Streams
-are rejected: a stream is not a `useData` target.
+(`__sigxKey`, defaulting to `test/<name>`) on the SAME function — identity
+is load-bearing, so it mutates rather than wraps. Without it, `useData(fn)`
+dev-throws in unit tests because the key is stamped by the Vite transform,
+which a test run does not have. Streams are rejected: a stream is not a
+`useData` target.
 
 The helpers are test-*oriented*, not dev-only — they behave identically
 against the prod dists (only the defensive throws strip), so a test run
@@ -673,16 +719,18 @@ handler, fed by the build's registry chunk:
 ```js
 import { createServerFnHandler } from '@sigx/server/node';
 
+// Importing the registry also evaluates your server-app module (the build
+// injected the import), so the pipeline is stamped before the first request.
 const { serverFns } = await import('./dist/server/sigx-server-fns.js');
-app.use(createServerFnHandler({ functions: serverFns, guard: requireSession }));
+app.use(createServerFnHandler({ functions: serverFns }));
 app.use(createRequestHandler({ /* documents, unchanged */ }));
 ```
 
-`guard` covers requests this handler serves. It does **not** run for the
-in-process calls the document handler beside it makes while rendering — put
-auth that must hold on every transport in the function's definition — its
-`use:` chain, or a `serverFnPreset` shared across the module
-(rfc-server-v3 §1, #493).
+There is no per-handler auth hook: app-wide policy — middleware,
+authentication, the default authorization — lives in `createServerApp` and
+runs identically for requests this handler serves and for the in-process
+calls the document handler beside it makes while rendering
+(rfc-server-v4 §3).
 
 On WinterCG runtimes (Cloudflare, Deno, Bun) skip the adapter —
 `handleServerFnRequest(request, options)` from `@sigx/server/server` is
@@ -777,7 +825,7 @@ app.use(createServerFnHandler({
     // included — in dev AND prod, before the response. Awaited; its own
     // throws never affect the response. Wire it to Sentry/OTel/logs.
     onError: (error, info) => log.error({ fn: info.name, error }),
-    // Upper bound on guard + handler (+ a stream's first chunk). On
+    // Upper bound on pipeline + handler (+ a stream's first chunk). On
     // expiry: 504 to the caller, rq.abortSignal fires, onError sees the
     // timeout. A STARTED stream is not bounded (time-to-first-byte only).
     timeoutMs: 10_000
@@ -787,23 +835,26 @@ app.use(createServerFnHandler({
 `ServerFnError`s are expected, client-visible errors — they do not fire
 `onError`. Prod masking is unchanged: the caller still sees a generic 500.
 
-### Rate limiting — a guard, not an option
+### Rate limiting — middleware, not an option
 
 There is deliberately no `rateLimit` endpoint option, and there will not be
-one: anything mounted at the endpoint is **wire-only by construction** (an
-in-process SSR call never enters the handler), which is the exact transport
-asymmetry the definition-level guard chain exists to correct — the same
-reasoning that declined an `onFinish` endpoint hook (rfc-server-v3 §2.6).
-A rate limiter **is a guard**:
+one: anything mounted only at the endpoint is **wire-only by construction**
+(an in-process SSR call never enters the handler), which is the exact
+transport asymmetry the app pipeline exists to correct. A rate limiter **is
+middleware** — app-wide, never per-function-disableable, which is the point:
+`allowAnonymous` cannot switch it off.
 
 ```ts
-// src/guards.ts — a token bucket per principal, in module state
+// src/server-app.ts — a token bucket per principal, in module state
+import { createServerApp } from '@sigx/server/server';
+import { principal, ServerFnError, type ServerMiddleware } from '@sigx/server';
+
 const buckets = new Map<string, { tokens: number; at: number }>();
 
-export const rateLimit: ServerFnGuard = (rq, fn) => {
-    if (fn.symbol === '') return;          // in-process (SSR) call — never throttle your own renders
-    const user = rq.locals.user as string | undefined;
-    const key = `${user ?? 'anon'}:${fn.symbol}`;   // per-user, per-function
+const rateLimit: ServerMiddleware = async (rq, fn) => {
+    if (fn.transport !== 'wire') return;   // never throttle your own renders
+    const user = await principal<User>(rq);            // memoized; null = anonymous
+    const key = `${user?.id ?? 'anon'}:${fn.symbol}`;  // per-user, per-function
     const now = Date.now();
     const b = buckets.get(key) ?? { tokens: 10, at: now };
     b.tokens = Math.min(10, b.tokens + ((now - b.at) / 1000) * 2);  // 2/s, burst 10
@@ -813,36 +864,41 @@ export const rateLimit: ServerFnGuard = (rq, fn) => {
     buckets.set(key, b);
 };
 
-const authed = serverFnPreset({ use: [requireUser, rateLimit] });
+export const app = createServerApp<User>({
+    middleware: [rateLimit],
+    authenticate: sessionFromCookie,
+});
 ```
 
 The pieces that make this correct:
 
-- **`fn.symbol === ''` is the transport discriminator** — a documented
-  contract, not a trick: the symbol exists only where a transport does.
-  `use:` chains run on EVERY transport (that is their point), so the
-  wire-only decision belongs *inside* the guard body. Without that line,
-  one SSR page rendering five cells burns five tokens of its own budget.
-  Auth guards must NOT carry this gate — auth holds everywhere.
-- **Key off `rq.locals`/`perRequest`** (seeded by an upstream auth guard)
-  for per-user limits; fold in `fn.symbol` for per-function buckets. For
+- **`fn.transport` is the transport discriminator** — a documented contract,
+  not a trick (`'wire'` for the four HTTP transports, `'in-process'` for
+  SSR-time and direct calls; it replaced the old `symbol === ''`
+  convention). Middleware runs on EVERY transport (that is its point), so
+  the wire-only decision belongs *inside* the body. Without that line, one
+  SSR page rendering five cells burns five tokens of its own budget.
+  Authentication and authorization must NOT carry this gate — access holds
+  everywhere.
+- **`principal(rq)` is memoized once per request**, so calling it here costs
+  nothing extra — and middleware runs *before* the pipeline's own
+  authenticate step only in the sense of ordering, not of duplication: the
+  first touch resolves it, everyone after shares the memo. For
   unauthenticated surfaces, key off headers — read `rq.request` behind
   `try/catch`, because a detached in-process context throws there and
   fail-open is exactly right for renders.
-- **Streams are covered for free** — guards run before the first pull on
-  every transport, so admission-style limiting applies to `serverStream`
+- **Streams are covered for free** — middleware runs before the first pull
+  on every transport, so admission-style limiting applies to `serverStream`
   unchanged. A *concurrency* cap (increment on admit, decrement on finish)
   releases through `perRequest`'s `onDispose` (#571): admit in a setup,
   register the decrement, and it fires when the response has fully flushed —
   streams included (see *Per-request values*). A generator's own `finally`
   still works where the cap lives entirely inside one handler.
-- **Cost accounting**: a guard sees `(rq, fn)` but never the arguments
-  (deliberate — arguments are pre-validation there). Charge by input weight
-  at the top of the handler instead, debiting a `perRequest` bucket the
-  guard admitted.
-- The endpoint `guard` option remains the right place for a **wire-level
-  backstop** across every function this endpoint serves — it is documented
-  wire-only, and that is its job description.
+- **Cost accounting**: middleware sees `(rq, fn)` but never the arguments
+  (deliberate — on the wire it runs pre-validation, pre-decode). Charge by
+  input weight in an `authorize` policy (which sees the VALIDATED
+  `op.input`) or at the top of the handler, debiting a `perRequest` bucket
+  the middleware admitted.
 
 ### Cancellation — `.with({ signal })`
 
@@ -1078,15 +1134,17 @@ Every server function is a public HTTP endpoint; the defaults assume that:
   layer (#556). Never deploy an Origin-stripping
   proxy in front of a cookie-authenticated app under that policy. An
   allowlist or `origin: false` makes it a deliberate public API.
-- **`guard` hook** runs before every function reached through the endpoint —
-  the WIRE transports (POST, GET reads, form posts, streams). It is the
-  wire-level backstop, **not** an app-wide seam: an in-process (SSR-time) call
-  never enters the handler, so it runs only that function's own `use` chain.
-  Auth that must hold on every transport belongs in the definition — `use:` on
-  each function, or one `serverFnPreset({ use })` shared by the module
-  (rfc-server-v3 §1, #489/#493). The build's `requireGuards` check (on by
-  default) is what makes "nobody forgot one" a guarantee rather than an
-  intention.
+- **Fail-closed access, on every transport** (rfc-server-v4). The app
+  pipeline — middleware → authenticate → the identity gate — runs before
+  the codec decodes attacker bytes on the wire, and identically for
+  in-process (SSR-time) calls inside `invoke`; authorization runs after
+  `input` validation, immediately before the handler. A function that
+  declares nothing **denies anonymous callers with a 401**; only the
+  literal `allowAnonymous: true` waives the gate, and even then middleware
+  and authentication still run. There is no endpoint-mounted auth hook to
+  forget — the one pipeline is the seam. The build's `requireAuthorization`
+  check (on by default) is what makes "nobody left a function undecided" a
+  build error rather than a runtime surprise.
 - **`maxBodyBytes`** (1 MiB default) enforced while reading.
 - **`maxUrlBytes`** (8 KiB default) caps a cache-marked GET read's query
   string — the URL analog of `maxBodyBytes`, answered with a 414.
@@ -1108,12 +1166,12 @@ Every server function is a public HTTP endpoint; the defaults assume that:
 
 | Entry | Runs on | What |
 |---|---|---|
-| `@sigx/server` | server (browser condition throws) | `serverFn`, `serverStream`, `serverFnPreset`, `perRequest`, `ServerFnError`, `isServerFnError`, types |
+| `@sigx/server` | server (browser condition throws) | `serverFn`, `serverStream`, `perRequest`, `principal`, `requirePrincipal`, `setPrincipal`, `requireAuthenticated`, `ServerFnError`, `isServerFnError`, types |
 | `@sigx/server/client` | any client (browser, lynx, terminal) | the generated stubs' runtime + `configureServerFn` (dependency-free) |
-| `@sigx/server/server` | anywhere (WinterCG) | `handleServerFnRequest(request, options)` |
+| `@sigx/server/server` | anywhere (WinterCG) | `createServerApp`, `handleServerFnRequest(request, options)`, `matchesServerFn` |
 | `@sigx/server/node` | Node | `createServerFnHandler(options)` — connect-style |
 | `@sigx/server/plugin` | app setup (any side) | `serverPlugin({ transport, types })` + `registerWireTypeHandlers` |
-| `@sigx/server/testing` | tests (server-side) | `createTestServerFnContext`, `stampServerFnKey` (#570) |
+| `@sigx/server/testing` | tests (server-side) | `createTestServerFnContext`, `stubServerApp`, `stampServerFnKey` (#570) |
 
 The runnable example is `examples/resume` (the "server function from a
 resumed handler" card).
