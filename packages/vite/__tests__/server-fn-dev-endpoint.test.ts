@@ -65,6 +65,9 @@ interface Mounted {
     origin: string;
     /** Hashed wire symbol for an export of the fixture module. */
     symbol(name: 'read' | 'never'): string;
+    /** Everything the plugin sent to the dev logger's `error` — assertable,
+     *  never swallowed (a no-op logger hid unexpected logs when debugging). */
+    loggerErrors: string[];
     close(): Promise<void>;
 }
 
@@ -92,14 +95,23 @@ async function mount(
     let middleware:
         | ((req: unknown, res: unknown, next: (err?: unknown) => void) => void)
         | undefined;
+    const loggerErrors: string[] = [];
     plugin.configureServer({
         middlewares: { use: (fn: typeof middleware) => (middleware = fn) },
         watcher: { add: () => {} },
-        config: { logger: { warn: () => {}, error: () => {} } },
-        ssrLoadModule: (id: string) =>
-            Promise.resolve(
-                id === '@sigx/server/node' ? serverFnNode : (modules[id] ?? liveModule)
-            )
+        config: {
+            logger: {
+                warn: () => {},
+                error: (msg: unknown) => loggerErrors.push(String(msg))
+            }
+        },
+        ssrLoadModule: (id: string) => {
+            if (id === '@sigx/server/node') return Promise.resolve(serverFnNode);
+            const mod = modules[id] ?? liveModule;
+            // An Error VALUE in the module map models a module that fails to
+            // evaluate (mid-edit syntax error): ssrLoadModule rejects.
+            return mod instanceof Error ? Promise.reject(mod) : Promise.resolve(mod);
+        }
     });
     if (!middleware) throw new Error('configureServer mounted no middleware');
 
@@ -115,6 +127,7 @@ async function mount(
 
     const handle: Mounted = {
         origin: `http://127.0.0.1:${port}`,
+        loggerErrors,
         symbol(name) {
             const match = new RegExp(`\\["(${name}_fn_[0-9a-f]{8})"\\]`).exec(registry);
             if (!match) throw new Error(`no symbol for ${name} in the registry`);
@@ -241,6 +254,38 @@ describe('sigxServer — the dev endpoint forwards every endpoint option (#561)'
             // The stamp is process-global — release it so the rest of this
             // file keeps its no-app posture.
             app?.dispose();
+        }
+    });
+
+    it('a BROKEN serverApp module is logged, never a crashed request — the fallback is fail-closed', async () => {
+        // Mid-edit the module can be a syntax error (ssrLoadModule rejects);
+        // the per-request load must log and continue so the runtime denies
+        // fail-closed (nothing stamped here) instead of aborting the RPC
+        // through next(err).
+        const dev = await mount(
+            { serverApp: '/src/server-app.ts' },
+            { '/src/server-app.ts': new Error('mid-edit syntax error') }
+        );
+        const res = await fetch(`${dev.origin}/_sigx/fn/${dev.symbol('read')}`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', origin: dev.origin },
+            body: JSON.stringify({ args: ['p1'] })
+        });
+        // SERVED, not crashed — the load failure was caught and logged, and
+        // the request went on through createServerFnHandler. This fixture's
+        // fns are `allowAnonymous`, so with nothing stamped they still run;
+        // a protected fn would deny 401 fail-closed instead (the pipeline
+        // pins in packages/server/__tests__/app-pipeline.test.ts). Either
+        // way the response is the RUNTIME's — never the harness's 500
+        // 'error' body from next(err).
+        expect(res.status).toBe(200);
+        await expect(res.json()).resolves.toEqual({ data: 'read:p1' });
+        // And LOGGED — both the eager configureServer load and the
+        // per-request load report the broken module.
+        expect(dev.loggerErrors.length).toBeGreaterThanOrEqual(1);
+        for (const entry of dev.loggerErrors) {
+            expect(entry).toContain('/src/server-app.ts');
+            expect(entry).toContain('mid-edit syntax error');
         }
     });
 });
