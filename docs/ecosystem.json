@@ -4,7 +4,7 @@
     "and in WHAT ORDER they must be aligned and released after a core release.",
     "",
     "Read by: .github/workflows/release.yml (the notify-consumers fan-out),",
-    "docs/ecosystem-release.md (the runbook), .github/workflows-ai/ecosystem-release.mjs",
+    "docs/ecosystem-release.md (the runbook), .claude/workflows/ecosystem-release.mjs",
     "(the orchestrator), and scripts/check-ecosystem.mjs (the CI guard that keeps it honest).",
     "",
     "`tier` is the release wave. A repo's tier must be strictly greater than the tier of every",

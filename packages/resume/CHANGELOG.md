@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-08-04
+
 ### Added
 
 - **The pack now registers its manifest type for `virtual:sigx-manifests` and

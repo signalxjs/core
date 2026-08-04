@@ -5,6 +5,8 @@ repository-root `CHANGELOG.md`.
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-08-04
+
 ### Changed
 
 - **BREAKING: rides the `AsyncState` union + SWR-through-error redesign

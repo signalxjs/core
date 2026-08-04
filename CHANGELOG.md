@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.15.0] — 2026-08-04
+
 ### Changed
 
 - **BREAKING — `@sigx/vite`: `requireGuards` is `requireAuthorization`, and
@@ -1338,7 +1340,8 @@ Initial public release of the SignalX (`sigx`) ecosystem on npm. Six packages pu
 - Node `^20.19.0 || >=22.12.0`
 - `@sigx/vite` peer-depends on `vite >=8.0.0`
 
-[Unreleased]: https://github.com/signalxjs/core/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/signalxjs/core/compare/v0.15.0...HEAD
+[0.15.0]: https://github.com/signalxjs/core/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/signalxjs/core/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/signalxjs/core/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/signalxjs/core/compare/v0.11.0...v0.12.0
