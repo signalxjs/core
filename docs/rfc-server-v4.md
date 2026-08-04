@@ -162,7 +162,7 @@ export interface ServerFnOptions<S, R> {
      * `grep -rn allowAnonymous --include='*.server.ts' src/`.
      */
     allowAnonymous?: true;
-    invalidates?/cache?/form?/handler;   // unchanged
+    // invalidates, cache, form, handler — unchanged
 }
 ```
 
@@ -427,9 +427,9 @@ export interface EndpointPosture {
 }
 
 export interface ServerAppOptions<P = unknown> extends EndpointPosture {
-    middleware?: ServerMiddleware[];       // copied once at creation (a policy an
-    authenticate?: (rq: ServerFnContext)   //   app can push to is not a policy)
-        => P | null | Promise<P | null>;
+    /** Copied once at creation — a policy an app can push to is not a policy. */
+    middleware?: ServerMiddleware[];
+    authenticate?: (rq: ServerFnContext) => P | null | Promise<P | null>;
     /** The app default policy chain — applies where a definition declares
      *  nothing. Always receives a non-null principal: anonymity is granted
      *  only by the per-fn literal, never by the default. */
