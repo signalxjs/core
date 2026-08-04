@@ -261,11 +261,14 @@ describe('sigxServer — the dev endpoint forwards every endpoint option (#561)'
             headers: { 'content-type': 'application/json', origin: dev.origin },
             body: JSON.stringify({ args: ['p1'] })
         });
-        // Served, not crashed: with nothing stamped the pipeline denies
-        // fail-closed — a 401 envelope, not the harness's 500 'error' body.
-        expect(res.status).toBe(401);
-        await expect(res.json()).resolves.toEqual({
-            error: { message: 'Authentication required', status: 401 }
-        });
+        // SERVED, not crashed — the load failure was caught and logged, and
+        // the request went on through createServerFnHandler. This fixture's
+        // fns are `allowAnonymous`, so with nothing stamped they still run;
+        // a protected fn would deny 401 fail-closed instead (the pipeline
+        // pins in packages/server/__tests__/app-pipeline.test.ts). Either
+        // way the response is the RUNTIME's — never the harness's 500
+        // 'error' body from next(err).
+        expect(res.status).toBe(200);
+        await expect(res.json()).resolves.toEqual({ data: 'read:p1' });
     });
 });
