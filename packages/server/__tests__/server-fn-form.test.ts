@@ -8,9 +8,20 @@
  * Origin posture.
  */
 
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { handleServerFnRequest, type ServerFnRequestOptions } from '../src/server/index';
 import { serverFn, serverStream, ServerFnError, type StandardSchemaV1 } from '../src/index';
+import { stubServerApp } from '../src/testing';
+
+// The pipeline is fail-closed (rfc-server-v4 §2.1): stub an authenticated
+// app so the form transport stays the subject.
+let restoreApp: () => void;
+beforeEach(() => {
+    restoreApp = stubServerApp({ authenticate: () => ({ id: 'tester' }) });
+});
+afterEach(() => {
+    restoreApp();
+});
 
 const ORIGIN = 'http://localhost';
 const PAGE = `${ORIGIN}/contact?tab=support`;

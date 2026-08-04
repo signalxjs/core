@@ -7,10 +7,21 @@
  * on a safe method, and pipeline parity with POST.
  */
 
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { handleServerFnRequest, type ServerFnRequestOptions } from '../src/server/index';
 import { serverFn, serverStream, ServerFnError } from '../src/index';
 import { encodeWire } from '../src/wire-codec';
+import { stubServerApp } from '../src/testing';
+
+// The pipeline is fail-closed (rfc-server-v4 §2.1): stub an authenticated
+// app so GET/cache semantics stay the subject.
+let restoreApp: () => void;
+beforeEach(() => {
+    restoreApp = stubServerApp({ authenticate: () => ({ id: 'tester' }) });
+});
+afterEach(() => {
+    restoreApp();
+});
 
 const ORIGIN = 'http://localhost';
 
@@ -23,6 +34,10 @@ const readSwr = serverFn({
     handler: async () => 'swr'
 });
 const readPublic = serverFn({
+    // `public` without `allowAnonymous` is the rfc-server-v4 §1.4 coherence
+    // warning — a public read depends only on its arguments, so it is also
+    // anonymous-reachable by declaration.
+    allowAnonymous: true,
     cache: { maxAge: 30, public: true, sMaxAge: 600 },
     handler: async () => 'anyone'
 });
@@ -511,6 +526,7 @@ describe('__DEV__ warnings', () => {
     it('a public read touching rq.request warns once', async () => {
         const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
         const nosy = serverFn({
+            allowAnonymous: true,
             cache: { maxAge: 30, public: true },
             handler: async (rq) => {
                 void rq.request.headers.get('cookie');

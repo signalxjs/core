@@ -2,6 +2,40 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING: the guard system is split into middleware / authentication /
+  authorization (rfc-server-v4 §1–§2, #607/#609).** One `use:` chain carried
+  three concerns with three natural scopes; they are now three vocabularies,
+  and the runtime is **fail-closed**: app-wide config resolves through the
+  `__SIGX_SERVER_APP__` seam (stamped by `createServerApp` — phase 2 — and by
+  `/testing`'s `stubServerApp` today), and **a miss may only ever remove
+  permission, never add it**. What each existing input observes now:
+
+  | You had | You now observe |
+  |---|---|
+  | `serverFn({ handler })` with no declarations | **Denies 401** on every transport (was: ran open). Configure an app (`stubServerApp` in tests, `createServerApp` in phase 2) or declare `authorize:`/`allowAnonymous: true`. |
+  | `use: [guard]` | Removed. Authorization guards → `authorize: ServerPolicy \| ServerPolicy[]` — `(principal, rq, op) => boolean`, run **after** `input` validation (so `op.input` is the trusted resource; guards ran before), strict-`true`-to-allow, non-true is a 403 (401 when the principal is null). Cross-cutting work → app `middleware` (always runs, every transport, never per-fn-disableable). |
+  | `unguarded: true` | Removed → `allowAnonymous: true` (literal). **Middleware and authentication now run for these fns** — a throwing authenticator now 500s a formerly-unguarded endpoint, and a rate-limit middleware now applies to it (both are the point). Only the identity gate is waived; declared policies still run with a nullable principal. `grep -rn allowAnonymous` replaces the `unguarded` grep. |
+  | `serverFnPreset({ use })` / `preset.stream` | Removed (§1.5): the app default (`createServerApp({ authorize })`) answers #489; a module-scope policy is one imported identifier per fn. The `unguarded`-contradiction definition-time throw went with it — `allowAnonymous` under an authed app is coherent now. |
+  | `info.symbol === ''` as the in-process discriminator | Replaced: `ServerFnInfo` carries `transport: 'wire' \| 'in-process'`; symbol is pure identity (`''` still means "no build stamp"). The rate-limit pattern's gate line becomes `if (fn.transport !== 'wire') return`. |
+  | endpoint `guard` option | Still runs (wire-only, pre-decode) but retyped `ServerMiddleware` and **scheduled for removal in phase 2** — app middleware runs at the same pre-revive slot and reaches in-process calls too. |
+  | `__sigxGuardChecked` / `__SIGX_GUARDS_CHECKED__` / the unchecked-fn dev warning | The runtime reader and warning are deleted, not migrated: the fail-closed runtime closes rfc-server-v3 §1.5's unanalyzed-module gap (an unanalyzed module now denies instead of running open). `stampServerFnKey` no longer stamps the checked marker; the build's now-inert stamp emission goes with the phase-3 gate rename. |
+
+  New public surface: `principal(rq)` / `requirePrincipal(rq)` (the typed
+  identity accessors, memoized once per request store — one SSR render with
+  five cells decodes the session once) / `setPrincipal(rq, p)` /
+  `requireAuthenticated` (the built-in default policy);
+  `createTestServerFnContext(init, { principal })` and `stubServerApp(config)`
+  on `@sigx/server/testing`. The endpoint runs middleware → authenticate →
+  identity gate **before `reviveWire`**, so anonymous attacker payloads never
+  reach the codec or the validator (strictly stronger than the old pre-revive
+  guard, which gated nothing). A new definition-time dev warning flags
+  `cache.public` without `allowAnonymous: true` (authenticated responses under
+  a shared-cache header). The build gate accepts `authorize:`/literal
+  `allowAnonymous: true` (old spellings pass transitionally until the phase-3
+  `requireAuthorization` rename).
+
 ### Added
 
 - **Request-value disposal — `perRequest` `onDispose`, `disposeRequestValues`,

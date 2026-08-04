@@ -391,7 +391,7 @@ describe('sigxServer — inline extraction (non-matching files)', () => {
         try {
             expect(() =>
                 gated.transform.call(ctx('client'), bare, join(gatedRoot, 'src/api.server.ts'))
-            ).toThrow(/api\.server\.ts:2:21 .*declares no guard chain/s);
+            ).toThrow(/api\.server\.ts:2:21 .*has no decided access policy/s);
         } finally {
             rmSync(gatedRoot, { recursive: true, force: true });
         }
@@ -414,7 +414,7 @@ describe('sigxServer — inline extraction (non-matching files)', () => {
                 join(warnRoot, 'src/api.server.ts')
             );
             expect(result.code).toContain('__serverFnStub(');
-            expect(warnings.some((w) => w.includes('declares no guard chain'))).toBe(true);
+            expect(warnings.some((w) => w.includes('has no decided access policy'))).toBe(true);
         } finally {
             rmSync(warnRoot, { recursive: true, force: true });
         }

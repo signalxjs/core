@@ -6,11 +6,22 @@
  * response headers (multiple set-cookie values must all survive).
  */
 
-import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
 import { createServer, type Server } from 'node:http';
 import { once } from 'node:events';
 import { createServerFnHandler } from '../src/node';
 import { serverFn, serverStream, perRequest } from '../src/index';
+import { stubServerApp } from '../src/testing';
+
+// The pipeline is fail-closed (rfc-server-v4 §2.1): stub an authenticated
+// app so the node adapter stays the subject.
+let restoreApp: () => void;
+beforeEach(() => {
+    restoreApp = stubServerApp({ authenticate: () => ({ id: 'tester' }) });
+});
+afterEach(() => {
+    restoreApp();
+});
 
 const twoCookies = serverFn(async (rq) => {
     rq.responseHeaders.append('set-cookie', 'a=1; Path=/');

@@ -12,18 +12,19 @@
  * `maxBodyBytes` during the body read (`maxUrlBytes` for a GET's query
  * string; content-length for a form body), reviver-based DROPPING of
  * prototype-pollution keys (they are removed from the parsed value, not a
- * request error), and prod error masking. The `guard` hook runs before every
- * function reached through THIS ENDPOINT — the wire transports (rfc-server-v3
- * §4, #493). It is not the app-wide seam: an in-process (SSR-time) call never
- * enters this handler, so a chain that must run on every transport belongs in
- * the definition (`use:` / `serverFnPreset`).
+ * request error), and prod error masking. The app pipeline's wire half —
+ * middleware → authenticate → the identity gate (rfc-server-v4 §1.3) — runs
+ * HERE, before `reviveWire` touches attacker bytes; `invoke` runs the same
+ * prelude itself for in-process calls, so the pipeline is transport-complete
+ * by construction.
  */
 
+import { runServerPrelude } from '../app-config';
 import { createRequestContext, type ServerFnContext } from '../context';
 import { claimDisposalOwnership, disposeRequestValues } from '../per-request';
 import { runInScope } from '../scope';
 import { isServerFnError } from '../errors';
-import type { ServerFnGuard, ServerFnInfo, WrappedServerFn } from '../types';
+import type { ServerFnInfo, ServerMiddleware, WrappedServerFn } from '../types';
 import { encodeWire, reviveWire } from '../wire-codec';
 import {
     decodeFnPath,
@@ -59,17 +60,15 @@ export interface ServerFnRequestOptions {
      */
     base?: string;
     /**
-     * Runs before every function reached through THIS ENDPOINT — the wire
-     * transports (POST, GET reads, form posts, streams).
+     * A wire-only pre-decode hook for THIS endpoint, running immediately
+     * before the app pipeline's wire prelude.
      *
-     * It does NOT run for in-process (SSR-time) calls: those never enter this
-     * handler (`packages/server/src/index.ts` — the wrapper calls `invoke`
-     * directly), so their only middleware is the function's own `use:` chain.
-     * For a chain that runs on EVERY transport, put it in the definition —
-     * `use:` per function, or one `serverFnPreset({ use })` per server module
-     * (rfc-server-v3 §1, #489/#493). Use this hook as the wire-level backstop.
+     * SCHEDULED FOR REMOVAL (rfc-server-v4 §3.1, phase 2 of the split): app
+     * middleware (`createServerApp({ middleware })`) runs at this exact slot
+     * AND reaches in-process calls; a wire-only concern is one
+     * `fn.transport !== 'wire'` early-return inside the middleware body.
      */
-    guard?: ServerFnGuard;
+    guard?: ServerMiddleware;
     /**
      * Origin policy. Default `'same-origin'`: the `Origin` header must match
      * the request URL's origin (browsers always send it on POST).
@@ -655,7 +654,7 @@ export async function handleServerFnRequest(
         // onError, no envelope. Masked per §5 like any fn failure; a thrown
         // ServerFnError passes through so a custom resolve can speak the
         // wire language. The real info/ctx don't exist yet — built fresh.
-        const info = { symbol, name: symbolName(symbol) };
+        const info: ServerFnInfo = { symbol, name: symbolName(symbol), transport: 'wire' };
         const ctx = createRequestContext(request);
         if (!isServerFnError(error)) await reportMasked(options, error, info, ctx);
         const shape = wireErrorShape(error, info.name || symbol, options.maxResponseBytes);
@@ -704,7 +703,11 @@ export async function handleServerFnRequest(
     }
     // Captured: TS narrowing does not cross into the work closure below.
     const invoke = fn.__sigxFn;
-    const info = { symbol, name: symbolName(symbol, fn.__sigxName) };
+    const info: ServerFnInfo = {
+        symbol,
+        name: symbolName(symbol, fn.__sigxName),
+        transport: 'wire'
+    };
 
     let parsed: unknown;
     let boundarySidecar: unknown;
@@ -838,14 +841,22 @@ export async function handleServerFnRequest(
     // Unscoped where the runtime has no AsyncLocalStorage; nothing else moves.
     const work = runInScope(ctx as ServerFnContext, async (): Promise<Response> => {
         await options.guard?.(ctx as ServerFnContext, info);
+        // The pipeline's wire half (rfc-server-v4 §1.3, steps 1–3): app
+        // middleware → authenticate → the identity gate, HERE so an
+        // anonymous caller is refused before attacker bytes reach the codec
+        // or the validator. `invoke` runs steps 4–7 (arity, validation,
+        // authorize, handler); it re-runs the prelude only for in-process
+        // calls (`info.transport === 'in-process'`), so nothing doubles.
+        await runServerPrelude(ctx as ServerFnContext, info, fn.__sigxAnon === true);
         // Rich types on the way IN (rfc-server §4) — decoded AFTER the
         // prototype-pollution reviver, so dangerous keys are already gone,
-        // and AFTER the guard (#559): the codec's revive handlers (built-in
-        // and app-registered alike) do attacker-directed work — BigInt digit
-        // conversion, RegExp compilation, Map/Set construction — so nothing
-        // runs them before the request is vetted. The guard reads only
-        // (ctx, info), never args, so it loses nothing by going first. A
-        // malformed tag payload is the caller's bad request, not a 500.
+        // and AFTER the prelude (#559): the codec's revive handlers
+        // (built-in and app-registered alike) do attacker-directed work —
+        // BigInt digit conversion, RegExp compilation, Map/Set construction
+        // — so nothing runs them before the request is vetted. Middleware
+        // reads only (ctx, info), never args, so it loses nothing by going
+        // first. A malformed tag payload is the caller's bad request, not a
+        // 500.
         // Form input is NEVER wire-decoded: its values are strings and
         // Files, and a field literally named like a tag must stay what the
         // user typed.

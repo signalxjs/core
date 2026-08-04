@@ -4,27 +4,92 @@
  */
 import type { ServerFnContext, ServerFnContextInit } from './context';
 
-/** Identity of the function being invoked, as the transports know it. */
+/** Identity of the function being invoked, as the pipeline sees it. */
 export interface ServerFnInfo {
     /**
-     * The content-hashed transport symbol (`<name>_fn_<hash8>`). Empty on
-     * in-process calls — the symbol exists only where a transport does.
+     * The content-hashed transport symbol (`<name>_fn_<hash8>`), or the
+     * stable id under `role: 'client'`. Pure IDENTITY — `''` means nothing
+     * stamped one (a unit test importing the source module); it no longer
+     * doubles as the transport discriminator (rfc-server-v4 §1.1), which is
+     * {@link ServerFnInfo.transport}.
      */
     symbol: string;
     /** The export name of the function. */
     name: string;
+    /**
+     * The transport discriminator: `'wire'` for the four HTTP transports
+     * (POST JSON, GET reads, form posts, NDJSON streams), `'in-process'`
+     * for SSR-time and direct server-side calls. Replaces the old
+     * `symbol === ''` contract — middleware that must not run for renders
+     * branches on this: `if (fn.transport !== 'wire') return;`.
+     */
+    transport: 'wire' | 'in-process';
 }
 
 /**
- * Guard/middleware: veto by throwing (a `ServerFnError` sets the response
- * status); hand results downstream via `rq.locals`.
+ * Middleware (rfc-server-v4 §1.1): app-global, ordered, runs on EVERY
+ * transport, before-only — no `next()`, no around-ness (a standing
+ * non-goal). Veto by throwing (a `ServerFnError` sets the response status —
+ * a rate limiter throws 429 here); hand results downstream via `rq.locals`
+ * or a `perRequest` value. Never sees arguments: on the wire it runs before
+ * `reviveWire` on attacker-controlled bytes (#559), and it loses nothing by
+ * going first. Transport-specific behavior is the body's own branch on
+ * `fn.transport`.
  */
-export type ServerFnGuard = (rq: ServerFnContext, fn: ServerFnInfo) => void | Promise<void>;
+export type ServerMiddleware = (rq: ServerFnContext, fn: ServerFnInfo) => void | Promise<void>;
 
 /**
- * The full invocation pipeline (`use` guards → `input` validation → handler)
- * stamped on every wrapped function as `__sigxFn`. Transports call this with
- * a live context; the public callable wraps it with a detached one.
+ * An authorization policy (rfc-server-v4 §1.1) — the per-operation
+ * requirement, run AFTER input validation so `op.input` is trustworthy.
+ * Positional so the dominant case reads bare: `(p) => p.role === 'admin'`.
+ * Policies in an array AND together.
+ *
+ * The runtime is STRICT: only the literal `true` allows — `false`, and any
+ * accidental non-boolean, deny (403; 401 when the principal is null). A
+ * thrown `ServerFnError` passes through verbatim for a custom status.
+ */
+export type ServerPolicy<P = unknown> = (
+    /** `null` reaches a policy only on an `allowAnonymous` function. */
+    principal: P | null,
+    rq: ServerFnContext,
+    op: ServerPolicyOp
+) => boolean | Promise<boolean>;
+
+/** The operation a {@link ServerPolicy} is deciding. */
+export interface ServerPolicyOp {
+    fn: ServerFnInfo;
+    /**
+     * VALIDATED single input (options-form fn / input-form stream) — the
+     * resource for resource-based policies ("may P edit post
+     * `op.input.id`"). `undefined` on the direct form and no-input streams.
+     */
+    input?: unknown;
+    /**
+     * The raw argument list — for multi-argument direct/stream forms this
+     * is unvalidated wire data, the same trust level the handler receives.
+     */
+    args: readonly unknown[];
+    /**
+     * Filled by packs whose operations target an instance — `@sigx/actors`
+     * passes `{ kind: 'actor', type, key, method }` (rfc-server-v4 §7).
+     * Core wire calls leave it undefined.
+     */
+    resource?: { kind: string; type: string; key: string; method: string };
+}
+
+/**
+ * The full invocation pipeline stamped on every wrapped function as
+ * `__sigxFn`: for an in-process call it runs everything — middleware →
+ * authenticate → identity gate → arity → `input` validation → authorize →
+ * handler; a wire transport owns the first three itself, pre-decode, and
+ * `invoke` runs the rest (rfc-server-v4 §1.3's ownership contract). A
+ * hand-rolled transport that skips its half never skips the authorization
+ * DECISION — authorization (which pulls authentication on demand) is
+ * inside `invoke` — but it does lose middleware, and it loses the
+ * pre-decode ordering: without the transport-side gate, anonymous
+ * attacker bytes reach the arity gate and the validator before the deny
+ * lands, where the real endpoint refuses them first. Transports call this
+ * with a live context; the public callable wraps it with a detached one.
  */
 export type ServerFnInvoke = (
     rq: ServerFnContext,
@@ -197,17 +262,13 @@ export interface WrappedServerFn {
      */
     __sigxKey?: string;
     /**
-     * Build-stamped (true) when `sigxServer({ requireGuards })` ANALYZED this
-     * function — rfc-server-v3 §1.5's mitigation for its own residual gap.
-     *
-     * A `*.server.ts` outside the plugin's `include`/`scan` is never extracted,
-     * so the gate cannot see it and it would ship unguarded with no signal.
-     * Marking what WAS checked makes absence the alarm: `__DEV__` warns when a
-     * function without the stamp is invoked, so a missing signal degrades to
-     * silence rather than to a false pass. Prod is still not covered — no
-     * candidate mechanism closes that without failing open somewhere worse.
+     * Present (true) when the definition declared `allowAnonymous: true`
+     * (rfc-server-v4 §1.2) — the identity gate is waived for this function.
+     * Stamped by the RUNTIME wrapper (not the build), so a wire transport
+     * can run the gate before decoding attacker bytes without the build's
+     * help.
      */
-    __sigxGuardChecked?: boolean;
+    __sigxAnon?: boolean;
     /**
      * Present when the options form declared `invalidates` (rfc-server
      * §6.2): VALIDATED input (stashed on the request context by the

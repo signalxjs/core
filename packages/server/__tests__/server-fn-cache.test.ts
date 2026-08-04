@@ -6,10 +6,18 @@
  * the fn stub's delivery to the global cache seam.
  */
 
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { serverFn, ServerFnError } from '../src/index';
 import { handleServerFnRequest } from '../src/server/index';
 import { __serverFnStub, type ServerFnCacheDirectives } from '../src/client/index';
+import { stubServerApp } from '../src/testing';
+
+// The pipeline is fail-closed (rfc-server-v4 §2.1): stub an authenticated
+// app so the $cache envelope stays the subject.
+let restoreApp: () => void;
+beforeEach(() => {
+    restoreApp = stubServerApp({ authenticate: () => ({ id: 'tester' }) });
+});
 
 const ORIGIN = 'http://localhost';
 
@@ -24,6 +32,7 @@ const post = (fn: unknown, body = '{"args":[{}]}'): Promise<Response> =>
     );
 
 afterEach(() => {
+    restoreApp();
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
     delete (globalThis as { __SIGX_SERVERFN_CACHE__?: unknown }).__SIGX_SERVERFN_CACHE__;

@@ -10,9 +10,10 @@
  * function is called during SSR.
  */
 
-import { describe, it, expect, afterEach, vi } from 'vitest';
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { serverFn, serverStream } from '../src/index';
 import { runWithServerFnContext } from '../src/node';
+import { stubServerApp } from '../src/testing';
 
 const REQ = (url = 'https://example.com/cart', init?: RequestInit) => new Request(url, init);
 
@@ -20,7 +21,15 @@ const REQ = (url = 'https://example.com/cart', init?: RequestInit) => new Reques
 const whoAmI = serverFn(async (rq) => rq.request.headers.get('cookie') ?? null);
 const whereAmI = serverFn(async (rq) => rq.url.pathname);
 
+// The pipeline is fail-closed (rfc-server-v4 §2.1): stub an authenticated
+// app so the ambient-context semantics under test stay the subject.
+let restoreApp: () => void;
+beforeEach(() => {
+    restoreApp = stubServerApp({ authenticate: () => ({ id: 'tester' }) });
+});
+
 afterEach(() => {
+    restoreApp();
     delete (globalThis as any).__SIGX_SERVERFN_CONTEXT__;
     vi.restoreAllMocks();
 });
