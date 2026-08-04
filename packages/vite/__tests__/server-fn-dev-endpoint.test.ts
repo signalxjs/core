@@ -85,9 +85,9 @@ async function mount(
     mkdirSync(join(root, 'src'), { recursive: true });
     writeFileSync(join(root, 'src/api.server.ts'), API);
 
-    // requireGuards off: this file is about option forwarding, not the guard
-    // gate (which has its own coverage in server-fn-plugin.test.ts).
-    const plugin = sigxServer({ requireGuards: false, ...options }) as any;
+    // requireAuthorization off: this file is about option forwarding, not the
+    // access gate (which has its own coverage in server-fn-plugin.test.ts).
+    const plugin = sigxServer({ requireAuthorization: false, ...options }) as any;
     plugin.configResolved({ root, command: 'serve' });
 
     const registry = plugin.load(plugin.resolveId('virtual:sigx-server-fns')) as string;

@@ -265,7 +265,7 @@ describe('bundled build + server functions — registry inlined, no chunk (real 
         writeFileSync(
             join(root, 'src', 'api.server.ts'),
             `import { serverFn } from '@sigx/server';\n` +
-                `export const ping = serverFn({ unguarded: true, handler: async () => 'pong' });\n`
+                `export const ping = serverFn({ allowAnonymous: true, handler: async () => 'pong' });\n`
         );
         // The worker entry imports the registry virtual — in a bundled build
         // it INLINES; the sigx-server-fns.js chunk must not be emitted.

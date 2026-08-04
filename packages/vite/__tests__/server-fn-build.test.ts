@@ -37,7 +37,7 @@ describe('sigxServer end-to-end (real vite build)', () => {
 import { serverFn } from '@sigx/server';
 
 export const addToCart = serverFn({
-    unguarded: true,
+    allowAnonymous: true,
     handler: async (rq, id: string) => '${SECRET}: ' + id
 });
 `);
@@ -60,7 +60,7 @@ import { component } from 'sigx';
 import { serverFn } from '@sigx/server';
 
 export const stamp = serverFn({
-    unguarded: true,
+    allowAnonymous: true,
     handler: async (rq) => 'INLINE_${SECRET}:' + rq.url.pathname
 });
 
@@ -244,7 +244,7 @@ describe('sigxServer end-to-end — rev 2: role:client + shared package (#320)',
 import { serverFn } from '@sigx/server';
 
 export const addToCart = serverFn({
-    unguarded: true,
+    allowAnonymous: true,
     handler: async (rq, id: string) => '${SECRET}: ' + id
 });
 `);
