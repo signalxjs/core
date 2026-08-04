@@ -93,7 +93,7 @@ describe('interleaved requests keep per-request state apart', () => {
         expect(seen).toEqual(['B', 'A']);
     });
 
-    it('rq.locals written by a guard belong to one request only', async () => {
+    it('rq.locals written by middleware belong to one request only', async () => {
         const first = gate();
         const observed: Array<string | undefined> = [];
 
@@ -104,12 +104,16 @@ describe('interleaved requests keep per-request state apart', () => {
             return rq.locals.user;
         });
 
-        const options = {
-            resolve: () => whoami,
-            guard: (ctx: ServerFnContext) => {
-                ctx.locals.user = ctx.request.headers.get('x-user') ?? undefined;
-            }
-        } as unknown as ServerFnRequestOptions;
+        restoreApp();
+        restoreApp = stubServerApp({
+            middleware: [
+                (ctx) => {
+                    ctx.locals.user = ctx.request.headers.get('x-user') ?? undefined;
+                }
+            ],
+            authenticate: () => ({ id: 'tester' })
+        });
+        const options = { resolve: () => whoami } as unknown as ServerFnRequestOptions;
 
         const a = handleServerFnRequest(post('w', [], { 'x-user': 'alice' }), options);
         const bRes = await handleServerFnRequest(post('w', [], { 'x-user': 'bob' }), options);

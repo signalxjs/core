@@ -2,7 +2,45 @@
 
 ## [Unreleased]
 
+### Added
+
+- **`createServerApp` — the server platform value (rfc-server-v4 §3,
+  #607/#610, phase 2).** One user-owned value holds everything app-wide:
+  the pipeline (`middleware`, `authenticate`, the default `authorize`), the
+  **endpoint posture** (`origin`, `maxBodyBytes`, `maxUrlBytes`,
+  `maxResponseBytes`, `timeoutMs`, `onError` — stated once, inherited by
+  every mount and by bare `handleServerFnRequest` calls; an explicit
+  per-call value wins), and the principal `codec` for cross-hop propagation
+  (`@sigx/actors`). `app.serverFns(mount)` returns a plain handler bound to
+  the app — routing stays in the platform entry (`matchesServerFn` is still
+  the predicate; the app decides what every operation passes through, never
+  which handler answers a URL). Mounts claim their `base` namespace:
+  overlapping prefixes throw at MOUNT time, because everything after the
+  base IS the symbol (#543). Stamping is last-wins (dev HMR re-evaluates
+  the app module; replacing a different live app gets a `__DEV__` note);
+  `dispose()` releases the seam only if it still holds this app's stamp.
+- **`authorizeBoundary` — per-boundary refresh authorization (closes the
+  §6.3 gap).** A boundary refresh re-renders server components with
+  CLIENT-SUPPLIED props under only the mutation's authorization; the new
+  hook (on `ServerFnRequestOptions` and the mount) vetoes ONE descriptor
+  under the request's principal, after the deps ∩ `invalidates` gate.
+  Strict-`true`; a deny drops that descriptor silently (the client
+  converges through `$cache` a round trip later), a throw drops the whole
+  refresh — the mutation is never affected.
+
 ### Changed
+
+- **BREAKING: the endpoint `guard` option is removed (rfc-server-v4 §3.1,
+  #610).** It was wire-only by construction — the transport asymmetry the
+  definition-level chain existed to correct. App middleware
+  (`createServerApp({ middleware })`) runs at the exact same pre-decode
+  slot AND reaches in-process calls; a wire-only concern is one
+  `fn.transport !== 'wire'` early-return in the middleware body. What an
+  existing `guard` observed: same ctx, same info, same #557 semantics (a
+  middleware that sets `rq.responseHeaders` and throws still delivers the
+  cookie on every transport's error shape) — plus in-process coverage it
+  never had. `@sigx/vite`'s dev `guard` module-specifier goes with it,
+  replaced by `serverApp` (below).
 
 - **BREAKING: the guard system is split into middleware / authentication /
   authorization (rfc-server-v4 §1–§2, #607/#609).** One `use:` chain carried

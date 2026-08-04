@@ -438,13 +438,18 @@ describe('errors fork on request content-type, never on the fn (§6.4)', () => {
         }
     });
 
-    it('a guard veto delivers guard-set headers on the form error path — the JSON path parity (#557)', async () => {
-        const res = await formPost('app/contact.server.ts/submit', new URLSearchParams({ message: 'hi' }), {}, {
-            guard: (rq) => {
-                rq.responseHeaders.set('set-cookie', 'challenge=1');
-                throw new ServerFnError(401, 'sign in first');
-            }
+    it('a middleware veto delivers middleware-set headers on the form error path — the JSON path parity (#557)', async () => {
+        restoreApp();
+        restoreApp = stubServerApp({
+            middleware: [
+                (rq) => {
+                    rq.responseHeaders.set('set-cookie', 'challenge=1');
+                    throw new ServerFnError(401, 'sign in first');
+                }
+            ],
+            authenticate: () => ({ id: 'tester' })
         });
+        const res = await formPost('app/contact.server.ts/submit', new URLSearchParams({ message: 'hi' }));
         expect(res.status).toBe(401);
         // The cookie rides along; the page's own load-bearing headers win.
         expect(res.headers.get('set-cookie')).toBe('challenge=1');
@@ -452,7 +457,7 @@ describe('errors fork on request content-type, never on the fn (§6.4)', () => {
         expect(res.headers.get('cache-control')).toBe('no-store');
     });
 
-    it('a masked handler throw keeps guard-set headers on the form error path too (#557)', async () => {
+    it('a masked handler throw keeps middleware-set headers on the form error path too (#557)', async () => {
         const boomForm = serverFn({
             form: true,
             input: PassThrough,
@@ -460,12 +465,18 @@ describe('errors fork on request content-type, never on the fn (§6.4)', () => {
                 throw new Error('db down');
             }
         });
+        restoreApp();
+        restoreApp = stubServerApp({
+            middleware: [
+                (rq) => {
+                    rq.responseHeaders.append('set-cookie', 'rotated=2');
+                }
+            ],
+            authenticate: () => ({ id: 'tester' })
+        });
         const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
         const res = await formPost('b', new URLSearchParams({ a: '1' }), {}, {
-            resolve: () => boomForm,
-            guard: (rq) => {
-                rq.responseHeaders.append('set-cookie', 'rotated=2');
-            }
+            resolve: () => boomForm
         });
         spy.mockRestore();
         expect(res.status).toBe(500);
@@ -473,14 +484,19 @@ describe('errors fork on request content-type, never on the fn (§6.4)', () => {
         expect(res.headers.get('content-type')).toContain('text/html');
     });
 
-    it('the guard runs on the form path and its rejection renders as HTML', async () => {
-        const guard = vi.fn(() => {
+    it('middleware runs on the form path and its rejection renders as HTML', async () => {
+        const middleware = vi.fn(() => {
             throw new ServerFnError(401, 'sign in first');
         });
-        const res = await formPost('app/contact.server.ts/submit', new URLSearchParams({ message: 'hi' }), {}, { guard });
+        restoreApp();
+        restoreApp = stubServerApp({
+            middleware: [middleware],
+            authenticate: () => ({ id: 'tester' })
+        });
+        const res = await formPost('app/contact.server.ts/submit', new URLSearchParams({ message: 'hi' }));
         expect(res.status).toBe(401);
         expect(res.headers.get('content-type')).toContain('text/html');
-        expect(guard).toHaveBeenCalledOnce();
+        expect(middleware).toHaveBeenCalledOnce();
     });
 });
 

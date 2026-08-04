@@ -426,14 +426,19 @@ describe('Origin on a safe method (§5.2a)', () => {
 });
 
 describe('pipeline parity on GET', () => {
-    it('the app-wide guard runs and its rejection is no-store', async () => {
-        const guard = vi.fn(() => {
+    it('app middleware runs and its rejection is no-store', async () => {
+        const middleware = vi.fn(() => {
             throw new ServerFnError(401, 'sign in first');
         });
-        const res = await get('read_fn_00000001', [{ id: 'p1' }], {}, { guard });
+        restoreApp();
+        restoreApp = stubServerApp({
+            middleware: [middleware],
+            authenticate: () => ({ id: 'tester' })
+        });
+        const res = await get('read_fn_00000001', [{ id: 'p1' }]);
         expect(res.status).toBe(401);
         expect(res.headers.get('cache-control')).toBe('no-store');
-        expect(guard).toHaveBeenCalledOnce();
+        expect(middleware).toHaveBeenCalledOnce();
     });
 
     it('the input validator rejects with a 400 on GET', async () => {

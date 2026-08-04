@@ -282,6 +282,17 @@ describe('handleServerFnRequest — stable symbols (rfc-server rev 2, N.3)', () 
     it('reads a multi-segment stable symbol off the path and derives the last segment as the name', async () => {
         const stable = '@acme/api/src/cart.server.ts/addToCart';
         const seen: { symbol: string; name: string }[] = [];
+        // App middleware is where fn info is observed now (the endpoint
+        // `guard` option is gone — rfc-server-v4 §3.1).
+        restoreApp();
+        restoreApp = stubServerApp({
+            middleware: [
+                (_rq, fn) => {
+                    seen.push(fn);
+                }
+            ],
+            authenticate: () => ({ id: 'tester' })
+        });
         const url = `${ORIGIN}/_sigx/fn/${stable}`;
         expect(url).not.toContain('%'); // #355: the whole point
         const res = await handleServerFnRequest(
@@ -290,36 +301,35 @@ describe('handleServerFnRequest — stable symbols (rfc-server rev 2, N.3)', () 
                 headers: { 'content-type': 'application/json', origin: ORIGIN },
                 body: '{"args":[2,3]}'
             }),
-            {
-                resolve: (sym) => (sym === stable ? add : null),
-                guard: (_rq, fn) => {
-                    seen.push(fn);
-                }
-            }
+            { resolve: (sym) => (sym === stable ? add : null) }
         );
         expect(res.status).toBe(200);
         await expect(res.json()).resolves.toEqual({ data: 5 });
         // resolve received every segment after the base, rejoined; the
-        // guard's info.name is the last one, even though the id carries no
-        // hashed tail.
+        // middleware's info.name is the last one, even though the id
+        // carries no hashed tail.
         expect(seen).toEqual([{ symbol: stable, name: 'addToCart', transport: 'wire' }]);
     });
 
     it('a stable id containing a hashed-looking tail cannot misparse the name', async () => {
         const tricky = 'legacy_fn_00000001/api.server.ts/run';
         const seen: string[] = [];
+        restoreApp();
+        restoreApp = stubServerApp({
+            middleware: [
+                (_rq, fn) => {
+                    seen.push(fn.name);
+                }
+            ],
+            authenticate: () => ({ id: 'tester' })
+        });
         const res = await handleServerFnRequest(
             new Request(`${ORIGIN}/_sigx/fn/${tricky}`, {
                 method: 'POST',
                 headers: { 'content-type': 'application/json', origin: ORIGIN },
                 body: '{"args":[]}'
             }),
-            {
-                resolve: () => echo,
-                guard: (_rq, fn) => {
-                    seen.push(fn.name);
-                }
-            }
+            { resolve: () => echo }
         );
         expect(res.status).toBe(200);
         expect(seen).toEqual(['run']); // the last '/' wins over the _fn_<hex8> pattern
@@ -406,11 +416,16 @@ describe('handleServerFnRequest — stable symbols (rfc-server rev 2, N.3)', () 
 
     it('hashed-symbol name derivation is unregressed', async () => {
         const seen: string[] = [];
-        await call('add_fn_00000001', { args: [1, 2] }, {}, {
-            guard: (_rq, fn) => {
-                seen.push(fn.name);
-            }
+        restoreApp();
+        restoreApp = stubServerApp({
+            middleware: [
+                (_rq, fn) => {
+                    seen.push(fn.name);
+                }
+            ],
+            authenticate: () => ({ id: 'tester' })
         });
+        await call('add_fn_00000001', { args: [1, 2] });
         expect(seen).toEqual(['add']);
     });
 });
@@ -622,35 +637,44 @@ describe('handleServerFnRequest — throwing resolve (#555)', () => {
     });
 });
 
-describe('handleServerFnRequest — guard seam', () => {
+describe('handleServerFnRequest — app middleware at the endpoint', () => {
     it('runs before the function with the symbol info and shares locals', async () => {
         const seen: unknown[] = [];
         const whoami = serverFn(async (rq) => rq.locals.user);
+        restoreApp();
+        restoreApp = stubServerApp({
+            middleware: [
+                (rq, fn) => {
+                    seen.push(fn.symbol);
+                    rq.locals.user = 'andy';
+                }
+            ],
+            authenticate: () => ({ id: 'tester' })
+        });
         const res = await handleServerFnRequest(
             new Request(`${ORIGIN}/_sigx/fn/who_fn_00000006`, {
                 method: 'POST',
                 headers: { 'content-type': 'application/json', origin: ORIGIN },
                 body: '{"args":[]}'
             }),
-            {
-                resolve: () => whoami,
-                guard: (rq, fn) => {
-                    seen.push(fn.symbol);
-                    rq.locals.user = 'andy';
-                }
-            }
+            { resolve: () => whoami }
         );
         await expect(res.json()).resolves.toEqual({ data: 'andy' });
         expect(seen).toEqual(['who_fn_00000006']);
     });
 
-    it('a guard veto becomes the response, cookies included', async () => {
-        const res = await call('add_fn_00000001', { args: [1, 2] }, {}, {
-            guard: (rq) => {
-                rq.responseHeaders.set('set-cookie', 'challenge=1');
-                throw new ServerFnError(401, 'sign in first');
-            }
+    it('a middleware veto becomes the response, cookies included', async () => {
+        restoreApp();
+        restoreApp = stubServerApp({
+            middleware: [
+                (rq) => {
+                    rq.responseHeaders.set('set-cookie', 'challenge=1');
+                    throw new ServerFnError(401, 'sign in first');
+                }
+            ],
+            authenticate: () => ({ id: 'tester' })
         });
+        const res = await call('add_fn_00000001', { args: [1, 2] });
         expect(res.status).toBe(401);
         expect(res.headers.get('set-cookie')).toBe('challenge=1');
         await expect(res.json()).resolves.toEqual({
@@ -658,41 +682,45 @@ describe('handleServerFnRequest — guard seam', () => {
         });
     });
 
-    // `guard` lives INSIDE this handler, so it covers the wire transports
-    // and nothing else — an in-process (SSR-time) call never enters it.
-    // Under rfc-server-v4 that is exactly why the option is scheduled for
-    // removal (§3.1): the transport-COMPLETE mechanism is app middleware,
-    // whose in-process pin lives in app-pipeline.test.ts ("middleware DOES
-    // run for an in-process call" — the inverse of this one). Until phase 2
-    // deletes the option, its wire-only shape stays executable here so the
-    // removal is a deliberate diff, not a silent drift.
-    it('does NOT run for an in-process call — the endpoint guard option is wire-only', async () => {
-        let guarded = 0;
+    // The endpoint `guard` option this describe used to pin ("wire-only,
+    // does NOT run in-process") is GONE (rfc-server-v4 §3.1) — its
+    // replacement is transport-COMPLETE by design, so the pin inverts: ONE
+    // middleware covers the in-process call AND the wire call of the same
+    // function. The pipeline-order pins live in app-pipeline.test.ts; this
+    // one pins completeness at the endpoint boundary specifically.
+    it('one app middleware covers BOTH the in-process call and the wire call (§3.1)', async () => {
+        let ran = 0;
+        const transports: string[] = [];
+        restoreApp();
+        restoreApp = stubServerApp({
+            middleware: [
+                (_rq, fn) => {
+                    ran += 1;
+                    transports.push(fn.transport);
+                }
+            ],
+            authenticate: () => ({ id: 'tester' })
+        });
         const secret = serverFn(async () => 'data');
-        const options: Partial<ServerFnRequestOptions> = {
-            resolve: () => secret,
-            guard: () => {
-                guarded += 1;
-            }
-        };
-        // Mounting the handler does not wrap the function: calling it
-        // directly, exactly as `useData` does during SSR, bypasses it.
-        void options;
-        await expect(secret()).resolves.toBe('data');
-        expect(guarded).toBe(0);
 
-        // …while the same function over the wire IS guarded, so the test
-        // pins the asymmetry rather than just the absence.
+        // In-process, exactly as `useData` does during SSR: covered.
+        await expect(secret()).resolves.toBe('data');
+        expect(ran).toBe(1);
+
+        // The same function over the wire: covered by the SAME middleware,
+        // exactly once (the endpoint runs the prelude; invoke does not
+        // re-run it for wire calls — the ownership contract).
         const res = await handleServerFnRequest(
             new Request(`${ORIGIN}/_sigx/fn/secret_fn_00000007`, {
                 method: 'POST',
                 headers: { 'content-type': 'application/json', origin: ORIGIN },
                 body: '{"args":[]}'
             }),
-            options as ServerFnRequestOptions
+            { resolve: () => secret }
         );
         await expect(res.json()).resolves.toEqual({ data: 'data' });
-        expect(guarded).toBe(1);
+        expect(ran).toBe(2);
+        expect(transports).toEqual(['in-process', 'wire']);
     });
 });
 
@@ -857,14 +885,18 @@ describe('handleServerFnRequest — onError observability seam (#349)', () => {
         }
     });
 
-    it('fires for masked GUARD throws too', async () => {
+    it('fires for masked MIDDLEWARE throws too', async () => {
         const onError = vi.fn();
-        const res = await call('add_fn_00000001', { args: [1, 2] }, {}, {
-            onError,
-            guard: () => {
-                throw new Error('guard exploded');
-            }
+        restoreApp();
+        restoreApp = stubServerApp({
+            middleware: [
+                () => {
+                    throw new Error('middleware exploded');
+                }
+            ],
+            authenticate: () => ({ id: 'tester' })
         });
+        const res = await call('add_fn_00000001', { args: [1, 2] }, {}, { onError });
         expect(res.status).toBe(500);
         expect(onError).toHaveBeenCalledTimes(1);
     });
@@ -1021,23 +1053,33 @@ describe('handleServerFnRequest — rich wire serialization (rfc-server §4)', (
         expect(res.status).toBe(500);
     });
 
-    it('the guard runs BEFORE wire revive — a veto beats a malformed encoded arg (#559)', async () => {
+    it('the prelude runs BEFORE wire revive — a middleware veto beats a malformed encoded arg (#559)', async () => {
         // The codec's revive handlers do attacker-directed work (BigInt digit
         // conversion, RegExp compilation), so an unvetted request must never
-        // reach them: the guard's 401 wins over the reviver's 400.
-        const res = await call('echo_fn_00000010', { args: [{ $bigint: 'not a number' }] }, {}, {
-            guard: (rq) => {
-                rq.responseHeaders.set('set-cookie', 'challenge=1');
-                throw new ServerFnError(401, 'sign in first');
-            }
+        // reach them: the middleware's 401 wins over the reviver's 400.
+        restoreApp();
+        restoreApp = stubServerApp({
+            middleware: [
+                (rq) => {
+                    rq.responseHeaders.set('set-cookie', 'challenge=1');
+                    throw new ServerFnError(401, 'sign in first');
+                }
+            ],
+            authenticate: () => ({ id: 'tester' })
         });
+        const res = await call('echo_fn_00000010', { args: [{ $bigint: 'not a number' }] });
         expect(res.status).toBe(401);
-        // And the #557 rule holds on the post-guard revive 400 too:
-        const reject = await call('echo_fn_00000010', { args: [{ $bigint: 'not a number' }] }, {}, {
-            guard: (rq) => {
-                rq.responseHeaders.set('set-cookie', 'trace=1');
-            }
+        // And the #557 rule holds on the post-prelude revive 400 too:
+        restoreApp();
+        restoreApp = stubServerApp({
+            middleware: [
+                (rq) => {
+                    rq.responseHeaders.set('set-cookie', 'trace=1');
+                }
+            ],
+            authenticate: () => ({ id: 'tester' })
         });
+        const reject = await call('echo_fn_00000010', { args: [{ $bigint: 'not a number' }] });
         expect(reject.status).toBe(400);
         expect(reject.headers.get('set-cookie')).toBe('trace=1');
     });

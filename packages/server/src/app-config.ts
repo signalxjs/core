@@ -20,13 +20,31 @@
 
 import type { ServerFnContext } from './context';
 import { ServerFnError } from './errors';
-import type { ServerFnInfo, ServerMiddleware, ServerPolicy, ServerPolicyOp } from './types';
+import type {
+    EndpointPosture,
+    ServerFnInfo,
+    ServerMiddleware,
+    ServerPolicy,
+    ServerPolicyOp
+} from './types';
 
-/** What `createServerApp` stamps — the pipeline third of its options. */
+/** What `createServerApp` stamps — pipeline, posture, and the codec. */
 export interface ServerAppConfig {
     middleware?: readonly ServerMiddleware[];
     authenticate?: (rq: ServerFnContext) => unknown | Promise<unknown>;
     authorize?: ServerPolicy | readonly ServerPolicy[];
+    /**
+     * The app's endpoint posture (rfc-server-v4 §3.1) — consulted by
+     * `handleServerFnRequest` for any wire knob the call's own options
+     * leave undefined (explicit wins; the built-in default is last).
+     */
+    posture?: EndpointPosture;
+    /**
+     * Round-trips a principal as a string — the cross-hop propagation
+     * contract `@sigx/actors` consumes (rfc-server-v4 §7). Core stores it;
+     * it plays no role in this package's own pipeline.
+     */
+    codec?: { encode(principal: unknown): string; decode(encoded: string): unknown | null };
 }
 
 /** The seam, typed at the single accessor (`docs/seams.md` rule 2). */
