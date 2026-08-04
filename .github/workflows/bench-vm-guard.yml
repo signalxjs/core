@@ -44,7 +44,13 @@ env:
   # "Bench" — matching on the name would make the guard see itself as in-flight
   # and never deallocate anything. Paths absent from a given repo simply never
   # match, which is how `actors` (bench.yml only) works without special-casing.
-  BENCH_RUN_PATHS: '(bench|bench-nightly|bench-baseline)\.yml$'
+  # A character class, not `\.`: this string is interpolated into a jq string
+  # literal (`test("$BENCH_RUN_PATHS")`), where `\.` is an INVALID escape —
+  # jq refused to parse it, every query "failed → assume busy", and the guard
+  # never deallocated the VM once (found because a baseline recording met an
+  # orphaned load the guard should have cleared). `[.]` means a literal dot in
+  # the regex and needs no escaping in a jq string.
+  BENCH_RUN_PATHS: '(bench|bench-nightly|bench-baseline)[.]yml$'
 
 jobs:
   deallocate-if-idle:
