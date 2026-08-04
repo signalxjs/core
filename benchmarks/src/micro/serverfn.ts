@@ -27,6 +27,7 @@
  * per key — a `JSON.parse` reviver, a codec walk — separates there.
  */
 import { serverFn, serverStream, ServerFnError } from '@sigx/server';
+import './app.ts';
 import { handleServerFnRequest } from '@sigx/server/server';
 import { assert, type MicroBench, type MicroSuite } from './types.ts';
 import { WIDE_ARG_KEYS, plainList, richPayload, smallArgs, wideArgs } from '../fixtures/payloads.ts';

@@ -23,6 +23,7 @@
  */
 import { serverFn } from '@sigx/server';
 import { handleServerFnRequest } from '@sigx/server/server';
+import './app.ts';
 import { assert, type MicroBench, type MicroSuite } from './types.ts';
 
 const ORIGIN = 'http://localhost';

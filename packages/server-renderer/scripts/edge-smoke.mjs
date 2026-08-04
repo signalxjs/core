@@ -12,7 +12,7 @@ import { jsx, component, defineApp, useData, useHead } from 'sigx';
 import { createSSR, useResponse, createFetchHandler } from '@sigx/server-renderer';
 import { resumePlugin } from '@sigx/resume/server';
 import { serverFn } from '@sigx/server';
-import { handleServerFnRequest } from '@sigx/server/server';
+import { handleServerFnRequest, createServerApp } from '@sigx/server/server';
 
 const Stats = component(() => {
     const stats = useData('edge:stats', async () => {
@@ -110,8 +110,14 @@ function assert(cond, message) {
 }
 
 // 5) @sigx/server is WinterCG-clean too (rfc-deploy §6 — closing the
-// standing gap): a server-fn POST round-trip through the prod dist.
+// standing gap): a server-fn POST round-trip through the prod dist. The
+// runtime is fail-closed since rfc-server-v4 (a bare fn denies 401), so
+// this smoke stamps a real app — which also proves createServerApp and the
+// whole pipeline (middleware slot, authenticate memo, identity gate,
+// authorize) are WinterCG-clean.
 {
+    const app = createServerApp({ authenticate: () => ({ id: 'edge-smoke' }) });
+    void app;
     const add = serverFn(async (_rq, a, b) => a + b);
     const res = await handleServerFnRequest(
         new Request('https://edge.test/_sigx/fn/add_fn_00000001', {
