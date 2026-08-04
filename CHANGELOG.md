@@ -68,9 +68,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   `__sigxGuardChecked`/`__SIGX_GUARDS_CHECKED__` machinery is deleted — the
   fail-closed runtime closes rfc-server-v3 §1.5's unanalyzed-module gap it
   existed to mitigate. The old→new observable table, per input shape, is in
-  `packages/server/CHANGELOG.md`; `createServerApp` (the platform value and
-  mounts) lands in phase 2 (#610), the sharpened `requireAuthorization`
-  build gate in phase 3 (#611).
+  `packages/server/CHANGELOG.md`; **the migration guide — including the
+  three-cut recipe for a conflated pre-v4 guard — is
+  [`docs/migrations/0.15-guard-split.md`](docs/migrations/0.15-guard-split.md)**;
+  `createServerApp` (the platform value and mounts) lands in phase 2 (#610),
+  the sharpened `requireAuthorization` build gate in phase 3 (#611).
 
 ### Added
 
