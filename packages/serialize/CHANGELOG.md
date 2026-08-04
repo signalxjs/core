@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-08-04
+
 ### Added
 
 - **`@sigx/serialize/bytes` — an opt-in binary vocabulary (#569).** One

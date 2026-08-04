@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-08-04
+
 **Added: streamed responses extend the server-function scope to end-of-body (#571).**
 
 - `createFetchHandler`'s streaming return now registers a `keepAlive(until)`

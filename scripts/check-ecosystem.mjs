@@ -5,7 +5,7 @@
  * The manifest is the single source of truth for which repos consume sigx core and in
  * what ORDER they are aligned and released after a core release. It is read by
  * `release.yml`'s consumer fan-out, by `docs/ecosystem-release.md`, and by the
- * orchestrator in `.github/workflows-ai/`. A stale manifest silently mis-orders a
+ * orchestrator in `.claude/workflows/`. A stale manifest silently mis-orders a
  * release — exactly how the hardcoded fan-out list in `release.yml` came to be missing
  * six live consumers. This script makes that failure loud instead.
  *

@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-08-04
+
 ### Added
 
 - **`createServerApp` — the server platform value (rfc-server-v4 §3,
