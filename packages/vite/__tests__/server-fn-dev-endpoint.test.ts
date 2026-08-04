@@ -65,6 +65,9 @@ interface Mounted {
     origin: string;
     /** Hashed wire symbol for an export of the fixture module. */
     symbol(name: 'read' | 'never'): string;
+    /** Everything the plugin sent to the dev logger's `error` — assertable,
+     *  never swallowed (a no-op logger hid unexpected logs when debugging). */
+    loggerErrors: string[];
     close(): Promise<void>;
 }
 
@@ -92,10 +95,16 @@ async function mount(
     let middleware:
         | ((req: unknown, res: unknown, next: (err?: unknown) => void) => void)
         | undefined;
+    const loggerErrors: string[] = [];
     plugin.configureServer({
         middlewares: { use: (fn: typeof middleware) => (middleware = fn) },
         watcher: { add: () => {} },
-        config: { logger: { warn: () => {}, error: () => {} } },
+        config: {
+            logger: {
+                warn: () => {},
+                error: (msg: unknown) => loggerErrors.push(String(msg))
+            }
+        },
         ssrLoadModule: (id: string) => {
             if (id === '@sigx/server/node') return Promise.resolve(serverFnNode);
             const mod = modules[id] ?? liveModule;
@@ -118,6 +127,7 @@ async function mount(
 
     const handle: Mounted = {
         origin: `http://127.0.0.1:${port}`,
+        loggerErrors,
         symbol(name) {
             const match = new RegExp(`\\["(${name}_fn_[0-9a-f]{8})"\\]`).exec(registry);
             if (!match) throw new Error(`no symbol for ${name} in the registry`);
@@ -270,5 +280,12 @@ describe('sigxServer — the dev endpoint forwards every endpoint option (#561)'
         // 'error' body from next(err).
         expect(res.status).toBe(200);
         await expect(res.json()).resolves.toEqual({ data: 'read:p1' });
+        // And LOGGED — both the eager configureServer load and the
+        // per-request load report the broken module.
+        expect(dev.loggerErrors.length).toBeGreaterThanOrEqual(1);
+        for (const entry of dev.loggerErrors) {
+            expect(entry).toContain('/src/server-app.ts');
+            expect(entry).toContain('mid-edit syntax error');
+        }
     });
 });
