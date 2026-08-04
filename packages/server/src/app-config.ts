@@ -150,8 +150,20 @@ function authenticationRequired(): ServerFnError {
     return new ServerFnError(401, 'Authentication required');
 }
 
-/** Latch for the once-per-process unconfigured-deny hint. */
-let hintedUnconfigured = false;
+/**
+ * Latch for the once-per-process unconfigured-deny hint — on `globalThis`
+ * under a registry symbol, not module-local: in dev the module runner and
+ * Node can hold two copies of this module (the `context.ts:56-65` hazard),
+ * and a module-local latch would fire the "once per process" hint once per
+ * copy, contradicting its own message.
+ */
+const HINTED = Symbol.for('sigx.serverfn.unconfiguredHint');
+function hintOnce(): boolean {
+    const seam = globalThis as Record<symbol, boolean | undefined>;
+    if (seam[HINTED]) return false;
+    seam[HINTED] = true;
+    return true;
+}
 
 /**
  * Steps 1–3 of the pipeline (rfc-server-v4 §1.3): app middleware, in
@@ -172,8 +184,7 @@ export async function runServerPrelude(
     }
     const p = await resolvePrincipal(rq);
     if (p === null && !allowAnonymous) {
-        if (__DEV__ && !hintedUnconfigured && config === undefined) {
-            hintedUnconfigured = true;
+        if (__DEV__ && config === undefined && hintOnce()) {
             console.warn(
                 `[sigx server] denying "${info.name || info.symbol}" — no server app is ` +
                 `configured in this process, so every function not declaring ` +

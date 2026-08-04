@@ -82,10 +82,14 @@ export interface ServerPolicyOp {
  * `__sigxFn`: for an in-process call it runs everything — middleware →
  * authenticate → identity gate → arity → `input` validation → authorize →
  * handler; a wire transport owns the first three itself, pre-decode, and
- * `invoke` runs the rest (rfc-server-v4 §1.3's ownership contract — a
- * hand-rolled transport that skips its half loses middleware only, never
- * the authorization decision). Transports call this with a live context;
- * the public callable wraps it with a detached one.
+ * `invoke` runs the rest (rfc-server-v4 §1.3's ownership contract). A
+ * hand-rolled transport that skips its half never skips the authorization
+ * DECISION — authorization (which pulls authentication on demand) is
+ * inside `invoke` — but it does lose middleware, and it loses the
+ * pre-decode ordering: without the transport-side gate, anonymous
+ * attacker bytes reach the arity gate and the validator before the deny
+ * lands, where the real endpoint refuses them first. Transports call this
+ * with a live context; the public callable wraps it with a detached one.
  */
 export type ServerFnInvoke = (
     rq: ServerFnContext,
