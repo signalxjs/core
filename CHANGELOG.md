@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.15.2] — 2026-08-05
+
+### Fixed
+
+- **The pipeline accessors were unreachable on workerd (#630/#631).**
+  `serverFeature`, `principal`, `requirePrincipal`, `setPrincipal` and
+  `requireAuthenticated` shipped in 0.15.1 on the package root only. The
+  root carries a `browser` condition, and `wrangler` bundles Workers with
+  that condition — so a Cloudflare deployment resolved the stubs and threw
+  *"serverFeature() reached the browser unextracted"* at runtime, **on a
+  genuine server**. They are now re-exported from `@sigx/server/server`,
+  which has no `browser` branch, for packs whose runtime is server-only
+  everywhere (`@sigx/actors` on Durable Objects is the case that surfaced
+  it). The root exports are unchanged: an app's own `*.server.ts` files are
+  extracted by the build and never reach a client bundle, so the root stays
+  the right door for user code.
+
 ## [0.15.1] — 2026-08-04
 
 ### Added
@@ -1371,7 +1388,8 @@ Initial public release of the SignalX (`sigx`) ecosystem on npm. Six packages pu
 - Node `^20.19.0 || >=22.12.0`
 - `@sigx/vite` peer-depends on `vite >=8.0.0`
 
-[Unreleased]: https://github.com/signalxjs/core/compare/v0.15.1...HEAD
+[Unreleased]: https://github.com/signalxjs/core/compare/v0.15.2...HEAD
+[0.15.2]: https://github.com/signalxjs/core/compare/v0.15.1...v0.15.2
 [0.15.1]: https://github.com/signalxjs/core/compare/v0.15.0...v0.15.1
 [0.15.0]: https://github.com/signalxjs/core/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/signalxjs/core/compare/v0.13.0...v0.14.0
