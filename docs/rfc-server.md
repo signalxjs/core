@@ -13,6 +13,15 @@ one way to do it.
 > design and why it lost. v3 also corrects a claim this document made in four
 > places: the endpoint `guard` is **wire-only**, not "every transport" (#493).
 
+> **v4 lives in `rfc-server-v4.md`** (signalxjs/core#607): the guard system is
+> split into middleware / authentication / authorization, and `createServerApp`
+> becomes the app-wide policy holder. **Breaking**: it removes `use:`,
+> `unguarded`, `serverFnPreset` and the endpoint `guard` option, replaces the
+> `info.symbol === ''` transport contract with `info.transport`, and renames
+> `requireGuards` to `requireAuthorization`. This document's §2.1 guard block
+> and every `use:`-era claim are superseded where v4 says so (v4 §6 is the
+> ledger).
+
 > **rev-2 changes** (native clients — the third role): v1 modeled two roles,
 > a same-origin browser client and a Node SSR renderer. A **lynx or terminal
 > app calling a remote sigx server** is a third role with no representation —

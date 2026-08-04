@@ -2,6 +2,12 @@
 
 Status: **accepted** (§2's mechanism decided, #503; implementation phased in
 §5). Tracking: signalxjs/core#491.
+**Amended by `rfc-server-v4.md`** (signalxjs/core#607): §1 (the guard system is
+split into middleware / authentication / authorization — `use:`, `unguarded`,
+`serverFnPreset` and `requireGuards` are superseded), §2.8's `ServerFnGuard`
+naming paragraph, and two §3 non-goals (the process-level-chain rejection is
+rewritten for fail-closed resolution; the scope-carried rejection stands).
+v4 §6 is the decision-by-decision ledger.
 Amends `rfc-server.md` §2.1 (`serverFnPreset`, #398) and **replaces** its §2.2
 (`defineServerService`, #399) — that specification has been **removed from
 `rfc-server.md`** rather than deferred, so this document is the only place the
