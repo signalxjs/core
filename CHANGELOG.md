@@ -6,6 +6,37 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.15.1] — 2026-08-04
+
+### Added
+
+- **`ServerFeatureContext` — the endpoint-family seam, promoted
+  (rfc-server-v4 §3.2, #625/#626).** §3.2 held this internal until a second
+  endpoint family shipped, "with the shape recorded now so that feature does
+  not get to invent it"; `@sigx/actors` (§7) is that feature. It is the
+  pipeline an endpoint family other than `serverFns` runs so the two cannot
+  drift apart on the auth path: `prelude` (middleware → authenticate →
+  identity gate) and `enter` (the same, from a raw `Request`), `authorize`
+  (phase B, carrying `op.resource` for per-instance policies), plus the
+  app's `posture`, its `principalCodec`, and `claimBase`. Reached as
+  `serverFeature()` from `@sigx/server`, or `app.feature()` from a
+  `ServerApp` — both resolve `__SIGX_SERVER_APP__` per call, so a feature
+  can hold one at module scope and a call site with no platform value in
+  scope still runs the whole pipeline. Fail-closed throughout: they are the
+  same functions the serverFn path runs, not a second implementation.
+  `EndpointPosture` is now re-exported from the package root.
+
+### Fixed
+
+- **Mount bases are claimed on the app that owns them (#626).** Base
+  claiming resolved the *stamped* app, so a mount on a stale `ServerApp`
+  handle — dev HMR having re-evaluated the server-app module and stamped a
+  newer app — recorded against the live app's registry instead of its own,
+  which both invents overlaps against a stranger's bases and loses track of
+  its own (#543). `createServerApp` now claims against the config it
+  captured; the feature seam keeps resolving per call, which is what it
+  means.
+
 ## [0.15.0] — 2026-08-04
 
 ### Changed
@@ -1340,7 +1371,8 @@ Initial public release of the SignalX (`sigx`) ecosystem on npm. Six packages pu
 - Node `^20.19.0 || >=22.12.0`
 - `@sigx/vite` peer-depends on `vite >=8.0.0`
 
-[Unreleased]: https://github.com/signalxjs/core/compare/v0.15.0...HEAD
+[Unreleased]: https://github.com/signalxjs/core/compare/v0.15.1...HEAD
+[0.15.1]: https://github.com/signalxjs/core/compare/v0.15.0...v0.15.1
 [0.15.0]: https://github.com/signalxjs/core/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/signalxjs/core/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/signalxjs/core/compare/v0.12.0...v0.13.0

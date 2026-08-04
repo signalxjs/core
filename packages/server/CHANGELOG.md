@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.15.1] - 2026-08-04
+
 ### Added
 
 - **`ServerFeatureContext` — the endpoint-family seam, promoted
