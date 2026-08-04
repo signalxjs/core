@@ -213,3 +213,30 @@ describe('serverFeature() — posture, codec, base claiming', () => {
         );
     });
 });
+
+describe('the server entry re-exports the pipeline accessors', () => {
+    it('resolves the REAL functions, not the browser stubs', async () => {
+        // Regression for the Cloudflare break: `wrangler` bundles Workers
+        // with the `browser` condition, so the package ROOT resolves to the
+        // throwing stubs even though a Worker is a server. A pack whose
+        // runtime is server-only everywhere imports from this entry, which
+        // has no `browser` branch.
+        const entry = await import('../src/server/index');
+        expect(typeof entry.serverFeature).toBe('function');
+        expect(typeof entry.principal).toBe('function');
+        expect(typeof entry.requirePrincipal).toBe('function');
+        expect(typeof entry.setPrincipal).toBe('function');
+        expect(typeof entry.requireAuthenticated).toBe('function');
+        // Same objects the root exports — one implementation, two doors.
+        // ALL five, not a sample: the point of the re-export is that a pack
+        // can switch entries wholesale, and a half-pinned guarantee would
+        // let one accessor drift back to root-only and break workerd again
+        // for exactly the reason this test exists.
+        const root = await import('../src/index');
+        expect(entry.serverFeature).toBe(root.serverFeature);
+        expect(entry.principal).toBe(root.principal);
+        expect(entry.requirePrincipal).toBe(root.requirePrincipal);
+        expect(entry.setPrincipal).toBe(root.setPrincipal);
+        expect(entry.requireAuthenticated).toBe(root.requireAuthenticated);
+    });
+});
