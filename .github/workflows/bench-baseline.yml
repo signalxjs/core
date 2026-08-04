@@ -115,6 +115,16 @@ jobs:
         run: git --no-pager diff --stat benchmarks/results/baseline.json
 
       - uses: peter-evans/create-pull-request@v6
+        # The bench VM's runner service starts without $HOME in its
+        # environment, and this action shells out to `git config --global`,
+        # which dies with `fatal: $HOME not set` — AFTER a successful
+        # recording (run 30920523268 stranded one on the VM's workspace).
+        # Hosted runners always set HOME, which is why only this workflow
+        # ever hit it. `runner.temp` rather than the service user's home:
+        # always present and writable, and the only thing the action needs a
+        # HOME for is a scratch global gitconfig (safe.directory).
+        env:
+          HOME: ${{ runner.temp }}
         with:
           base: ${{ inputs.ref }}
           branch: bench/rebaseline-${{ inputs.ref }}
