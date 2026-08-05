@@ -4,69 +4,69 @@
       "scenario": "small-page",
       "framework": "sigx",
       "stats": {
-        "avgNs": 12127.082304306265,
-        "minNs": 10245,
-        "maxNs": 1000717,
-        "p25Ns": 10956,
-        "p50Ns": 11196.999999523163,
-        "p75Ns": 11648,
-        "p99Ns": 31939,
-        "samples": 56121
+        "avgNs": 12162.83145726141,
+        "minNs": 10395,
+        "maxNs": 832724.9999990463,
+        "p25Ns": 11007,
+        "p50Ns": 11247,
+        "p75Ns": 11677.000000476837,
+        "p99Ns": 32267.999999523163,
+        "samples": 55968
       }
     },
     {
       "scenario": "small-page",
       "framework": "vue",
       "stats": {
-        "avgNs": 19419.778968905794,
-        "minNs": 12799,
-        "maxNs": 6426473,
-        "p25Ns": 13481,
-        "p50Ns": 14031,
-        "p75Ns": 15703,
-        "p99Ns": 37506,
-        "samples": 34701
+        "avgNs": 19799.16227620359,
+        "minNs": 12930,
+        "maxNs": 6798603,
+        "p25Ns": 13730,
+        "p50Ns": 14312,
+        "p75Ns": 15974,
+        "p99Ns": 37997,
+        "samples": 34127
       }
     },
     {
       "scenario": "small-page",
       "framework": "react",
       "stats": {
-        "avgNs": 14337.653309992955,
-        "minNs": 9534,
-        "maxNs": 5403083,
-        "p25Ns": 10726,
-        "p50Ns": 11378,
-        "p75Ns": 14281,
-        "p99Ns": 29835,
-        "samples": 46843
+        "avgNs": 14561.763741980232,
+        "minNs": 9694,
+        "maxNs": 5278430,
+        "p25Ns": 11047,
+        "p50Ns": 11808,
+        "p75Ns": 14382,
+        "p99Ns": 30556,
+        "samples": 46136
       }
     },
     {
       "scenario": "small-page",
       "framework": "preact",
       "stats": {
-        "avgNs": 8613.081199324102,
+        "avgNs": 8848.712763499463,
         "minNs": 6439,
-        "maxNs": 6379723,
-        "p25Ns": 6831,
-        "p50Ns": 7000,
-        "p75Ns": 7241,
-        "p99Ns": 15824,
-        "samples": 76343
+        "maxNs": 7041980,
+        "p25Ns": 6870,
+        "p50Ns": 7051,
+        "p75Ns": 7321,
+        "p99Ns": 16025,
+        "samples": 73577
       }
     },
     {
       "scenario": "large-table-1k",
       "framework": "sigx",
       "stats": {
-        "avgNs": 3884195.1028571427,
-        "minNs": 3581160,
-        "maxNs": 5791337,
-        "p25Ns": 3655843,
-        "p50Ns": 3706469,
-        "p75Ns": 3826580,
-        "p99Ns": 5207122,
+        "avgNs": 3906561.702857143,
+        "minNs": 3621351,
+        "maxNs": 6267301,
+        "p25Ns": 3676705,
+        "p50Ns": 3727952,
+        "p75Ns": 3794202,
+        "p99Ns": 5507226,
         "samples": 175
       }
     },
@@ -74,27 +74,27 @@
       "scenario": "large-table-1k",
       "framework": "vue",
       "stats": {
-        "avgNs": 3363769.58823528,
-        "minNs": 3084894,
-        "maxNs": 6840967,
-        "p25Ns": 3115399,
-        "p50Ns": 3195880.9999990463,
-        "p75Ns": 3228579.9999990463,
-        "p99Ns": 5327460,
-        "samples": 204
+        "avgNs": 3350840.7121951776,
+        "minNs": 3129289.0000009537,
+        "maxNs": 6339760,
+        "p25Ns": 3158933.9999990463,
+        "p50Ns": 3176851,
+        "p75Ns": 3209249.0000019073,
+        "p99Ns": 4439716,
+        "samples": 205
       }
     },
     {
       "scenario": "large-table-1k",
       "framework": "react",
       "stats": {
-        "avgNs": 3180057.9859813037,
-        "minNs": 2720495,
-        "maxNs": 12711704,
-        "p25Ns": 2759343,
-        "p50Ns": 2780846,
-        "p75Ns": 2812353,
-        "p99Ns": 10348146,
+        "avgNs": 3172031.6028037337,
+        "minNs": 2708231,
+        "maxNs": 13123761.999999046,
+        "p25Ns": 2740513,
+        "p50Ns": 2756687,
+        "p75Ns": 2781992,
+        "p99Ns": 10990951,
         "samples": 214
       }
     },
@@ -102,27 +102,27 @@
       "scenario": "large-table-1k",
       "framework": "preact",
       "stats": {
-        "avgNs": 2410641.3120567375,
-        "minNs": 1957286,
-        "maxNs": 10970152,
-        "p25Ns": 1980962,
-        "p50Ns": 1995023,
-        "p75Ns": 2011467,
-        "p99Ns": 10247124,
-        "samples": 282
+        "avgNs": 2499935.3125,
+        "minNs": 2002397,
+        "maxNs": 11349892,
+        "p25Ns": 2022618,
+        "p50Ns": 2035096,
+        "p75Ns": 2055267,
+        "p99Ns": 10450787,
+        "samples": 272
       }
     },
     {
       "scenario": "large-table",
       "framework": "sigx",
       "stats": {
-        "avgNs": 50118428.8,
-        "minNs": 49544436,
-        "maxNs": 51004323,
-        "p25Ns": 49731728,
-        "p50Ns": 49780020,
-        "p75Ns": 50114604,
-        "p99Ns": 50868919,
+        "avgNs": 51340085.5,
+        "minNs": 50688346,
+        "maxNs": 52654488,
+        "p25Ns": 50995008,
+        "p50Ns": 51040988,
+        "p75Ns": 51541732,
+        "p99Ns": 51675444,
         "samples": 10
       }
     },
@@ -130,13 +130,13 @@
       "scenario": "large-table",
       "framework": "vue",
       "stats": {
-        "avgNs": 64122531.25,
-        "minNs": 46547095,
-        "maxNs": 75842556,
-        "p25Ns": 55788934,
-        "p50Ns": 67709586,
-        "p75Ns": 70490851,
-        "p99Ns": 73189779,
+        "avgNs": 65943558.416666664,
+        "minNs": 50136054,
+        "maxNs": 78612872,
+        "p25Ns": 55991016,
+        "p50Ns": 69607413,
+        "p75Ns": 71345928,
+        "p99Ns": 73862345,
         "samples": 12
       }
     },
@@ -144,13 +144,13 @@
       "scenario": "large-table",
       "framework": "react",
       "stats": {
-        "avgNs": 40368724.85714286,
-        "minNs": 32626154,
-        "maxNs": 52529549,
-        "p25Ns": 33285596,
-        "p50Ns": 34352211,
-        "p75Ns": 46586063,
-        "p99Ns": 49166667,
+        "avgNs": 39598675.14285714,
+        "minNs": 32383745,
+        "maxNs": 54245366,
+        "p25Ns": 33113264,
+        "p50Ns": 34106331,
+        "p75Ns": 46229949,
+        "p99Ns": 49218422,
         "samples": 14
       }
     },
@@ -158,13 +158,13 @@
       "scenario": "large-table",
       "framework": "preact",
       "stats": {
-        "avgNs": 35199425.5625,
-        "minNs": 21139445,
-        "maxNs": 49903716,
-        "p25Ns": 23107918,
-        "p50Ns": 30358851,
-        "p75Ns": 44762278,
-        "p99Ns": 49892851,
+        "avgNs": 35424411,
+        "minNs": 21208076,
+        "maxNs": 50367032,
+        "p25Ns": 21581829,
+        "p50Ns": 31487028,
+        "p75Ns": 46559665,
+        "p99Ns": 48248440,
         "samples": 16
       }
     },
@@ -172,13 +172,13 @@
       "scenario": "deep-tree",
       "framework": "sigx",
       "stats": {
-        "avgNs": 530467075.5,
-        "minNs": 511196256.0000019,
-        "maxNs": 554140369,
-        "p25Ns": 516886160,
-        "p50Ns": 521506634,
-        "p75Ns": 550574567,
-        "p99Ns": 553066011.9999981,
+        "avgNs": 543065900.0833331,
+        "minNs": 521514761.0000019,
+        "maxNs": 582937509.9999981,
+        "p25Ns": 530319199,
+        "p50Ns": 532458265,
+        "p75Ns": 546128270,
+        "p99Ns": 578762684,
         "samples": 12
       }
     },
@@ -186,13 +186,13 @@
       "scenario": "deep-tree",
       "framework": "vue",
       "stats": {
-        "avgNs": 782673563.3333334,
-        "minNs": 689975550,
-        "maxNs": 922914219,
-        "p25Ns": 695577294,
-        "p50Ns": 767055552,
-        "p75Ns": 814696097,
-        "p99Ns": 913226065,
+        "avgNs": 830752535.5833334,
+        "minNs": 715200521,
+        "maxNs": 1037442525,
+        "p25Ns": 732974310,
+        "p50Ns": 814368730,
+        "p75Ns": 878805211,
+        "p99Ns": 926454606,
         "samples": 12
       }
     },
@@ -200,13 +200,13 @@
       "scenario": "deep-tree",
       "framework": "react",
       "stats": {
-        "avgNs": 308348478.7499997,
-        "minNs": 269142413.9999924,
-        "maxNs": 372504030,
-        "p25Ns": 272488415,
-        "p50Ns": 309589273,
-        "p75Ns": 321201040,
-        "p99Ns": 346050301.0000038,
+        "avgNs": 320314258.9999997,
+        "minNs": 281784298,
+        "maxNs": 378026714,
+        "p25Ns": 293718385,
+        "p50Ns": 324969783,
+        "p75Ns": 325548501.9999962,
+        "p99Ns": 347456138,
         "samples": 12
       }
     },
@@ -214,13 +214,13 @@
       "scenario": "deep-tree",
       "framework": "preact",
       "stats": {
-        "avgNs": 218088117.66666666,
-        "minNs": 202759909,
-        "maxNs": 251902212,
-        "p25Ns": 204379856,
-        "p50Ns": 214879832,
-        "p75Ns": 219545362,
-        "p99Ns": 235662776,
+        "avgNs": 220334604,
+        "minNs": 207602580,
+        "maxNs": 258701570,
+        "p25Ns": 209386305,
+        "p50Ns": 218499277,
+        "p75Ns": 222133253,
+        "p99Ns": 229726692,
         "samples": 12
       }
     },
@@ -228,41 +228,41 @@
       "scenario": "attr-style-heavy",
       "framework": "sigx",
       "stats": {
-        "avgNs": 2728338.5634920634,
-        "minNs": 2516517,
-        "maxNs": 4892001,
-        "p25Ns": 2582035,
-        "p50Ns": 2618551,
-        "p75Ns": 2680844,
-        "p99Ns": 4151678,
-        "samples": 252
+        "avgNs": 2651613.906614786,
+        "minNs": 2452868,
+        "maxNs": 4727333,
+        "p25Ns": 2526199,
+        "p50Ns": 2554392,
+        "p75Ns": 2600481,
+        "p99Ns": 3994122,
+        "samples": 257
       }
     },
     {
       "scenario": "attr-style-heavy",
       "framework": "vue",
       "stats": {
-        "avgNs": 2989700.252173913,
-        "minNs": 2848687,
-        "maxNs": 5916764,
-        "p25Ns": 2875607,
-        "p50Ns": 2889157,
-        "p75Ns": 2904751,
-        "p99Ns": 4184146,
-        "samples": 230
+        "avgNs": 3072344.035714286,
+        "minNs": 2930019,
+        "maxNs": 5989261,
+        "p25Ns": 2952082,
+        "p50Ns": 2963559,
+        "p75Ns": 2981246,
+        "p99Ns": 4148095,
+        "samples": 224
       }
     },
     {
       "scenario": "attr-style-heavy",
       "framework": "react",
       "stats": {
-        "avgNs": 3324727.4660194176,
-        "minNs": 3007235,
-        "maxNs": 7349500,
-        "p25Ns": 3051091,
-        "p50Ns": 3081387,
-        "p75Ns": 3115148,
-        "p99Ns": 6148181,
+        "avgNs": 3305100.4029126214,
+        "minNs": 2957590,
+        "maxNs": 8372916,
+        "p25Ns": 3003059,
+        "p50Ns": 3047436,
+        "p75Ns": 3088467,
+        "p99Ns": 6210265,
         "samples": 206
       }
     },
@@ -270,83 +270,83 @@
       "scenario": "attr-style-heavy",
       "framework": "preact",
       "stats": {
-        "avgNs": 2328163.894557823,
-        "minNs": 2190226,
-        "maxNs": 5914631,
-        "p25Ns": 2224317,
-        "p50Ns": 2240872,
-        "p75Ns": 2258408,
-        "p99Ns": 4199770,
-        "samples": 294
+        "avgNs": 2259565.709570957,
+        "minNs": 2121900,
+        "maxNs": 5902060,
+        "p25Ns": 2160848,
+        "p50Ns": 2169952,
+        "p75Ns": 2181179,
+        "p99Ns": 4117369,
+        "samples": 303
       }
     },
     {
       "scenario": "escape-heavy",
       "framework": "sigx",
       "stats": {
-        "avgNs": 545941.3698412698,
-        "minNs": 505511,
-        "maxNs": 1915433,
-        "p25Ns": 522506,
-        "p50Ns": 528725,
-        "p75Ns": 534164,
-        "p99Ns": 1500738,
-        "samples": 1260
+        "avgNs": 544238.6947697111,
+        "minNs": 507365,
+        "maxNs": 2222932,
+        "p25Ns": 521085,
+        "p50Ns": 526454,
+        "p75Ns": 532313,
+        "p99Ns": 1534154,
+        "samples": 1281
       }
     },
     {
       "scenario": "escape-heavy",
       "framework": "vue",
       "stats": {
-        "avgNs": 312622.993733214,
-        "minNs": 285510,
-        "maxNs": 1115709,
-        "p25Ns": 297758,
-        "p50Ns": 300923,
-        "p75Ns": 306602,
-        "p99Ns": 899324,
-        "samples": 2234
+        "avgNs": 314565.63828828826,
+        "minNs": 287534,
+        "maxNs": 1191647,
+        "p25Ns": 298009,
+        "p50Ns": 302416,
+        "p75Ns": 307233,
+        "p99Ns": 982562,
+        "samples": 2220
       }
     },
     {
       "scenario": "escape-heavy",
       "framework": "react",
       "stats": {
-        "avgNs": 315311.8155164637,
-        "minNs": 288034,
-        "maxNs": 1672086,
-        "p25Ns": 301865,
-        "p50Ns": 307393,
-        "p75Ns": 311469,
-        "p99Ns": 766834,
-        "samples": 2217
+        "avgNs": 312055.40696117806,
+        "minNs": 289617,
+        "maxNs": 1478349,
+        "p25Ns": 298801,
+        "p50Ns": 302476,
+        "p75Ns": 307263,
+        "p99Ns": 783071,
+        "samples": 2241
       }
     },
     {
       "scenario": "escape-heavy",
       "framework": "preact",
       "stats": {
-        "avgNs": 233369.6623246493,
-        "minNs": 216977,
-        "maxNs": 1196881,
-        "p25Ns": 222745,
-        "p50Ns": 226981,
-        "p75Ns": 231238,
-        "p99Ns": 640755,
-        "samples": 2994
+        "avgNs": 239315.7205882353,
+        "minNs": 223627,
+        "maxNs": 835240,
+        "p25Ns": 228144,
+        "p50Ns": 233702,
+        "p75Ns": 237337,
+        "p99Ns": 663580,
+        "samples": 2924
       }
     },
     {
       "scenario": "escape-clean",
       "framework": "sigx",
       "stats": {
-        "avgNs": 21240.676839192707,
-        "minNs": 20848.951171875,
-        "maxNs": 23525.37451171875,
-        "p25Ns": 20935.326171875,
-        "p50Ns": 20987.294189453125,
-        "p75Ns": 21081.041015625,
-        "p99Ns": 21381.953125,
+        "avgNs": 21593.738057454426,
+        "minNs": 21227.740234375,
+        "maxNs": 24054.904296875,
+        "p25Ns": 21297.94384765625,
+        "p50Ns": 21376.135498046875,
+        "p75Ns": 21432.700439453125,
+        "p99Ns": 21525.99267578125,
         "samples": 12
       }
     },
@@ -354,13 +354,13 @@
       "scenario": "escape-clean",
       "framework": "vue",
       "stats": {
-        "avgNs": 23542.078369140625,
-        "minNs": 23191.8857421875,
-        "maxNs": 24500.15234375,
-        "p25Ns": 23247.314453125,
-        "p50Ns": 23364.777587890625,
-        "p75Ns": 23544.95849609375,
-        "p99Ns": 23966.48046875,
+        "avgNs": 24145.115498860676,
+        "minNs": 23330.780029296875,
+        "maxNs": 24909.21630859375,
+        "p25Ns": 23732.218994140625,
+        "p50Ns": 23877.265625,
+        "p75Ns": 24590.1669921875,
+        "p99Ns": 24705.4130859375,
         "samples": 12
       }
     },
@@ -368,13 +368,13 @@
       "scenario": "escape-clean",
       "framework": "react",
       "stats": {
-        "avgNs": 15167.654276529947,
-        "minNs": 14696.333740234375,
-        "maxNs": 18505.656005859375,
-        "p25Ns": 14768.2607421875,
-        "p50Ns": 14806.79541015625,
-        "p75Ns": 14879.908203125,
-        "p99Ns": 15333.3544921875,
+        "avgNs": 15494.133565266928,
+        "minNs": 15071.6328125,
+        "maxNs": 18703.604248046875,
+        "p25Ns": 15093.2451171875,
+        "p50Ns": 15157.77587890625,
+        "p75Ns": 15295.01416015625,
+        "p99Ns": 15541.1494140625,
         "samples": 12
       }
     },
@@ -382,19 +382,19 @@
       "scenario": "escape-clean",
       "framework": "preact",
       "stats": {
-        "avgNs": 9973.145244891826,
-        "minNs": 9904.84716796875,
-        "maxNs": 10063.2958984375,
-        "p25Ns": 9935.98779296875,
-        "p50Ns": 9958.932373046875,
-        "p75Ns": 9997.5107421875,
-        "p99Ns": 10049.434814453125,
+        "avgNs": 9873.973520132211,
+        "minNs": 9839.0322265625,
+        "maxNs": 9962.636474609375,
+        "p25Ns": 9843.091064453125,
+        "p50Ns": 9857.448486328125,
+        "p75Ns": 9895.034423828125,
+        "p99Ns": 9913.964599609375,
         "samples": 13
       }
     }
   ],
   "meta": {
-    "date": "2026-08-04T14:59:44.670Z",
+    "date": "2026-08-05T10:08:47.449Z",
     "node": "v24.18.1",
     "cpu": "AMD EPYC 9V74 80-Core Processor"
   },
@@ -407,49 +407,49 @@
         "framework": "sigx",
         "bytes": 1950663,
         "ttfbMs": {
-          "p50": 1.281,
-          "p75": 1.355,
-          "p99": 1.627
+          "p50": 1.289,
+          "p75": 1.349,
+          "p99": 1.657
         },
         "totalMs": {
-          "p50": 35.956,
-          "p75": 36.261,
-          "p99": 45.597
+          "p50": 36.976,
+          "p75": 37.252,
+          "p99": 53.076
         }
       },
       {
         "framework": "vue",
         "bytes": 1811651,
         "ttfbMs": {
-          "p50": 65.791,
-          "p75": 69.337,
-          "p99": 84.376
+          "p50": 65.437,
+          "p75": 70.34,
+          "p99": 87.533
         },
         "totalMs": {
-          "p50": 66.631,
-          "p75": 70.215,
-          "p99": 85.074
+          "p50": 66.178,
+          "p75": 70.786,
+          "p99": 88.291
         }
       },
       {
         "framework": "react",
         "bytes": 1801651,
         "ttfbMs": {
-          "p50": 35.714,
-          "p75": 36.666,
-          "p99": 38.582
+          "p50": 35.985,
+          "p75": 36.544,
+          "p99": 39.161
         },
         "totalMs": {
-          "p50": 50.854,
-          "p75": 52.284,
-          "p99": 56.019
+          "p50": 51.166,
+          "p75": 53.063,
+          "p99": 55.631
         }
       }
     ]
   },
   "quick": {
     "meta": {
-      "date": "2026-08-04T14:59:44.670Z",
+      "date": "2026-08-05T10:08:47.449Z",
       "node": "v24.18.1",
       "cpu": "AMD EPYC 9V74 80-Core Processor"
     },
@@ -458,17 +458,17 @@
         "scenario": "escape-heavy",
         "framework": "sigx",
         "stats": {
-          "avgNs": 626350.603503184,
-          "p50Ns": 539953,
-          "samples": 628
+          "avgNs": 605444.081538461,
+          "p50Ns": 537561,
+          "samples": 650
         }
       },
       {
         "scenario": "escape-clean",
         "framework": "sigx",
         "stats": {
-          "avgNs": 20494.1962890625,
-          "p50Ns": 20420.1328125,
+          "avgNs": 23640.23134358724,
+          "p50Ns": 22375.101806640625,
           "samples": 12
         }
       },
@@ -476,18 +476,18 @@
         "scenario": "small-page",
         "framework": "sigx",
         "stats": {
-          "avgNs": 18304.35565185547,
-          "p50Ns": 18442.0166015625,
-          "samples": 12
+          "avgNs": 11876.450526756853,
+          "p50Ns": 11277,
+          "samples": 33412
         }
       },
       {
         "scenario": "large-table-1k",
         "framework": "sigx",
         "stats": {
-          "avgNs": 3831250.4631578946,
-          "p50Ns": 3645597,
-          "samples": 95
+          "avgNs": 3890658.6666666665,
+          "p50Ns": 3696904,
+          "samples": 96
         }
       }
     ],
@@ -500,10 +500,10 @@
           "framework": "sigx",
           "bytes": 191925,
           "ttfbMs": {
-            "p50": 0.181
+            "p50": 0.183
           },
           "totalMs": {
-            "p50": 3.615
+            "p50": 3.678
           }
         }
       ]
@@ -513,35 +513,35 @@
         "suite": "codec",
         "name": "encode+stringify plainList",
         "stats": {
-          "avgNs": 542465.5192837466,
-          "p50Ns": 533413,
-          "samples": 726
+          "avgNs": 541340.2019230769,
+          "p50Ns": 533735,
+          "samples": 728
         }
       },
       {
         "suite": "codec",
         "name": "parse+revive plainList",
         "stats": {
-          "avgNs": 550019.4387186536,
-          "p50Ns": 545871.9999995232,
-          "samples": 718
+          "avgNs": 559424.8893617021,
+          "p50Ns": 554817,
+          "samples": 705
         }
       },
       {
         "suite": "serverfn",
         "name": "POST read 1k rows",
         "stats": {
-          "avgNs": 756394.1203155819,
-          "p50Ns": 733144,
-          "samples": 507
+          "avgNs": 766427.9181286447,
+          "p50Ns": 742840,
+          "samples": 513
         }
       },
       {
         "suite": "serverfn",
         "name": "POST noop",
         "stats": {
-          "avgNs": 17439.469319661457,
-          "p50Ns": 17224.588623046875,
+          "avgNs": 17784.579427083332,
+          "p50Ns": 17533.7138671875,
           "samples": 12
         }
       },
@@ -549,36 +549,36 @@
         "suite": "serverfn",
         "name": "POST wide args, 400 keys",
         "stats": {
-          "avgNs": 143242.79934687953,
-          "p50Ns": 138228,
-          "samples": 2756
+          "avgNs": 147911.88405253284,
+          "p50Ns": 142525,
+          "samples": 2665
         }
       },
       {
         "suite": "keymatch",
         "name": "gate 32x32 deps, 64 tuple patterns",
         "stats": {
-          "avgNs": 1049923.946380697,
-          "p50Ns": 1038242,
-          "samples": 373
+          "avgNs": 1055991.0188679246,
+          "p50Ns": 1036092,
+          "samples": 371
         }
       },
       {
         "suite": "refresh",
         "name": "boundary refresh x32",
         "stats": {
-          "avgNs": 803635.2299794661,
-          "p50Ns": 767946,
-          "samples": 487
+          "avgNs": 777916.6547619047,
+          "p50Ns": 760517,
+          "samples": 504
         }
       },
       {
         "suite": "packs",
         "name": "large-table-1k resume",
         "stats": {
-          "avgNs": 4225380.622222222,
-          "p50Ns": 4008714,
-          "samples": 90
+          "avgNs": 4258284.988636363,
+          "p50Ns": 4064008,
+          "samples": 88
         }
       },
       {
@@ -586,9 +586,9 @@
         "name": "default slot, 3 element children",
         "informational": true,
         "stats": {
-          "avgNs": 107.53023324861772,
-          "p50Ns": 106.02392578125,
-          "samples": 893
+          "avgNs": 106.73309469063545,
+          "p50Ns": 105.437255859375,
+          "samples": 897
         }
       },
       {
@@ -596,9 +596,9 @@
         "name": "default slot, 100 element children",
         "informational": true,
         "stats": {
-          "avgNs": 151.8547834565353,
-          "p50Ns": 148.82519531226717,
-          "samples": 632
+          "avgNs": 156.47568948817292,
+          "p50Ns": 153.8427734375,
+          "samples": 613
         }
       },
       {
@@ -606,9 +606,27 @@
         "name": "default slot, render-prop child",
         "informational": true,
         "stats": {
-          "avgNs": 162.2412734209481,
-          "p50Ns": 160.51513671875,
-          "samples": 590
+          "avgNs": 163.85343034300723,
+          "p50Ns": 161.41040039085783,
+          "samples": 584
+        }
+      },
+      {
+        "suite": "reactivity",
+        "name": "signal write fanned out to 100 effects x1k",
+        "stats": {
+          "avgNs": 12033585.392857177,
+          "p50Ns": 12006683,
+          "samples": 28
+        }
+      },
+      {
+        "suite": "reactivity",
+        "name": "watch(deep) 1 mutation, 200-row state x100",
+        "stats": {
+          "avgNs": 71102396.75,
+          "p50Ns": 71154140,
+          "samples": 12
         }
       }
     ],
@@ -647,7 +665,7 @@
   },
   "micro": {
     "meta": {
-      "date": "2026-08-04T14:59:35.621Z",
+      "date": "2026-08-05T10:08:37.290Z",
       "node": "v24.18.1",
       "cpu": "AMD EPYC 9V74 80-Core Processor"
     },
@@ -655,324 +673,495 @@
       {
         "suite": "codec",
         "name": "JSON.stringify plainList (floor)",
-        "avgNs": 265899.034439834,
-        "p50Ns": 260692,
-        "samples": 2410
+        "avgNs": 252304.82165354313,
+        "p50Ns": 247173,
+        "samples": 2540
       },
       {
         "suite": "codec",
         "name": "encode+stringify plainList",
         "floorOf": "JSON.stringify plainList (floor)",
-        "avgNs": 566548.7322551643,
-        "p50Ns": 544630,
-        "samples": 1113,
-        "ratioToFloor": 2.089
+        "avgNs": 554961.1257695691,
+        "p50Ns": 532182,
+        "samples": 1137,
+        "ratioToFloor": 2.153
       },
       {
         "suite": "codec",
         "name": "encode plainList (walk only)",
-        "avgNs": 280612.70332136325,
-        "p50Ns": 271999,
-        "samples": 2228
+        "avgNs": 283807.16159782093,
+        "p50Ns": 272321,
+        "samples": 2203
       },
       {
         "suite": "codec",
         "name": "encode+stringify plainList +handler",
         "floorOf": "JSON.stringify plainList (floor)",
-        "avgNs": 583912.2686292544,
-        "p50Ns": 565031,
-        "samples": 1087,
-        "ratioToFloor": 2.167
+        "avgNs": 579957.3412408764,
+        "p50Ns": 561997,
+        "samples": 1096,
+        "ratioToFloor": 2.274
       },
       {
         "suite": "codec",
         "name": "JSON.parse plainList (floor)",
-        "avgNs": 371179.0058173357,
-        "p50Ns": 368234,
-        "samples": 1719
+        "avgNs": 384897.1845597105,
+        "p50Ns": 382217,
+        "samples": 1658
       },
       {
         "suite": "codec",
         "name": "parse+revive plainList",
         "floorOf": "JSON.parse plainList (floor)",
-        "avgNs": 550038.2592912705,
-        "p50Ns": 546622,
-        "samples": 1157,
-        "ratioToFloor": 1.484
+        "avgNs": 562226.7349823321,
+        "p50Ns": 558693,
+        "samples": 1132,
+        "ratioToFloor": 1.462
       },
       {
         "suite": "codec",
         "name": "encode+stringify richPayload",
-        "avgNs": 159260.9935210524,
-        "p50Ns": 156215,
-        "samples": 4013
+        "avgNs": 161299.46984608175,
+        "p50Ns": 158509,
+        "samples": 3963
       },
       {
         "suite": "codec",
         "name": "parse+revive richPayload",
-        "avgNs": 157068.8686669946,
-        "p50Ns": 154282,
-        "samples": 4066
+        "avgNs": 169992.80287310455,
+        "p50Ns": 167342,
+        "samples": 3759
       },
       {
         "suite": "codec",
         "name": "JSON.stringify deepPayload (floor)",
-        "avgNs": 4881.622985839844,
-        "p50Ns": 4882.179443359375,
+        "avgNs": 4902.883292061942,
+        "p50Ns": 4898.09619140625,
         "samples": 28
       },
       {
         "suite": "codec",
         "name": "encode+stringify deepPayload",
         "floorOf": "JSON.stringify deepPayload (floor)",
-        "avgNs": 9483.927302433895,
-        "p50Ns": 9485.9150390625,
-        "samples": 13,
-        "ratioToFloor": 1.943
+        "avgNs": 9617.080708821615,
+        "p50Ns": 9620.32373046875,
+        "samples": 12,
+        "ratioToFloor": 1.964
       },
       {
         "suite": "serverfn",
         "name": "POST read 1k rows (floor)",
-        "avgNs": 418215.2523364486,
-        "p50Ns": 400483,
-        "samples": 1498
+        "avgNs": 412509.4457439896,
+        "p50Ns": 407184,
+        "samples": 1539
       },
       {
         "suite": "serverfn",
         "name": "POST read 1k rows",
         "floorOf": "POST read 1k rows (floor)",
-        "avgNs": 710379.8701007839,
-        "p50Ns": 700404,
-        "samples": 893,
-        "ratioToFloor": 1.749
+        "avgNs": 698345.6611661166,
+        "p50Ns": 688568,
+        "samples": 909,
+        "ratioToFloor": 1.691
       },
       {
         "suite": "serverfn",
         "name": "POST read rich payload",
-        "avgNs": 214219.07157258576,
-        "p50Ns": 208674,
-        "samples": 2976
+        "avgNs": 213039.02075659347,
+        "p50Ns": 207913.99999809265,
+        "samples": 2987
       },
       {
         "suite": "serverfn",
         "name": "POST mutation, tiny args (floor)",
-        "avgNs": 10951.192846679687,
-        "p50Ns": 10893.157470703125,
+        "avgNs": 10978.188818359375,
+        "p50Ns": 10956.86328125,
         "samples": 10
       },
       {
         "suite": "serverfn",
         "name": "POST mutation, tiny args",
         "floorOf": "POST mutation, tiny args (floor)",
-        "avgNs": 19193.098876953125,
-        "p50Ns": 18304.248046875,
+        "avgNs": 19692.937561035156,
+        "p50Ns": 18729.491455078125,
         "samples": 12,
-        "ratioToFloor": 1.68
+        "ratioToFloor": 1.709
       },
       {
         "suite": "serverfn",
         "name": "POST noop (floor)",
-        "avgNs": 10662.700084339489,
-        "p50Ns": 10663.192138671875,
+        "avgNs": 10549.19051846591,
+        "p50Ns": 10535.510009765625,
         "samples": 11
       },
       {
         "suite": "serverfn",
         "name": "POST noop",
         "floorOf": "POST noop (floor)",
-        "avgNs": 17720.148844401043,
-        "p50Ns": 17265.607421875,
+        "avgNs": 17923.664184570312,
+        "p50Ns": 17576.326904296875,
         "samples": 12,
-        "ratioToFloor": 1.619
+        "ratioToFloor": 1.668
       },
       {
         "suite": "serverfn",
         "name": "POST wide args, 400 keys (floor)",
-        "avgNs": 65734.97111615432,
-        "p50Ns": 64397,
-        "samples": 9694
+        "avgNs": 67313.95917503966,
+        "p50Ns": 65999,
+        "samples": 9455
       },
       {
         "suite": "serverfn",
         "name": "POST wide args, 400 keys",
         "floorOf": "POST wide args, 400 keys (floor)",
-        "avgNs": 142835.7779025376,
-        "p50Ns": 137997,
-        "samples": 4453,
-        "ratioToFloor": 2.143
+        "avgNs": 145733.76365714284,
+        "p50Ns": 141143,
+        "samples": 4375,
+        "ratioToFloor": 2.139
       },
       {
         "suite": "serverfn",
         "name": "GET idempotent read",
-        "avgNs": 46856.992369212705,
-        "p50Ns": 45308,
-        "samples": 13629
+        "avgNs": 47294.420178041546,
+        "p50Ns": 45589,
+        "samples": 13480
       },
       {
         "suite": "serverfn",
         "name": "POST error path (ServerFnError)",
-        "avgNs": 25704.387471516926,
-        "p50Ns": 25089.781982421875,
+        "avgNs": 26070.632670084637,
+        "p50Ns": 25403.084716796875,
         "samples": 12
       },
       {
         "suite": "serverfn",
         "name": "NDJSON stream, 1000 chunks",
-        "avgNs": 1999744.9516129033,
-        "p50Ns": 1962984,
-        "samples": 310
+        "avgNs": 2006694.4169381107,
+        "p50Ns": 1940617,
+        "samples": 307
       },
       {
         "suite": "keymatch",
         "name": "gate 1x8 deps, 64 tuple patterns",
-        "avgNs": 46976.40296197858,
-        "p50Ns": 44587,
-        "samples": 13572
+        "avgNs": 47276.42823179792,
+        "p50Ns": 44888,
+        "samples": 13460
       },
       {
         "suite": "keymatch",
         "name": "gate 8x32 deps, 64 tuple patterns",
-        "avgNs": 279933.81008772936,
-        "p50Ns": 274893.99999809265,
-        "samples": 2280
+        "avgNs": 282372.1657802078,
+        "p50Ns": 277367.99999809265,
+        "samples": 2256
       },
       {
         "suite": "keymatch",
         "name": "gate 32x32 deps, 64 tuple patterns",
-        "avgNs": 984188.2976743891,
-        "p50Ns": 971191.9999961853,
-        "samples": 645
+        "avgNs": 991871.9687011074,
+        "p50Ns": 978115,
+        "samples": 639
       },
       {
         "suite": "keymatch",
         "name": "gate 8x32 deps, 64 string patterns",
-        "avgNs": 180026.9395992097,
-        "p50Ns": 175654,
-        "samples": 3543
+        "avgNs": 181220.0079681275,
+        "p50Ns": 176576,
+        "samples": 3514
       },
       {
         "suite": "keymatch",
         "name": "gate 32x32 deps, 64 string patterns",
-        "avgNs": 609012.5911708253,
-        "p50Ns": 600484,
-        "samples": 1042
+        "avgNs": 615203.9554695063,
+        "p50Ns": 605493,
+        "samples": 1033
       },
       {
         "suite": "refresh",
         "name": "boundary refresh x1",
-        "avgNs": 33257.2683055497,
-        "p50Ns": 28934,
-        "samples": 18956
+        "avgNs": 34529.452375726985,
+        "p50Ns": 29584,
+        "samples": 18226
       },
       {
         "suite": "refresh",
         "name": "boundary refresh x8",
-        "avgNs": 214830.89422744556,
-        "p50Ns": 187983,
-        "samples": 2893
+        "avgNs": 224478.26925820258,
+        "p50Ns": 194403,
+        "samples": 2804
       },
       {
         "suite": "refresh",
         "name": "boundary refresh x32",
-        "avgNs": 861232.2378303199,
-        "p50Ns": 753314,
-        "samples": 719
+        "avgNs": 900898.6929824562,
+        "p50Ns": 785354,
+        "samples": 684
       },
       {
         "suite": "packs",
         "name": "small-page plain",
-        "avgNs": 61547.844401168455,
-        "p50Ns": 52159,
-        "samples": 10270
+        "avgNs": 62773.61933115014,
+        "p50Ns": 53230,
+        "samples": 10077
       },
       {
         "suite": "packs",
         "name": "small-page islands",
         "floorOf": "small-page plain",
-        "avgNs": 77379.12340998043,
-        "p50Ns": 67211,
-        "samples": 8176,
-        "ratioToFloor": 1.289
+        "avgNs": 79141.5766240281,
+        "p50Ns": 68413,
+        "samples": 7974,
+        "ratioToFloor": 1.285
       },
       {
         "suite": "packs",
         "name": "small-page resume",
         "floorOf": "small-page plain",
-        "avgNs": 77278.07312301296,
-        "p50Ns": 67782,
-        "samples": 8178,
-        "ratioToFloor": 1.3
+        "avgNs": 78572.08992032376,
+        "p50Ns": 68884,
+        "samples": 7907,
+        "ratioToFloor": 1.294
       },
       {
         "suite": "packs",
         "name": "large-table-1k plain",
-        "avgNs": 4735903.837209302,
-        "p50Ns": 4097606,
-        "samples": 129
+        "avgNs": 4790674.864,
+        "p50Ns": 4127262,
+        "samples": 125
       },
       {
         "suite": "packs",
         "name": "large-table-1k islands",
         "floorOf": "large-table-1k plain",
-        "avgNs": 4761381.182539683,
-        "p50Ns": 4151516,
-        "samples": 126,
-        "ratioToFloor": 1.013
+        "avgNs": 4912782.622950819,
+        "p50Ns": 4274774,
+        "samples": 122,
+        "ratioToFloor": 1.036
       },
       {
         "suite": "packs",
         "name": "large-table-1k resume",
         "floorOf": "large-table-1k plain",
-        "avgNs": 4780439.698412699,
-        "p50Ns": 4151306,
-        "samples": 126,
-        "ratioToFloor": 1.013
+        "avgNs": 4929879.5245901635,
+        "p50Ns": 4302557,
+        "samples": 122,
+        "ratioToFloor": 1.042
       },
       {
         "suite": "slots",
         "name": "default slot, 3 element children",
-        "avgNs": 108.55782659753854,
-        "p50Ns": 107.197265625,
-        "samples": 1427
+        "avgNs": 107.99413381494072,
+        "p50Ns": 106.7919921875,
+        "samples": 1434
       },
       {
         "suite": "slots",
         "name": "slice floor n=100",
-        "avgNs": 39.332088273745576,
-        "p50Ns": 37.744873046875,
-        "samples": 3956
+        "avgNs": 43.88377982884385,
+        "p50Ns": 42.300048828125,
+        "samples": 3543
       },
       {
         "suite": "slots",
         "name": "default slot, 100 element children",
         "floorOf": "slice floor n=100",
-        "avgNs": 147.15398770734598,
-        "p50Ns": 144.284423828125,
-        "samples": 1055,
-        "ratioToFloor": 3.823
+        "avgNs": 148.2241117665055,
+        "p50Ns": 145.566162109375,
+        "samples": 1047,
+        "ratioToFloor": 3.441
       },
       {
         "suite": "slots",
         "name": "named slot, 100 element children",
         "floorOf": "slice floor n=100",
-        "avgNs": 154.0628086306014,
-        "p50Ns": 151.287109375,
-        "samples": 1007,
-        "ratioToFloor": 4.008
+        "avgNs": 154.5372812947429,
+        "p50Ns": 151.6494140625,
+        "samples": 1004,
+        "ratioToFloor": 3.585
       },
       {
         "suite": "slots",
         "name": "default slot, render-prop child",
-        "avgNs": 167.98200049254572,
-        "p50Ns": 161.383056640625,
-        "samples": 916
+        "avgNs": 170.57953354524668,
+        "p50Ns": 163.7724609375,
+        "samples": 902
       },
       {
         "suite": "slots",
         "name": "default slot, render-prop child, no scoped props",
-        "avgNs": 179.9713174882629,
-        "p50Ns": 174.32958984375,
-        "samples": 852
+        "avgNs": 185.84830185973527,
+        "p50Ns": 179.6826171875,
+        "samples": 824
+      },
+      {
+        "suite": "reactivity",
+        "name": "plain object write x10k",
+        "avgNs": 8207.402114868164,
+        "p50Ns": 8194.322021484375,
+        "samples": 16
+      },
+      {
+        "suite": "reactivity",
+        "name": "signal write, no subscribers x10k",
+        "floorOf": "plain object write x10k",
+        "avgNs": 618813.1866537718,
+        "p50Ns": 618553,
+        "samples": 1034,
+        "ratioToFloor": 75.486
+      },
+      {
+        "suite": "reactivity",
+        "name": "signal write, 1 effect x10k",
+        "floorOf": "plain object write x10k",
+        "avgNs": 2573689.868312757,
+        "p50Ns": 2561953,
+        "samples": 243,
+        "ratioToFloor": 312.65
+      },
+      {
+        "suite": "reactivity",
+        "name": "signal write fanned out to 100 effects x1k",
+        "avgNs": 11524760.37254902,
+        "p50Ns": 11496416,
+        "samples": 51
+      },
+      {
+        "suite": "reactivity",
+        "name": "batch of 3 writes into one effect x1k",
+        "avgNs": 513823.8310428456,
+        "p50Ns": 511902,
+        "samples": 1237
+      },
+      {
+        "suite": "reactivity",
+        "name": "plain deep walk x100",
+        "avgNs": 2798208.4818182336,
+        "p50Ns": 2783047,
+        "samples": 220
+      },
+      {
+        "suite": "reactivity",
+        "name": "watch(deep) 1 mutation, {count} state x1k",
+        "avgNs": 1541016.4292685438,
+        "p50Ns": 1531750.0000038147,
+        "samples": 410
+      },
+      {
+        "suite": "reactivity",
+        "name": "watch(deep) 1 mutation, 200-row state x100",
+        "floorOf": "plain deep walk x100",
+        "avgNs": 71604191.33333492,
+        "p50Ns": 69961279.99999619,
+        "samples": 12,
+        "ratioToFloor": 25.138
+      },
+      {
+        "suite": "reactivity",
+        "name": "watch(deep) 8 mutations per batch, 200-row state x100",
+        "floorOf": "plain deep walk x100",
+        "avgNs": 74061660.91666667,
+        "p50Ns": 72783275,
+        "samples": 12,
+        "ratioToFloor": 26.152
+      },
+      {
+        "suite": "reactivity",
+        "name": "watch(deep: 1) flat 200-key state x1k",
+        "avgNs": 75478765.91666667,
+        "p50Ns": 74126177,
+        "samples": 12
+      },
+      {
+        "suite": "reactivity",
+        "name": "turn-boundary dirty walk x100",
+        "floorOf": "plain deep walk x100",
+        "avgNs": 73492751.33333333,
+        "p50Ns": 72263057,
+        "samples": 12,
+        "ratioToFloor": 25.965
+      },
+      {
+        "suite": "reactivity",
+        "name": "diamond write + read x1k",
+        "avgNs": 736388.5069605568,
+        "p50Ns": 729850,
+        "samples": 862
+      },
+      {
+        "suite": "reactivity",
+        "name": "50-deep computed chain write + read x1k",
+        "avgNs": 6656302.387096774,
+        "p50Ns": 6627782,
+        "samples": 93
+      },
+      {
+        "suite": "reactivity",
+        "name": "value-stable computed write (cutoff) x10k",
+        "avgNs": 3190678.7040816327,
+        "p50Ns": 3168006,
+        "samples": 196
+      },
+      {
+        "suite": "reactivity",
+        "name": "re-track: effect with 50 deps re-running x1k",
+        "avgNs": 5902134.902912621,
+        "p50Ns": 5885794,
+        "samples": 103
+      },
+      {
+        "suite": "reactivity",
+        "name": "$set replace of 10-key object x1k",
+        "avgNs": 2420538.891891892,
+        "p50Ns": 2425607,
+        "samples": 259
+      },
+      {
+        "suite": "reactivity",
+        "name": "Map set+delete churn with size/has subscriber x1k",
+        "avgNs": 673970.118336887,
+        "p50Ns": 667356,
+        "samples": 938
+      },
+      {
+        "suite": "reactivity",
+        "name": "array push+pop churn with length subscriber x1k",
+        "avgNs": 2358547.8127340823,
+        "p50Ns": 2352827,
+        "samples": 267
+      },
+      {
+        "suite": "reactivity",
+        "name": "untracked nested object read x10k",
+        "avgNs": 1300359.7659137577,
+        "p50Ns": 1295352,
+        "samples": 487
+      },
+      {
+        "suite": "reactivity",
+        "name": "create 10k object signals",
+        "avgNs": 8655536.871794872,
+        "p50Ns": 7348299,
+        "samples": 39
+      },
+      {
+        "suite": "reactivity",
+        "name": "create-and-stop 1k effects over 5 deps",
+        "avgNs": 813729.2283950617,
+        "p50Ns": 683781,
+        "samples": 162
+      },
+      {
+        "suite": "reactivity",
+        "name": "signal() on non-proxyable roots x1k",
+        "avgNs": 56239.575269784174,
+        "p50Ns": 49324,
+        "samples": 11120
+      },
+      {
+        "suite": "reactivity",
+        "name": "read non-proxyable values off an object signal x10k",
+        "avgNs": 1059380.97319933,
+        "p50Ns": 1053308,
+        "samples": 597
       }
     ],
     "bytes": [
