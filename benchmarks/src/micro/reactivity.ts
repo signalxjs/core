@@ -116,9 +116,14 @@ function assertDeepWatchContract(): void {
     let fired = 0;
     const handle = watch(() => probe, () => { fired++; }, { deep: true });
 
+    // Sampled before the push, not compared against zero: `fired > 0` would
+    // also be satisfied by an initial callback the watcher made on its own
+    // (an `immediate` watch, or a future default), which proves nothing about
+    // the push.
+    const beforeAdd = fired;
     probe.rows.push({ id: 0, label: 'probe', nested: { a: 0, b: 0 } });
     const afterAdd = fired;
-    assert(afterAdd > 0, 'adding a row did not notify the deep watcher');
+    assert(afterAdd > beforeAdd, 'adding a row did not notify the deep watcher');
 
     probe.rows[0].nested.b = 1;
     assert(
@@ -240,6 +245,38 @@ function deepWatchBench(config: {
         },
         run: () => {
             for (let i = 0; i < config.turns; i++) turn();
+        }
+    };
+}
+
+/**
+ * The `@sigx/actors` shape verbatim: `{ count }`, one deep watcher, one write
+ * per turn. This is the state that profiled at 13.0 % of `state/*` — a single
+ * flat object, where the traversal has almost nothing to walk and the cost is
+ * the effect machinery around it rather than the walk itself.
+ *
+ * Deliberately NOT the `rows` fixture with one row (four objects: state, array,
+ * row, nested). The point of this row is to isolate the fixed per-turn cost
+ * from the per-node cost that the 200-row benches measure, and a four-object
+ * fixture blurs the two. No floor: `plain deep walk x100` walks a 200-row tree,
+ * so a ratio against it would report fixture size.
+ */
+function actorsStateBench(): MicroBench {
+    const state = signal({ count: 0 });
+    let fired = 0;
+    watch(() => state, () => { fired++; }, { deep: true });
+
+    return {
+        suite: 'reactivity',
+        name: 'watch(deep) 1 mutation, {count} state x1k',
+        check: () => {
+            assertDeepWatchContract();
+            const before = fired;
+            state.count++;
+            assert(fired > before, 'a count write did not fire the deep watcher');
+        },
+        run: () => {
+            for (let i = 0; i < 1_000; i++) state.count++;
         }
     };
 }
@@ -747,12 +784,7 @@ export const reactivitySuite: MicroSuite = {
             batchedWrites(),
 
             plainWalkFloor(),
-            deepWatchBench({
-                name: 'watch(deep) 1 mutation, small state x1k',
-                rows: 1,
-                mutationsPerTurn: 1,
-                turns: 1_000
-            }),
+            actorsStateBench(),
             deepWatchBench({
                 name: `watch(deep) 1 mutation, ${ROWS}-row state x100`,
                 rows: ROWS,
