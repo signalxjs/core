@@ -283,6 +283,31 @@ calibration the design has to pass.
 dependencies, so `signalxjs/actors` — which carries its own copy of `bench.yml`
 and a differently-shaped quick suite — can take it unchanged.
 
+### When the baseline goes slack
+
+The gate is one-sided (`deltaPct > threshold`), so an improvement never fails a
+run — and, until #647, never said anything either. A row that got 4x faster
+printed `-75.0%` with status `ok` and kept being measured against the old, slow
+number: after #642 the committed baseline claimed 71.15 ms for a row running at
+25.50 ms, so it would have kept passing until it regressed past **+179%**.
+
+`check-regression` now reports any gated timing row that is faster than its
+baseline by more than the threshold, in the console and in the markdown report:
+
+```
+stale baseline — 1 row(s) are more than 25% FASTER than the recorded baseline,
+so they now gate nothing until it is re-recorded:
+  - reactivity/watch(deep) 1 mutation, 200-row state x100: 25.4971 -> 6.4257 (-74.8%)
+```
+
+It is a note, never a failure — failing a run for making something faster would
+be hostile, and `bench-nightly` is where it most needs to be seen, since that is
+the job comparing against the committed baseline every night. It is skipped when
+`--baseline-file` is passed: the A/B compares two refs, where "before" is a
+measurement rather than an anchor and outrunning it is the point.
+
+**So: re-baseline after a large win, not only after adding a bench.**
+
 ## Baseline & caveats
 
 `results/` is gitignored except `results/baseline.json`, which

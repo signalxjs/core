@@ -101,12 +101,33 @@ jobs:
       # afterwards, because everything is then judged against it.
       - name: Quiet-machine check
         run: |
+          set -euo pipefail
           uptime
+          # WAIT for quiet rather than sampling once. This step runs directly
+          # after `pnpm build`, which is heavily parallel, so a single reading
+          # is dominated by load THIS JOB just created — on an otherwise idle
+          # VM it squeaks under, but after a busy stretch the 5- and 15-minute
+          # averages stay high and the 1-minute figure decays too slowly to
+          # pass. #646: two recordings refused at 1.44 and 1.67 with no other
+          # bench workflow running, each after paying for a full install and
+          # build, and neither salvageable — the job has to be dispatched again
+          # from scratch.
+          #
+          # Three minutes of waiting is far cheaper than that, and the guard
+          # keeps its meaning: a machine another tenant is genuinely using
+          # still never settles, and we still refuse.
+          for i in $(seq 1 12); do
+            load=$(cut -d' ' -f1 /proc/loadavg)
+            if awk -v l="$load" 'BEGIN { exit (l <= 0.8) ? 0 : 1 }'; then
+              echo "1-minute load average: $load — quiet, recording"
+              exit 0
+            fi
+            echo "1-minute load average: $load — waiting for the machine to settle ($i/12)"
+            sleep 15
+          done
           load=$(cut -d' ' -f1 /proc/loadavg)
-          echo "1-minute load average: $load"
-          # 4 dedicated cores; anything approaching 1.0 before we start means
-          # something else is running and the recording is not trustworthy.
-          awk -v l="$load" 'BEGIN { if (l > 0.8) { print "::error::Machine is not quiet (load " l ") — refusing to record a baseline."; exit 1 } }'
+          echo "::error::Machine is not quiet (load $load) after 3 minutes — refusing to record a baseline."
+          exit 1
 
       - name: Record the baseline
         run: pnpm bench:ssr:baseline
