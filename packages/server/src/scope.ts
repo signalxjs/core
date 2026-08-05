@@ -315,26 +315,25 @@ function ensureContextStore(): Promise<ContextStore | null> {
     });
 }
 
-/** Has THIS module copy defined the seam property yet? Only the first stamp
- *  goes through `defineProperty`; see `stampResolver`. */
-let _seamDefined = false;
-
 /** Re-assert the read seam. See the note above on why this happens on every
  *  entry and not just the first. */
 function stampResolver(): void {
     const host = globalThis as {
         __SIGX_SERVERFN_CONTEXT__?: () => ServerFnContextInit | undefined;
     };
-    // The re-assert runs on EVERY scope entry, so the descriptor work happens
-    // once and the hot path stays a plain assignment — which preserves the
-    // NON-ENUMERABLE attribute the first stamp set, keeping this pack-internal
-    // seam out of `Object.keys(globalThis)`. The latch is per module copy on
-    // purpose: if another copy defined the property first, this copy's plain
-    // assignment inherits its descriptor, so either order lands the same.
-    if (_seamDefined) {
-        host.__SIGX_SERVERFN_CONTEXT__ = _resolver;
-        return;
-    }
+    // `defineProperty` UNCONDITIONALLY, not a first-time latch guarding a plain
+    // assignment. The whole reason this re-asserts on every entry is that
+    // anything may clobber or DELETE the seam (see the note above); a plain
+    // assignment would faithfully restore the value while silently re-creating
+    // the property as enumerable, so exactly the case this function exists for
+    // is the case that would un-hide it.
+    //
+    // Measured before choosing: `defineProperty` is ~512 ns against ~1.5 ns for
+    // an assignment, which is 0.27% of the cheapest request in `bench:micro`
+    // (`serverfn/POST noop`, ~190 µs) at one to three calls per request. Below
+    // noise, and it buys back a branch, a module-local latch, and the
+    // latch-ordering hazard that came with it.
+    //
     // `enumerable` is spelled even though `false` is the default for a NEW
     // property: another copy of this module may have created it by plain
     // assignment, and a partial descriptor would preserve `enumerable: true`.
@@ -344,10 +343,6 @@ function stampResolver(): void {
         configurable: true,
         enumerable: false
     });
-    // Latched only after the descriptor work SUCCEEDED — latching first would
-    // send every later entry down the plain-assignment path having never
-    // hidden the property.
-    _seamDefined = true;
 }
 
 /**

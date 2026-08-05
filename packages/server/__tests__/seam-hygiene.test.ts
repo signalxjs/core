@@ -109,6 +109,21 @@ describe('pack-internal seams stay off the enumerable global surface', () => {
         expect(Object.keys(globalThis)).not.toContain('__SIGX_SERVERFN_CONTEXT__');
     });
 
+    it('__SIGX_SERVERFN_CONTEXT__ is re-HIDDEN after the seam is deleted', async () => {
+        // The case the re-assert exists for: a test teardown or a host that
+        // resets globals between requests removes the property. A latched
+        // plain-assignment path would restore the value as an ENUMERABLE
+        // property — un-hiding the seam precisely when it is being repaired.
+        await runWithServerFnContext(new Request('https://x.test/'), () => undefined);
+        delete (globalThis as { __SIGX_SERVERFN_CONTEXT__?: unknown }).__SIGX_SERVERFN_CONTEXT__;
+        expect(descriptor('__SIGX_SERVERFN_CONTEXT__')).toBeUndefined();
+
+        await runWithServerFnContext(new Request('https://x.test/'), () => undefined);
+        expect(descriptor('__SIGX_SERVERFN_CONTEXT__')?.enumerable).toBe(false);
+        expect(typeof (globalThis as { __SIGX_SERVERFN_CONTEXT__?: unknown }).__SIGX_SERVERFN_CONTEXT__)
+            .toBe('function');
+    });
+
     it('HIDES a seam an earlier plain assignment left enumerable', () => {
         // Dev HMR's older module copy, or an app stamping the codec by hand,
         // creates the property enumerable first. `defineProperty` with a

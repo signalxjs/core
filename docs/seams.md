@@ -479,9 +479,14 @@ app context. Then:
    fix the descriptor on that path: keep the existing value, redefine the
    property.
 
-   If the writer sits on a hot path, define once behind a module-local latch —
-   set *after* the `defineProperty` succeeds — and let later writes be plain
-   assignments, which inherit the descriptor.
+   **A re-asserting writer must `defineProperty` every time**, not latch and
+   fall back to assignment. `__SIGX_SERVERFN_CONTEXT__` re-stamps on every
+   scope entry precisely because anything may clobber or *delete* the seam —
+   and a plain assignment restores the value while re-creating the property
+   enumerable, so the repair path would be the one that un-hides it. The cost
+   was measured before the rule was written: ~512 ns versus ~1.5 ns for an
+   assignment, which is 0.27% of the cheapest request in `bench:micro`. Below
+   noise; do not trade the guarantee for it.
 
 ## Appendix: private symbol-keyed globals
 
