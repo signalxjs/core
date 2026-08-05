@@ -240,9 +240,22 @@ pnpm bench:ssr         # full comparative SSR bench: equivalence check, then sig
                        #   - `bench-smoke` (ci.yml, hosted, merge queue): correctness only. Adapter
                        #     rot, byte counts, --require-baseline-rows. Machine-independent, so it
                        #     stays on a hosted runner and the queue never waits on the VM.
-                       #   - `bench-ab` (bench.yml, VM): the PR's base ref and head ref measured
-                       #     back to back, commented as a delta. Needs no baseline and survives a
-                       #     change of hardware. Never fails — read the table and decide.
+                       #   - `bench-ab` (bench.yml, VM): two refs measured INTERLEAVED across
+                       #     rounds (even rounds base-first, odd head-first), commented as a
+                       #     verdict. Needs no baseline and survives a change of hardware.
+                       #     On a PR it never fails — read the table and decide.
+                       #     A row reads `improved`/`regressed` only when every round agrees in
+                       #     sign AND the median delta clears both 3% and the row's own spread;
+                       #     a side that swings >10% run-to-run reads `noisy` and claims nothing.
+                       #     Measuring base-then-head ONCE cannot do this: the head is always
+                       #     second, so drift lands on its account (#637, a PR touching no
+                       #     package source, read +3.7/+5.9/+6.6% on three rows).
+                       #     DISPATCH IT WITH A `base` INPUT TO A/B ANY TWO REFS:
+                       #       gh workflow run bench.yml --ref main -f base=main -f head=<branch> \
+                       #         -f rounds=7 -f enforce=true
+                       #     That is how a perf change is judged before it is proposed, and the
+                       #     only place --enforce exists. (--ref main: see the OIDC note above.)
+                       #     A dispatch with NO `base` runs `bench-quick` instead.
                        #   - `bench-nightly` (bench-nightly.yml, VM): `bench:quick:enforce` against
                        #     the committed baseline. This is the only thing that catches DRIFT —
                        #     bench-ab compares a PR to its own base, so ten PRs at +2% each pass
