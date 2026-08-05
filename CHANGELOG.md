@@ -23,8 +23,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
   The one thing enumerating the proxy did that reading keys does not is
   subscribe to the **key-set** dep, without which a newly added key would stop
-  notifying — an internal `trackKeySet` now does that explicitly, and the
-  regression tests for it fail if it is removed.
+  notifying. That is now covered by the any-write dep below.
+
+- **A deep watcher subscribes once per object, not once per key (#644).**
+  Reaching a per-key dep meant reading every value back through the `get` trap:
+  ~1200 reads and ~1600 subscriptions on a 200-row fixture, where one
+  subscription per object is 402. Each reactive object now has an optional
+  "any write" dep — fired for a changed key, a new key, a deletion, or any
+  Map/Set mutation — so the traversal walks raw values and touches the proxy
+  exactly once per object, to subscribe.
+
+  The dep is allocated lazily on first subscription, so an object nobody
+  deep-watches never creates one and its writes pay a single null check against
+  an already-loaded slot.
+
+  Still no observable change: the same writes notify. One edge case that was
+  previously unreachable is now covered explicitly — `obj.newKey = undefined` on
+  an object whose keys have never been read notifies a deep watcher, where the
+  `Object.is` guard would otherwise have compared `undefined` to `undefined` and
+  told nobody.
 
 - **The pack-internal `globalThis` seams are now non-enumerable, and the
   server-app config is frozen (#634).** Opening devtools on a sigx page listed

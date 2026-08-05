@@ -4,69 +4,94 @@
 
 import type { WatchSource, WatchCallback, WatchOptions, WatchHandle } from './types';
 import { rawEffect, registerWithActiveScope } from './effect';
-import { trackKeySet } from './signal';
-import { reactiveToRaw } from './collections';
+import { signal, trackAnyWrite } from './signal';
+import { reactiveToRaw, shouldNotProxy } from './collections';
 
 /**
- * Deeply traverses an object to trigger reactive tracking on all nested properties.
- * @param value The value to traverse
- * @param depth Maximum depth to traverse (Infinity for unlimited, number for limited)
- * @param seen Set of already visited objects to prevent circular references
+ * Deeply subscribe the active effect to every object reachable from `value`.
+ *
+ * The whole traversal runs over RAW objects and touches the proxy exactly once
+ * per object, to subscribe. Two measurements shaped it:
+ *
+ * - `Object.keys()` on a reactive proxy costs ~165x what it costs on the raw
+ *   object (2036ns vs 12.3ns for a three-key object). V8 validates the
+ *   `ownKeys` trap's result against the target's own property descriptors on
+ *   every call — that is the proxy protocol, not the trap body, and on a
+ *   200-row fixture it was ~68% of a deep-watch turn (#641).
+ * - Reading each value back through the `get` trap to reach its per-key dep
+ *   cost ~50ns a key, ~1200 keys, and produced ~1600 subscriptions where 402
+ *   would do (#644).
+ *
+ * So neither happens now. `trackAnyWrite` subscribes to one dep covering every
+ * write to an object — any key, new keys, deletions, Map/Set mutations — and
+ * the recursion descends through the raw values, resolving each child's proxy
+ * directly rather than by reading it out of its parent.
+ *
+ * The child proxy must still be MATERIALISED (not merely looked up): a write
+ * always goes through a proxy, so an object we never proxied is an object whose
+ * writes we would never see.
+ *
+ * @param value The value to traverse. Subscribing needs a reactive proxy — a
+ *   plain object has no deps to subscribe to, so passing one walks the shape
+ *   and tracks nothing. That is what enumerating it used to do too.
+ * @param depth Maximum depth (Infinity for unlimited, number for limited)
+ * @param seen Raw objects already visited, to terminate on cycles
  */
 function traverse(value: unknown, depth: number = Infinity, seen: Set<unknown> = new Set()): unknown {
-    // Don't traverse primitives, null, or if we've exceeded depth
     if (depth <= 0) return value;
     if (value === null || typeof value !== 'object') return value;
-    
-    // Prevent circular references
-    if (seen.has(value)) return value;
-    seen.add(value);
-    
-    if (Array.isArray(value)) {
-        // Traverse array elements
-        for (let i = 0; i < value.length; i++) {
-            traverse(value[i], depth - 1, seen);
+
+    // `seen` holds RAW objects: the same object reached by two paths yields the
+    // same proxy, but keying on raw is what makes that true by construction.
+    const raw = (reactiveToRaw.get(value) ?? value) as object;
+    if (seen.has(raw)) return value;
+    seen.add(raw);
+
+    // One subscription for the whole object. Fires for a changed key, a new
+    // key, a deleted key, and — for collections — any mutation, which is why
+    // Maps and Sets need nothing beyond this.
+    trackAnyWrite(value);
+
+    if (Array.isArray(raw)) {
+        for (let i = 0; i < raw.length; i++) {
+            descend(raw[i], depth - 1, seen);
         }
-    } else if (value instanceof Map) {
-        // Traverse Map entries
-        value.forEach((v, k) => {
-            traverse(k, depth - 1, seen);
-            traverse(v, depth - 1, seen);
+    } else if (raw instanceof Map) {
+        raw.forEach((v, k) => {
+            descend(k, depth - 1, seen);
+            descend(v, depth - 1, seen);
         });
-    } else if (value instanceof Set) {
-        // Traverse Set values
-        value.forEach(v => {
-            traverse(v, depth - 1, seen);
+    } else if (raw instanceof Set) {
+        raw.forEach(v => {
+            descend(v, depth - 1, seen);
         });
     } else {
-        // Enumerate the RAW target, read back through the proxy.
-        //
-        // `Object.keys()` on a reactive proxy costs ~165x what it costs on the
-        // raw object — 2036ns vs 12.3ns for a three-key object — because V8
-        // validates the `ownKeys` trap's result against the target's own
-        // property descriptors on every call. That is not the trap body (which
-        // profiles separately at ~11%); it is the proxy protocol itself, and on
-        // a 200-row fixture it was ~68% of an entire deep-watch turn (#641).
-        // It scales with the number of plain OBJECTS walked, not with keys,
-        // which is why arrays — handled by the index loop above — never paid it.
-        //
-        // The key set is identical either way: the `ownKeys` trap returns
-        // `Reflect.ownKeys(target)`, so `Object.keys` over the proxy and over
-        // the raw target enumerate exactly the same own enumerable string keys.
-        // Reading each one back through the proxy still subscribes per key and
-        // still materialises the nested proxy the recursion needs.
-        //
-        // `trackKeySet` replaces the ONE thing enumerating the proxy did that
-        // reading keys does not: subscribing to the key-set dep, without which
-        // a new key added to this object would never notify.
-        const raw = reactiveToRaw.get(value) ?? value;
-        trackKeySet(value);
         for (const key of Object.keys(raw)) {
-            traverse((value as Record<string, unknown>)[key], depth - 1, seen);
+            descend((raw as Record<string, unknown>)[key], depth - 1, seen);
         }
     }
-    
+
     return value;
+}
+
+/**
+ * Descend into a RAW child: give it a proxy so its writes are observable, then
+ * traverse that.
+ *
+ * `signal()` is idempotent through the global raw→proxy map, so this is a
+ * WeakMap hit for every object the traversal has seen before — cheaper than
+ * reading the child out of its parent through the `get` trap, and it does not
+ * subscribe to the parent's per-key dep as a side effect.
+ *
+ * Values `signal()` refuses to proxy (Date, RegExp, typed arrays — anything
+ * with internal slots) are skipped before it is called: `signal()` hands such a
+ * value straight back, so traversing the result would add a non-reactive object
+ * to `seen` and enumerate keys that nothing can ever subscribe to.
+ */
+function descend(rawChild: unknown, depth: number, seen: Set<unknown>): void {
+    if (depth <= 0 || rawChild === null || typeof rawChild !== 'object') return;
+    if (shouldNotProxy(rawChild)) return;
+    traverse(signal(rawChild as object), depth, seen);
 }
 
 /**

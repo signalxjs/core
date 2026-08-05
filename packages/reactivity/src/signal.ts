@@ -27,34 +27,34 @@ import {
 const signalIds = new WeakMap<object, number>();
 
 /**
- * Private key the `get` trap answers by tracking the KEY-SET dep — the one
- * `ownKeys` tracks — and returning `undefined`. See {@link trackKeySet}.
+ * Private key the `get` trap answers by tracking the object's ANY-WRITE dep and
+ * returning `undefined`. See {@link trackAnyWrite}.
  */
-const TRACK_KEY_SET = Symbol('sigx:trackKeySet');
+const TRACK_ANY_WRITE = Symbol('sigx:trackAnyWrite');
 
 /**
- * Subscribe the active effect to `target`'s key-set dep WITHOUT enumerating it.
+ * Subscribe the active effect to ONE dep covering every write to `target` —
+ * any key, new keys, deletions, and Map/Set mutations.
  *
- * `Object.keys(proxy)` subscribes to that dep as a side effect of going through
- * the `ownKeys` trap — which is how `watch(deep)` used to reach it, and which
- * costs about 165x what enumerating the raw object costs: V8 validates the
- * trap's result against the target's own property descriptors on every call,
- * and that was measured at ~68% of an entire deep-watch turn (#641).
+ * This is what a deep watcher actually wants. Subscribing per key made the
+ * traversal read every value back through the `get` trap purely to reach that
+ * key's dep: ~1200 reads and ~1600 `track` calls on a 200-row fixture, where
+ * one subscription per object is 402 (#644). It also had to track the key-set
+ * dep separately (#641), because a key nobody has read has no per-key dep yet —
+ * an any-write dep subsumes that case, since the `set` trap fires it for a new
+ * key as readily as for a changed one.
  *
- * Dropping the enumeration without replacing this subscription would be a
- * silent correctness bug rather than a slow path. Adding a NEW key triggers the
- * per-key dep and the key-set dep, but the per-key dep does not exist yet for a
- * key nobody has read — so the key-set dep is the only thing that fires, and a
- * deep watcher that stopped tracking it would simply not notice new keys.
+ * Allocated lazily on first subscription, so an object nobody deep-watches
+ * never creates it and its writes pay one already-loaded null check.
  *
  * A no-op on anything that is not a reactive proxy: reading an unknown symbol
  * off a plain object yields `undefined` and touches nothing.
  *
  * @internal
  */
-export function trackKeySet(target: unknown): void {
+export function trackAnyWrite(target: unknown): void {
     if (target !== null && typeof target === 'object') {
-        void (target as Record<symbol, unknown>)[TRACK_KEY_SET];
+        void (target as Record<symbol, unknown>)[TRACK_ANY_WRITE];
     }
 }
 
@@ -244,6 +244,12 @@ export function signal<T>(target: T): PrimitiveSignal<T> | Signal<T & object> {
     // Lazy: most signals (primitives wrapped as { value }, flat objects)
     // never read a nested object, so don't pay a WeakMap per signal().
     let reactiveCache: WeakMap<object, any> | null = null;
+    // One dep covering EVERY write to this object (see `trackAnyWrite`).
+    // Held in the closure rather than in depsMap so the write path costs a
+    // null check on an already-loaded slot instead of a second Map lookup —
+    // this is the hottest path in the library and most objects never allocate
+    // it at all.
+    let anyWriteDep: Dep | null = null;
 
     // DevTools id — only minted when a hook is currently installed.
     // The id stays on the proxy for the rest of its life via
@@ -280,6 +286,18 @@ export function signal<T>(target: T): PrimitiveSignal<T> | Signal<T & object> {
     // installed via setProxy right after construction below.
     const collectionSupport = isCollectionTarget
         ? createCollectionInstrumentations(objectTarget, depsMap!, getOrCreateDep, (key) => {
+            // Every Map/Set mutation routes through here, which makes it the
+            // one place a collection's any-write dep (#644) can be fired —
+            // `set`/`deleteProperty` never see them.
+            //
+            // NOT coalesced with the instrumentation's own triggers: `notify`
+            // runs after their `endBatch`, so they have already flushed by the
+            // time we get here, and `trigger` opens its own batch anyway. An
+            // effect subscribed to BOTH this dep and the same collection's
+            // key/iteration deps would therefore run twice. That takes a user
+            // effect which deep-watches a collection and separately reads it;
+            // a deep watcher on its own only ever holds this dep.
+            if (anyWriteDep !== null) trigger(anyWriteDep);
             notifySignalUpdated(signalId, key);
         })
         : null;
@@ -291,13 +309,13 @@ export function signal<T>(target: T): PrimitiveSignal<T> | Signal<T & object> {
 
     const proxy = new Proxy(objectTarget, {
         get(obj, prop, receiver) {
-            // Subscribe to the KEY-SET dep without enumerating (see
-            // `trackKeySet` below). One symbol identity compare on the hottest
-            // path in the library, which is the price of letting `watch(deep)`
-            // reach this dep without paying for the `ownKeys` trap.
-            if (prop === TRACK_KEY_SET) {
-                if (!collectionInstrumentations && currentSubscriber) {
-                    track(getOrCreateDep(Array.isArray(obj) ? 'length' : ITERATION_KEY));
+            // Subscribe to the ANY-WRITE dep (see `trackAnyWrite` below). One
+            // symbol identity compare on the hottest path in the library,
+            // which is the price of letting `watch(deep)` subscribe to a whole
+            // object without reading every key through this trap.
+            if (prop === TRACK_ANY_WRITE) {
+                if (currentSubscriber) {
+                    track(anyWriteDep ??= createDep());
                 }
                 return undefined;
             }
@@ -439,27 +457,35 @@ export function signal<T>(target: T): PrimitiveSignal<T> | Signal<T & object> {
             // target whose prototype carries data properties — `signal()` is
             // called on plain objects and arrays in practice — and the price
             // of closing it is the probe on every write.
-            const isNewKey = oldValue === undefined && depsMap !== null &&
+            //
+            // `anyWriteDep` counts alongside `depsMap` here: a deep watcher
+            // subscribes to the object without reading a single key (#644), so
+            // an object can be watched while `depsMap` is still null. Without
+            // this, `obj.newKey = undefined` on such an object would reach the
+            // `Object.is` guard below, compare undefined to undefined, and
+            // notify nobody.
+            const isNewKey = oldValue === undefined && (depsMap !== null || anyWriteDep !== null) &&
                 !Object.prototype.hasOwnProperty.call(obj, prop);
 
             const result = Reflect.set(obj, prop, newValue);
 
             if (isNewKey) {
-                const dep = depsMap!.get(prop);
+                const dep = depsMap?.get(prop);
                 // Arrays carry their enumeration dep on `length` (see the
                 // `ownKeys` trap), so a new index routes there. That covers
                 // filling a hole left by `delete list[i]`, where the key set
                 // grows but `length` does not move; a plain append lands here
                 // too and triggers the same pair the length-change branch
                 // below would have.
-                const keysDep = depsMap!.get(isArray ? 'length' : ITERATION_KEY);
-                if (dep && keysDep) {
-                    // Two deps for one write — batch so a subscriber of
-                    // both runs once.
+                const keysDep = depsMap?.get(isArray ? 'length' : ITERATION_KEY);
+                // Batch whenever more than one dep is in play, so a subscriber
+                // of several runs once.
+                if ((dep ? 1 : 0) + (keysDep ? 1 : 0) + (anyWriteDep ? 1 : 0) > 1) {
                     startBatch();
                     try {
-                        trigger(dep);
-                        trigger(keysDep);
+                        if (dep) trigger(dep);
+                        if (keysDep) trigger(keysDep);
+                        if (anyWriteDep) trigger(anyWriteDep);
                     } finally {
                         endBatch();
                     }
@@ -467,6 +493,8 @@ export function signal<T>(target: T): PrimitiveSignal<T> | Signal<T & object> {
                     trigger(dep);
                 } else if (keysDep) {
                     trigger(keysDep);
+                } else if (anyWriteDep) {
+                    trigger(anyWriteDep);
                 }
                 notifySignalUpdated(signalId, prop);
                 return result;
@@ -474,6 +502,14 @@ export function signal<T>(target: T): PrimitiveSignal<T> | Signal<T & object> {
 
             // Only trigger if value actually changed
             if (!Object.is(oldValue, newValue)) {
+                // A deep watcher subscribed to the whole object (#644) has to
+                // fire alongside whatever per-key deps do. Batching only when
+                // one exists keeps the common write — no deep watcher — on
+                // exactly the path it was on before, at the cost of one null
+                // check against an already-loaded slot.
+                const deep = anyWriteDep !== null;
+                if (deep) startBatch();
+                try {
                 if (depsMap) {
                     // Array writes can hit several deps at once (an index
                     // plus `length`, or `length` plus truncated indices).
@@ -513,6 +549,10 @@ export function signal<T>(target: T): PrimitiveSignal<T> | Signal<T & object> {
                         }
                     }
                 }
+                if (deep) trigger(anyWriteDep!);
+                } finally {
+                    if (deep) endBatch();
+                }
 
                 // Devtools: emit on any actual state change, even if
                 // nothing is currently subscribed (depsMap may be null
@@ -529,6 +569,11 @@ export function signal<T>(target: T): PrimitiveSignal<T> | Signal<T & object> {
             const result = Reflect.deleteProperty(obj, prop);
 
             if (result && hasKey) {
+                // See the matching comment in `set`: a deep watcher (#644) can
+                // be subscribed while `depsMap` is still null.
+                const deep = anyWriteDep !== null;
+                if (deep) startBatch();
+                try {
                 if (depsMap) {
                     const dep = depsMap.get(prop);
                     // The key set shrank — see the `ownKeys` trap for which
@@ -552,6 +597,10 @@ export function signal<T>(target: T): PrimitiveSignal<T> | Signal<T & object> {
                     } else if (keysDep) {
                         trigger(keysDep);
                     }
+                }
+                if (deep) trigger(anyWriteDep!);
+                } finally {
+                    if (deep) endBatch();
                 }
                 // Devtools: a delete is also a state change — `$set()`
                 // removals route through here too, so the panel needs

@@ -262,6 +262,21 @@ describe('watch', () => {
             expect(callback).toHaveBeenCalledTimes(1);
         });
 
+        it('detects a new key whose value is undefined', () => {
+            // #644 made this reachable: a deep watcher now subscribes to the
+            // object without reading any key, so `depsMap` can still be null
+            // here. The `isNewKey` guard has to count the any-write dep, or
+            // this write reaches the `Object.is` check, compares undefined to
+            // undefined, and notifies nobody.
+            const state = signal<{ a: number; added?: number }>({ a: 1 });
+            const callback = vi.fn();
+
+            watch(() => state, callback, { deep: true });
+
+            state.added = undefined;
+            expect(callback).toHaveBeenCalledTimes(1);
+        });
+
         it('detects a deleted key', () => {
             const state = signal<{ a: number; b?: number }>({ a: 1, b: 2 });
             const callback = vi.fn();
