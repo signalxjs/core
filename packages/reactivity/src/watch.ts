@@ -5,7 +5,7 @@
 import type { WatchSource, WatchCallback, WatchOptions, WatchHandle } from './types';
 import { rawEffect, registerWithActiveScope } from './effect';
 import { signal, trackAnyWrite } from './signal';
-import { reactiveToRaw } from './collections';
+import { reactiveToRaw, shouldNotProxy } from './collections';
 
 /**
  * Deeply subscribe the active effect to every object reachable from `value`.
@@ -31,7 +31,9 @@ import { reactiveToRaw } from './collections';
  * always goes through a proxy, so an object we never proxied is an object whose
  * writes we would never see.
  *
- * @param value The value to traverse — a reactive proxy, or a raw object
+ * @param value The value to traverse. Subscribing needs a reactive proxy — a
+ *   plain object has no deps to subscribe to, so passing one walks the shape
+ *   and tracks nothing. That is what enumerating it used to do too.
  * @param depth Maximum depth (Infinity for unlimited, number for limited)
  * @param seen Raw objects already visited, to terminate on cycles
  */
@@ -82,13 +84,14 @@ function traverse(value: unknown, depth: number = Infinity, seen: Set<unknown> =
  * subscribe to the parent's per-key dep as a side effect.
  *
  * Values `signal()` refuses to proxy (Date, RegExp, typed arrays — anything
- * with internal slots) are skipped: nothing can subscribe to them, so walking
- * into them could only cost time.
+ * with internal slots) are skipped before it is called: `signal()` hands such a
+ * value straight back, so traversing the result would add a non-reactive object
+ * to `seen` and enumerate keys that nothing can ever subscribe to.
  */
 function descend(rawChild: unknown, depth: number, seen: Set<unknown>): void {
     if (depth <= 0 || rawChild === null || typeof rawChild !== 'object') return;
-    const childProxy = signal(rawChild as object);
-    traverse(childProxy, depth, seen);
+    if (shouldNotProxy(rawChild)) return;
+    traverse(signal(rawChild as object), depth, seen);
 }
 
 /**

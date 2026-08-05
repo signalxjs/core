@@ -288,16 +288,16 @@ export function signal<T>(target: T): PrimitiveSignal<T> | Signal<T & object> {
         ? createCollectionInstrumentations(objectTarget, depsMap!, getOrCreateDep, (key) => {
             // Every Map/Set mutation routes through here, which makes it the
             // one place a collection's any-write dep (#644) can be fired —
-            // `set`/`deleteProperty` never see them. Batched, because the
-            // instrumentation has already triggered its own deps by now.
-            if (anyWriteDep !== null) {
-                startBatch();
-                try {
-                    trigger(anyWriteDep);
-                } finally {
-                    endBatch();
-                }
-            }
+            // `set`/`deleteProperty` never see them.
+            //
+            // NOT coalesced with the instrumentation's own triggers: `notify`
+            // runs after their `endBatch`, so they have already flushed by the
+            // time we get here, and `trigger` opens its own batch anyway. An
+            // effect subscribed to BOTH this dep and the same collection's
+            // key/iteration deps would therefore run twice. That takes a user
+            // effect which deep-watches a collection and separately reads it;
+            // a deep watcher on its own only ever holds this dep.
+            if (anyWriteDep !== null) trigger(anyWriteDep);
             notifySignalUpdated(signalId, key);
         })
         : null;
