@@ -183,16 +183,27 @@ pnpm bench:ssr:quick:ci # the same, plus --require-baseline-rows: FAILS when a q
                        # as `ungated` (and un-measured baseline entries as `stale`; a rename is one
                        # of each), and this is the CI job's variant, because set membership needs no
                        # matching hardware. Add a quick bench => re-baseline in the SAME PR.
-pnpm bench:micro       # request-path benches (after pnpm build): the server-fn endpoint, the
+pnpm bench:micro       # micro benches (after pnpm build): the server-fn endpoint, the
                        # @sigx/serialize boundary codec, the §6.3 boundary-refresh gate,
-                       # createBoundaryRefresh, and the islands/resume SSR pack overhead.
+                       # createBoundaryRefresh, the islands/resume SSR pack overhead, and
+                       # @sigx/reactivity's propagation + watch(deep) traversal (#636).
                        # sigx-only — nothing to compare against, so each bench reports a RATIO to a
-                       # floor (raw JSON, a bare fetch handler, a plain render). Every bench has a
+                       # floor (raw JSON, a bare fetch handler, a plain render, a plain object write,
+                       # a plain deep walk). Every bench has a
                        # correctness guard that fails the run: a bench silently measuring a 403 or an
                        # empty render would look like a huge win. The packs suite also reports payload
                        # BYTES, which are deterministic and therefore gated at +2% (vs +25% for
                        # timings) and enforced even across machines. A reduced subset rides
                        # `bench:ssr:quick`, so these are regression-gated with the SSR numbers.
+                       # The reactivity suite is BATCH-SIZED (x1k/x10k/x100 in each name): mitata
+                       # measures one run() call and nothing below ~0.1ms can be gated, so a bench
+                       # measuring a single signal write would produce a number no gate can read.
+                       # A bench and its floor must share a batch size — ratioToFloor divides two
+                       # p50s, so mismatched batches report the batch ratio and call it overhead.
+pnpm bench             # vitest/tinybench harness — runtime-core + runtime-dom ONLY, and NOT
+                       # baselined, NOT in bench:quick, NOT run by any CI job. Local scratchpad for
+                       # renderer work; anything that needs to be gated belongs in benchmarks/.
+                       # Reactivity moved out of it in #636; the remaining two files follow later.
 pnpm bench:ssr         # full comparative SSR bench: equivalence check, then sigx vs Vue/React/Preact
                        # CI runs `typecheck` + `verify` + the quick suite (bench-smoke job) as a CORRECTNESS
                        # gate: it catches adapter rot, output divergence and micro-bench guard failures, never

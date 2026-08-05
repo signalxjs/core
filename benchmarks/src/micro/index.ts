@@ -9,6 +9,7 @@ import { keyMatchSuite } from './keymatch.ts';
 import { refreshSuite } from './refresh.ts';
 import { packsSuite } from './packs.ts';
 import { slotsSuite } from './slots.ts';
+import { reactivitySuite } from './reactivity.ts';
 
 export const SUITES: MicroSuite[] = [
     codecSuite,
@@ -16,7 +17,8 @@ export const SUITES: MicroSuite[] = [
     keyMatchSuite,
     refreshSuite,
     packsSuite,
-    slotsSuite
+    slotsSuite,
+    reactivitySuite
 ];
 
 export type { MicroBench, MicroSuite, ByteMetric, SuiteName } from './types.ts';
