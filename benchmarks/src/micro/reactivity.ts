@@ -411,6 +411,7 @@ function writeNoSubscribers(): MicroBench {
         suite: 'reactivity',
         name: 'signal write, no subscribers x10k',
         floorOf: 'plain object write x10k',
+        quick: true,
         check: () => {
             state.v = 7;
             assert(state.v === 7, 'the signal did not take the write');
@@ -433,6 +434,7 @@ function writeOneEffect(): MicroBench {
         suite: 'reactivity',
         name: 'signal write, 1 effect x10k',
         floorOf: 'plain object write x10k',
+        quick: true,
         check: () => {
             const before = runs;
             state.v = ++n;
