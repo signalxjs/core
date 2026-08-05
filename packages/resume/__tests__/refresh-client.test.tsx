@@ -110,6 +110,28 @@ afterEach(() => {
     vi.restoreAllMocks();
 });
 
+describe('seam installation', () => {
+    it('is NON-ENUMERABLE — pack-to-pack wiring, never emitted into the page (#634)', () => {
+        // Stamped at `@sigx/resume/client` module init, which this file's
+        // imports have already triggered.
+        expect(
+            Object.getOwnPropertyDescriptor(globalThis, '__SIGX_SERVERFN_BOUNDARIES__')?.enumerable
+        ).toBe(false);
+        expect(Object.keys(globalThis)).not.toContain('__SIGX_SERVERFN_BOUNDARIES__');
+        // Hidden, not unreachable — @sigx/server's stub reads it by name.
+        expect(typeof seam().collect).toBe('function');
+        expect(typeof seam().apply).toBe('function');
+    });
+
+    it('leaves __SIGX_BOUNDARIES__ enumerable — it is a wire payload (#634)', () => {
+        (window as unknown as { __SIGX_BOUNDARIES__?: unknown }).__SIGX_BOUNDARIES__ =
+            Object.create(null);
+        expect(
+            Object.getOwnPropertyDescriptor(window, '__SIGX_BOUNDARIES__')?.enumerable
+        ).toBe(true);
+    });
+});
+
 describe('collect()', () => {
     it('inventories refreshable boundaries with encoded props and a high base', async () => {
         const Counter = makeCounter();

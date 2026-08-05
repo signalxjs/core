@@ -280,7 +280,15 @@ export function installBoundaryRefreshSeam(): void {
         __SIGX_SERVERFN_BOUNDARIES__?: { collect: typeof collect; apply: typeof apply };
     };
     if (host.__SIGX_SERVERFN_BOUNDARIES__) return;
-    host.__SIGX_SERVERFN_BOUNDARIES__ = { collect, apply };
+    // `defineProperty` so the seam lands NON-ENUMERABLE (the default for a new
+    // property defined this way) — pack-to-pack wiring, never emitted into the
+    // page, so it stays out of `Object.keys(globalThis)`. `configurable` keeps
+    // `uninstallBoundaryRefreshSeam`'s delete working.
+    Object.defineProperty(host, '__SIGX_SERVERFN_BOUNDARIES__', {
+        value: { collect, apply },
+        writable: true,
+        configurable: true
+    });
 }
 
 /** Test-only symmetry: remove the seam iff it is ours. */

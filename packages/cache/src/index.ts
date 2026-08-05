@@ -116,7 +116,16 @@ export function cachePlugin(defaults?: CacheDefaults): Plugin {
                     }
                 }
             };
-            seam.__SIGX_SERVERFN_CACHE__ = onDirectives;
+            // `defineProperty` so the seam lands NON-ENUMERABLE (the default
+            // for a new property defined this way) — pack-to-pack wiring is
+            // not a page payload and does not belong in
+            // `Object.keys(globalThis)`. `configurable` keeps the disposal
+            // `delete` below working.
+            Object.defineProperty(seam, '__SIGX_SERVERFN_CACHE__', {
+                value: onDirectives,
+                writable: true,
+                configurable: true
+            });
             app._context.disposables.add(() => {
                 if (seam.__SIGX_SERVERFN_CACHE__ === onDirectives) {
                     delete seam.__SIGX_SERVERFN_CACHE__;

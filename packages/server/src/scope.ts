@@ -315,14 +315,32 @@ function ensureContextStore(): Promise<ContextStore | null> {
     });
 }
 
+/** Has THIS module copy defined the seam property yet? Only the first stamp
+ *  goes through `defineProperty`; see `stampResolver`. */
+let _seamDefined = false;
+
 /** Re-assert the read seam. See the note above on why this happens on every
  *  entry and not just the first. */
 function stampResolver(): void {
-    (
-        globalThis as {
-            __SIGX_SERVERFN_CONTEXT__?: () => ServerFnContextInit | undefined;
-        }
-    ).__SIGX_SERVERFN_CONTEXT__ = _resolver;
+    const host = globalThis as {
+        __SIGX_SERVERFN_CONTEXT__?: () => ServerFnContextInit | undefined;
+    };
+    // The re-assert runs on EVERY scope entry, so the descriptor work happens
+    // once and the hot path stays a plain assignment — which preserves the
+    // NON-ENUMERABLE attribute the first stamp set, keeping this pack-internal
+    // seam out of `Object.keys(globalThis)`. The latch is per module copy on
+    // purpose: if another copy defined the property first, this copy's plain
+    // assignment inherits its descriptor, so either order lands the same.
+    if (_seamDefined) {
+        host.__SIGX_SERVERFN_CONTEXT__ = _resolver;
+        return;
+    }
+    _seamDefined = true;
+    Object.defineProperty(host, '__SIGX_SERVERFN_CONTEXT__', {
+        value: _resolver,
+        writable: true,
+        configurable: true
+    });
 }
 
 /**
@@ -427,10 +445,18 @@ function keepAliveScope(until: Promise<unknown>): void {
 // the older copy's object must still grow the newer method (readers
 // feature-detect it either way; docs/seams.md).
 {
-    const seam = ((globalThis as { __SIGX_SERVERFN_SCOPE__?: ServerFnScope })
-        .__SIGX_SERVERFN_SCOPE__ ??= {
-        run: runInScope,
-        keepAlive: keepAliveScope
-    });
+    const host = globalThis as { __SIGX_SERVERFN_SCOPE__?: ServerFnScope };
+    // `defineProperty` on the first stamp so the seam lands NON-ENUMERABLE
+    // (the default for a new property defined this way) — it is pack-to-pack
+    // wiring, not a payload, so it stays out of `Object.keys(globalThis)`. An
+    // already-stamped seam is left alone, exactly as the `??=` did.
+    if (!host.__SIGX_SERVERFN_SCOPE__) {
+        Object.defineProperty(host, '__SIGX_SERVERFN_SCOPE__', {
+            value: { run: runInScope, keepAlive: keepAliveScope },
+            writable: true,
+            configurable: true
+        });
+    }
+    const seam = host.__SIGX_SERVERFN_SCOPE__ as ServerFnScope;
     seam.keepAlive ??= keepAliveScope;
 }

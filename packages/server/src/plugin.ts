@@ -58,7 +58,16 @@ export function registerWireTypeHandlers(handlers: TypeHandler[]): void {
         if (at >= 0) next[at] = handler;
         else next.push(handler);
     }
-    g.__SIGX_SERVERFN_CODEC__ = next;
+    // `defineProperty` so the seam lands NON-ENUMERABLE (the default for a new
+    // property defined this way) — pack-internal wiring, never emitted into a
+    // page, so it has no business in `Object.keys(globalThis)`. An app that
+    // assigns the name directly (a documented option) still works and inherits
+    // the descriptor.
+    Object.defineProperty(g, '__SIGX_SERVERFN_CODEC__', {
+        value: next,
+        writable: true,
+        configurable: true
+    });
 }
 
 export interface ServerPluginOptions {

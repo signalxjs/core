@@ -73,6 +73,21 @@ export function resolveServerAppConfig(): ServerAppConfig | undefined {
  * re-evaluation is indistinguishable from a second app — the process is the
  * unit, the `__SIGX_SERVERFN_CODEC__` posture. Returns the previous value so
  * a test stamp can restore it.
+ *
+ * The config is FROZEN on the way in. Replacing the app wholesale stays
+ * legal (HMR needs it) and already dev-warns at `createServerApp`; swapping
+ * a member in place — `globalThis.__SIGX_SERVER_APP__.authorize = () => true`
+ * — did not warn and silently failed OPEN, which is exactly what this seam's
+ * fail-closed class forbids (`docs/seams.md`). Now it throws. `claimedBases`
+ * is pre-seeded first because `claimAppBase` does `??=` on it and freeze is
+ * shallow: with the array present that assignment short-circuits and never
+ * writes, while `push` on the array keeps working.
+ *
+ * The property itself is defined NON-ENUMERABLE: this seam is pack-internal
+ * wiring, not a payload anything reads off `globalThis` by hand, so it has
+ * no business in `Object.keys(globalThis)` or a console completion list.
+ * `writable`/`configurable` keep last-wins re-stamping and `dispose()`'s
+ * delete working.
  */
 export function stampServerAppConfig(
     config: ServerAppConfig | undefined
@@ -81,9 +96,20 @@ export function stampServerAppConfig(
     const previous = seam.__SIGX_SERVER_APP__;
     if (config === undefined) {
         delete seam.__SIGX_SERVER_APP__;
-    } else {
-        seam.__SIGX_SERVER_APP__ = config;
+        return previous;
     }
+    // Guarded, not unconditional: a restore stamp (`stubServerApp`'s teardown)
+    // hands back a config this function already froze, and `??=` on a frozen
+    // object with the key absent would throw.
+    if (!Object.isFrozen(config)) {
+        config.claimedBases ??= [];
+        Object.freeze(config);
+    }
+    Object.defineProperty(seam, '__SIGX_SERVER_APP__', {
+        value: config,
+        writable: true,
+        configurable: true
+    });
     return previous;
 }
 

@@ -50,6 +50,23 @@ export function scriptOpen(nonce?: string): string {
 }
 
 /**
+ * The document-complete signal — THE one emitter, used by every streaming
+ * path (`ssr.ts`'s generator and callback APIs, `document.ts`). It used to be
+ * three byte-identical copies of this literal, which is a drift hazard on a
+ * string that `scripts/deploy-smoke/assertions.mjs` and
+ * `packages/server-renderer/scripts/edge-smoke.mjs` assert verbatim.
+ *
+ * `__SIGX_STREAMING_COMPLETE__` stays a plain (enumerable) global, unlike the
+ * pack-internal seams: it is written by this emitted script, so hiding it
+ * would change wire bytes, and it is an APP-FACING contract — nothing in
+ * `packages/**\/src` reads it. The `sigx:ready` event is the half most apps
+ * should use; the flag exists for code that starts after the event fired.
+ */
+export function completionScript(nonce?: string): string {
+    return `${scriptOpen(nonce)}window.__SIGX_STREAMING_COMPLETE__=true;window.dispatchEvent(new Event('sigx:ready'));</script>`;
+}
+
+/**
  * Keys interpreted specially by JS object machinery — rejected outright
  * rather than shipped (prototype-pollution guard).
  */

@@ -25,6 +25,56 @@ the `__SIGX_ASYNC__` accessors. Both were invisible to anyone changing "the"
 reader — a decode added to the single accessor would have silently skipped
 every island. Both were united in #374.
 
+## Visible or hidden — the two classes (#634)
+
+Every SSR framework puts state on a global, because the server has to hand the
+browser something and `window` is the channel: Next.js ships `self.__next_f`,
+`__NEXT_DATA__`, `__BUILD_MANIFEST` and `__SSG_MANIFEST`; React DOM's SSR
+defines `$RC`/`$RS`/`$RX` from inline scripts; Nuxt has `__NUXT__`; Remix three;
+SvelteKit one hashed name; Solid `_$HY`. Qwik and Astro are the mainstream
+exception, keeping state in the DOM (`<script type="qwik/json">` inside the
+container, `<astro-island>` attributes) instead.
+
+So the question is not whether to have globals — it is which of them a person
+opening devtools should ever see. Two classes, and the descriptor says which:
+
+- **Wire seams are ENUMERABLE.** `__SIGX_ASYNC__`, `__SIGX_BOUNDARIES__`,
+  `__SIGX_STREAMING_COMPLETE__`, `$SIGX_REPLACE`, `$SIGX_APPEND`. The server
+  writes them with a plain assignment from an emitted `<script>`, so their
+  descriptor is not ours to choose without changing wire bytes — and they are
+  the page's debuggable data cache and bootstrap, exactly what `__NEXT_DATA__`
+  and `__NUXT__` are. They stay visible on purpose.
+- **Control seams are NON-ENUMERABLE.** Everything else. They are pack-to-pack
+  wiring stamped by JavaScript at runtime, nobody reads them off `globalThis`
+  by hand, and they have no business in `Object.keys(globalThis)` or a console
+  completion list. Their writers use
+  `Object.defineProperty(host, NAME, { value, writable: true, configurable: true })`
+  — a *new* property defined that way defaults to non-enumerable, so the
+  attribute need not be spelled, and `configurable` keeps the disposal
+  `delete` paths working.
+
+This costs nothing in compatibility. A third party that stamps a seam with a
+plain `globalThis.__SIGX_X__ = v` still works, and the assignment *inherits*
+the existing writable data property's descriptor — so it stays hidden too. The
+names are unchanged; only their enumerability is.
+
+Note what the hidden class is **not**: it is not a security boundary. Anything
+running on the page can still read a non-enumerable property by name. The point
+is surface area and legibility, not access control.
+
+> **What the page exposes is app-authored, and unfiltered.** Whatever an app
+> returns from a `useData`/`serverFn` fetcher lands verbatim in
+> `__SIGX_ASYNC__` under its key, and a claimed component's props and signals
+> land in `__SIGX_BOUNDARIES__[id]`. `record.deps` additionally ships canonical
+> cache-key strings, which can carry identifiers (`user:42`) even when the
+> value does not. The renderer applies key-safety and serializability checks
+> (`DANGEROUS_KEYS`, `isSerializable`) and **no sensitivity filter** — a secret
+> fetched under a `useData` key is one `window.__SIGX_ASYNC__` away. Nothing
+> the framework itself owns goes there: the principal lives on `rq.locals`
+> under a non-enumerable `Symbol.for` slot (`server/src/app-config.ts`) that no
+> serializer walks, and `@sigx/server-renderer` performs no `globalThis` writes
+> at all.
+
 ## DI tokens assume ONE module graph
 
 Every `provide*` seam is a `Symbol()` token (`createToken` in
@@ -62,8 +112,9 @@ ordinarily fine.
 | | |
 |---|---|
 | **Written by** | `server-renderer/src/server/state.ts` → `assignmentJs` (`server/serialize.ts`), from `server/state-plugin.ts` — shell script, mid-stream preScripts, and the `onStreamEnd` final drain. Server-side, packs feed it through `ctx.registerSerializedState` (#407), **the only public writer** — useAsync/useStream record their keys through the same `_unflushedAsyncKeys` dirty-set internally. |
-| **Read by** | `runtime-core/src/async/restore.ts` — `peekRestored`, **the only accessor**. `@sigx/cache` imports it (plus `writeBack`/`invalidateRestored`/`restoredKeys`) from `@sigx/runtime-core/internals` rather than touching the global. |
+| **Read by** | `runtime-core/src/async/restore.ts` — **the only accessor module**, four functions: `peekRestored` (:82, the sole *read*), `restoredKeys` (:101), `invalidateRestored` (:108), `writeBack` (:121). `@sigx/cache` imports them from `@sigx/runtime-core/internals` rather than touching the global. |
 | **Shape** | Null-prototype object, `key → value`. Values are encoded by `@sigx/serialize`. |
+| **Visibility** | Enumerable — a wire seam (see "Visible or hidden"). |
 
 `peekRestored` is therefore also **the** decode point: the codec is applied in
 exactly one place for this seam.
@@ -107,9 +158,10 @@ the contract.
 
 | | |
 |---|---|
-| **Written by** | `server-renderer/src/server/serialize.ts` → `emitBoundaryTable` (:209) and `boundaryPatchJs` (:241) |
-| **Read by** | `server-renderer/src/client/scheduler.ts:90` — `getBoundaryTable`/`getBoundaryRecord`, **the only accessor**. `@sigx/ssr-islands` (`client/island-context.ts`) and `@sigx/resume` (`client/scope.ts`) both go through it. |
+| **Written by** | **Server:** `server-renderer/src/server/serialize.ts` → `emitBoundaryTable` (:274) and `boundaryPatchJs` (:306). **Client:** `installBoundaryRecords` (`client/scheduler.ts:120`) and `removeBoundaryRecord` (:133) — a refresh envelope's `records` patch enters the table exactly as a streamed assignment would; both are public via `client/index.ts` and used by `resume/src/client/refresh.ts`. |
+| **Read by** | `server-renderer/src/client/scheduler.ts` — `getBoundaryTable` (:97) / `getBoundaryRecord` (:108). Together with the two writers above these are **the only four accessors**. `@sigx/ssr-islands` (`client/island-context.ts`) and `@sigx/resume` (`client/scope.ts`) both go through them. |
 | **Shape** | `id → SSRBoundaryRecord { props, state, … }` |
+| **Visibility** | Enumerable — a wire seam (see "Visible or hidden"). |
 
 Per-boundary props and signal snapshots for selective hydration and resume.
 Islands derives a filtered `IslandInfo` view and memoizes it in
@@ -126,6 +178,33 @@ does not memoize.
 > (`server-renderer/src/client/hydration-core.ts`, `resume/src/client/`).
 > Adding a decode to the accessor would trade a size guard for convenience.
 
+## Bootstrap seams — functions the server defines for its own emitted scripts
+
+Neither payloads nor pack hand-offs: the renderer defines these once, then
+every later `<script>` it streams calls them. They cross the server→browser
+boundary like the data seams and are enumerable for the same reason.
+
+### `$SIGX_REPLACE`
+
+| | |
+|---|---|
+| **Defined by** | `server-renderer/src/server/streaming.ts:23` (`generateStreamingScript`), emitted from `ssr.ts` |
+| **Called by** | the per-boundary replacement scripts the same module generates (:78) |
+| **Contract** | `(id: number, html: string) => void` — swaps the `data-async-placeholder` div for resolved HTML, then dispatches a bubbling `sigx:async-ready` CustomEvent carrying `detail.id`; `client/scheduler.ts` listens for it |
+
+### `$SIGX_APPEND`
+
+| | |
+|---|---|
+| **Defined by** | `server-renderer/src/server/streaming.ts:47` (`generateAppendBootstrap`), emitted from `ssr.ts` |
+| **Called by** | the per-token append scripts (`generateAppendScript`, :61), produced by `server/render-core.ts` |
+| **Contract** | `(id: number, text: string) => void` — appends a streamed text token (`useStream`) into its placeholder |
+
+Both take their payload through `escapeJsonForScript`, which escapes `<`, `>`,
+U+2028 and U+2029 but **not** `&` — correct for `<script>` text context, which
+is the only context either is emitted into. Neither value may be reflected into
+an attribute context without additional escaping.
+
 ## Control seams — one package handing another a capability
 
 Direction matters and is easy to get backwards: the **stamper** is usually the
@@ -135,8 +214,8 @@ package being extended, and the **caller** is the one with no import path to it.
 
 | | |
 |---|---|
-| **Stamped by** | `cache/src/index.ts:86` at plugin install |
-| **Called by** | `server/src/client/index.ts` when a response carries `$cache` |
+| **Stamped by** | `cache/src/index.ts:119` at plugin install (non-enumerable; disposal deletes it at :129) |
+| **Called by** | `server/src/client/index.ts:193` when a response carries `$cache` |
 | **Contract** | `(directives: { invalidates?: ReadonlyArray<string \| readonly unknown[]> }) => void` |
 
 Server-declared cache directives (rfc-server §6.2) reach the cache pack with no
@@ -163,8 +242,8 @@ is never called; a throwing hook never breaks the RPC result.
 
 | | |
 |---|---|
-| **Stamped by** | `serverPlugin({ types })` / `registerWireTypeHandlers` (`@sigx/server/plugin`) — or the app directly |
-| **Read by** | `server/src/wire-codec.ts` |
+| **Stamped by** | `serverPlugin({ types })` / `registerWireTypeHandlers` (`@sigx/server/plugin:61`) — or the app directly |
+| **Read by** | `server/src/wire-codec.ts:29`. Also read by its own writer (`plugin.ts:51-52`): registration is a read-modify-write, so the accessor pair lives in two modules. |
 | **Contract** | `TypeHandler[]` (see `@sigx/serialize`) — consulted **before** the built-ins. Registration through `registerWireTypeHandlers` is **tag-keyed**: a handler whose `tag` is already present replaces it (idempotent under per-request server-app installs); tag-less handlers append once by identity |
 
 Keeps `@sigx/server/client` able to revive app types without importing them.
@@ -271,7 +350,7 @@ what breaks.
 
 | | |
 |---|---|
-| **Stamped by** | `createServerApp()` (`@sigx/server/server`) — the app's server-app module, at evaluation; `/testing`'s `stubServerApp` in tests. Last-wins (HMR-safe), `dispose()` releases only its own stamp |
+| **Stamped by** | `createServerApp()` (`@sigx/server/server`) — the app's server-app module, at evaluation; `/testing`'s `stubServerApp` in tests. Last-wins (HMR-safe), `dispose()` releases only its own stamp. **The config is frozen on the way in** (#634) — see below |
 | **Read by** | `server/src/app-config.ts` — `resolveServerAppConfig()`, the only accessor; consulted lazily per call by the endpoint, by `invoke`, and by every `ServerFeatureContext` member (#625) |
 | **Contract** | `{ middleware?, authenticate?, authorize?, posture?, codec?, claimedBases? }` (`ServerAppConfig`) |
 
@@ -299,6 +378,21 @@ its miss is a no-op rather than a deny. It lives on the config so
 registry; scope stays per-app, since stamping a new app brings a fresh
 array.
 
+**`stampServerAppConfig` freezes the config** (#634). Replacing the app
+wholesale stays legal — HMR and `stubServerApp` need it, and it already
+dev-warns — but swapping a member in place,
+`globalThis.__SIGX_SERVER_APP__.authorize = () => true`, warned nothing and
+silently failed **open**, which is exactly what a fail-closed seam must not
+permit. It now throws. `claimedBases` is pre-seeded to `[]` *before* the
+freeze, because `claimAppBase` does `??=` on it: with the array present that
+assignment short-circuits and never writes, and `Object.freeze` is shallow so
+`push` still works. The seeding is guarded on `Object.isFrozen`, since a
+restore stamp hands back a config this function already froze.
+
+Consequence for callers: `resolveServerAppConfig()` returns a **frozen**
+object. A test that swapped `authorize` between cases on a stamped config must
+re-stamp through `stubServerApp` instead.
+
 (`__SIGX_GUARDS_CHECKED__`, the previous holder of this section, retired
 with rfc-server-v4: the fail-closed runtime closed the unanalyzed-module gap
 it mitigated — an unanalyzed `*.server.ts` now denies instead of running
@@ -308,8 +402,8 @@ open — so the build stamps nothing and the runtime reads nothing.)
 
 | | |
 |---|---|
-| **Stamped by** | `declareLiveClient()` — non-web platform-identity modules (lynx, terminal) |
-| **Read by** | `runtime-core/src/async/environment.ts`, `server/src/index.ts` (`assertNotLiveClient`) |
+| **Stamped by** | `declareLiveClient()` (`runtime-core/src/async/environment.ts:38`) — non-web platform-identity modules (lynx, terminal) |
+| **Read by** | `server/src/index.ts:458` (`assertNotLiveClient`) and `server/src/plugin.ts:109`. **Not** by `environment.ts`, which only writes it: `isLiveClient()` reads a module-local `declared`, deliberately, so the `typeof window` fallback can stay unstamped. |
 | **Contract** | `boolean` — `true` declares a live client; an explicit `declareLiveClient(false)` stamps `false` as a not-live override (readers compare `=== true`) |
 
 Marks a runtime with no HTML page. A `serverFn` body reaching a live client is
@@ -320,9 +414,15 @@ it.
 
 | | |
 |---|---|
-| **Stamped by** | `server-renderer/src/server/document.ts:44`, `ssr.ts:401,513` — with a `sigx:ready` event |
-| **Read by** | client code waiting on a finished document |
+| **Stamped by** | `completionScript()` (`server-renderer/src/server/serialize.ts`) — **the one emitter**, called from `document.ts` and both streaming paths in `ssr.ts` |
+| **Read by** | **Nothing in `packages/**/src`** — this is an APP-FACING contract, and the only in-repo consumers are the HTML assertions in `scripts/deploy-smoke/assertions.mjs` and `packages/server-renderer/scripts/edge-smoke.mjs` |
 | **Contract** | `true`, plus `window.dispatchEvent(new Event('sigx:ready'))` |
+| **Visibility** | Enumerable — a wire seam (see "Visible or hidden"). |
+
+The `sigx:ready` event is the half most apps should use; the flag exists for
+code that starts running *after* the event already fired. It was three
+byte-identical copies of the same emitted literal until #634 — a drift hazard
+on a string two smoke suites assert verbatim — and is now a single function.
 
 ### `__SIGX_DEVTOOLS_HOOK__`
 
@@ -363,3 +463,39 @@ app context. Then:
 4. Swallow throws from the far side. A pack bug must not break the caller.
    (Fail-closed control seams invert this too, deliberately: a throwing
    policy is a deny or an error, never swallowed.)
+5. **Define a control seam NON-ENUMERABLE** (#634) — the writer uses
+   `Object.defineProperty(host, NAME, { value, writable: true, configurable: true })`,
+   which defaults a new property to non-enumerable. Only a **wire** seam (one
+   the server emits into HTML with a plain assignment) stays enumerable, and
+   then only because its descriptor is fixed by the emitted bytes. If the
+   writer sits on a hot path, define once behind a module-local latch and let
+   later writes be plain assignments — they inherit the descriptor.
+
+## Appendix: private symbol-keyed globals
+
+Not seams — nothing across a package boundary reads them — but they *are*
+`globalThis` state, and this file is meant to be the whole map. They use
+`Symbol.for('sigx.*')` rather than a string key for the same reason the seams
+above exist at all: two copies of a module must land on one slot. A registry
+symbol is invisible to `Object.keys` and to devtools completion by
+construction.
+
+| Key | Site | Purpose |
+|---|---|---|
+| `Symbol.for('sigx.serverfn.unconfiguredHint')` | `server/src/app-config.ts:190` | Once-per-process dev hint latch. Not module-local, or dev's two module copies would each fire a hint whose text claims it fires once. |
+| `Symbol.for('sigx.serverfn.warnedNestedRequest')` | `server/src/scope.ts:235` | Same, for the nested-request notice. |
+
+Related, and *not* on `globalThis` — the same discipline applied to a host
+object, listed so a search for "where does sigx keep hidden state" finds them:
+`Symbol.for('sigx.serverfn.principal')` and
+`Symbol.for('sigx.serverfn.requestValues'|'…requestDisposal')` on `rq.locals`
+(`server/src/app-config.ts:99`, `server/src/per-request.ts:46,52`),
+`Symbol.for('sigx.cloudflare.devPlatform')` on the Vite dev server
+(`cloudflare/src/dev.ts:20`), and `Symbol.for('sigx.directives')` on DOM
+elements (`runtime-dom/src/directives.ts:59`).
+
+One more global escapes this registry by design: `@sigx/vite`'s auto-import
+codegen (`vite/src/cli.ts:267`) writes **user-configured** prefix names onto
+`globalThis`. The names come from app config, so they cannot be enumerated
+here — but an app that sees an unexpected global should check its own
+auto-import prefixes before filing a bug against a seam.

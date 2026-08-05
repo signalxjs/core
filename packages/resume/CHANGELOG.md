@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **`__SIGX_SERVERFN_BOUNDARIES__` is stamped non-enumerable (#634).** The
+  single-flight refresh seam is pack-to-pack wiring, never emitted into a page,
+  so it no longer shows up in `Object.keys(globalThis)` or devtools completion.
+  Name, contract, first-stamp-wins install and `uninstall` are unchanged, and
+  `@sigx/server`'s stub reads it exactly as before. `__SIGX_BOUNDARIES__` — the
+  wire table this pack reads — stays enumerable on purpose. See
+  `docs/seams.md`.
+
 ## [0.15.0] - 2026-08-04
 
 ### Added

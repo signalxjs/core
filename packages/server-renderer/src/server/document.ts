@@ -35,15 +35,10 @@ import type { SSRPlugin } from '../plugin';
 import { createSSRContext, type SSRContext, type SSRContextOptions } from './context';
 import { initPluginContext } from './plugin-setup';
 import { renderToChunks } from './render-core';
-import { emitBoundaryTable, scriptOpen } from './serialize';
+import { completionScript, emitBoundaryTable } from './serialize';
 import { renderHeadToString, collectRootAttrs, mergeAttrsIntoTag } from '../head';
 import { responseSummary, type SSRResponse } from '../response';
 import { chunksToBytes } from './bytes';
-
-/** Same completion signal the plain streaming APIs emit. */
-function completionScript(nonce?: string): string {
-    return `${scriptOpen(nonce)}window.__SIGX_STREAMING_COMPLETE__=true;window.dispatchEvent(new Event('sigx:ready'));</script>`;
-}
 
 export interface DocumentOptions extends SSRContextOptions {
     /** Full HTML template containing the outlet marker. */
