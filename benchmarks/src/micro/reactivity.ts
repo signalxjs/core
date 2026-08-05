@@ -131,6 +131,18 @@ function assertDeepWatchContract(): void {
         'mutating an object added in an earlier turn did not notify — the traversal is not re-subscribing to new subtrees'
     );
 
+    // A NEW KEY on a plain object, which the array push above does NOT cover:
+    // an array keeps its key-set subscription through `Array.isArray` and
+    // `.length`, so a traversal that stopped subscribing to the key set of
+    // plain objects would still pass everything above (#641). A new key has no
+    // per-key dep yet, so the key-set dep is the only thing that can fire.
+    const afterNested = fired;
+    (probe.rows[0] as unknown as Record<string, number>).addedKey = 1;
+    assert(
+        fired > afterNested,
+        'adding a new key to a nested object did not notify — the traversal is not subscribing to the key set'
+    );
+
     handle.stop();
 }
 
@@ -329,6 +341,13 @@ function shallowWatchBench(): MicroBench {
  * anything the turn added. The remaining cost is one full traversal per dirty
  * turn, which is exactly the ceiling actors#38 documented and could not remove
  * from the caller's side.
+ *
+ * Its `trackDeep` still enumerates the PROXY, because that is what the caller
+ * ships. #641 moved reactivity's own `traverse` onto the raw target and left
+ * this alone deliberately — so the gap between this row and the `watch(deep)`
+ * rows above is now exactly what a caller who hand-rolls the walk is leaving on
+ * the table by not using `watch(deep)`. Do not "fix" it here without telling
+ * signalxjs/actors#77 first; the point of the row is to track what they run.
  */
 function turnBoundaryBench(): MicroBench {
     const state = signal(makeState(ROWS));

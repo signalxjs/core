@@ -8,6 +8,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- **`watch(deep)` no longer enumerates through the reactive proxy (#641).**
+  `Object.keys()` on a proxy costs about **165x** what it costs on the raw
+  object — 2036ns against 12.3ns for a three-key object — because V8 validates
+  the `ownKeys` trap's result against the target's own property descriptors on
+  every call. It is not the trap body, which profiles separately at ~11%; it is
+  the proxy protocol, and on a 200-row fixture it was **~68% of an entire
+  deep-watch turn**. The traversal now enumerates the raw target and reads each
+  key back through the proxy, which subscribes exactly as before.
+
+  Nothing observable changes: the same deps are tracked and the same writes
+  notify. The cost scaled with the number of plain **objects** walked, so the
+  deeper and wider the watched state, the larger the win; arrays never paid it.
+
+  The one thing enumerating the proxy did that reading keys does not is
+  subscribe to the **key-set** dep, without which a newly added key would stop
+  notifying — an internal `trackKeySet` now does that explicitly, and the
+  regression tests for it fail if it is removed.
+
 - **The pack-internal `globalThis` seams are now non-enumerable, and the
   server-app config is frozen (#634).** Opening devtools on a sigx page listed
   ten `__SIGX_*` / `$SIGX_*` names; five of those were pack-to-pack wiring

@@ -4,6 +4,8 @@
 
 import type { WatchSource, WatchCallback, WatchOptions, WatchHandle } from './types';
 import { rawEffect, registerWithActiveScope } from './effect';
+import { trackKeySet } from './signal';
+import { reactiveToRaw } from './collections';
 
 /**
  * Deeply traverses an object to trigger reactive tracking on all nested properties.
@@ -37,8 +39,29 @@ function traverse(value: unknown, depth: number = Infinity, seen: Set<unknown> =
             traverse(v, depth - 1, seen);
         });
     } else {
-        // Traverse object properties
-        for (const key of Object.keys(value)) {
+        // Enumerate the RAW target, read back through the proxy.
+        //
+        // `Object.keys()` on a reactive proxy costs ~165x what it costs on the
+        // raw object — 2036ns vs 12.3ns for a three-key object — because V8
+        // validates the `ownKeys` trap's result against the target's own
+        // property descriptors on every call. That is not the trap body (which
+        // profiles separately at ~11%); it is the proxy protocol itself, and on
+        // a 200-row fixture it was ~68% of an entire deep-watch turn (#641).
+        // It scales with the number of plain OBJECTS walked, not with keys,
+        // which is why arrays — handled by the index loop above — never paid it.
+        //
+        // The key set is identical either way: the `ownKeys` trap returns
+        // `Reflect.ownKeys(target)`, so `Object.keys` over the proxy and over
+        // the raw target enumerate exactly the same own enumerable string keys.
+        // Reading each one back through the proxy still subscribes per key and
+        // still materialises the nested proxy the recursion needs.
+        //
+        // `trackKeySet` replaces the ONE thing enumerating the proxy did that
+        // reading keys does not: subscribing to the key-set dep, without which
+        // a new key added to this object would never notify.
+        const raw = reactiveToRaw.get(value) ?? value;
+        trackKeySet(value);
+        for (const key of Object.keys(raw)) {
             traverse((value as Record<string, unknown>)[key], depth - 1, seen);
         }
     }

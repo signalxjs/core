@@ -223,6 +223,107 @@ describe('watch', () => {
             state.level1.level2 = { level3: { value: 'changed' } };
             expect(callback).toHaveBeenCalled();
         });
+
+        // #641 moved the traversal off `Object.keys(proxy)` onto the raw
+        // target, which costs ~165x less but drops the key-set subscription
+        // the `ownKeys` trap used to provide as a side effect. These cover the
+        // cases that would silently stop notifying if that subscription were
+        // ever lost again — a NEW key has no per-key dep yet, so the key-set
+        // dep is the only thing that fires for it.
+        it('detects a new key added to a watched object', () => {
+            const state = signal<{ a: number; added?: number }>({ a: 1 });
+            const callback = vi.fn();
+
+            watch(() => state, callback, { deep: true });
+
+            state.added = 2;
+            expect(callback).toHaveBeenCalledTimes(1);
+        });
+
+        it('detects a new key added to a NESTED object', () => {
+            const state = signal<{ nested: { a: number; added?: number } }>({ nested: { a: 1 } });
+            const callback = vi.fn();
+
+            watch(() => state, callback, { deep: true });
+
+            state.nested.added = 2;
+            expect(callback).toHaveBeenCalledTimes(1);
+        });
+
+        it('detects the first key added to an initially EMPTY nested object', () => {
+            // The hardest case: no dep of any kind exists on `empty` until the
+            // key-set dep is tracked, so nothing else can catch this.
+            const state = signal<{ empty: Record<string, number> }>({ empty: {} });
+            const callback = vi.fn();
+
+            watch(() => state, callback, { deep: true });
+
+            state.empty.first = 1;
+            expect(callback).toHaveBeenCalledTimes(1);
+        });
+
+        it('detects a deleted key', () => {
+            const state = signal<{ a: number; b?: number }>({ a: 1, b: 2 });
+            const callback = vi.fn();
+
+            watch(() => state, callback, { deep: true });
+
+            delete state.b;
+            expect(callback).toHaveBeenCalledTimes(1);
+        });
+
+        it('re-subscribes to a subtree added in a later turn', () => {
+            // The actors#38 write-behind case: an object added in turn N and
+            // mutated in turn N+1 must still notify.
+            const state = signal<{ rows: Array<{ n: number }> }>({ rows: [] });
+            const callback = vi.fn();
+
+            watch(() => state, callback, { deep: true });
+
+            state.rows.push({ n: 0 });
+            expect(callback).toHaveBeenCalledTimes(1);
+
+            state.rows[0].n = 1;
+            expect(callback).toHaveBeenCalledTimes(2);
+        });
+
+        it('still traverses Maps and Sets', () => {
+            const state = signal<{ map: Map<string, number>; set: Set<number> }>({
+                map: new Map([['a', 1]]),
+                set: new Set([1])
+            });
+            const callback = vi.fn();
+
+            watch(() => state, callback, { deep: true });
+
+            state.map.set('b', 2);
+            expect(callback).toHaveBeenCalledTimes(1);
+
+            state.set.add(2);
+            expect(callback).toHaveBeenCalledTimes(2);
+        });
+
+        it('terminates on a circular reference', () => {
+            const inner: Record<string, unknown> = { value: 1 };
+            inner.self = inner;
+            const state = signal<{ inner: Record<string, unknown> }>({ inner });
+            const callback = vi.fn();
+
+            watch(() => state, callback, { deep: true });
+
+            state.inner.value = 2;
+            expect(callback).toHaveBeenCalledTimes(1);
+        });
+
+        it('does not traverse past a non-proxyable value', () => {
+            const state = signal({ when: new Date(0), n: 0 });
+            const callback = vi.fn();
+
+            watch(() => state, callback, { deep: true });
+
+            state.n = 1;
+            expect(callback).toHaveBeenCalledTimes(1);
+        });
     });
 
     describe('watching different source types', () => {

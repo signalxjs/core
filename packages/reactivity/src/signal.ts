@@ -26,6 +26,38 @@ import {
  */
 const signalIds = new WeakMap<object, number>();
 
+/**
+ * Private key the `get` trap answers by tracking the KEY-SET dep — the one
+ * `ownKeys` tracks — and returning `undefined`. See {@link trackKeySet}.
+ */
+const TRACK_KEY_SET = Symbol('sigx:trackKeySet');
+
+/**
+ * Subscribe the active effect to `target`'s key-set dep WITHOUT enumerating it.
+ *
+ * `Object.keys(proxy)` subscribes to that dep as a side effect of going through
+ * the `ownKeys` trap — which is how `watch(deep)` used to reach it, and which
+ * costs about 165x what enumerating the raw object costs: V8 validates the
+ * trap's result against the target's own property descriptors on every call,
+ * and that was measured at ~68% of an entire deep-watch turn (#641).
+ *
+ * Dropping the enumeration without replacing this subscription would be a
+ * silent correctness bug rather than a slow path. Adding a NEW key triggers the
+ * per-key dep and the key-set dep, but the per-key dep does not exist yet for a
+ * key nobody has read — so the key-set dep is the only thing that fires, and a
+ * deep watcher that stopped tracking it would simply not notice new keys.
+ *
+ * A no-op on anything that is not a reactive proxy: reading an unknown symbol
+ * off a plain object yields `undefined` and touches nothing.
+ *
+ * @internal
+ */
+export function trackKeySet(target: unknown): void {
+    if (target !== null && typeof target === 'object') {
+        void (target as Record<symbol, unknown>)[TRACK_KEY_SET];
+    }
+}
+
 /** Check if a value is a primitive type */
 function isPrimitive(value: unknown): value is Primitive {
     if (value === null || value === undefined) return true;
@@ -259,6 +291,17 @@ export function signal<T>(target: T): PrimitiveSignal<T> | Signal<T & object> {
 
     const proxy = new Proxy(objectTarget, {
         get(obj, prop, receiver) {
+            // Subscribe to the KEY-SET dep without enumerating (see
+            // `trackKeySet` below). One symbol identity compare on the hottest
+            // path in the library, which is the price of letting `watch(deep)`
+            // reach this dep without paying for the `ownKeys` trap.
+            if (prop === TRACK_KEY_SET) {
+                if (!collectionInstrumentations && currentSubscriber) {
+                    track(getOrCreateDep(Array.isArray(obj) ? 'length' : ITERATION_KEY));
+                }
+                return undefined;
+            }
+
             if (prop === '$set') {
                 return setFn ??= (newValue: T & object) => {
                     batch(() => {
