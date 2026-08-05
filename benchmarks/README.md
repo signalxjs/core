@@ -29,6 +29,13 @@ pnpm bench:ssr:stream     # streaming TTFB harness (large-table, p50/p75/p99)
 pnpm bench:micro          # micro suites (server fns, codec, gate, packs, slots, reactivity)
 pnpm bench:ssr:quick      # sigx-only quick suite + regression check (informational)
 pnpm bench:ssr:baseline   # full run that writes/merges results/baseline.json
+
+# Interleaved A/B between two checkouts (usually two worktrees, each built).
+# Both scripts encode `--conditions production`, which is the easy thing to get
+# wrong — without it the DEV dist is measured.
+pnpm --filter @sigx/benchmarks run ab -- \
+  --base-dir=../main --head-dir=. --rounds=5 --out=/tmp/rounds.json
+pnpm --filter @sigx/benchmarks run ab:report -- --rounds-file=/tmp/rounds.json
 pnpm --filter @sigx/benchmarks bench:quick:enforce   # quick suite, fails on regression
 pnpm --filter @sigx/benchmarks verify       # equivalence check only
 pnpm --filter @sigx/benchmarks typecheck    # this workspace's own stricter tsconfig
@@ -234,21 +241,47 @@ against the `quick` section of `results/baseline.json`.
   delta table prints, and "worse than +25%" notes on a CI runner are expected.
 - **`bench.yml` → `bench-ab`** runs on PRs touching `packages/**`,
   `benchmarks/**` or the lockfile, and is where PR-time *numbers* come from. It
-  measures the PR's base ref and then its head ref **on the same runner**, and
-  posts the delta as a single comment it updates in place. Absolute figures from
-  a shared vCPU are worthless, but the delta between two runs minutes apart on
-  the same box is not — and unlike the committed baseline it needs no machine to
-  match. It never fails on a regression; read the table and decide. Fork PRs get
-  the same table in the job summary (their token cannot comment).
+  measures two refs **on the same runner**, **interleaved** (see below), and
+  posts the result as a single comment it updates in place. Absolute figures
+  from a shared vCPU are worthless, but the comparison between two refs is not
+  — and unlike the committed baseline it needs no machine to match. On a PR it
+  never fails; read the table and decide. Fork PRs get the same table in the job
+  summary (their token cannot comment).
+- **`bench.yml` → `bench-ab` by hand** — dispatch it with a `base` input and it
+  compares **any two refs**: `base: main`, `head: my-branch`. That is how a perf
+  change gets judged *before* it is proposed, and the only place `--enforce`
+  exists (the `enforce` input), for a deliberate proof run.
+- **`bench.yml` → `bench-quick`** (manual dispatch with **no** `base`)
+  additionally runs `bench:micro` and uploads both result files.
 
-  **Its noise floor, measured**: the PR that added the job (#554) changes no
-  runtime code, so every delta in its own table was noise — and the timing rows
-  landed within ±5%, the two stream rows within ±15% (the stream is 10
-  iterations, not a sampled median). Read a few percent as nothing. The whole
-  job takes about a minute: a warm pnpm store installs in ~2s and the two builds
-  and two 8s suites fit in the rest.
-- **`bench.yml` → `bench-quick`** (manual dispatch) additionally runs
-  `bench:micro` and uploads both result files.
+#### Why interleaved (#638)
+
+Measuring base once and then head once cannot separate the change from the
+machine. The head is always second, so drift, thermal state and cache warmth
+land on its account. On #637 — a PR that touched no package source at all —
+that read as **+3.7%, +5.9% and +6.6%** on three rows.
+
+Raising mitata's sample budget does not help: that shrinks *within-run*
+sampling error, while every sample on one side shares the same position in
+time. So the rounds alternate, and the alternation is **counterbalanced** —
+even rounds base-first, odd rounds head-first — so a linear drift carries
+equal and opposite bias in the two orders and cancels in the paired deltas.
+
+A row is only called `improved`/`regressed` when **every round agrees in sign**
+(a sign test at p = 2⁻ᴿ, ~3% at the default R=5) **and** the median delta clears
+both 3% and the row's own run-to-run spread. A side whose spread exceeds 10%
+is reported `noisy` and claims nothing.
+
+That second condition is not decoration. In a local null run — the *same*
+checkout on both sides, so a known-zero effect — `serverfn/POST noop` came out
+at a median of **−15.1% with every round negative**, and the 200-row deep-watch
+bench at **−37.7%**. Unanimity alone would have called both an improvement; the
+spread rule refused them. Zero rows were called in that run, which is the
+calibration the design has to pass.
+
+`ab.ts` (the round driver) is deliberately free of local imports and npm
+dependencies, so `signalxjs/actors` — which carries its own copy of `bench.yml`
+and a differently-shaped quick suite — can take it unchanged.
 
 ## Baseline & caveats
 

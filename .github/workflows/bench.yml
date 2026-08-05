@@ -8,10 +8,24 @@ name: Bench
 #
 # Two jobs, two shapes:
 #
-# - `bench-quick` (manual): one run of the current ref, results uploaded as an
-#   artifact for a human to read.
-# - `bench-ab` (perf-sensitive PRs): the PR's base ref and its head ref
-#   measured back to back ON THE SAME RUNNER, posted as a comment.
+# - `bench-quick` (manual, no `base` input): one run of the current ref, results
+#   uploaded as an artifact for a human to read.
+# - `bench-ab` (perf-sensitive PRs, or a manual run WITH a `base` input): two
+#   refs measured ON THE SAME RUNNER, INTERLEAVED across rounds, posted as a
+#   comment. A PR compares its base against its head; a dispatch compares any
+#   two refs, so a candidate branch can be measured against `main` without
+#   opening a PR — which is how a perf change gets judged before it is proposed.
+#
+# INTERLEAVED, because measuring base once and then head once cannot separate
+# the change from the machine (#638). The head is always second, so every bit of
+# drift, thermal state and cache warmth lands on its account: on #637, a PR that
+# touched no package source at all, that read as +3.7%, +5.9% and +6.6% on three
+# rows. Rounds alternate and counterbalance (even rounds base-first, odd rounds
+# head-first) so a linear drift cancels in the paired deltas instead of accruing
+# to one side, and a row is only called `improved`/`regressed` when every round
+# agrees in sign AND the median delta clears the row's own run-to-run spread.
+# A local null run — the same checkout on both sides — produced medians of
+# -37.7% and -15.1% that the spread rule correctly refused to call.
 #
 # BOTH NOW RUN ON THE DEDICATED BENCH VM (org-level self-hosted runner, label
 # `bench`). Three back-to-back quick runs there put every timing row above
@@ -32,6 +46,25 @@ name: Bench
 # That also means the merge queue never waits on the VM.
 on:
   workflow_dispatch:
+    inputs:
+      base:
+        description: 'A/B "before" ref (sha, branch or tag). Leave EMPTY for a plain one-off run of this ref.'
+        required: false
+        type: string
+      head:
+        description: 'A/B "after" ref. Defaults to the ref this workflow was dispatched from.'
+        required: false
+        type: string
+      rounds:
+        description: 'Interleaved rounds per side (>= 2).'
+        required: false
+        default: '5'
+        type: string
+      enforce:
+        description: 'Fail the job on a unanimous regression. The deliberate proof run — PR runs are never gated.'
+        required: false
+        default: false
+        type: boolean
   pull_request:
     branches: [main]
     paths:
@@ -115,7 +148,9 @@ jobs:
           }
 
   bench-quick:
-    if: github.event_name == 'workflow_dispatch'
+    # A dispatch with no `base` input is a plain one-off run of this ref. Give
+    # it a `base` and you get the A/B job below instead.
+    if: github.event_name == 'workflow_dispatch' && inputs.base == ''
     needs: wake
     # `workflow_dispatch` requires write access on a branch of this repo, so
     # there is no fork exposure here and this can take the VM unconditionally.
@@ -157,7 +192,7 @@ jobs:
             benchmarks/results/micro-latest.json
 
   bench-ab:
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' || inputs.base != ''
     needs: wake
     # A PR from a branch of this repo goes to the bench VM; a PR from a FORK
     # stays on `ubuntu-latest`, non-negotiably. Fork PRs run the workflow file
@@ -174,23 +209,28 @@ jobs:
     # indented further than the first is preserved verbatim, newline and all, so
     # a pretty-wrapped version of this reaches Actions with literal newlines in
     # it.
-    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]') && fromJSON('["self-hosted","linux","x64","bench"]') || 'ubuntu-latest' }}
-    # Two installs, two builds, two suites. The ceiling is for a hang, not for a
-    # slow run.
+    runs-on: ${{ (github.event_name == 'workflow_dispatch' || (github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]')) && fromJSON('["self-hosted","linux","x64","bench"]') || 'ubuntu-latest' }}
+    # Two installs, two builds, then 2xR quick suites. The VM turns a quick
+    # suite in ~20s, so the default 5 rounds add ~200s to what this job already
+    # cost. The ceiling is for a hang, not for a slow run.
     timeout-minutes: 45
     permissions:
       contents: read
       pull-requests: write
     env:
-      BASE_SHA: ${{ github.event.pull_request.base.sha }}
-      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      # A PR compares its base against its head. A dispatch compares whatever
+      # two refs it was given, which is what makes "measure this candidate
+      # against main" possible without opening a PR at all.
+      BASE_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || inputs.base }}
+      HEAD_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || (inputs.head != '' && inputs.head || github.sha) }}
+      ROUNDS: ${{ github.event_name == 'pull_request' && '5' || inputs.rounds }}
     steps:
-      # fetch-depth 0: the job checks the base ref out in place, so both commits
-      # must be in the clone.
+      # fetch-depth 0: the base ref is checked out as a WORKTREE of this clone,
+      # so its commit must already be here.
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ env.HEAD_REF }}
 
       - uses: pnpm/action-setup@v6
 
@@ -199,47 +239,88 @@ jobs:
           node-version: '24'
           cache: 'pnpm'
 
-      # Both halves invoke src/quick.ts BY PATH, never through a pnpm script:
-      # the base ref is an arbitrary older commit and need not define a script
-      # name this PR introduces.
-      - name: Bench the base ref
+      # A WORKTREE rather than `git checkout --detach` in place, because the two
+      # sides now have to exist SIMULTANEOUSLY: rounds alternate between them,
+      # and re-checking-out and rebuilding per round would cost more than the
+      # measurement and reintroduce exactly the drift the interleaving removes.
+      #
+      # `worktree prune` first: this runner is self-hosted and reuses its
+      # workspace, so a registration left behind by a killed job would otherwise
+      # make `worktree add` fail on a path that no longer exists.
+      - name: Check out the base ref alongside
         run: |
-          git checkout --detach "$BASE_SHA"
+          set -euo pipefail
+          git worktree prune
+          rm -rf "$RUNNER_TEMP/base"
+          # Resolve locally FIRST. A PR's base sha is already in the clone
+          # (fetch-depth: 0 above), and `git fetch origin <sha>` is not a
+          # refspec fetch — it would fail on the common case and drop us into
+          # the all-branches fallback on every PR run, for nothing.
+          # Only a dispatch naming a ref this clone has never seen needs the
+          # network.
+          if ! base_sha=$(git rev-parse --verify --quiet "$BASE_REF^{commit}"); then
+            git fetch --no-tags --force origin "$BASE_REF" 2>/dev/null \
+              || git fetch --no-tags --force origin "+refs/heads/*:refs/remotes/origin/*"
+            base_sha=$(git rev-parse --verify --quiet "$BASE_REF^{commit}" \
+              || git rev-parse --verify "origin/$BASE_REF^{commit}" \
+              || git rev-parse --verify FETCH_HEAD)
+          fi
+          echo "base $BASE_REF -> $base_sha"
+          echo "BASE_SHA=$base_sha" >> "$GITHUB_ENV"
+          # HEAD_REF may be a branch name on a dispatch, so resolve it too —
+          # the report title abbreviates to 7 characters and would otherwise
+          # print the first 7 letters of a branch name.
+          echo "HEAD_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          git worktree add --detach "$RUNNER_TEMP/base" "$base_sha"
+
+      # Each side builds in its own tree, so there is no stale-dist hazard to
+      # clean up between them — the reason the old job needed `rm -rf
+      # packages/*/dist` was that both refs shared one working directory.
+      - name: Install and build both sides
+        run: |
+          set -euo pipefail
           pnpm install --frozen-lockfile
           pnpm build
-          node --conditions production benchmarks/src/quick.ts
-          cp benchmarks/results/quick-latest.json "$RUNNER_TEMP/base.json"
-
-      - name: Bench the head ref
-        run: |
-          git checkout --detach "$HEAD_SHA"
-          # A dist left over from the base build is not overwritten when the
-          # head build no longer emits that file — the head half must measure
-          # the head's output and nothing else.
-          rm -rf packages/*/dist
+          cd "$RUNNER_TEMP/base"
           pnpm install --frozen-lockfile
           pnpm build
-          node --conditions production benchmarks/src/quick.ts
-          cp benchmarks/results/quick-latest.json "$RUNNER_TEMP/head.json"
 
-      # The HEAD checkout's comparer, so a PR that changes check-regression is
-      # read by the version it ships. No --enforce and no
-      # --require-baseline-rows: this job reports, it never fails on numbers.
-      - name: Compare
+      # ab.ts runs each side's OWN quick.ts by path, never through a pnpm
+      # script: the base ref is an arbitrary older commit and need not define a
+      # script name the head introduces.
+      - name: Interleaved A/B
         run: |
-          node --conditions production benchmarks/src/check-regression.ts \
-            --baseline-file="$RUNNER_TEMP/base.json" \
-            --current-file="$RUNNER_TEMP/head.json" \
+          node --conditions production benchmarks/src/ab.ts \
+            --base-dir="$RUNNER_TEMP/base" \
+            --head-dir="$GITHUB_WORKSPACE" \
+            --rounds="$ROUNDS" \
+            --out="$RUNNER_TEMP/rounds.json"
+
+      # The HEAD checkout's reporter, so a PR that changes the verdict rules is
+      # read by the version it ships.
+      #
+      # `--enforce` ONLY on a dispatch that asked for it. A PR run reports and
+      # never fails: this workflow is not a required check and has no
+      # merge_group trigger precisely so the VM can never block a merge, and a
+      # job that can fail on numbers would quietly undo that.
+      - name: Report
+        run: |
+          node --conditions production benchmarks/src/ab-report.ts \
+            --rounds-file="$RUNNER_TEMP/rounds.json" \
             --markdown="$RUNNER_TEMP/bench.md" \
-            --title="base \`${BASE_SHA:0:7}\` (before) → head \`${HEAD_SHA:0:7}\` (after), both measured on this runner."
+            ${{ (github.event_name == 'workflow_dispatch' && inputs.enforce) && '--enforce' || '' }} \
+            --title="base \`${BASE_SHA:0:7}\` (before) → head \`${HEAD_SHA:0:7}\` (after), interleaved over $ROUNDS rounds on this runner."
 
+      # always(): an --enforce failure above must still publish the table that
+      # explains it, or the run reports a verdict nobody can read.
       - name: Job summary
+        if: always()
         run: cat "$RUNNER_TEMP/bench.md" >> "$GITHUB_STEP_SUMMARY"
 
       # Fork PRs get a read-only token on `pull_request`, so the comment call
       # would 403. The job summary above still carries the table for those.
       - name: Comment on the PR
-        if: github.event.pull_request.head.repo.full_name == github.repository
+        if: always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
         uses: actions/github-script@v8
         with:
           script: |
@@ -266,7 +347,15 @@ jobs:
         with:
           name: bench-ab-results
           path: |
-            ${{ runner.temp }}/base.json
-            ${{ runner.temp }}/head.json
+            ${{ runner.temp }}/rounds.json
             ${{ runner.temp }}/bench.md
           if-no-files-found: ignore
+
+      # This runner is self-hosted and keeps its workspace between jobs. A
+      # worktree registration left in .git outlives RUNNER_TEMP being cleaned,
+      # and the next run's `worktree add` would then fail on a stale path.
+      - name: Remove the base worktree
+        if: always()
+        run: |
+          git worktree remove --force "$RUNNER_TEMP/base" 2>/dev/null || true
+          git worktree prune
