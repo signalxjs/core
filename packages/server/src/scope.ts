@@ -318,11 +318,31 @@ function ensureContextStore(): Promise<ContextStore | null> {
 /** Re-assert the read seam. See the note above on why this happens on every
  *  entry and not just the first. */
 function stampResolver(): void {
-    (
-        globalThis as {
-            __SIGX_SERVERFN_CONTEXT__?: () => ServerFnContextInit | undefined;
-        }
-    ).__SIGX_SERVERFN_CONTEXT__ = _resolver;
+    const host = globalThis as {
+        __SIGX_SERVERFN_CONTEXT__?: () => ServerFnContextInit | undefined;
+    };
+    // `defineProperty` UNCONDITIONALLY, not a first-time latch guarding a plain
+    // assignment. The whole reason this re-asserts on every entry is that
+    // anything may clobber or DELETE the seam (see the note above); a plain
+    // assignment would faithfully restore the value while silently re-creating
+    // the property as enumerable, so exactly the case this function exists for
+    // is the case that would un-hide it.
+    //
+    // Measured before choosing: `defineProperty` is ~512 ns against ~1.5 ns for
+    // an assignment, which is 0.27% of the cheapest request in `bench:micro`
+    // (`serverfn/POST noop`, ~190 µs) at one to three calls per request. Below
+    // noise, and it buys back a branch, a module-local latch, and the
+    // latch-ordering hazard that came with it.
+    //
+    // `enumerable` is spelled even though `false` is the default for a NEW
+    // property: another copy of this module may have created it by plain
+    // assignment, and a partial descriptor would preserve `enumerable: true`.
+    Object.defineProperty(host, '__SIGX_SERVERFN_CONTEXT__', {
+        value: _resolver,
+        writable: true,
+        configurable: true,
+        enumerable: false
+    });
 }
 
 /**
@@ -427,10 +447,20 @@ function keepAliveScope(until: Promise<unknown>): void {
 // the older copy's object must still grow the newer method (readers
 // feature-detect it either way; docs/seams.md).
 {
-    const seam = ((globalThis as { __SIGX_SERVERFN_SCOPE__?: ServerFnScope })
-        .__SIGX_SERVERFN_SCOPE__ ??= {
-        run: runInScope,
-        keepAlive: keepAliveScope
+    const host = globalThis as { __SIGX_SERVERFN_SCOPE__?: ServerFnScope };
+    // First stamp still wins — an already-stamped seam keeps its identity,
+    // exactly as the `??=` did, which is what lets `keepAlive` be patched onto
+    // an older copy's object below. But the DESCRIPTOR is fixed either way: a
+    // copy that created the property by plain assignment would otherwise
+    // strand it enumerable forever.
+    const seam = host.__SIGX_SERVERFN_SCOPE__ ?? { run: runInScope, keepAlive: keepAliveScope };
+    // NON-ENUMERABLE — pack-to-pack wiring, not a payload, so it stays out of
+    // `Object.keys(globalThis)`.
+    Object.defineProperty(host, '__SIGX_SERVERFN_SCOPE__', {
+        value: seam,
+        writable: true,
+        configurable: true,
+        enumerable: false
     });
     seam.keepAlive ??= keepAliveScope;
 }

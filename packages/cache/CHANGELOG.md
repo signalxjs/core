@@ -5,6 +5,14 @@ repository-root `CHANGELOG.md`.
 
 ## [Unreleased]
 
+### Changed
+
+- **`__SIGX_SERVERFN_CACHE__` is stamped non-enumerable (#634).** The `$cache`
+  envelope seam is pack-to-pack wiring, never emitted into a page, so it no
+  longer shows up in `Object.keys(globalThis)` or devtools completion. Name,
+  contract, install and disposal are unchanged, and `@sigx/server`'s stub reads
+  it exactly as before. See `docs/seams.md`.
+
 ## [0.15.0] - 2026-08-04
 
 ### Changed

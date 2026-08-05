@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- **The document-complete script has one emitter (#634).**
+  `window.__SIGX_STREAMING_COMPLETE__=true;window.dispatchEvent(new Event('sigx:ready'));`
+  was three byte-identical copies across `document.ts` and both streaming paths
+  in `ssr.ts` — a drift hazard on a string that `scripts/deploy-smoke` and
+  `scripts/edge-smoke.mjs` assert verbatim. It is now `completionScript(nonce)`
+  in `server/serialize.ts`, beside `scriptOpen`. **Output is unchanged.** The
+  global itself stays enumerable: it is written by the emitted script and is an
+  app-facing contract (nothing in this repo reads it — the `sigx:ready` event
+  is the half most apps should use). See `docs/seams.md`.
+
 ## [0.15.0] - 2026-08-04
 
 **Added: streamed responses extend the server-function scope to end-of-body (#571).**

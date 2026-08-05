@@ -2,6 +2,30 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **`stampServerAppConfig` freezes the config, and the seams are
+  non-enumerable (#634).** `__SIGX_SERVER_APP__` is a fail-closed control seam
+  holding `authenticate`/`authorize`, but nothing stopped
+  `globalThis.__SIGX_SERVER_APP__.authorize = () => true` — an in-place member
+  swap that warned nothing and silently failed **open**. Wholesale replacement
+  stays legal (HMR and `stubServerApp` need it, and it already dev-warns); the
+  member swap now throws.
+
+  **What breaks:** anything mutating a config after it is stamped — most
+  plausibly a test swapping `authorize` between cases on the object it passed
+  to `createServerApp` or `stubServerApp`. `resolveServerAppConfig()` returns a
+  frozen object now; re-stamp instead. `claimAppBase` is unaffected:
+  `claimedBases` is pre-seeded before the freeze and `push` still works,
+  because `Object.freeze` is shallow.
+
+  Separately and with no observable effect, `__SIGX_SERVERFN_CODEC__`,
+  `__SIGX_SERVERFN_CONTEXT__`, `__SIGX_SERVERFN_SCOPE__` and
+  `__SIGX_SERVER_APP__` are now defined non-enumerable, so they stay out of
+  `Object.keys(globalThis)` and devtools completion. Names, contracts and read
+  paths are unchanged, and an app that stamps one by plain assignment inherits
+  the descriptor. See `docs/seams.md`.
+
 ## [0.15.2] - 2026-08-05
 
 ### Fixed

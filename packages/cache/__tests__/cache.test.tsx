@@ -995,6 +995,16 @@ describe('@sigx/cache', () => {
         (globalThis as { __SIGX_SERVERFN_CACHE__?: (d: { invalidates?: unknown[] }) => void })
             .__SIGX_SERVERFN_CACHE__;
 
+    it('installs the seam NON-ENUMERABLE — pack-to-pack wiring, not a page payload (#634)', () => {
+        mountWith(cachePlugin(), jsx(component(() => () => <div />), {}));
+        expect(
+            Object.getOwnPropertyDescriptor(globalThis, '__SIGX_SERVERFN_CACHE__')?.enumerable
+        ).toBe(false);
+        expect(Object.keys(globalThis)).not.toContain('__SIGX_SERVERFN_CACHE__');
+        // Hidden, not unreachable — @sigx/server's stub reads it by name.
+        expect(typeof seam()).toBe('function');
+    });
+
     it('installs the $cache envelope seam and feeds invalidate() — tuple prefixes included', async () => {
         let calls = 0;
         const fetcher = vi.fn(async () => ({ v: ++calls }));

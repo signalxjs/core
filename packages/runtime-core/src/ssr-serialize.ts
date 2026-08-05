@@ -61,5 +61,21 @@ export function provideTypeHandlers(
     // process-wide list would let two apps' handlers collide across requests.
     if (typeof window === 'undefined') return;
     const g = globalThis as { __SIGX_TYPE_HANDLERS__?: TypeHandler[] };
-    g.__SIGX_TYPE_HANDLERS__ = [...(g.__SIGX_TYPE_HANDLERS__ ?? []), ...handlers];
+    // `defineProperty`, not assignment: the seam is pack-internal wiring, so
+    // it stays NON-ENUMERABLE — out of `Object.keys(globalThis)` and devtools
+    // completion. Unlike `__SIGX_ASYNC__`/`__SIGX_BOUNDARIES__`, nothing emits
+    // this into HTML, so there is no wire byte to keep identical. A third
+    // party that assigns the name directly still works and inherits the
+    // descriptor.
+    //
+    // `enumerable` is spelled even though `false` is the default for a NEW
+    // property: a pack — or an older copy of this module under dev HMR — may
+    // have created it by plain assignment, and a partial descriptor would
+    // preserve that property's `enumerable: true`.
+    Object.defineProperty(g, '__SIGX_TYPE_HANDLERS__', {
+        value: [...(g.__SIGX_TYPE_HANDLERS__ ?? []), ...handlers],
+        writable: true,
+        configurable: true,
+        enumerable: false
+    });
 }

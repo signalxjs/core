@@ -6,6 +6,48 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- **The pack-internal `globalThis` seams are now non-enumerable, and the
+  server-app config is frozen (#634).** Opening devtools on a sigx page listed
+  ten `__SIGX_*` / `$SIGX_*` names; five of those were pack-to-pack wiring
+  nobody reads by hand. `docs/seams.md` now splits the registry in two, and the
+  descriptor says which is which:
+
+  - **Wire seams stay enumerable** — `__SIGX_ASYNC__`, `__SIGX_BOUNDARIES__`,
+    `__SIGX_STREAMING_COMPLETE__`, `$SIGX_REPLACE`, `$SIGX_APPEND`. The server
+    writes them with a plain assignment from an emitted `<script>`, so their
+    descriptor is fixed by the wire bytes, and they are the page's debuggable
+    data cache — the same posture as `__NEXT_DATA__` / `__NUXT__`.
+  - **Control seams are non-enumerable** — `__SIGX_TYPE_HANDLERS__`,
+    `__SIGX_LIVE_CLIENT__`, `__SIGX_SERVERFN_CODEC__`,
+    `__SIGX_SERVERFN_CACHE__`, `__SIGX_SERVERFN_BOUNDARIES__`,
+    `__SIGX_SERVERFN_CONTEXT__`, `__SIGX_SERVERFN_SCOPE__`,
+    `__SIGX_SERVER_APP__`.
+
+  **No name, wire byte, or contract changed.** A third-party pack that stamps a
+  seam with a plain `globalThis.__SIGX_X__ = v` still works, and the assignment
+  inherits the existing property's descriptor. This is surface area, not access
+  control — a non-enumerable property is still readable by name.
+
+  **`__SIGX_SERVER_APP__` additionally freezes its config**, and that one *is*
+  observable. It is a fail-closed control seam carrying `authenticate` and
+  `authorize`; replacing the app wholesale already dev-warned, but swapping a
+  member in place —
+  `globalThis.__SIGX_SERVER_APP__.authorize = () => true` — warned nothing and
+  silently failed **open**. It now throws. **What breaks:** code holding the
+  result of `resolveServerAppConfig()` (or the object passed to
+  `createServerApp`/`stubServerApp`) and mutating it afterwards — most
+  plausibly a test suite swapping `authorize` between cases. Re-stamp through
+  `stubServerApp` instead. `claimedBases` still accepts `push`; the freeze is
+  shallow and the array is pre-seeded before it.
+
+  Also in this change: `__SIGX_STREAMING_COMPLETE__`'s emitted literal was three
+  byte-identical copies and is now one `completionScript()` emitter (output
+  unchanged), and `docs/seams.md` gained rows for `$SIGX_REPLACE` /
+  `$SIGX_APPEND` — server-written, browser-executed globals that had no
+  registry entry at all — plus corrections to six stale or wrong rows.
+
 ## [0.15.2] — 2026-08-05
 
 ### Fixed

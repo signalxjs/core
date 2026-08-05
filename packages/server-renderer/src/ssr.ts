@@ -27,7 +27,7 @@ import { generateStreamingScript, generateReplacementScript, generateAppendBoots
 import { renderHeadToString } from './head';
 import type { StreamCallbacks } from './server/types';
 import { stateSerializationPlugin } from './server/state-plugin';
-import { emitBoundaryTable, boundaryPatchJs, scriptOpen } from './server/serialize';
+import { emitBoundaryTable, boundaryPatchJs, completionScript } from './server/serialize';
 import type { SSRResponse } from './response';
 import {
     renderDocumentImpl,
@@ -433,7 +433,7 @@ export function createSSR(instanceOptions?: CreateSSROptions): SSRInstance {
             }
 
             // Phase 4: Signal streaming complete
-            yield `${scriptOpen(ctx._nonce)}window.__SIGX_STREAMING_COMPLETE__=true;window.dispatchEvent(new Event('sigx:ready'));</script>`;
+            yield completionScript(ctx._nonce);
         }
 
         return generateAll();
@@ -544,7 +544,7 @@ export function createSSR(instanceOptions?: CreateSSROptions): SSRInstance {
                 // Boundary table (core protocol — empty renders emit nothing)
                 shellHtml += emitBoundaryTable(ctx);
 
-                shellHtml += `${scriptOpen(ctx._nonce)}window.__SIGX_STREAMING_COMPLETE__=true;window.dispatchEvent(new Event('sigx:ready'));</script>`;
+                shellHtml += completionScript(ctx._nonce);
 
                 callbacks.onShellReady(shellHtml);
 

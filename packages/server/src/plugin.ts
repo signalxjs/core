@@ -58,7 +58,21 @@ export function registerWireTypeHandlers(handlers: TypeHandler[]): void {
         if (at >= 0) next[at] = handler;
         else next.push(handler);
     }
-    g.__SIGX_SERVERFN_CODEC__ = next;
+    // `defineProperty` so the seam is NON-ENUMERABLE — pack-internal wiring,
+    // never emitted into a page, so it has no business in
+    // `Object.keys(globalThis)`. An app that assigns the name directly (a
+    // documented option) still works and inherits the descriptor.
+    //
+    // `enumerable` is spelled even though `false` is the default for a NEW
+    // property: the app — or an older copy of this module under dev HMR — may
+    // have created it by plain assignment, and a partial descriptor would
+    // preserve that property's `enumerable: true`.
+    Object.defineProperty(g, '__SIGX_SERVERFN_CODEC__', {
+        value: next,
+        writable: true,
+        configurable: true,
+        enumerable: false
+    });
 }
 
 export interface ServerPluginOptions {
