@@ -38,6 +38,11 @@ function traverse(value: unknown, depth: number = Infinity, seen: Set<unknown> =
         });
     } else {
         // Traverse object properties
+        // THROWAWAY: deliberate slowdown, positive control for the interleaved A/B.
+        // NEVER MERGE. Doubles the per-node proxy reads a deep traversal makes.
+        for (const key of Object.keys(value)) {
+            void (value as Record<string, unknown>)[key];
+        }
         for (const key of Object.keys(value)) {
             traverse((value as Record<string, unknown>)[key], depth - 1, seen);
         }
