@@ -109,6 +109,26 @@ describe('pack-internal seams stay off the enumerable global surface', () => {
         expect(Object.keys(globalThis)).not.toContain('__SIGX_SERVERFN_CONTEXT__');
     });
 
+    it('HIDES a seam an earlier plain assignment left enumerable', () => {
+        // Dev HMR's older module copy, or an app stamping the codec by hand,
+        // creates the property enumerable first. `defineProperty` with a
+        // PARTIAL descriptor would preserve that, so `enumerable: false` is
+        // spelled at every writer — this assertion keeps it spelled.
+        //
+        // The `delete` is load-bearing: an earlier test in this file already
+        // defined the property non-enumerable, and assigning to an existing
+        // writable property PRESERVES its descriptor — which is the very
+        // mechanism under test. Only a fresh property is born enumerable.
+        const g = globalThis as { __SIGX_SERVERFN_CODEC__?: unknown };
+        delete g.__SIGX_SERVERFN_CODEC__;
+        g.__SIGX_SERVERFN_CODEC__ = [];
+        expect(descriptor('__SIGX_SERVERFN_CODEC__')?.enumerable).toBe(true);
+
+        registerWireTypeHandlers([]);
+        expect(descriptor('__SIGX_SERVERFN_CODEC__')?.enumerable).toBe(false);
+        expect(Object.keys(globalThis)).not.toContain('__SIGX_SERVERFN_CODEC__');
+    });
+
     it('the seams still read back through their accessors', () => {
         // Non-enumerable must not mean unreadable — the whole contract is that
         // a reader in another package finds the value exactly as before.

@@ -335,12 +335,19 @@ function stampResolver(): void {
         host.__SIGX_SERVERFN_CONTEXT__ = _resolver;
         return;
     }
-    _seamDefined = true;
+    // `enumerable` is spelled even though `false` is the default for a NEW
+    // property: another copy of this module may have created it by plain
+    // assignment, and a partial descriptor would preserve `enumerable: true`.
     Object.defineProperty(host, '__SIGX_SERVERFN_CONTEXT__', {
         value: _resolver,
         writable: true,
-        configurable: true
+        configurable: true,
+        enumerable: false
     });
+    // Latched only after the descriptor work SUCCEEDED — latching first would
+    // send every later entry down the plain-assignment path having never
+    // hidden the property.
+    _seamDefined = true;
 }
 
 /**
@@ -446,17 +453,19 @@ function keepAliveScope(until: Promise<unknown>): void {
 // feature-detect it either way; docs/seams.md).
 {
     const host = globalThis as { __SIGX_SERVERFN_SCOPE__?: ServerFnScope };
-    // `defineProperty` on the first stamp so the seam lands NON-ENUMERABLE
-    // (the default for a new property defined this way) — it is pack-to-pack
-    // wiring, not a payload, so it stays out of `Object.keys(globalThis)`. An
-    // already-stamped seam is left alone, exactly as the `??=` did.
-    if (!host.__SIGX_SERVERFN_SCOPE__) {
-        Object.defineProperty(host, '__SIGX_SERVERFN_SCOPE__', {
-            value: { run: runInScope, keepAlive: keepAliveScope },
-            writable: true,
-            configurable: true
-        });
-    }
-    const seam = host.__SIGX_SERVERFN_SCOPE__ as ServerFnScope;
+    // First stamp still wins — an already-stamped seam keeps its identity,
+    // exactly as the `??=` did, which is what lets `keepAlive` be patched onto
+    // an older copy's object below. But the DESCRIPTOR is fixed either way: a
+    // copy that created the property by plain assignment would otherwise
+    // strand it enumerable forever.
+    const seam = host.__SIGX_SERVERFN_SCOPE__ ?? { run: runInScope, keepAlive: keepAliveScope };
+    // NON-ENUMERABLE — pack-to-pack wiring, not a payload, so it stays out of
+    // `Object.keys(globalThis)`.
+    Object.defineProperty(host, '__SIGX_SERVERFN_SCOPE__', {
+        value: seam,
+        writable: true,
+        configurable: true,
+        enumerable: false
+    });
     seam.keepAlive ??= keepAliveScope;
 }

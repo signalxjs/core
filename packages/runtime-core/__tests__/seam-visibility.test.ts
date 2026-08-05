@@ -52,6 +52,21 @@ describe('pack-internal seams are hidden', () => {
         expect(descriptor('__SIGX_LIVE_CLIENT__')?.enumerable).toBe(false);
     });
 
+    it('HIDES a seam an earlier plain assignment left enumerable', () => {
+        // The case a partial descriptor would miss: dev HMR's older module
+        // copy, or a pack that stamped by assignment, creates the property
+        // enumerable first. `defineProperty` with a partial descriptor
+        // preserves existing attributes, so `enumerable: false` is spelled at
+        // every writer — this is the assertion that keeps it spelled.
+        const g = globalThis as Seams;
+        g.__SIGX_LIVE_CLIENT__ = true;
+        expect(descriptor('__SIGX_LIVE_CLIENT__')?.enumerable).toBe(true);
+
+        declareLiveClient(true);
+        expect(descriptor('__SIGX_LIVE_CLIENT__')?.enumerable).toBe(false);
+        expect(Object.keys(globalThis)).not.toContain('__SIGX_LIVE_CLIENT__');
+    });
+
     it('__SIGX_TYPE_HANDLERS__ is non-enumerable and still accumulates', () => {
         const handler = defineTypeHandler({
             name: 'x',

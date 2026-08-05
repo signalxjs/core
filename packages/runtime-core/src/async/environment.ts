@@ -36,14 +36,20 @@ export function declareLiveClient(live = true): void {
     // `boolean`, not `true`: an explicit `declareLiveClient(false)` stamp is
     // a legal not-live override — docs/seams.md carries the contract.
     //
-    // `defineProperty` so the seam lands NON-ENUMERABLE (the default for a
-    // new property defined this way): it is pack-internal wiring, not a page
-    // payload, so it does not belong in `Object.keys(globalThis)`. A platform
-    // module that assigns the name directly still works.
+    // `defineProperty` so the seam is NON-ENUMERABLE: it is pack-internal
+    // wiring, not a page payload, so it does not belong in
+    // `Object.keys(globalThis)`. A platform module that assigns the name
+    // directly still works and inherits the descriptor.
+    //
+    // `enumerable` is spelled even though `false` is the default for a NEW
+    // property: an embedder — or an older copy of this module — may have
+    // created it by plain assignment, and a partial descriptor would preserve
+    // that property's `enumerable: true`.
     Object.defineProperty(globalThis, '__SIGX_LIVE_CLIENT__', {
         value: live,
         writable: true,
-        configurable: true
+        configurable: true,
+        enumerable: false
     });
 }
 

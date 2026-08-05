@@ -279,15 +279,20 @@ export function installBoundaryRefreshSeam(): void {
     const host = globalThis as {
         __SIGX_SERVERFN_BOUNDARIES__?: { collect: typeof collect; apply: typeof apply };
     };
-    if (host.__SIGX_SERVERFN_BOUNDARIES__) return;
-    // `defineProperty` so the seam lands NON-ENUMERABLE (the default for a new
-    // property defined this way) — pack-to-pack wiring, never emitted into the
-    // page, so it stays out of `Object.keys(globalThis)`. `configurable` keeps
+    // First stamp still wins — an existing seam keeps its identity, which is
+    // what `uninstallBoundaryRefreshSeam` and the double-eval guard rely on —
+    // but the DESCRIPTOR is fixed either way: an older copy of this module may
+    // have created the property by plain assignment, leaving it enumerable,
+    // and returning early there would strand it visible forever.
+    const seam = host.__SIGX_SERVERFN_BOUNDARIES__ ?? { collect, apply };
+    // NON-ENUMERABLE — pack-to-pack wiring, never emitted into the page, so it
+    // stays out of `Object.keys(globalThis)`. `configurable` keeps
     // `uninstallBoundaryRefreshSeam`'s delete working.
     Object.defineProperty(host, '__SIGX_SERVERFN_BOUNDARIES__', {
-        value: { collect, apply },
+        value: seam,
         writable: true,
-        configurable: true
+        configurable: true,
+        enumerable: false
     });
 }
 

@@ -464,12 +464,24 @@ app context. Then:
    (Fail-closed control seams invert this too, deliberately: a throwing
    policy is a deny or an error, never swallowed.)
 5. **Define a control seam NON-ENUMERABLE** (#634) — the writer uses
-   `Object.defineProperty(host, NAME, { value, writable: true, configurable: true })`,
-   which defaults a new property to non-enumerable. Only a **wire** seam (one
-   the server emits into HTML with a plain assignment) stays enumerable, and
-   then only because its descriptor is fixed by the emitted bytes. If the
-   writer sits on a hot path, define once behind a module-local latch and let
-   later writes be plain assignments — they inherit the descriptor.
+   `Object.defineProperty(host, NAME, { value, writable: true, configurable: true, enumerable: false })`.
+   Only a **wire** seam (one the server emits into HTML with a plain
+   assignment) stays enumerable, and then only because its descriptor is fixed
+   by the emitted bytes.
+
+   **Spell `enumerable: false`, even though it is the default for a new
+   property.** `defineProperty` with a *partial* descriptor preserves an
+   existing property's attributes, so if anything created the name by plain
+   assignment first — dev HMR's older module copy, a pack, the app — omitting
+   it silently leaves the seam enumerable forever. For the same reason, a
+   writer that skips work when the seam already exists (first-stamp-wins, as
+   `__SIGX_SERVERFN_SCOPE__` and `__SIGX_SERVERFN_BOUNDARIES__` do) must still
+   fix the descriptor on that path: keep the existing value, redefine the
+   property.
+
+   If the writer sits on a hot path, define once behind a module-local latch —
+   set *after* the `defineProperty` succeeds — and let later writes be plain
+   assignments, which inherit the descriptor.
 
 ## Appendix: private symbol-keyed globals
 

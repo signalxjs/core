@@ -116,15 +116,18 @@ export function cachePlugin(defaults?: CacheDefaults): Plugin {
                     }
                 }
             };
-            // `defineProperty` so the seam lands NON-ENUMERABLE (the default
-            // for a new property defined this way) — pack-to-pack wiring is
-            // not a page payload and does not belong in
+            // `defineProperty` so the seam is NON-ENUMERABLE — pack-to-pack
+            // wiring is not a page payload and does not belong in
             // `Object.keys(globalThis)`. `configurable` keeps the disposal
-            // `delete` below working.
+            // `delete` below working. `enumerable` is spelled even though
+            // `false` is the default for a NEW property: an earlier install —
+            // or another pack — may have created it by plain assignment, and a
+            // partial descriptor would preserve `enumerable: true`.
             Object.defineProperty(seam, '__SIGX_SERVERFN_CACHE__', {
                 value: onDirectives,
                 writable: true,
-                configurable: true
+                configurable: true,
+                enumerable: false
             });
             app._context.disposables.add(() => {
                 if (seam.__SIGX_SERVERFN_CACHE__ === onDirectives) {

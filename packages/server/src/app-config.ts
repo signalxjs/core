@@ -105,10 +105,15 @@ export function stampServerAppConfig(
         config.claimedBases ??= [];
         Object.freeze(config);
     }
+    // `enumerable` is spelled even though `false` is the default for a NEW
+    // property: dev HMR's older module copy may have created it by plain
+    // assignment, and a partial descriptor would preserve that property's
+    // `enumerable: true`.
     Object.defineProperty(seam, '__SIGX_SERVER_APP__', {
         value: config,
         writable: true,
-        configurable: true
+        configurable: true,
+        enumerable: false
     });
     return previous;
 }
