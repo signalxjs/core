@@ -220,8 +220,19 @@ pnpm bench:ssr         # full comparative SSR bench: equivalence check, then sig
                        #   - Re-baseline with the **Bench re-baseline** workflow
                        #     (`workflow_dispatch`, bench-baseline.yml). It records on the VM and
                        #     opens a PR. "Add a quick bench => re-baseline in the SAME PR" now
-                       #     means: run it from your branch, merge the PR it opens into that branch.
+                       #     means: merge the PR it opens into your branch.
                        #     Do NOT commit a locally-recorded baseline.
+                       #     DISPATCH IT FROM `main`, PASSING YOUR BRANCH AS THE `ref` INPUT:
+                       #       gh workflow run bench-baseline.yml --ref main -f ref=<your-branch>
+                       #     Running the workflow FILE from a feature branch fails in `wake` with
+                       #     AADSTS700213 ("No matching federated identity record found for
+                       #     presented assertion subject repo:signalxjs/core:ref:refs/heads/<branch>"):
+                       #     the Azure federated identity credential matches refs/heads/main and the
+                       #     pull_request subject, not arbitrary branches. `--ref main` picks the
+                       #     workflow file (and thus the OIDC subject) while the `ref` INPUT is what
+                       #     gets checked out, recorded, and used as the base of the PR it opens —
+                       #     so the baseline still comes from your branch. Same applies to any other
+                       #     workflow_dispatch that needs the VM.
                        #   - `pnpm --filter @sigx/benchmarks bench:quick:enforce` still works
                        #     locally, but on your machine it gates payload BYTES only and warns
                        #     that timings were skipped. That is expected, not a bug.
