@@ -95,6 +95,37 @@ function printTable(rows: DeltaRow[]): void {
     })));
 }
 
+/**
+ * Rows that have run away from their baseline in the GOOD direction.
+ *
+ * The gate is one-sided by design — an improvement must never fail a run — but
+ * that also means it says nothing, and the row keeps being measured against the
+ * old, slow number. #642 made a row 61.6% faster and left it passing until it
+ * would have regressed +179%; #645 improved the same row again. Both times the
+ * baseline was only re-recorded because someone was watching for it.
+ *
+ * The threshold is reused rather than given its own knob: a row that moved
+ * further than the gate's own tolerance is exactly one the gate can no longer
+ * see. Byte rows are excluded — they are exact, and a smaller payload is
+ * unambiguously good rather than a measurement that needs re-anchoring.
+ */
+function staleRows(rows: DeltaRow[], threshold: number): DeltaRow[] {
+    return rows.filter((r) => r.gated && r.kind === 'time' && r.deltaPct < -threshold);
+}
+
+function printStaleBaseline(rows: DeltaRow[], threshold: number): void {
+    const stale = staleRows(rows, threshold);
+    if (stale.length === 0) return;
+    console.log(
+        `\nstale baseline — ${stale.length} row(s) are more than ${threshold}% FASTER than the recorded baseline, `
+        + 'so they now gate nothing until it is re-recorded:'
+    );
+    for (const row of stale) {
+        console.log(`  - ${row.bench}: ${row.baselineP50Ms} -> ${row.currentP50Ms} (${formatDelta(row)})`);
+    }
+    console.log('Re-record with the Bench re-baseline workflow (see AGENTS.md).');
+}
+
 function printCoverage({ ungated, stale }: Comparison): void {
     if (ungated.length > 0) {
         console.log(`\nungated — measured but no baseline entry, cannot fail (${ungated.length}):`);
@@ -118,6 +149,8 @@ function printCoverage({ ungated, stale }: Comparison): void {
 function markdownReport(
     comparison: Comparison,
     threshold: number,
+    /** False when comparing two arbitrary files: there is no baseline to be stale. */
+    anchored: boolean,
     baselineMeta: ResultsMeta | undefined,
     currentMeta: ResultsMeta | undefined,
     title: string | undefined
@@ -152,6 +185,15 @@ function markdownReport(
     if (stale.length > 0) {
         lines.push('', `**Stale** — on the "before" side but not measured now, so renamed or removed (${stale.length}):`);
         for (const bench of stale) lines.push(`- \`${bench}\``);
+    }
+
+    // Only meaningful against a recorded baseline. The A/B job compares two
+    // refs directly, where "before" is a measurement rather than an anchor and
+    // getting faster than it is the whole point.
+    const outrun = anchored ? staleRows(rows, threshold) : [];
+    if (outrun.length > 0) {
+        lines.push('', `**Stale baseline** — ${outrun.length} row(s) are more than ${threshold}% faster than the recorded baseline, so they gate nothing until it is re-recorded:`);
+        for (const row of outrun) lines.push(`- \`${row.bench}\`: ${row.baselineP50Ms} → ${row.currentP50Ms} (${formatDelta(row)})`);
     }
 
     lines.push('');
@@ -218,12 +260,13 @@ function main(): void {
     if (rows.length > 0) printTable(rows);
     else console.warn('[check-regression] no comparable benches between baseline and current quick results.');
     printCoverage(comparison);
+    if (baselinePath === undefined) printStaleBaseline(rows, threshold);
 
     const baselineMeta = baselineQuick.meta ?? baselineFile.meta;
     if (markdownPath !== undefined) {
         fs.writeFileSync(
             markdownPath,
-            markdownReport(comparison, threshold, baselineMeta, current.meta, title)
+            markdownReport(comparison, threshold, baselinePath === undefined, baselineMeta, current.meta, title)
         );
         console.log(`\nwrote ${markdownPath}`);
     }
