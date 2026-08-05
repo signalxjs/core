@@ -26,7 +26,7 @@ pnpm build          # at the repo root
 ```sh
 pnpm bench:ssr            # verify equivalence, then run string-render benches (mitata)
 pnpm bench:ssr:stream     # streaming TTFB harness (large-table, p50/p75/p99)
-pnpm bench:micro          # request-path suites (server fns, codec, gate, packs)
+pnpm bench:micro          # micro suites (server fns, codec, gate, packs, slots, reactivity)
 pnpm bench:ssr:quick      # sigx-only quick suite + regression check (informational)
 pnpm bench:ssr:baseline   # full run that writes/merges results/baseline.json
 pnpm --filter @sigx/benchmarks bench:quick:enforce   # quick suite, fails on regression
@@ -62,7 +62,7 @@ histograms and entity-decoded text content must match across all frameworks
 
 ## Request-path benches (`bench:micro`)
 
-`pnpm bench:micro` runs `src/run-micro.ts` over six suites in `src/micro/`.
+`pnpm bench:micro` runs `src/run-micro.ts` over seven suites in `src/micro/`.
 Payloads come from `src/fixtures/payloads.ts`, derived from the same seeded
 data as the scenarios.
 
@@ -74,6 +74,37 @@ data as the scenarios.
 | `refresh`  | `createBoundaryRefresh` re-rendering 1 / 8 / 32 descriptors                                                       |
 | `packs`    | a scenario rendered plain vs `islandsPlugin()` vs `resumePlugin()` — time **and** payload bytes                   |
 | `slots`    | `createSlots(children).default(...)` — the slot read every component with children makes, against a `slice` floor |
+| `reactivity` | signal/computed/effect propagation, and the `watch(deep)` traversal, against a plain-write and a plain-walk floor |
+
+### The reactivity suite is batch-sized (#636)
+
+Reactivity moved here from the vitest harness, which is not baselined and which
+no CI job runs — so the package underneath every other number in this repo was
+the one package CI could not see move, and `watch(deep: true)` (the headline of
+#546) had no bench in either harness.
+
+Two rules govern it, both load-bearing:
+
+- **Every `run()` performs a sized batch** — the `x1k` / `x10k` / `x100` in each
+  name. mitata measures one `run()` call and `check-regression` cannot gate a
+  p50 below ~0.1 ms; a signal write is tens of nanoseconds, so measuring one
+  would produce a number no gate could read.
+- **A bench and its `floorOf` share a batch size.** `ratioToFloor` divides two
+  p50s, so pairing an x100 bench with an x10k floor reports the batch ratio and
+  calls it overhead. Hence two floor families — the writes at x10k, the walks at
+  x100 — and anything matching neither is an absolute timing.
+
+`plain deep walk x100` is the floor that carries the #546 argument: the same
+traversal over the **raw** fixture, no proxy and no tracking. A `watch(deep)`
+bench's ratio to it is exactly what the reactive machinery adds on top of the
+walk, and it is the figure that should collapse if #546 lands.
+
+Note that the write floor is `obj.v = obj.v + 1`, not `obj.v = i`. The set trap
+it floors already reads the old value before its `Object.is` test, so a
+store-only floor would compare one operation against two — and a loop of stores
+whose intermediate values are never read is the loop V8 is entitled to sink.
+The first draft measured 1.27 ns per write, which is a floor reporting how well
+it was optimised away.
 
 ### Floors, not competitors
 
@@ -93,6 +124,18 @@ contents, that the §6.3 gate actually admitted every descriptor, that the
 codec round-trips its fixture, and that each pack left its fingerprint in the
 HTML (`"hydrate":"load"` for islands, `"hydrate":"never"` + `"component"` for
 resume) while the plain floor left none.
+
+The reactivity guards carry more weight than most, because a watcher that has
+silently stopped watching and an effect graph that has come detached both cost
+nothing and would report a spectacular number forever. Each one proves the graph
+is live before it is measured — the fanout write runs exactly 100 effects, the
+cutoff write runs none — and every `watch(deep)` bench additionally proves the
+**re-track** case on a throwaway fixture: an object added in one turn and
+mutated in the next must still notify. `signalxjs/actors#38` calls a miss there
+silent data loss under write-behind, and it is the first thing a traversal
+optimisation breaks. Both halves of that contract were verified by deliberately
+weakening the probe watcher to `deep: 1` and `deep: 2` and confirming the run
+fails without reporting a number.
 
 ### Payload bytes
 
