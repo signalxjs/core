@@ -25,9 +25,12 @@
  *                 a row from being called on a margin its own noise covers.
  * - `no change` — otherwise.
  *
- * Byte rows skip all of it: a byte count has no variance, so any movement at
- * all is real and a row that somehow differs BETWEEN rounds indicates
- * nondeterministic output rather than a size change.
+ * Byte rows skip all of it: a byte count has no variance, so the direction is
+ * simply reported (`smaller` / `larger` / `unchanged`). What FAILS is the same
+ * one-sided, threshold-bound rule the baseline gate uses — an increase past
+ * BYTES_THRESHOLD_PCT — so a payload that got smaller is never a failure. A row
+ * whose count differs BETWEEN rounds is `nondeterministic`, which is a worse
+ * problem than any size change and always fails.
  *
  * The table reports the raw `[min d_i, max d_i]` rather than a bootstrap
  * interval. At R=5 a bootstrap would be resampling five points and dressing the
@@ -55,7 +58,9 @@ const NOISY_SPREAD_PCT = 10;
  */
 const MIN_EFFECT_PCT = 3;
 
-type Verdict = 'improved' | 'regressed' | 'no change' | 'noisy' | 'info' | 'unchanged' | 'changed';
+type Verdict =
+    | 'improved' | 'regressed' | 'no change' | 'noisy' | 'info'
+    | 'unchanged' | 'smaller' | 'larger' | 'nondeterministic';
 
 interface RoundRecord {
     index: number;
@@ -114,9 +119,18 @@ function allSameSign(deltas: number[]): boolean {
 
 function verdictFor(row: SeriesRow, deltas: number[], baseSpread: number, headSpread: number): Verdict {
     if (row.kind === 'bytes') {
-        // Deterministic: identical input must produce an identical byte count,
-        // so any movement is a real size change and needs no statistics.
-        return deltas.every((d) => d === 0) ? 'unchanged' : 'changed';
+        // A byte count is deterministic, so it needs no statistics — but it
+        // must also BE deterministic. The same ref measured five times has to
+        // produce the same number; if it does not, the output is
+        // nondeterministic, which matters more than whatever size change is
+        // being reported on top of it.
+        if (new Set(row.base).size > 1 || new Set(row.head).size > 1) return 'nondeterministic';
+        const delta = deltas[0];
+        if (delta === 0) return 'unchanged';
+        // Direction is reported; whether it FAILS is `isFailure`, which is
+        // one-sided and threshold-bound exactly like the baseline gate. A
+        // payload that got smaller is a win, not something to fail a run on.
+        return delta < 0 ? 'smaller' : 'larger';
     }
     if (!row.gated) return 'info';
     if (Math.max(baseSpread, headSpread) > NOISY_SPREAD_PCT) return 'noisy';
@@ -152,8 +166,10 @@ function buildSeries(rounds: RoundRecord[]): { series: SeriesRow[]; partial: str
                 entry = { bench: row.bench, kind: row.kind, gated: row.gated, base: [], head: [] };
                 byBench.set(row.bench, entry);
             }
-            // A bench flipped to `informational` mid-flight would be read off
-            // the last round otherwise; gate it if ANY round said to.
+            // Informational in ANY round wins. `gated` is read off the head
+            // payload, so in practice every round agrees; if they ever did
+            // not, the safe direction is the one that cannot fail a run on a
+            // row somebody marked unfailable.
             entry.gated = entry.gated && row.gated;
             entry.base.push(row.baselineP50Ms);
             entry.head.push(row.currentP50Ms);
@@ -193,6 +209,18 @@ function toVerdictRows(series: SeriesRow[]): VerdictRow[] {
     });
 }
 
+/**
+ * What `--enforce` acts on. Deliberately narrower than "the verdict is not
+ * good": byte rows are one-sided and threshold-bound exactly like the baseline
+ * gate in check-regression, so a smaller payload and a sub-threshold increase
+ * are reported and never fail.
+ */
+function isFailure(row: VerdictRow): boolean {
+    if (row.verdict === 'regressed' || row.verdict === 'nondeterministic') return true;
+    if (row.verdict === 'larger') return row.medianDelta > BYTES_THRESHOLD_PCT;
+    return false;
+}
+
 function pct(value: number): string {
     if (!Number.isFinite(value)) return 'n/a';
     return `${value >= 0 ? '+' : ''}${value.toFixed(1)}%`;
@@ -220,7 +248,7 @@ function markdownReport(
             const range = row.kind === 'bytes'
                 ? '—'
                 : `${pct(row.minDelta)} … ${pct(row.maxDelta)}`;
-            const mark = row.verdict === 'regressed' || row.verdict === 'changed' ? '**' : '';
+            const mark = isFailure(row) ? '**' : '';
             lines.push(
                 `| ${row.bench} | ${row.baseMedian} | ${row.headMedian} | ${pct(row.medianDelta)} | ${range} | ${mark}${row.verdict}${mark} |`
             );
@@ -284,7 +312,7 @@ function main(): void {
         console.log(`\nwrote ${markdownPath}`);
     }
 
-    const regressions = rows.filter((r) => r.verdict === 'regressed' || r.verdict === 'changed');
+    const regressions = rows.filter(isFailure);
     if (regressions.length > 0) {
         console.log(`\n${regressions.length} row(s) regressed:`);
         for (const row of regressions) {
