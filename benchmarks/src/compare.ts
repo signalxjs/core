@@ -45,6 +45,16 @@ export interface DeltaRow {
     bench: string;
     baselineP50Ms: number;
     currentP50Ms: number;
+    /**
+     * The unrounded inputs, in the row's native unit (ns for renders, ms for
+     * streams, bytes for payloads). The two columns above are rounded FOR
+     * DISPLAY and must not be used for arithmetic: at 4 decimal places a
+     * 0.0002 ms row carries one significant digit, which is enough to turn a
+     * zero difference into a reported +100%. `deltaPct` and these two are the
+     * numbers to compute on.
+     */
+    baselineRaw: number;
+    currentRaw: number;
     deltaPct: number;
     /** Byte-count rows are machine-independent — gated tighter, never skipped. */
     kind: 'time' | 'bytes';
@@ -81,7 +91,7 @@ export function isQuickPayload(value: unknown): value is QuickPayload {
     if (!value || typeof value !== 'object') return false;
     const candidate = value as {
         string?: unknown;
-        stream?: { results?: unknown };
+        stream?: { results?: unknown; scenario?: unknown };
         micro?: unknown;
         bytes?: unknown;
     };
@@ -94,6 +104,7 @@ export function isQuickPayload(value: unknown): value is QuickPayload {
     return Array.isArray(candidate.string)
         && typeof candidate.stream === 'object'
         && candidate.stream !== null
+        && typeof candidate.stream.scenario === 'string'
         && Array.isArray(candidate.stream.results)
         && arrayOrAbsent(candidate.micro)
         && arrayOrAbsent(candidate.bytes);
@@ -121,6 +132,8 @@ export function compare(baseline: QuickPayload, current: QuickPayload): Comparis
             bench,
             baselineP50Ms: Number((base.stats.p50Ns / 1e6).toFixed(3)),
             currentP50Ms: Number((cur.stats.p50Ns / 1e6).toFixed(3)),
+            baselineRaw: base.stats.p50Ns,
+            currentRaw: cur.stats.p50Ns,
             deltaPct: deltaPct(base.stats.p50Ns, cur.stats.p50Ns),
             kind: 'time',
             gated: !INFORMATIONAL_TIMINGS.has(bench)
@@ -150,6 +163,8 @@ export function compare(baseline: QuickPayload, current: QuickPayload): Comparis
             bench: ttfb,
             baselineP50Ms: base.ttfbMs.p50,
             currentP50Ms: cur.ttfbMs.p50,
+            baselineRaw: base.ttfbMs.p50,
+            currentRaw: cur.ttfbMs.p50,
             deltaPct: deltaPct(base.ttfbMs.p50, cur.ttfbMs.p50),
             kind: 'time',
             gated: true
@@ -158,6 +173,8 @@ export function compare(baseline: QuickPayload, current: QuickPayload): Comparis
             bench: total,
             baselineP50Ms: base.totalMs.p50,
             currentP50Ms: cur.totalMs.p50,
+            baselineRaw: base.totalMs.p50,
+            currentRaw: cur.totalMs.p50,
             deltaPct: deltaPct(base.totalMs.p50, cur.totalMs.p50),
             kind: 'time',
             gated: true
@@ -184,6 +201,8 @@ export function compare(baseline: QuickPayload, current: QuickPayload): Comparis
             bench,
             baselineP50Ms: Number((base.stats.p50Ns / 1e6).toFixed(4)),
             currentP50Ms: Number((cur.stats.p50Ns / 1e6).toFixed(4)),
+            baselineRaw: base.stats.p50Ns,
+            currentRaw: cur.stats.p50Ns,
             deltaPct: deltaPct(base.stats.p50Ns, cur.stats.p50Ns),
             kind: 'time',
             // Read off the CURRENT run: flipping a bench to informational takes
@@ -213,6 +232,8 @@ export function compare(baseline: QuickPayload, current: QuickPayload): Comparis
             bench,
             baselineP50Ms: base.bytes,
             currentP50Ms: cur.bytes,
+            baselineRaw: base.bytes,
+            currentRaw: cur.bytes,
             deltaPct: deltaPct(base.bytes, cur.bytes),
             kind: 'bytes',
             gated: true

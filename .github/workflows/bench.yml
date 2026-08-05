@@ -252,11 +252,19 @@ jobs:
           set -euo pipefail
           git worktree prune
           rm -rf "$RUNNER_TEMP/base"
-          # A dispatch may name a ref that this clone has never seen; a PR's
-          # base sha is already present, and re-fetching it is a no-op.
-          git fetch --no-tags --force origin "$BASE_REF" 2>/dev/null \
-            || git fetch --no-tags --force origin "+refs/heads/*:refs/remotes/origin/*"
-          base_sha=$(git rev-parse --verify --quiet "$BASE_REF^{commit}" || git rev-parse --verify FETCH_HEAD)
+          # Resolve locally FIRST. A PR's base sha is already in the clone
+          # (fetch-depth: 0 above), and `git fetch origin <sha>` is not a
+          # refspec fetch — it would fail on the common case and drop us into
+          # the all-branches fallback on every PR run, for nothing.
+          # Only a dispatch naming a ref this clone has never seen needs the
+          # network.
+          if ! base_sha=$(git rev-parse --verify --quiet "$BASE_REF^{commit}"); then
+            git fetch --no-tags --force origin "$BASE_REF" 2>/dev/null \
+              || git fetch --no-tags --force origin "+refs/heads/*:refs/remotes/origin/*"
+            base_sha=$(git rev-parse --verify --quiet "$BASE_REF^{commit}" \
+              || git rev-parse --verify "origin/$BASE_REF^{commit}" \
+              || git rev-parse --verify FETCH_HEAD)
+          fi
           echo "base $BASE_REF -> $base_sha"
           echo "BASE_SHA=$base_sha" >> "$GITHUB_ENV"
           # HEAD_REF may be a branch name on a dispatch, so resolve it too —

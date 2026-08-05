@@ -73,8 +73,19 @@ interface SeriesRow {
     bench: string;
     kind: DeltaRow['kind'];
     gated: boolean;
+    /** Unrounded, per round — what the spread is computed from. */
     base: number[];
     head: number[];
+    /** Rounded, per round — what the table shows. Never computed on. */
+    baseDisplay: number[];
+    headDisplay: number[];
+    /**
+     * Per-round deltas taken straight from `compare()`, which computed them
+     * from the raw p50s. Recomputing these from the display columns would
+     * quantize the sign test and the effect size: a 0.0002 ms row rounds to one
+     * significant digit, which is how a zero difference reports as +100%.
+     */
+    deltas: number[];
 }
 
 interface VerdictRow extends SeriesRow {
@@ -163,7 +174,14 @@ function buildSeries(rounds: RoundRecord[]): { series: SeriesRow[]; partial: str
         for (const row of comparison.rows) {
             let entry = byBench.get(row.bench);
             if (!entry) {
-                entry = { bench: row.bench, kind: row.kind, gated: row.gated, base: [], head: [] };
+                entry = {
+                    bench: row.bench,
+                    kind: row.kind,
+                    gated: row.gated,
+                    base: [], head: [],
+                    baseDisplay: [], headDisplay: [],
+                    deltas: []
+                };
                 byBench.set(row.bench, entry);
             }
             // Informational in ANY round wins. `gated` is read off the head
@@ -171,8 +189,11 @@ function buildSeries(rounds: RoundRecord[]): { series: SeriesRow[]; partial: str
             // not, the safe direction is the one that cannot fail a run on a
             // row somebody marked unfailable.
             entry.gated = entry.gated && row.gated;
-            entry.base.push(row.baselineP50Ms);
-            entry.head.push(row.currentP50Ms);
+            entry.base.push(row.baselineRaw);
+            entry.head.push(row.currentRaw);
+            entry.baseDisplay.push(row.baselineP50Ms);
+            entry.headDisplay.push(row.currentP50Ms);
+            entry.deltas.push(row.deltaPct);
         }
     });
 
@@ -191,13 +212,15 @@ function buildSeries(rounds: RoundRecord[]): { series: SeriesRow[]; partial: str
 
 function toVerdictRows(series: SeriesRow[]): VerdictRow[] {
     return series.map((row) => {
-        const deltas = row.base.map((b, i) => (b === 0 ? 0 : (row.head[i] / b - 1) * 100));
+        const deltas = row.deltas;
         const baseSpread = spreadPct(row.base);
         const headSpread = spreadPct(row.head);
         return {
             ...row,
-            baseMedian: median(row.base),
-            headMedian: median(row.head),
+            // Display columns come from the rounded arrays; every number the
+            // verdict depends on comes from the raw ones.
+            baseMedian: median(row.baseDisplay),
+            headMedian: median(row.headDisplay),
             deltas,
             medianDelta: median(deltas),
             minDelta: Math.min(...deltas),
