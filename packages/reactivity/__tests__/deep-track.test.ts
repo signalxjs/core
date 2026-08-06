@@ -1,5 +1,6 @@
-import { describe, it, expect, vi } from 'vitest';
-import { effect, signal } from '../src/index';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { effect, effectScope, signal } from '../src/index';
+import type { EffectScope } from '../src/index';
 import { deepTrack } from '../src/internals';
 
 /**
@@ -13,15 +14,35 @@ import { deepTrack } from '../src/internals';
  * tested in a shape nobody uses is a seam that can break unnoticed.
  */
 describe('deepTrack (internals)', () => {
+    /**
+     * One scope per test, stopped afterwards — subscriptions that outlive
+     * their test accumulate across the file and the later assertions stop
+     * meaning what they say.
+     *
+     * A scope rather than stopping each runner by hand because that is the
+     * caller's own teardown: `@sigx/actors` installs the effect inside the
+     * activation's `effectScope` and disposes it with `scope.stop()` at
+     * deactivation.
+     */
+    let scope: EffectScope | null = null;
+
+    afterEach(() => {
+        scope?.stop();
+        scope = null;
+    });
+
     /** The `@sigx/actors` shape: park the re-run, fold it later. */
     function trackDeferred(state: object): { dirty: () => boolean; fold: () => void } {
         let dirty = false;
         let retrack: (() => void) | null = null;
-        effect(() => deepTrack(state), {
-            scheduler: (run) => {
-                dirty = true;
-                retrack = run;
-            }
+        scope ??= effectScope();
+        scope.run(() => {
+            effect(() => deepTrack(state), {
+                scheduler: (run) => {
+                    dirty = true;
+                    retrack = run;
+                }
+            });
         });
         return {
             dirty: () => dirty,
@@ -100,9 +121,12 @@ describe('deepTrack (internals)', () => {
         // behaviour is a decision rather than an accident.
         const plain = { a: 1 };
         const runs = vi.fn();
-        effect(() => {
-            deepTrack(plain);
-            runs();
+        scope ??= effectScope();
+        scope.run(() => {
+            effect(() => {
+                deepTrack(plain);
+                runs();
+            });
         });
         expect(runs).toHaveBeenCalledTimes(1);
 
