@@ -1,6 +1,6 @@
 {
     "name": "@sigx/cloudflare",
-    "version": "0.15.2",
+    "version": "0.15.3",
     "description": "Cloudflare Workers deployment adapter for SigX",
     "type": "module",
     "main": "./dist/index.js",
