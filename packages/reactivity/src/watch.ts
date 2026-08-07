@@ -31,13 +31,27 @@ import { reactiveToRaw, shouldNotProxy } from './collections';
  * always goes through a proxy, so an object we never proxied is an object whose
  * writes we would never see.
  *
+ * Exported from `@sigx/reactivity/internals` as `deepTrack` (#651). `watch` is
+ * not the only caller that needs a deep dirty signal, and the other one —
+ * `@sigx/actors`, which parks the effect's re-run and folds it at a turn
+ * boundary rather than re-walking per mutation — needs a `scheduler`, which
+ * `WatchOptions` does not offer. Without a seam it carried a copy of this
+ * function instead, and that copy sat on the pre-#642 algorithm while this one
+ * moved twice: it enumerated the proxy AND read every key back. Exporting the
+ * traversal rather than the `trackAnyWrite` leaf is deliberate — a caller given
+ * only the leaf must re-derive `descend`, `shouldNotProxy` and the `signal()`
+ * materialisation, all load-bearing and none of them exported, and would be
+ * free to disagree with `watch(deep)` about what counts as a change all over
+ * again.
+ *
  * @param value The value to traverse. Subscribing needs a reactive proxy — a
  *   plain object has no deps to subscribe to, so passing one walks the shape
  *   and tracks nothing. That is what enumerating it used to do too.
  * @param depth Maximum depth (Infinity for unlimited, number for limited)
  * @param seen Raw objects already visited, to terminate on cycles
+ * @internal
  */
-function traverse(value: unknown, depth: number = Infinity, seen: Set<unknown> = new Set()): unknown {
+export function traverse(value: unknown, depth: number = Infinity, seen: Set<unknown> = new Set()): unknown {
     if (depth <= 0) return value;
     if (value === null || typeof value !== 'object') return value;
 

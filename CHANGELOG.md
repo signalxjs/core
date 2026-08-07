@@ -6,6 +6,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- **`deepTrack` on `@sigx/reactivity/internals` (#651)** — the deep-watch
+  traversal the two entries below rebuilt, exported so a caller that needs the
+  dirty signal but cannot use `watch` can have it.
+
+  `@sigx/actors` is that caller. It drives the traversal from a bare `effect`
+  with a `scheduler`, which parks the re-run so the walk folds once per turn
+  boundary instead of once per mutation — and `WatchOptions` offers no
+  scheduler. With no seam it carried a **copy** of this function, and while
+  this one moved twice that copy stayed on the pre-#641 algorithm: enumerating
+  the proxy *and* reading every key back. Measured downstream at ~1.2 ms for a
+  single mutating turn over 200-row state, with no subscriber and no write
+  anywhere near it (signalxjs/actors#124).
+
+  The traversal is exported rather than the `trackAnyWrite` leaf on purpose. A
+  caller given only the leaf has to re-derive `descend`, `shouldNotProxy` and
+  the `signal()` materialisation of nested children — all load-bearing, none of
+  them exported — and would be free to disagree with `watch(deep)` about what
+  counts as a change all over again. `@internal`, and on `/internals`: this is
+  a cross-package seam, not public API.
+
 ### Changed
 
 - **`watch(deep)` no longer enumerates through the reactive proxy (#641).**
