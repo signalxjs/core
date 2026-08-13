@@ -1,6 +1,6 @@
 {
     "name": "@sigx/vercel",
-    "version": "0.15.3",
+    "version": "0.15.4",
     "description": "Vercel deployment adapter for SigX (Build Output API v3)",
     "type": "module",
     "main": "./dist/index.js",
