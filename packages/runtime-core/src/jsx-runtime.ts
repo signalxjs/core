@@ -91,10 +91,11 @@ function normalizeChild(c: JSXChild): VNode {
         return normalizeChildren(c.value as JSXChild)[0] ?? createCommentVNode();
     }
     if (Array.isArray(c)) {
-        const nested = normalizeChildren(c);
-        if (nested.length === 0) return createCommentVNode();
-        if (nested.length === 1) return nested[0];
-        return { type: Fragment, props: EMPTY_PROPS, key: null, children: nested, dom: null } as VNode;
+        // Always a Fragment, regardless of length: the same array child
+        // must keep one vnode shape as it grows or shrinks, or crossing a
+        // length boundary changes the type at its position and the
+        // reconciler remounts every item (#658).
+        return { type: Fragment, props: EMPTY_PROPS, key: null, children: normalizeChildren(c), dom: null } as VNode;
     }
     if ((c as VNode).type) {
         return c as VNode;

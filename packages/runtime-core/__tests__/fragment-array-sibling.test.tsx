@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { render } from '@sigx/runtime-dom';
-import { jsx } from '@sigx/runtime-core';
+import { component, jsx } from '@sigx/runtime-core';
 
 /**
  * Regression tests for the "fragment array sibling boundary" bug.
@@ -81,6 +81,78 @@ describe('fragment-wrapped array children — sibling boundary', () => {
             '<span>b</span>',
             '<button>Add</button>',
         ]);
+    });
+
+    // #658: normalizeChild used to give an array child a different vnode
+    // shape per length (0 → Comment, 1 → bare item, 2+ → Fragment), so a
+    // list crossing the 1↔2 boundary changed type at its position and the
+    // reconciler remounted every item — setups re-ran, DOM nodes were
+    // recreated — while the final DOM *order* still looked correct.
+    it('crossing the 1↔2 boundary patches items instead of remounting them (#658)', () => {
+        const setups: string[] = [];
+        const Item = component<{ label: string }>(({ props }) => {
+            setups.push(props.label);
+            return () => jsx('i', { children: props.label });
+        }, { name: 'Item' });
+
+        function appView(items: string[]) {
+            return jsx('div', {
+                children: [
+                    jsx('span', { children: 'head' }),
+                    items.map((s) => jsx(Item, { label: s }, s)),
+                ],
+            });
+        }
+
+        render(appView(['a']), container);
+        expect(setups).toEqual(['a']);
+        const outer = container.firstElementChild as HTMLElement;
+        const first = outer.querySelector('i');
+
+        render(appView(['a', 'b']), container);
+        expect(setups).toEqual(['a', 'b']);
+        expect(outer.querySelector('i')).toBe(first);
+
+        render(appView(['a']), container);
+        expect(setups).toEqual(['a', 'b']);
+        expect(outer.querySelector('i')).toBe(first);
+    });
+
+    it('growing 1→2 keeps the existing item DOM node and the sibling last (#658)', () => {
+        render(view(['a']), container);
+        const outer = container.firstElementChild as HTMLElement;
+        const a = outer.querySelector('span');
+
+        render(view(['a', 'b']), container);
+        expect(outer.querySelector('span')).toBe(a);
+        expect(tagsOf(outer)).toEqual([
+            '<span>a</span>',
+            '<span>b</span>',
+            '<button>Add</button>',
+        ]);
+
+        render(view(['a']), container);
+        expect(outer.querySelector('span')).toBe(a);
+        expect(tagsOf(outer)).toEqual([
+            '<span>a</span>',
+            '<button>Add</button>',
+        ]);
+    });
+
+    it('crossing 0↔1 keeps the sibling in place', () => {
+        render(view([]), container);
+        const outer = container.firstElementChild as HTMLElement;
+        expect(outer.lastElementChild?.tagName).toBe('BUTTON');
+
+        render(view(['a']), container);
+        expect(tagsOf(outer)).toEqual([
+            '<span>a</span>',
+            '<button>Add</button>',
+        ]);
+
+        render(view([]), container);
+        expect(outer.querySelectorAll('span').length).toBe(0);
+        expect(outer.lastElementChild?.tagName).toBe('BUTTON');
     });
 
     it('also works when mapped items have no explicit keys', () => {

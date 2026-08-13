@@ -6,6 +6,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- **An array child among siblings keeps one vnode shape at every length
+  (#658).** `{list.map(…)}` rendered next to a sibling used to normalize to a
+  Comment when empty, the bare item vnode with one item, and a Fragment with
+  two or more. Crossing the 1↔2 (or 0↔1) boundary therefore changed the vnode
+  type at that child position and the reconciler remounted every item —
+  component setups re-ran, state and effects were lost, DOM nodes were
+  recreated — while the final DOM *order* still looked correct, which is why
+  this stayed invisible. Downstream it could become an unrecoverable hang: an
+  overlay outlet whose entry list churned across the boundary remounted the
+  open overlay forever (signalxjs/lynx#1051). The array branch now always
+  produces a Fragment, so the shape is stable for every length. An array as
+  the **sole** child was never affected (it flattens into the parent).
+
+  Observable output changes for inputs that already worked:
+
+  - Client DOM: a one-item array child now renders with the Fragment's
+    trailing anchor comment (`<!---->`) after it — one extra comment node.
+    Empty arrays keep the same one-comment footprint; 2+ items are unchanged.
+  - SSR HTML: an empty array child no longer emits `<!---->`, and two text
+    siblings separated only by an empty array now serialize with the standard
+    `<!--t-->` adjacency marker between them. One-item and 2+ arrays
+    serialize byte-identically to before.
+
 ## [0.15.3] — 2026-08-07
 
 ### Added

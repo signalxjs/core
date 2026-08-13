@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Hydration binds the trailing anchor for every Fragment (#658).** The
+  hydration walk traversed fragments transparently and left `vnode.dom`
+  unset, so the first append into a hydrated fragment fell back to a null
+  insertion anchor and the new node landed *past* the fragment's trailing
+  siblings. With #658 giving every array child a stable Fragment shape, that
+  gap would have covered every hydrated list; it already existed for 2+-item
+  arrays. `hydrateNode` now synthesizes the same trailing anchor comment a
+  client mount creates. Hydrated DOM therefore contains one `<!---->` per
+  fragment — converging with what a client-side mount of the same tree
+  produces, rather than diverging from it.
+
 ### Changed
 
 - **The document-complete script has one emitter (#634).**
