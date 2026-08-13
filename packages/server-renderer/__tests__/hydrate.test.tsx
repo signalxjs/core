@@ -169,7 +169,10 @@ describe('hydrate()', () => {
             hydrate(vnode, container);
             await nextTick();
 
-            expect(container.innerHTML).toBe('<span>A</span><span>B</span><span>C</span>');
+            // Hydration binds the same trailing anchor comment a client
+            // mount would create for a Fragment (#658) — the spans
+            // themselves are adopted, not recreated.
+            expect(container.innerHTML).toBe('<span>A</span><span>B</span><span>C</span><!---->');
         });
 
         it('should handle nested elements', async () => {

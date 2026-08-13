@@ -224,6 +224,14 @@ export function hydrateNode(vnode: VNode, dom: Node | null, parent: Node, region
             // this position's region bound.
             current = hydrateNode(child, current, parent, regionEnd);
         }
+        // SSR emits no fragment marker, so synthesize the trailing anchor
+        // comment mount would have created — the renderer keeps it in
+        // vnode.dom as the fallback insertion target. Without it, the
+        // first append into a hydrated fragment falls back to a null
+        // anchor and lands past the fragment's trailing siblings (#658).
+        const anchor = document.createComment('');
+        parent.insertBefore(anchor, current);
+        vnode.dom = anchor;
         return current;
     }
 
