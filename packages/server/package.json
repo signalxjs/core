@@ -1,6 +1,6 @@
 {
     "name": "@sigx/server",
-    "version": "0.15.3",
+    "version": "0.15.4",
     "description": "Server functions (RPC) for SignalX — typed client↔server calls with security defaults, extracted by @sigx/vite/server",
     "type": "module",
     "main": "./dist/index.js",

@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.15.4] - 2026-08-13
+
 ### Fixed
 
 - **Hydration binds the trailing anchor for every Fragment (#658).** The
@@ -19,6 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   client mount creates. Hydrated DOM therefore contains one `<!---->` per
   fragment — converging with what a client-side mount of the same tree
   produces, rather than diverging from it.
+
+## [0.15.3] - 2026-08-07
 
 ### Changed
 
