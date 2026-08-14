@@ -2,6 +2,56 @@
 
 ## [Unreleased]
 
+### Added
+
+- **`@sigx/serialize/stringify` — the codec's JSON in ONE walk (#657).**
+  `stringifyWithHandlers(value, handlers)` emits the wire string directly,
+  where `JSON.stringify(encodeWithHandlers(value))` walks the value twice:
+  once to build a JSON-safe tree, once to turn that tree into text and discard
+  it. Every consumer that ultimately wants a string was paying for the
+  intermediate — a durable actor save encodes and then the storage adapter
+  stringifies (signalxjs/actors#227 measured that second walk at **+51%** on
+  top of the encode), and `@sigx/server-renderer` did the same for every SSR
+  state blob and every admission check.
+
+  Output is **byte-for-byte** what the two-walk pair produced, throw for
+  throw, including the parts where the codec deliberately differs from raw
+  JSON: a boxed `new Number(5)` flattens to `{}` rather than `5`, a sole
+  `$`-prefixed key gains its `$esc` wrap even when the value under it is
+  dropped, an array hole stays `null` while an explicit `undefined` becomes
+  `{"$undef":0}`, and `toJSON` is called with no arguments. That is a
+  contract, not an aspiration: `__tests__/stringify.test.ts` is a differential
+  suite — a branch-by-branch corpus plus 2 000 seeded random structures across
+  six handler chains — that compares the two walks directly. It caught three
+  divergences during development, two of which would have changed wire bytes.
+
+  Measured against the same floor in one run of `pnpm bench:micro`
+  (`benchmarks/src/micro/codec.ts`, which now carries both forms of each
+  case): **2.54x → 2.43x** floor on 1 000 plain rows, **2.69x → 2.32x** with a
+  registered handler, **2.07x → 1.47x** on a 12-deep payload, and −11% on rows
+  salted with `Date`/`Map`/`Set`/`BigInt`/`URL`. A pure-JSON fast path is what
+  makes the plain case a win rather than a 10% loss — a node whose own values
+  are all JSON-native scalars encodes to itself, so it goes to the native
+  serializer wholesale instead of being emitted key by key in JS. There is no
+  beating C++ at emitting plain JSON; the point is to only do the JS work
+  where the codec actually earns it.
+
+  One documented divergence: that fast path reads a property once to classify
+  it and once through `JSON.stringify`, so a **side-effecting getter** is
+  evaluated twice where `encodeWithHandlers` evaluates it once. A getter that
+  answers differently per read is not serializable in any meaningful sense.
+
+  An opt-in subpath rather than a root export, for the reason `/bytes` (#569)
+  is one: the root entry is budgeted at 1 KB with no ignore list possible —
+  `@sigx/server/client` imports it, and that entry is itself the "stubs drag
+  no runtime" guard — so a server-side emitter cannot ride it. Not importing
+  it still costs zero: the root measures 909 B, down from 916 B, because the
+  shared vocabulary moved into an internal module both entries import rather
+  than being duplicated.
+
+  No revive-from-string counterpart: `JSON.parse` + `reviveWithHandlers` is
+  off the hot path, and the tree-shaped API is unchanged.
+
 ## [0.15.0] - 2026-08-04
 
 ### Added

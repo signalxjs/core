@@ -67,7 +67,8 @@
         "url": "https://github.com/signalxjs/core/issues"
     },
     "dependencies": {
-        "sigx": "workspace:^"
+        "sigx": "workspace:^",
+        "@sigx/serialize": "workspace:^"
     },
     "devDependencies": {
         "@sigx/resume": "workspace:^",

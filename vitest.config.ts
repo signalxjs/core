@@ -35,6 +35,7 @@ export default defineConfig({
             '@sigx/reactivity/internals': resolve(__dirname, 'packages/reactivity/src/internals.ts'),
             '@sigx/reactivity': resolve(__dirname, 'packages/reactivity/src/index.ts'),
             '@sigx/serialize/bytes': resolve(__dirname, 'packages/serialize/src/bytes.ts'),
+            '@sigx/serialize/stringify': resolve(__dirname, 'packages/serialize/src/stringify.ts'),
             '@sigx/serialize': resolve(__dirname, 'packages/serialize/src/index.ts'),
             '@sigx/runtime-core/internals': resolve(__dirname, 'packages/runtime-core/src/internals.ts'),
             '@sigx/runtime-core': resolve(__dirname, 'packages/runtime-core/src/index.ts'),

@@ -11,11 +11,20 @@
  * meaningful across machines. The bare encode walk is benched too, so a fix
  * has a direct target.
  *
+ * Since #657 each stringify case is measured BOTH ways against the same
+ * floor: `encode+stringify X` (two walks — build the tree, re-walk it) and
+ * `stringify X (one walk)`. Keeping the pair in one run on one machine is
+ * what makes the delta readable at all; the ratios move together with the
+ * hardware, and the gap between them is the intermediate tree.
+ *
  * H1: `encode()` tests the whole handler chain on every node, primitives
  * included — `plainList` (1 000 rows, zero handler hits) is the pure-miss
  * case that isolates it.
  * H2: `chain()` re-allocates per top-level call when any handler is
  * registered — the `+handler` variants pay it, the plain ones do not.
+ * H3: the second walk is roughly half the cost of the whole operation —
+ * `encode plainList (walk only)` against `encode+stringify plainList` bounds
+ * it, and the one-walk rows are what collect it.
  */
 import {
     encodeWithHandlers,
@@ -23,6 +32,7 @@ import {
     defineTypeHandler,
     type TypeHandler
 } from '@sigx/serialize';
+import { stringifyWithHandlers } from '@sigx/serialize/stringify';
 import { assert, type MicroBench, type MicroSuite } from './types.ts';
 import { plainList, richPayload, deepPayload, Money } from '../fixtures/payloads.ts';
 
@@ -68,6 +78,20 @@ function roundTrips(value: unknown, handlers: readonly TypeHandler[] = []): void
     assert(sameShape(value, back), 'codec round-trip changed the value');
 }
 
+/**
+ * Guard for the one-walk benches (#657): the fused emitter's contract is BYTE
+ * equality with the two-walk path, so a bench measuring it must assert exactly
+ * that. Machine-independent and free — and without it, an emitter that quietly
+ * dropped half the payload would report a spectacular number forever.
+ */
+function emitsSameBytes(value: unknown, handlers: readonly TypeHandler[] = []): void {
+    roundTrips(value, handlers);
+    assert(
+        stringifyWithHandlers(value, handlers) === JSON.stringify(encodeWithHandlers(value, handlers)),
+        'stringifyWithHandlers diverged from encode+stringify'
+    );
+}
+
 const PLAIN_JSON = JSON.stringify(plainList);
 const DEEP_JSON = JSON.stringify(deepPayload);
 const RICH_JSON = JSON.stringify(encodeWithHandlers(richPayload));
@@ -93,6 +117,19 @@ export const codecSuite: MicroSuite = {
                 run: () => JSON.stringify(encodeWithHandlers(plainList))
             },
             {
+                // The same boundary operation in ONE walk (#657). Its ratio
+                // against the SAME floor, measured in the same run on the same
+                // machine, is the whole point: the gap between this row and
+                // the one above is the intermediate tree, which every caller
+                // that wants a string was allocating and discarding.
+                suite: 'codec',
+                name: 'stringify plainList (one walk)',
+                floorOf: 'JSON.stringify plainList (floor)',
+                quick: true,
+                check: () => emitsSameBytes(plainList),
+                run: () => stringifyWithHandlers(plainList)
+            },
+            {
                 suite: 'codec',
                 name: 'encode plainList (walk only)',
                 check: () => roundTrips(plainList),
@@ -104,6 +141,15 @@ export const codecSuite: MicroSuite = {
                 floorOf: 'JSON.stringify plainList (floor)',
                 check: () => roundTrips(plainList, withHandler),
                 run: () => JSON.stringify(encodeWithHandlers(plainList, withHandler))
+            },
+            {
+                // H2's pair: a registered handler adds a per-node `test()` to
+                // both paths, so the one-walk win must survive it.
+                suite: 'codec',
+                name: 'stringify plainList +handler (one walk)',
+                floorOf: 'JSON.stringify plainList (floor)',
+                check: () => emitsSameBytes(plainList, withHandler),
+                run: () => stringifyWithHandlers(plainList, withHandler)
             },
             {
                 suite: 'codec',
@@ -131,6 +177,15 @@ export const codecSuite: MicroSuite = {
                 run: () => JSON.stringify(encodeWithHandlers(richPayload))
             },
             {
+                // The hit path in one walk — the shape a durable actor save
+                // actually has (rows salted with Dates), which is where
+                // signalxjs/actors#227 measured the second walk at +51%.
+                suite: 'codec',
+                name: 'stringify richPayload (one walk)',
+                check: () => emitsSameBytes(richPayload),
+                run: () => stringifyWithHandlers(richPayload)
+            },
+            {
                 suite: 'codec',
                 name: 'parse+revive richPayload',
                 check: () => roundTrips(richPayload),
@@ -151,6 +206,13 @@ export const codecSuite: MicroSuite = {
                 floorOf: 'JSON.stringify deepPayload (floor)',
                 check: () => roundTrips(deepPayload),
                 run: () => JSON.stringify(encodeWithHandlers(deepPayload))
+            },
+            {
+                suite: 'codec',
+                name: 'stringify deepPayload (one walk)',
+                floorOf: 'JSON.stringify deepPayload (floor)',
+                check: () => emitsSameBytes(deepPayload),
+                run: () => stringifyWithHandlers(deepPayload)
             }
         ];
     }

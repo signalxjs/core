@@ -12,10 +12,16 @@
 import {
     TYPE_HANDLER_TOKEN,
     getProvided,
-    encodeWithHandlers,
     BUILTIN_TYPE_HANDLERS,
     type TypeHandler
 } from 'sigx/internals';
+// Imported straight from the codec package, not re-exported through
+// `sigx/internals`: this is an opt-in SUBPATH kept out of the size-limited
+// root entry on purpose (#657), and routing it through the internals barrel
+// would hand it to every client bundle that imports one. This module is
+// server-only, and @sigx/serialize is already external here, so the
+// dependency costs nothing in any size row.
+import { stringifyWithHandlers as stringifyJSON } from '@sigx/serialize/stringify';
 import type { SSRContext } from './context';
 import type { SSRBoundaryRecord } from '../boundary';
 
@@ -173,14 +179,17 @@ export function isSerializable(
         return false;
     }
     try {
-        // stringify can also RETURN undefined (symbols, toJSON() returning
-        // undefined) — the key would silently vanish from the blob.
-        const json = handlers ? stringifyWithHandlers(value, handlers) : JSON.stringify(value);
+        // stringify can also RETURN undefined, and the key would then silently
+        // vanish from the blob. Plain JSON does that for a symbol and for a
+        // `toJSON` returning undefined; in codec-aware mode only the symbol
+        // (and a function) survives as undefined — `$undef` claims the rest.
+        const json = handlers ? stringifyJSON(value, handlers) : JSON.stringify(value);
         if (json === undefined) {
             if (__DEV__) {
                 console.warn(
                     `[SSR] ${what}("${key}") resolved to a value JSON cannot ` +
-                    `represent (symbol / toJSON returning undefined), skipped.${consequence}`
+                    `represent (a symbol${handlers ? '' : ' / toJSON returning undefined'}), ` +
+                    `skipped.${consequence}`
                 );
             }
             return false;
@@ -203,6 +212,13 @@ export function isSerializable(
  * see RAW values (the walk visits objects before `toJSON` runs), which is the
  * only reason `Date` is matchable at all.
  *
+ * One walk since #657: this used to be
+ * `JSON.stringify(encodeWithHandlers(value, handlers))`, which built a whole
+ * JSON-safe tree only for stringify to re-walk and the caller to discard a
+ * statement later. `@sigx/serialize/stringify` emits the same bytes straight
+ * to a string — byte-for-byte the same bytes, held there by a differential
+ * suite, because everything this returns lands on a wire a client parses.
+ *
  * Every reader of what this emits decodes with `reviveWithHandlers`:
  * `runtime-core/src/async/restore.ts`, `cache/src/store.ts`, and
  * `server-renderer/src/client/scheduler.ts` (`getBoundaryTable`, the single
@@ -213,7 +229,14 @@ export function stringifyWithHandlers(
     value: unknown,
     handlers: readonly TypeHandler[]
 ): string {
-    return JSON.stringify(encodeWithHandlers(value, handlers));
+    // The cast is `JSON.stringify`'s own lie, kept deliberately. This CAN
+    // return undefined — for a top-level symbol or function, and only those
+    // (a `toJSON` returning undefined comes back `{"$undef":0}`, because the
+    // built-in vocabulary claims it). Every emitter below concatenates the
+    // result into a <script> body and wants a `string`; the one caller that
+    // branches on the undefined, `isSerializable`, calls `stringifyJSON`
+    // directly so its check is type-checked rather than merely tolerated.
+    return stringifyJSON(value, handlers) as string;
 }
 
 /**
