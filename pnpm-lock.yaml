@@ -508,6 +508,9 @@ importers:
 
   packages/server-renderer:
     dependencies:
+      '@sigx/serialize':
+        specifier: workspace:^
+        version: link:../serialize
       sigx:
         specifier: workspace:^
         version: link:../sigx

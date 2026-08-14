@@ -17,6 +17,12 @@
             "development": "./dist/bytes.js",
             "production": "./dist/bytes.prod.js",
             "import": "./dist/bytes.js"
+        },
+        "./stringify": {
+            "types": "./dist/stringify.d.ts",
+            "development": "./dist/stringify.js",
+            "production": "./dist/stringify.prod.js",
+            "import": "./dist/stringify.js"
         }
     },
     "files": [

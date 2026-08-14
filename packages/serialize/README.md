@@ -60,6 +60,33 @@ const wire = JSON.stringify(encodeWithHandlers(value));
 const back = reviveWithHandlers(JSON.parse(wire));
 ```
 
+### Straight to a string (opt-in)
+
+If what you want is the **string** — a storage adapter's `save`, an SSR state
+blob, an RPC body — the pair above walks the value twice: once to build a
+JSON-safe tree, once for `JSON.stringify` to turn that tree into text and
+throw it away. `@sigx/serialize/stringify` does it in one walk:
+
+```ts
+import { stringifyWithHandlers } from '@sigx/serialize/stringify';
+
+const wire = stringifyWithHandlers(value);         // === JSON.stringify(encodeWithHandlers(value))
+```
+
+Byte-for-byte the same output, the same two `TypeError`s (circular, past 256
+levels), and the same handler chain — held there by a differential test suite,
+because everything this produces lands on a wire something else parses back.
+Load it on **read** exactly as before: `reviveWithHandlers(JSON.parse(wire))`.
+
+It returns `string | undefined`, mirroring `JSON.stringify`: `undefined` for a
+top-level symbol or function, and only those — an explicit `undefined` (and a
+`toJSON` returning one) is tagged `$undef` and survives.
+
+A separate subpath rather than the root export, deliberately: the root entry is
+budgeted at 1 KB and is bundled into `@sigx/server/client`'s dependency-free
+fetch stubs, so a server-side emitter must not tax every client bundle. Not
+importing it costs zero.
+
 `reviveWithHandlers` is **not** a general-purpose deep copy — apply it only to
 trees `encodeWithHandlers` produced. By design it reads any single-key
 `$`-prefixed object as a tag, so foreign JSON containing `{"$date": 1}` would

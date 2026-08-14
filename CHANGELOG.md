@@ -6,6 +6,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- **`@sigx/serialize/stringify`: the boundary codec's JSON in one walk
+  (#657).** `stringifyWithHandlers(value, handlers)` emits the wire string
+  directly instead of `JSON.stringify(encodeWithHandlers(value))`, which walks
+  the value twice — once to build a JSON-safe tree, once to turn that tree into
+  text and discard it. Every consumer that ultimately wants a string paid for
+  the intermediate: a durable actor save encodes and then its storage adapter
+  stringifies (signalxjs/actors#227 measured that second walk at **+51%** on
+  top of the encode). Output is byte-for-byte what the two-walk pair produced,
+  throw for throw, held there by a differential test suite (a branch-by-branch
+  corpus plus 2 000 seeded random structures across six handler chains).
+  Measured against the raw-JSON floor: 2.54x → 2.43x on 1 000 plain rows,
+  2.69x → 2.32x with a registered handler, 2.07x → 1.47x on a 12-deep payload.
+  An opt-in subpath, like `/bytes`: the root entry is budgeted at 1 KB and is
+  bundled into `@sigx/server/client`'s dependency-free fetch stubs, so a
+  server-side emitter must not tax every client bundle — and the root actually
+  shrank, 916 B → 909 B.
+
+### Performance
+
+- **`@sigx/server-renderer`: every SSR state blob is serialized in one walk
+  (#657).** The emitter behind `__SIGX_ASYNC__`, `__SIGX_BOUNDARIES__`,
+  boundary props and the `isSerializable` admission check now rides
+  `@sigx/serialize/stringify`. `isSerializable` was the worst of them: it
+  built an entire encoded tree purely to find out whether stringify would
+  throw, then dropped it. No wire byte changes.
+
 ## [0.15.4] — 2026-08-13
 
 ### Fixed

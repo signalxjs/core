@@ -44,6 +44,26 @@ export default [
     limit: '1 KB',
   },
   {
+    // The single-walk JSON emitter (#657), opt-in for the same reason /bytes
+    // is: the root above sits at 916 B of its 1 KB with no ignore list
+    // possible, so a second encoder cannot ride it — and the untouched root
+    // row is the proof that NOT importing this still costs zero. Server-side
+    // callers only (@sigx/server-renderer's blob emitters, storage adapters).
+    // Measures the walk PLUS the vocabulary chunk it shares with the root
+    // (BUILTIN_TYPE_HANDLERS / $esc / MAX_DEPTH, defined once in
+    // src/shared.ts), so it reads higher than the walk alone. No ignore list;
+    // the package has no dependencies to ignore.
+    name: '@sigx/serialize/stringify (single-walk JSON emitter)',
+    path: 'packages/serialize/dist/stringify.prod.js',
+    // 1.11 KB measured, of which ~175 B is the pure-JSON fast path (the scan
+    // that hands a node of plain scalars to the native serializer). It earns
+    // that: without it the fused walk LOSES ~10% to encode+stringify on a
+    // payload with no codec hits, because it replaces a C++ emitter with a JS
+    // one. Extracting the vocabulary into src/shared.ts left the root row at
+    // 909 B (from 916 B), so the split itself cost nothing.
+    limit: '1.25 KB',
+  },
+  {
     // public entry + /internals (createRenderer & co.) — see the fixture.
     name: '@sigx/runtime-core (incl. renderer internals)',
     path: 'scripts/size/runtime-core-with-internals.mjs',

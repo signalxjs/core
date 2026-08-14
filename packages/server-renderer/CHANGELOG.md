@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Performance
+
+- **Every state blob is serialized in one walk (#657).**
+  `stringifyWithHandlers` — the emitter behind `__SIGX_ASYNC__`,
+  `__SIGX_BOUNDARIES__`, `assignmentJs`, `serializeBoundaryProps` and the
+  `isSerializable` admission check — was
+  `JSON.stringify(encodeWithHandlers(value, handlers))`, which built a whole
+  JSON-safe tree only for `JSON.stringify` to re-walk it and the caller to
+  discard it a statement later. It now delegates to
+  `@sigx/serialize/stringify`, which emits the string directly. Worst for
+  `isSerializable`, which built that tree purely to find out whether
+  stringify would throw, then dropped it.
+
+  **No wire byte changes** — the new walk's contract is byte equality with
+  the old pair, held by a differential suite in `@sigx/serialize`, and every
+  byte-exact expectation in this package's tests passes untouched. Measured
+  in `pnpm bench:micro`: 2.54x → 2.43x the raw-JSON floor on 1 000 plain
+  rows, 2.07x → 1.47x on a deeply nested payload.
+
+  The public `stringifyWithHandlers` export keeps its name, its signature and
+  its `string` return. `isSerializable` now calls the underlying function
+  directly, so its `json === undefined` branch is type-checked rather than
+  merely tolerated; its dev warning no longer claims a `toJSON` returning
+  `undefined` is unrepresentable, which stopped being true in codec-aware
+  mode when the built-in `$undef` tag started claiming it.
+
+  New dependency: `@sigx/serialize` (direct, not through `sigx/internals` —
+  routing an opt-in server-side subpath through the internals barrel would
+  hand it to every client bundle importing that barrel).
+
 ## [0.15.4] - 2026-08-13
 
 ### Fixed

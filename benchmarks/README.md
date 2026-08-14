@@ -75,7 +75,7 @@ data as the scenarios.
 
 | Suite      | What it measures                                                                                                |
 | ---------- | --------------------------------------------------------------------------------------------------------------- |
-| `codec`    | `@sigx/serialize` encode/revive over plain, rich (Date/Map/Set/BigInt/URL) and deeply nested payloads             |
+| `codec`    | `@sigx/serialize` encode/revive over plain, rich (Date/Map/Set/BigInt/URL) and deeply nested payloads — each stringify case measured BOTH ways against one floor, `encode+stringify X` (two walks) and `stringify X (one walk)`, so the gap between them is readable in a single run (#657) |
 | `serverfn` | `handleServerFnRequest` in process: POST read/mutation, GET idempotent read, NDJSON stream, the error path        |
 | `keymatch` | the §6.3 boundary-refresh admission gate — `deps × patterns` matching, swept by size, tuple vs string patterns    |
 | `refresh`  | `createBoundaryRefresh` re-rendering 1 / 8 / 32 descriptors                                                       |
