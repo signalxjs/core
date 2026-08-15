@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.15.3] - 2026-08-07
+
 ### Changed
 
 - **`__SIGX_SERVERFN_BOUNDARIES__` is stamped non-enumerable (#634).** The

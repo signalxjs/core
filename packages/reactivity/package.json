@@ -1,6 +1,6 @@
 {
     "name": "@sigx/reactivity",
-    "version": "0.15.4",
+    "version": "0.15.5",
     "description": "Reactivity system for SignalX",
     "type": "module",
     "main": "./dist/index.js",

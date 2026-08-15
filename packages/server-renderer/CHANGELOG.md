@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.15.5] - 2026-08-15
+
 ### Performance
 
 - **Every state blob is serialized in one walk (#657).**
