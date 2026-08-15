@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.15.5] - 2026-08-15
+
 ### Added
 
 - **`@sigx/serialize/stringify` — the codec's JSON in ONE walk (#657).**

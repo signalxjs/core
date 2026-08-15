@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.15.3] - 2026-08-07
+
 ### Changed
 
 - **`stampServerAppConfig` freezes the config, and the seams are
