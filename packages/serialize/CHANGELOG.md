@@ -2,6 +2,26 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **`stringifyWithHandlers`'s pure-JSON fast path fires per RUN, not just per
+  node (#666).** Output is unchanged — byte-for-byte the two-walk pair's, same
+  differential suite, now with a row-collection corpus and fuzz production —
+  but a large collection of small nodes no longer loses to
+  `JSON.stringify(encodeWithHandlers(v, h))`. Previously each eligible node
+  went to the native serializer in its own call, so `{ steps: [500 small
+  rows] }` meant ~500 native calls joined in JS — measured on the actors bench
+  VM as *slower* than the two-walk pair it replaced (+2.4% scalar rows, +7.5%
+  when each row carried a `Date`, the field that disqualified its whole node).
+  Now consecutive eligible array elements ride ONE native call per run, and a
+  row whose only codec hits are built-in scalar-payload leaves (`Date`,
+  `BigInt`, `URL`, explicit `undefined`) joins the run via a shallow encoded
+  copy instead of breaking it. Custom-handler-claimed values still break runs
+  (a custom `serialize` may be impure; built-ins are pure reads). The accepted
+  getter divergence is unchanged in kind: a batched pass-by-ref row is read by
+  the eligibility scan and again by the native call — the same double read the
+  per-node fast path already had — while copied rows are read once.
+
 ## [0.15.5] - 2026-08-15
 
 ### Added

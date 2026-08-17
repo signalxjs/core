@@ -59,6 +59,51 @@ export const deepPayload: DeepNode = (() => {
     return make(12);
 })();
 
+export interface StepRow {
+    id: number;
+    label: string;
+    output: string | null;
+    ok: boolean;
+    ms: number;
+}
+
+export interface DatedStepRow extends StepRow {
+    at: Date;
+}
+
+/**
+ * The #666 shape: a large COLLECTION of small nodes — 500 flat rows under one
+ * key, the durable-actor checkpoint state that measured the per-node fast
+ * path as a regression (signalxjs/actors' `state/save-growth`). `plainList`
+ * cannot stand in for it: its weight is in 1 000 rows at the TOP level, where
+ * the whole-array fast path fires; here the array hides under a key and each
+ * row is small, so the cost is per-node granularity, not bytes.
+ */
+export const stepsPayload: { steps: StepRow[] } = (() => {
+    const rng = mulberry32(0x51e95);
+    return {
+        steps: Array.from({ length: 500 }, (_, i) => ({
+            id: i + 1,
+            label: `step-${i + 1}`,
+            output: rng() < 0.3 ? null : `ok ${Math.floor(rng() * 1e6)}`,
+            ok: rng() < 0.9,
+            ms: Math.round(rng() * 10000) / 100
+        }))
+    };
+})();
+
+/**
+ * The same rows, each carrying one `Date` — the issue's headline case: a
+ * single codec-typed field per row disqualified every node from the fast
+ * path, which is what run SUBSTITUTION exists for.
+ */
+export const stepsDatedPayload: { steps: DatedStepRow[] } = {
+    steps: stepsPayload.steps.map((row, i) => ({
+        ...row,
+        at: new Date(Date.UTC(2026, 0, 1) + i * 60_000)
+    }))
+};
+
 /** The mutation-argument shape: tiny, so fixed per-call overhead dominates. */
 export const smallArgs: [{ id: number; qty: number }] = [{ id: 42, qty: 3 }];
 

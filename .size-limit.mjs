@@ -61,7 +61,15 @@ export default [
     // payload with no codec hits, because it replaces a C++ emitter with a JS
     // one. Extracting the vocabulary into src/shared.ts left the root row at
     // 909 B (from 916 B), so the split itself cost nothing.
-    limit: '1.25 KB',
+    // 1.11 → 1.43 KB with #666: the fast path fires per RUN, not just per
+    // node — consecutive eligible array elements (scalar-valued rows, rows
+    // whose only codec hits are built-in scalar-payload leaves like a Date
+    // field) go to the native serializer as ONE batch. Per-node calls made a
+    // 500-row collection measurably WORSE than the two-walk pair it replaced;
+    // batching is the difference between winning on one big node and winning
+    // on many small ones. The root row above stays at 909 B — the batching
+    // code lives entirely in this entry's chunk.
+    limit: '1.5 KB',
   },
   {
     // public entry + /internals (createRenderer & co.) — see the fixture.
