@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.15.6] - 2026-08-17
+
 ### Changed
 
 - **`stringifyWithHandlers`'s pure-JSON fast path fires per RUN, not just per
