@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.15.6] — 2026-08-17
+
+### Performance
+
+- **`@sigx/serialize/stringify`: the pure-JSON fast path fires per run, not
+  per node (#666).** Output is unchanged — byte-for-byte the two-walk pair's —
+  but a large collection of small nodes no longer loses to
+  `JSON.stringify(encodeWithHandlers(v, h))`. Each eligible node used to go to
+  the native serializer in its own call, so `{ steps: [500 small rows] }`
+  meant ~500 native calls joined in JS — measured on a consumer's bench VM as
+  *slower* than the two walks it replaced, and one `Date` per row disqualified
+  every node outright. Now consecutive eligible array elements ride one native
+  call per run, and a row whose only codec hits are built-in scalar-payload
+  leaves (`Date`, `BigInt`, `URL`, explicit `undefined`) joins the run via a
+  shallow encoded copy. On the bench VM, 7/7 interleaved rounds: the plain
+  1 000-row fixture improved **−35%**; the consumer shapes flip from +2.4% /
+  +7.5% regressions to wins. Details in `packages/serialize/CHANGELOG.md`.
+
 ## [0.15.5] — 2026-08-15
 
 ### Added
@@ -1546,7 +1564,8 @@ Initial public release of the SignalX (`sigx`) ecosystem on npm. Six packages pu
 - Node `^20.19.0 || >=22.12.0`
 - `@sigx/vite` peer-depends on `vite >=8.0.0`
 
-[Unreleased]: https://github.com/signalxjs/core/compare/v0.15.5...HEAD
+[Unreleased]: https://github.com/signalxjs/core/compare/v0.15.6...HEAD
+[0.15.6]: https://github.com/signalxjs/core/compare/v0.15.5...v0.15.6
 [0.15.5]: https://github.com/signalxjs/core/compare/v0.15.4...v0.15.5
 [0.15.4]: https://github.com/signalxjs/core/compare/v0.15.3...v0.15.4
 [0.15.3]: https://github.com/signalxjs/core/compare/v0.15.2...v0.15.3
