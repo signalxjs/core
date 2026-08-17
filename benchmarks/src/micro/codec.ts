@@ -34,7 +34,7 @@ import {
 } from '@sigx/serialize';
 import { stringifyWithHandlers } from '@sigx/serialize/stringify';
 import { assert, type MicroBench, type MicroSuite } from './types.ts';
-import { plainList, richPayload, deepPayload, Money } from '../fixtures/payloads.ts';
+import { plainList, richPayload, deepPayload, stepsPayload, stepsDatedPayload, Money } from '../fixtures/payloads.ts';
 
 const moneyHandler: TypeHandler<Money, number> = defineTypeHandler({
     name: 'money',
@@ -165,6 +165,61 @@ export const codecSuite: MicroSuite = {
                 quick: true,
                 check: () => roundTrips(plainList),
                 run: () => reviveWithHandlers(JSON.parse(PLAIN_JSON))
+            },
+
+            // --- the #666 shape: a collection of small nodes ----------------
+            // 500 flat rows under a key. Per-node fast-path granularity made
+            // this LOSE to the two-walk pair (+2.4% scalar, +7.5% dated on the
+            // actors bench VM) while every single-large-tree fixture above
+            // won — run batching is what these rows gate.
+            {
+                suite: 'codec',
+                name: 'JSON.stringify steps (floor)',
+                isFloor: true,
+                check: () => assert(stepsPayload.steps.length === 500, 'steps fixture lost rows'),
+                run: () => JSON.stringify(stepsPayload)
+            },
+            {
+                suite: 'codec',
+                name: 'encode+stringify steps',
+                floorOf: 'JSON.stringify steps (floor)',
+                check: () => roundTrips(stepsPayload),
+                run: () => JSON.stringify(encodeWithHandlers(stepsPayload))
+            },
+            {
+                suite: 'codec',
+                name: 'stringify steps (one walk)',
+                floorOf: 'JSON.stringify steps (floor)',
+                check: () => emitsSameBytes(stepsPayload),
+                run: () => stringifyWithHandlers(stepsPayload)
+            },
+            {
+                // A legitimate floor even though its BYTES differ from the
+                // codec's: native stringifies the Dates via their own toJSON
+                // (ISO strings), a similar byte count over the same tree.
+                suite: 'codec',
+                name: 'JSON.stringify datedSteps (floor)',
+                isFloor: true,
+                check: () => assert(stepsDatedPayload.steps.length === 500, 'datedSteps fixture lost rows'),
+                run: () => JSON.stringify(stepsDatedPayload)
+            },
+            {
+                suite: 'codec',
+                name: 'encode+stringify datedSteps',
+                floorOf: 'JSON.stringify datedSteps (floor)',
+                check: () => roundTrips(stepsDatedPayload),
+                run: () => JSON.stringify(encodeWithHandlers(stepsDatedPayload))
+            },
+            {
+                // The issue's headline case: one Date per row disqualified
+                // every node from the fast path, so this is the row that
+                // proves run SUBSTITUTION works — hence the quick flag.
+                suite: 'codec',
+                name: 'stringify datedSteps (one walk)',
+                floorOf: 'JSON.stringify datedSteps (floor)',
+                quick: true,
+                check: () => emitsSameBytes(stepsDatedPayload),
+                run: () => stringifyWithHandlers(stepsDatedPayload)
             },
 
             // --- the hit path ----------------------------------------------

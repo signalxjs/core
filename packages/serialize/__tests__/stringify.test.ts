@@ -719,6 +719,207 @@ describe('the #565 dev probe', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Run batching (#666) — a big collection of small nodes goes native in RUNS
+// ---------------------------------------------------------------------------
+
+describe('run batching (#666)', () => {
+    const money = defineTypeHandler({
+        name: 'money',
+        tag: '$money',
+        test: (v): v is Money => v instanceof Money,
+        serialize: (m) => m.cents
+    }) as TypeHandler;
+    const epoch = defineTypeHandler({
+        name: 'epoch',
+        tag: '$epoch',
+        test: (v): v is Date => v instanceof Date,
+        serialize: (d) => d.getTime()
+    }) as TypeHandler;
+    const shout = defineTypeHandler({
+        name: 'shout',
+        tag: '$shout',
+        test: (v): v is string => typeof v === 'string' && v.startsWith('!'),
+        serialize: (s) => s.slice(1)
+    }) as TypeHandler;
+    const legacy = defineTypeHandler({
+        name: 'legacy',
+        test: (v): v is Money => v instanceof Money,
+        serialize: (m) => ({ $legacy: m.cents })
+    }) as TypeHandler;
+    const SETS: readonly (readonly TypeHandler[])[] = [[], [money], [epoch], [shout], [legacy]];
+
+    /** The issue's own shape: 500 small rows under a key. */
+    const scalarRows = (n = 500): unknown[] =>
+        Array.from({ length: n }, (_, i) => ({
+            id: i, label: `step-${i}`, output: i % 3 === 0 ? null : `ok ${i}`, ok: i % 2 === 0, ms: i * 1.5
+        }));
+    const datedRows = (n = 500): unknown[] =>
+        scalarRows(n).map((row, i) => ({ ...(row as object), at: new Date(1720000000000 + i) }));
+
+    it('the issue fixtures, across handler sets', () => {
+        for (let s = 0; s < SETS.length; s++) {
+            parity({ steps: scalarRows() }, SETS[s]!, `scalar rows / handlers ${s}`);
+            parity({ steps: datedRows() }, SETS[s]!, `dated rows / handlers ${s}`);
+        }
+    });
+
+    it('substitutable leaves in rows: every built-in scalar payload', () => {
+        parity({ steps: [{ id: 1, at: new Date(5) }, { id: 2 }] }, [], 'date field');
+        parity([{ n: 7n }, { n: -1n }], [], 'bigint fields');
+        parity([{ u: new URL('https://example.com/a?b=1') }], [], 'URL field');
+        parity([{ v: undefined }, { v: 1 }], [], 'explicit undefined field');
+        parity([{ at: new Date(NaN) }], [], 'invalid Date field');
+        parity([{ n: NaN, m: -0, i: Infinity }], [], 'NaN/-0/Infinity fields');
+    });
+
+    it('a substituted row emits the tag wrapper in place, key order kept (pinned)', () => {
+        // Both walks could get the copy's key order or the wrapper shape wrong
+        // together; parity alone would prove nothing here.
+        expect(stringifyWithHandlers({ steps: [{ id: 1, at: new Date(5) }, { id: 2 }] }))
+            .toBe('{"steps":[{"id":1,"at":{"$date":5}},{"id":2}]}');
+    });
+
+    it('run breakers at start, middle and end — and runs of one', () => {
+        const rows = scalarRows(6);
+        const BREAKERS: [string, unknown][] = [
+            ['map field', { m: new Map([['a', 1]]) }],
+            ['set field', { s: new Set([1]) }],
+            ['regexp field', { r: /x/g }],
+            ['sole $ key', { $a: 1 }],
+            ['own __proto__', JSON.parse('{"__proto__":{"x":1}}')],
+            ['symbol value', { v: Symbol('x') }],
+            ['function value', { v: () => {} }],
+            ['enumerable toJSON', { toJSON: () => ({ replaced: true }) }],
+            ['non-enumerable toJSON', (() => {
+                const r = { id: 1 };
+                Object.defineProperty(r, 'toJSON', { value: () => 'hidden', enumerable: false, configurable: true });
+                return r;
+            })()],
+            ['class instance', new (class Row { id = 1; })()],
+            ['boxed string', new String('ab')],
+            ['nested object field', { child: { id: 1 } }],
+            ['direct symbol', Symbol('x')]
+        ];
+        for (const [label, breaker] of BREAKERS) {
+            parity([breaker, ...rows], [], `${label} at start`);
+            parity([...rows.slice(0, 3), breaker, ...rows.slice(3)], [], `${label} in the middle`);
+            parity([...rows, breaker], [], `${label} at end`);
+            parity([breaker, rows[0], breaker], [], `${label} around a run of one`);
+            parity([rows[0], breaker, rows[1], breaker, rows[2]], [], `${label} alternating`);
+        }
+    });
+
+    it('eligible oddballs ride the batch', () => {
+        parity([Object.assign(Object.create(null) as object, { a: 1 })], [], 'null-proto row');
+        parity([{}, [], { a: 1 }], [], 'empty containers');
+        parity([{ $a: 1, $b: 2 }], [], 'multi-$-key row');
+        parity([{ get n(): number { return 41 + 1; } }], [], 'deterministic getter row');
+        parity([[1, , 3], [4, 5]], [], 'nested scalar arrays with holes');
+        parity([{ id: 1 }, , { id: 2 }] as unknown[], [], 'hole inside a run');
+        parity([new Date(5), 7n, undefined, { id: 1 }], [], 'direct codec leaves');
+    });
+
+    it('holes and explicit undefined keep their bytes inside runs (pinned)', () => {
+        expect(stringifyWithHandlers([{ id: 1 }, , { id: 2 }] as unknown[]))
+            .toBe('[{"id":1},null,{"id":2}]');
+        expect(stringifyWithHandlers([1, , 3] as unknown[])).toBe('[1,null,3]');
+        expect(stringifyWithHandlers([undefined])).toBe('[{"$undef":0}]');
+    });
+
+    it('memo interplay: a shared row inside and outside a run, cycles after a run', () => {
+        const shared = { id: 1, label: 'shared' };
+        parity({ before: shared, steps: [shared, { id: 2 }, shared] }, [], 'row shared with a memoized position');
+        parity([[shared, shared], new Map([['k', shared]])], [], 'shared across batch and handler');
+
+        const cyclic: unknown[] = [{ id: 1 }, { id: 2 }];
+        cyclic.push(cyclic);
+        parity(cyclic, [], 'self-referential array after a run');
+    });
+
+    it('the depth cap fires at the same level through a batched shape', () => {
+        const nest = (n: number, leaf: unknown): unknown => {
+            let v: unknown = leaf;
+            for (let i = 0; i < n; i++) v = { d: v };
+            return v;
+        };
+        for (const depth of [248, 250, 251, 252, 253, 254, 255, 256]) {
+            parity(nest(depth, [{ id: 1, at: new Date(5) }, { id: 2 }]), [], `batched at depth ${depth}`);
+            parity(nest(depth, [1, 2, 3]), [], `scalar run at depth ${depth}`);
+        }
+    });
+
+    it('custom handlers break runs wherever they claim', () => {
+        parity([{ price: new Money(1) }, { id: 2 }], [money], 'custom claims a row value');
+        const claimRow = defineTypeHandler({
+            name: 'row',
+            tag: '$row',
+            test: (v): v is { id: number } => typeof v === 'object' && v !== null && 'id' in v,
+            serialize: (r) => r.id
+        }) as TypeHandler;
+        parity([{ id: 1 }, { id: 2 }], [claimRow], 'custom claims the row itself');
+        // A custom handler may claim a BUILT-IN's payload — the digits of a
+        // bigint, the href of a URL — and encode walks payloads through the
+        // full chain, so a substitution that skipped the re-check would drift.
+        parity([{ n: 7n }], [shout], 'bigint payload not claimed');
+        const claimDigits = defineTypeHandler({
+            name: 'digits',
+            tag: '$digits',
+            test: (v): v is string => v === '7',
+            serialize: (s) => `<${s}>`
+        }) as TypeHandler;
+        parity([{ n: 7n }, { id: 1 }], [claimDigits], 'custom claims the bigint payload');
+        const claimHref = defineTypeHandler({
+            name: 'href',
+            tag: '$href',
+            test: (v): v is string => typeof v === 'string' && v.startsWith('https://'),
+            serialize: (s) => s.length
+        }) as TypeHandler;
+        parity([{ u: new URL('https://example.com/') }], [claimHref], 'custom claims the URL payload');
+    });
+
+    it('a Date with a hijacked toJSON inside a row is still $date (pinned)', () => {
+        const d = new Date(5);
+        (d as unknown as { toJSON: () => string }).toJSON = () => 'nope';
+        parity([{ at: d }], [], 'hijacked toJSON in a row');
+        expect(stringifyWithHandlers([{ at: d }])).toBe('[{"at":{"$date":5}}]');
+    });
+
+    it('a getter in a batched row is read once more than encode reads it', () => {
+        // The same accepted divergence the per-node fast path pinned (#657):
+        // the eligibility scan reads, then the native call reads again.
+        const count = (walk: (v: unknown) => unknown, make: () => object): number => {
+            let reads = 0;
+            const target = make();
+            Object.defineProperty(target, 'n', {
+                get: () => { reads++; return 1; }, enumerable: true, configurable: true
+            });
+            walk([{ id: 1 }, target, { id: 2 }]);
+            return reads;
+        };
+        const viaEncode = count((v) => encodeWithHandlers(v), () => ({ id: 3 }));
+        const viaStringify = count((v) => stringifyWithHandlers(v), () => ({ id: 3 }));
+        expect(viaStringify).toBe(viaEncode + 1);
+    });
+
+    it('a getter AFTER a substitution is read exactly as often as encode reads it', () => {
+        // The copy path reads each remaining value once and hands the COPY to
+        // the native call — fewer reads than the pass-by-ref scan, never more.
+        const count = (walk: (v: unknown) => unknown): number => {
+            let reads = 0;
+            const target: Record<string, unknown> = { at: new Date(5) };
+            Object.defineProperty(target, 'n', {
+                get: () => { reads++; return 1; }, enumerable: true, configurable: true
+            });
+            walk([target]);
+            return reads;
+        };
+        const viaEncode = count((v) => encodeWithHandlers(v));
+        const viaStringify = count((v) => stringifyWithHandlers(v));
+        expect(viaStringify).toBe(viaEncode);
+    });
+});
+
+// ---------------------------------------------------------------------------
 // Seeded fuzz
 // ---------------------------------------------------------------------------
 
@@ -808,6 +1009,46 @@ describe('seeded fuzz', () => {
                 if (arr.length > 0 && rng() < 0.3) delete arr[Math.floor(rng() * arr.length)];
                 pool.push(arr);
                 return arr;
+            }
+            if (roll < 0.58) {
+                // A ROW ARRAY — the #666 shape: a run of small objects whose
+                // values are scalars and codec leaves, salted with the exact
+                // things that must break a run ($-keys, __proto__, getters,
+                // toJSON, symbols) and with holes punched through it.
+                const rows: unknown[] = [];
+                const n = 2 + Math.floor(rng() * 7);
+                for (let i = 0; i < n; i++) {
+                    budget--;
+                    const r = rng();
+                    if (r < 0.1) {
+                        rows.push(LEAVES[Math.floor(rng() * LEAVES.length)]);
+                        continue;
+                    }
+                    if (r < 0.14) {
+                        const replacement = LEAVES[Math.floor(rng() * LEAVES.length)];
+                        rows.push({ toJSON: () => replacement });
+                        continue;
+                    }
+                    const row: Record<string, unknown> = {};
+                    const fields = 1 + Math.floor(rng() * 4);
+                    for (let f = 0; f < fields; f++) {
+                        const key = KEYS[Math.floor(rng() * KEYS.length)]!;
+                        const value = LEAVES[Math.floor(rng() * LEAVES.length)];
+                        if (key === '__proto__' || rng() >= 0.08) {
+                            Object.defineProperty(row, key, {
+                                value, enumerable: true, writable: true, configurable: true
+                            });
+                        } else {
+                            Object.defineProperty(row, key, {
+                                get: () => value, enumerable: true, configurable: true
+                            });
+                        }
+                    }
+                    rows.push(row);
+                }
+                if (rows.length > 0 && rng() < 0.25) delete rows[Math.floor(rng() * rows.length)];
+                pool.push(rows);
+                return rows;
             }
             if (roll < 0.62) return new Map([[KEYS[Math.floor(rng() * KEYS.length)]!, make(depth + 1)]]);
             if (roll < 0.68) return new Set([make(depth + 1)]);

@@ -23,6 +23,12 @@
  * differential suite against `JSON.stringify(encodeWithHandlers(…))`; if the
  * two walks ever disagree, THAT is the bug, whichever one looks nicer.
  *
+ * GRANULARITY: the pure-JSON fast path fires per RUN, not just per node
+ * (#666) — consecutive array elements that are scalars, scalar-valued plain
+ * rows, or rows whose only codec hits are built-in scalar-payload leaves go
+ * to the native serializer as one batch (`batchable` below). Per-node native
+ * calls made a 500-row collection LOSE to the two-walk pair it replaced.
+ *
  * One acknowledged non-parity, out of scope by design: `encode` builds its
  * objects with `out[key] = …`, so an own `__proto__` key holding an
  * object-valued payload SETS the prototype of the encoded node. That is
@@ -129,6 +135,146 @@ function pureScalars(values: readonly unknown[], custom: readonly TypeHandler[])
         if (!pureScalars1(values[i], custom)) return false;
     }
     return true;
+}
+
+/** Run-batching sentinel (#666): this element cannot ride a native batch —
+ *  emit it via the manual walk, which is ground truth. */
+const REJECT = Symbol();
+
+/**
+ * A value the codec's vocabulary claims, pre-encoded for a native batch —
+ * `{ [tag]: payload }` — or REJECT.
+ *
+ * BUILT-INS ONLY, and only those whose payload is a JSON-native scalar (Date,
+ * bigint, URL, `undefined`; Map/Set/RegExp payloads are arrays and reject via
+ * the payload check). Two reasons, both load-bearing:
+ * - a payload is walked through the FULL chain by `encode`, so a custom
+ *   handler may claim a built-in's payload (a string equal to a bigint's
+ *   digits, say) — hence `pureScalars1(p, custom)` on the payload, not a bare
+ *   typeof;
+ * - a CUSTOM handler's `serialize` may be impure, and an element whose run is
+ *   later broken would have it called here and again by the manual walk.
+ *   Every built-in serialize is a pure read, so built-ins cannot observe the
+ *   double call. Custom-claimed values therefore break runs instead.
+ *
+ * The computed key is deliberate: an object LITERAL's computed key is not
+ * subject to the `__proto__` setter, exactly like `encode`'s `{ [h.tag]: p }`.
+ */
+function encodeLeaf(
+    v: unknown,
+    custom: readonly TypeHandler[],
+    builtin: readonly TypeHandler[]
+): unknown {
+    if (custom.length) {
+        for (const h of custom) if (h.test(v)) return REJECT;
+    }
+    for (const h of builtin) {
+        if (h.test(v)) {
+            const p = h.serialize(v);
+            // Every built-in is tagged; the `!` records that, not a hope.
+            return pureScalars1(p, custom) ? { [h.tag!]: p } : REJECT;
+        }
+    }
+    // symbol | function | an object no vocabulary claims.
+    return REJECT;
+}
+
+/**
+ * Whether an array element can join a NATIVE BATCH (#666): returns the
+ * element itself, an order-preserving encoded copy, or REJECT.
+ *
+ * The per-node fast path made a 500-row collection ~500 separate native
+ * `JSON.stringify` calls joined in JS — measurably WORSE than the two-walk
+ * pair it replaced (issue #666's table: +2.4% on scalar rows, +7.5% when one
+ * `Date` per row disqualified every node). Batching runs of eligible elements
+ * into one native call is what makes a big collection of small nodes win the
+ * same way one big node already did.
+ *
+ * Eligible, beyond `pureScalars1`:
+ * - a dense-or-holey array of pure scalars (a hole is byte-safe in a batch:
+ *   `encode`'s `.map()` skips it and stringify writes `null`, and the
+ *   `undefined` the batch buffer carries makes native write `null` too);
+ * - a plain-prototype object whose values are pure scalars or
+ *   `encodeLeaf`-substitutable leaves — a row `{ id, at: Date }` becomes a
+ *   lazy partial COPY `{ id, at: { $date: n } }`, key order preserved, and
+ *   rides the batch;
+ * - Date / bigint / URL / explicit `undefined` elements directly, via
+ *   `encodeLeaf`.
+ *
+ * Rejects mirror the codec's divergences from raw JSON, each the same reason
+ * the per-node fast path rejects it: a sole `$`-prefixed key (needs the
+ * `$esc` wrap native won't add), an own `__proto__` key (native emits it,
+ * `encode` swallows it), a non-plain prototype (boxed primitives, class
+ * instances), a custom-claimed value anywhere. `toJSON` is rejected by an
+ * EXPLICIT `typeof` read — an own non-enumerable `toJSON` or a patched
+ * `Object.prototype` is invisible to `Object.keys` but honored by both walks,
+ * with different signatures. The built-in sweep runs BEFORE the `toJSON`
+ * check for non-plain objects, mirroring `str`'s order: a `Date` with a
+ * hijacked own `toJSON` is still `$date`.
+ *
+ * The read-twice note on `pureScalars1` extends here unchanged: a pass-by-ref
+ * element is read by this scan and again by the native call — the same
+ * accepted getter divergence, on the same nodes, that the per-node fast path
+ * already had. A COPIED row's substituted-onward keys are read once.
+ *
+ * Never consults `seen`: an eligible element has no object-valued members, so
+ * it can neither be an IN_PROGRESS ancestor nor close a cycle, and a shared
+ * row re-stringified natively is byte-identical to a memo splice.
+ */
+function batchable(
+    v: unknown,
+    custom: readonly TypeHandler[],
+    builtin: readonly TypeHandler[]
+): unknown {
+    if (pureScalars1(v, custom)) return v;
+    // bigint / undefined / symbol / function, or a custom-claimed scalar.
+    if (v === null || typeof v !== 'object') return encodeLeaf(v, custom, builtin);
+    if (custom.length) {
+        for (const h of custom) if (h.test(v)) return REJECT;
+    }
+    if (Array.isArray(v)) {
+        if (typeof (v as { toJSON?: unknown }).toJSON === 'function') return REJECT;
+        for (let i = 0; i < v.length; i++) {
+            const e = v[i];
+            // A hole: `null` under both walks, so it stays.
+            if (e === undefined && !(i in v)) continue;
+            // Scalars only one level down — a substitution here would put its
+            // payload past the depth the caller's gate accounts for.
+            if (!pureScalars1(e, custom)) return REJECT;
+        }
+        return v;
+    }
+    const proto = Object.getPrototypeOf(v);
+    // A Date/URL ELEMENT substitutes; a boxed primitive or class instance
+    // falls through encodeLeaf unclaimed and rejects.
+    if (proto !== Object.prototype && proto !== null) return encodeLeaf(v, custom, builtin);
+    if (typeof (v as { toJSON?: unknown }).toJSON === 'function') return REJECT;
+    const keys = Object.keys(v);
+    if (keys.length === 1 && keys[0]!.charCodeAt(0) === 36 /* $ */) return REJECT;
+    let copy: Record<string, unknown> | undefined;
+    for (let k = 0; k < keys.length; k++) {
+        const key = keys[k]!;
+        if (key === PROTO_KEY) return REJECT;
+        const val = (v as Record<string, unknown>)[key];
+        if (pureScalars1(val, custom)) {
+            if (copy) copy[key] = val;
+            continue;
+        }
+        const sub = encodeLeaf(val, custom, builtin);
+        if (sub === REJECT) return REJECT;
+        if (!copy) {
+            // Lazy: the overwhelmingly common all-scalar row never allocates.
+            // Backfill is safe from the setter — every earlier key already
+            // passed the PROTO_KEY check above.
+            copy = {};
+            for (let j = 0; j < k; j++) {
+                const kj = keys[j]!;
+                copy[kj] = (v as Record<string, unknown>)[kj];
+            }
+        }
+        copy[key] = sub;
+    }
+    return copy ?? v;
 }
 
 /**
@@ -257,9 +403,22 @@ function str(
             return native;
         }
 
+        // The manual walk, run-batched (#666): consecutive `batchable`
+        // elements accumulate in a buffer flushed as ONE native call —
+        // `JSON.stringify(buf).slice(1, -1)` strips the brackets and the run's
+        // internal commas come out native (a run of one is fine: "[5]" → "5").
+        // `{ steps: [500 rows] }` is thereby one native call, not 500.
+        //
+        // The gate is the STRICTEST depth any batched byte can stand for: a
+        // substituted row field's tag payload sits at depth+3 (row at d+1,
+        // wrapper at d+2, payload at d+3), where `encode` would throw. Near
+        // the cap the loop falls back to per-element `str`, which reproduces
+        // the throw (or its absence) exactly.
+        const canBatch = depth + 2 < MAX_DEPTH;
         let out = '[';
+        let first = true;
+        let buf: unknown[] | undefined;
         for (let i = 0; i < value.length; i++) {
-            if (i > 0) out += ',';
             const item = value[i];
             // Holes are the whole reason this is not a plain indexed read.
             // `encode` walks with `value.map()`, which SKIPS holes, so a
@@ -270,15 +429,34 @@ function str(
             //
             // The `in` check is what distinguishes a hole from an EXPLICIT
             // undefined — but only an `undefined` read can be either, so a
-            // dense array never pays for it.
-            //
-            // `?? 'null'` then covers both drops JSON makes in this position:
-            // the hole, and an element that stringifies to nothing (a symbol
-            // or a function).
-            const text = item === undefined && !(i in value)
-                ? undefined
-                : str(item, custom, builtin, seen, true, depth + 1);
+            // dense array never pays for it. In a batch the hole rides as the
+            // `undefined` it reads as: native writes `null` for it, exactly
+            // the byte the codec wants.
+            const hole = item === undefined && !(i in value);
+            if (canBatch) {
+                const rep = hole ? undefined : batchable(item, custom, builtin);
+                if (rep !== REJECT) {
+                    (buf ??= []).push(rep);
+                    continue;
+                }
+                if (buf !== undefined) {
+                    if (!first) out += ',';
+                    first = false;
+                    out += JSON.stringify(buf).slice(1, -1);
+                    buf = undefined;
+                }
+            }
+            // `?? 'null'` covers both drops JSON makes in this position: the
+            // hole, and an element that stringifies to nothing (a symbol or a
+            // function).
+            const text = hole ? undefined : str(item, custom, builtin, seen, true, depth + 1);
+            if (!first) out += ',';
+            first = false;
             out += text ?? 'null';
+        }
+        if (buf !== undefined) {
+            if (!first) out += ',';
+            out += JSON.stringify(buf).slice(1, -1);
         }
         out += ']';
         seen.set(value, out);
