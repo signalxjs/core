@@ -74,7 +74,7 @@ jobs:
       # Every core-sync.yml across the sigx repos pins this same pair for the
       # same reason. Bump one without the other and this job breaks at the very
       # last step, after the full suite has already run.
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref }}
 
