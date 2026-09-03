@@ -135,7 +135,7 @@ jobs:
       - name: Show what changed
         run: git --no-pager diff --stat benchmarks/results/baseline.json
 
-      - uses: peter-evans/create-pull-request@v6
+      - uses: peter-evans/create-pull-request@v8
         # The bench VM's runner service starts without $HOME in its
         # environment, and this action shells out to `git config --global`,
         # which dies with `fatal: $HOME not set` — AFTER a successful
