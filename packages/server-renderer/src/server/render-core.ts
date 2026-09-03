@@ -1487,6 +1487,16 @@ export async function* renderToChunks(
 
     let result = gen.next();
     while (!result.done) {
+        // The suspended frame sits between its setCurrentInstance and its
+        // finally, so the slot is ITS component right now — and every other
+        // walk in the process (a concurrent render, a deferred closure) is
+        // free to move it while this iteration is parked. It parks TWICE:
+        // handing a chunk to the consumer below is a suspension just like
+        // the await. Capture before either, and put it back before every
+        // re-entry into the generator, on the throw path too, so
+        // getCurrentInstance() is right for the synchronous span that
+        // follows the resume (#552).
+        const saved = getCurrentInstance();
         if (buf.length > 0) {
             // Flush before awaiting so pending output isn't held back across
             // async gaps (and at explicit FLUSH hints).
@@ -1498,16 +1508,9 @@ export async function* renderToChunks(
 
         const suspend = result.value;
         if (suspend === FLUSH) {
+            setCurrentInstance(saved);
             result = gen.next();
         } else {
-            // The suspended frame sits between its setCurrentInstance and
-            // its finally, so the slot is ITS component right now — and
-            // every other walk in the process (a concurrent render, a
-            // deferred closure) is free to move it while we await. Put it
-            // back before re-entering the generator, on the throw path
-            // too, so getCurrentInstance() is right for the synchronous
-            // span that follows the resume (#552).
-            const saved = getCurrentInstance();
             try {
                 const v = await suspend.p;
                 setCurrentInstance(saved);

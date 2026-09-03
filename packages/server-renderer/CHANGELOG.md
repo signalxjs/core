@@ -19,8 +19,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   resumed frame called its render function against the wrong instance and
   its `finally` then restored a stale parent over the live one. The streamed
   deferred-render closure never set the instance for its render function at
-  all. The drivers now save the slot before each `await` and restore it
-  before `gen.next(v)` and `gen.throw(e)`; the deferred closure sets its
+  all. The drivers now save the slot before each park — the `await`, and in
+  `renderToChunks` the chunk yield to the consumer that precedes it, which
+  parks the walk just the same — and restore it before every re-entry
+  (`gen.next`, `gen.throw`, the FLUSH resume); the deferred closure sets its
   component's frame around `renderFn()` and the walk of what it returns
   (restored in a `finally`). Guarantee: the instance is correct for the whole
   of a component's render — `setup()`, the render function that runs once
