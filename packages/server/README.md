@@ -161,9 +161,13 @@ export const app = createServerApp<User>({
 The pipeline order is pinned: **middleware → authenticate → the identity
 gate → arity → `input` validation → `authorize` → handler**. Authentication
 is memoized once per request store, so one SSR render with five cells
-decodes the session once. On the wire the first three run **before** the
-codec ever touches attacker bytes — an anonymous caller never reaches the
-revive step or your validator.
+decodes the session once. Middleware is **not**: the chain runs once per
+operation — every wire call, every stream open, every in-process call — so
+that same render runs each middleware five times. Once-per-request work
+(a request id, an audit record) goes in a `perRequest` value the middleware
+touches, not in the middleware body (#628). On the wire the first three run
+**before** the codec ever touches attacker bytes — an anonymous caller never
+reaches the revive step or your validator.
 
 Wire it up once:
 

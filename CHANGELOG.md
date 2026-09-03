@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- **`@sigx/server`: the middleware cadence and the feature seam are
+  documented (#628).** Docs only — behaviour is unchanged and frozen for 1.0
+  (RFC #677 §4.2). `ServerMiddleware`'s JSDoc and the README now state that
+  the chain runs once per *operation* (every wire call, stream open and
+  in-process call — five data cells in one SSR render run it five times)
+  while `authenticate` is memoized per request store, and point to
+  `perRequest` for once-per-request work. `ServerFeatureContext`
+  cross-references the `__sigxAnon` wrapper stamp core's endpoint reads for
+  anonymity, and `enter()` is documented as the wire entry for a feature
+  that owns the raw `Request`, `prelude()` for one that already holds a
+  context. The seam additions #628 proposes (`configured`, `wrap()`, the
+  identity gate alone) are 1.x.
+- **npm keywords for `sigx`, `@sigx/runtime-dom` and `@sigx/vite`
+  (#606).** Metadata only: the three packages still publishing
+  `keywords: ["SignalX"]` now carry real lists (signals, reactivity,
+  fine-grained, components, jsx/tsx, ssr; `vite`/`vite-plugin` for the
+  plugin) in the style of the other eleven. Takes effect on the next publish.
+
 ## [0.15.6] — 2026-08-17
 
 ### Performance
