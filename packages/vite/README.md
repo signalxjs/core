@@ -231,6 +231,13 @@ server. With `sigxServer()` present it also stamps real `action`/`method`
 attributes onto a `<form>` whose submit handler calls a `form: true` server
 function — the zero-JS transport (rfc-server §6.4).
 
+Three transform-time contract violations are **build errors** (rfc-1.0
+§4.5), not warnings: a component reachable only as `export default`
+(`resume components must be named exports`), the same component name
+exported from two resume modules (the error names both files), and a
+handler that binds or references `$scope` / `$el`. The full contract is in
+`@sigx/resume`'s README, "Writing resumable components".
+
 ## Deployment artifacts — `ssr.adapter` and `virtual:sigx-app`
 
 The build seam of the deployment RFC (`docs/rfc-deploy.md` §3). `ssr.adapter`

@@ -54,6 +54,18 @@ export interface ExtractedHandler {
     exportSource: string;
 }
 
+/**
+ * A transform-contract violation that must FAIL the build (rfc-1.0 §4.5):
+ * a default-exported component, or a handler binding/referencing a reserved
+ * name. Unlike `IneligibleHandler` these never degrade to hydrate mode —
+ * the plugin turns each into `this.error`.
+ */
+export interface ContractError {
+    /** UTF-16 string index of the offending node in the original source. */
+    offset: number;
+    message: string;
+}
+
 /** One handler that could not be extracted, with a warnable reason. */
 export interface IneligibleHandler {
     component: string;
@@ -86,6 +98,8 @@ export interface ResumeExtraction {
     handlersModule: string | null;
     handlers: ExtractedHandler[];
     ineligible: IneligibleHandler[];
+    /** Build-failing contract violations — see `ContractError`. */
+    errors: ContractError[];
     components: ResumeComponent[];
     /** Union of extracted event names — feeds the loader's delegation list. */
     events: string[];
@@ -457,6 +471,14 @@ interface ModuleScan {
     moduleLocals: Set<string>;
     /** LOCAL binding → exported name, for component discovery. */
     exportsByLocal: Map<string, string>;
+    /**
+     * The module's `export default`, if any: the local it re-exports
+     * (`export default Counter`), or the callee of an inline call
+     * (`export default component(...)`). Either shape naming a component
+     * is a build error (§4.5) — a default export has no name to key the
+     * registry and manifest, so it would be silently non-resumable.
+     */
+    defaultExport: { node: Node; local: string | null; callee: string | null } | null;
 }
 
 function scanModule(program: Node): ModuleScan {
@@ -464,9 +486,20 @@ function scanModule(program: Node): ModuleScan {
         imports: new Map(),
         componentFactories: new Set(),
         moduleLocals: new Set(),
-        exportsByLocal: new Map()
+        exportsByLocal: new Map(),
+        defaultExport: null
     };
     for (const stmt of program.body as Node[]) {
+        if (stmt.type === 'ExportDefaultDeclaration') {
+            const decl = stmt.declaration as Node;
+            const callee = decl.type === 'CallExpression' ? (decl.callee as Node) : null;
+            scan.defaultExport = {
+                node: stmt,
+                local: decl.type === 'Identifier' ? (decl.name as string) : null,
+                callee: callee?.type === 'Identifier' ? (callee.name as string) : null
+            };
+            continue;
+        }
         if (stmt.type === 'ImportDeclaration') {
             const source = (stmt.source as Node).value as string;
             const stmtTypeOnly = stmt.importKind === 'type';
@@ -549,8 +582,21 @@ function isSignalDecl(decl: Node, ctxName: string): boolean {
     );
 }
 
-function findComponents(program: Node, scan: ModuleScan): ComponentInfo[] {
+const NAMED_EXPORTS_ONLY = 'resume components must be named exports';
+
+function findComponents(program: Node, scan: ModuleScan, errors: ContractError[]): ComponentInfo[] {
     const components: ComponentInfo[] = [];
+    // `export default component(...)`: never a resumable id (no name), and
+    // since §4.5 a build error rather than a silent non-resumable.
+    const def = scan.defaultExport;
+    if (def?.callee && scan.componentFactories.has(def.callee)) {
+        errors.push({
+            offset: def.node.start,
+            message:
+                `${NAMED_EXPORTS_ONLY} — \`export default ${def.callee}(...)\` has no export name to ` +
+                `key the registry and manifest. Write \`export const <Name> = ${def.callee}(...)\`.`
+        });
+    }
     for (const stmt of program.body as Node[]) {
         const decl = stmt.type === 'ExportNamedDeclaration' && isNode(stmt.declaration)
             ? (stmt.declaration as Node)
@@ -566,9 +612,23 @@ function findComponents(program: Node, scan: ModuleScan): ComponentInfo[] {
             if (!setupFn || !FUNCTION_TYPES.has(setupFn.type)) continue;
             const local = (declarator.id as Node).name as string;
             const exported = scan.exportsByLocal.get(local);
-            // Only NAMED exports are resumable ids — this also skips
-            // `export { Local as default }` (exported === 'default').
-            if (!exported || exported === 'default') continue;
+            // Only NAMED exports are resumable ids. A component reaching the
+            // outside ONLY as the default export (`export default Local` /
+            // `export { Local as default }`) is a build error (§4.5): it
+            // used to be silently non-resumable. A non-exported component
+            // stays silently local — nothing outside the module can render
+            // it, so there is nothing to resume.
+            if (exported === 'default' || (!exported && def?.local === local)) {
+                errors.push({
+                    offset: declarator.start,
+                    message:
+                        `${NAMED_EXPORTS_ONLY} — <${local}> is only reachable as \`export default\`, ` +
+                        `which has no name to key the registry and manifest. Export it by name: ` +
+                        `\`export const ${local} = ...\`.`
+                });
+                continue;
+            }
+            if (!exported) continue;
 
             const firstParam = (setupFn.params as Node[])[0];
             const ctxName = firstParam && firstParam.type === 'Identifier' ? (firstParam.name as string) : null;
@@ -816,7 +876,8 @@ export function extractResumeHandlers(
     const program = parseAst(code, { lang: LANG_BY_EXT[ext] ?? 'tsx' }, clean) as unknown as Node;
 
     const moduleScan = scanModule(program);
-    const components = findComponents(program, moduleScan);
+    const errors: ContractError[] = [];
+    const components = findComponents(program, moduleScan, errors);
 
     const handlers: ExtractedHandler[] = [];
     const ineligible: IneligibleHandler[] = [];
@@ -975,12 +1036,23 @@ export function extractResumeHandlers(
 
             const scan = scanHandler(fn);
             allSites.push({ site, preventDefault: scan.callsPreventDefault });
-            if (scan.contextual) {
-                fail(site, `handler uses ${scan.contextual}`);
+            if (scan.usesReservedName) {
+                // A build error, not a hydrate-mode downgrade (§4.5): the
+                // handler is re-emitted as `($scope, …) => …` and `$el` is
+                // the delegated element, so a body that binds or reads
+                // either is reading the runtime's own plumbing.
+                errors.push({
+                    offset: site.expr.start,
+                    message:
+                        `on${site.event} of <${comp.exported}> binds or references a reserved name — ` +
+                        `\`$scope\` and \`$el\` are the resumed scope and the delegated element ` +
+                        `inside a resumable handler. Rename the binding (parameter, local, ` +
+                        `named signal or destructured prop) so the handler does not use them.`
+                });
                 continue;
             }
-            if (scan.usesReservedName) {
-                fail(site, 'handler references a reserved name ($scope/$el)');
+            if (scan.contextual) {
+                fail(site, `handler uses ${scan.contextual}`);
                 continue;
             }
 
@@ -1221,6 +1293,7 @@ export function extractResumeHandlers(
         handlersModule,
         handlers,
         ineligible,
+        errors,
         components: componentResults,
         events: [...events].sort(),
         warnings

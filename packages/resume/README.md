@@ -39,6 +39,14 @@ Any render method that receives the App picks the pack up from there —
 `createSSR().render(app)`, `createRequestHandler({ app })`,
 `createFetchHandler({ app })`.
 
+With a manifest, the document also gets `<link rel="modulepreload">` for the
+handler chunk of every resume boundary the request actually rendered
+(`ResumeManifest.handlers`, #410) — the bytes arrive off the critical path,
+execution still waits for the first interaction, and the loader stays the
+page's only script. A page without a resume boundary emits nothing; the
+component (upgrade) chunk is never warmed — upgrade-on-write is lazy on
+purpose. Dev renders manifest-less, so it preloads nothing there.
+
 Components stamped by the transform (`__resumeId`) become boundaries with
 `hydrate: 'never'` — core schedules nothing; the pack's delegation owns all
 waking. Fully-extracted components resume through their QRL attributes;
@@ -65,6 +73,39 @@ const renderBoundaries = createBoundaryRefresh({
 });
 // handleServerFnRequest(request, { fns, renderBoundaries })  (wire phase of #313)
 ```
+
+**`refreshComponents` is wired in two places, and both must agree.** The
+prod entry (`entry.cloudflare.ts` / `entry.node.ts` / …) builds
+`createBoundaryRefresh({ components })` for `handleServerFnRequest`, and the
+dev half is the module `sigxServer({ renderBoundaries: '/src/dev-refresh.ts' })`
+points at (`examples/resume/src/dev-refresh.ts`). Both take the same
+export-name-keyed registry (`examples/resume/src/entry-server.tsx` exports
+it once as `refreshComponents` for that reason). A component missing from
+the registry is not an error: its descriptor is declined and the boundary
+converges through `$cache` invalidation — one round trip slower, and the
+chunk loads after all. Missing it in only one of the two places is the
+classic "works in dev, not in prod" (or the reverse).
+
+**The `plugins:` form never sees app-level DI** (rfc-1.0 §4.3). It builds
+its re-render from the listed plugins only — `serverPlugin({ types })`,
+`provideTypeHandlers`, anything `app.use` installed on the page's app, is
+invisible to it, so a boundary whose props or state need those handlers
+re-renders without them. An app that installs any of those passes the app
+factory instead, and the app's plugins win:
+
+```ts
+const renderBoundaries = createBoundaryRefresh({
+    app: () => createApp(),      // the entry-server's factory — plugins, type handlers and all
+    components: refreshComponents
+});
+```
+
+(The callback receives whatever the endpoint passes through — its
+`ServerFnContext` when riding `handleServerFnRequest({ renderBoundaries })` —
+for a factory that needs the request.)
+
+`plugins:` stays the documented default for the zero-JS examples because
+those pages have no app to hand.
 
 The registry is explicit — same posture as the server-fn registry, never
 ambient. Descriptors the re-render cannot honor (unknown key, a snapshot the
@@ -158,6 +199,61 @@ signals, `ctx.props` reads, imports, globals); anything else (loop variables,
 setup helpers, `ctx.emit`, …) makes the whole component fall back to
 wake-on-interaction — first interaction hydrates it, with a build-time
 warning naming the capture.
+
+### The contract
+
+These are the rules the transform and the runtime rely on. Transform-time
+violations are **build errors** (rfc-1.0 §4.5) — never a warning that leaves
+the component silently broken in prod; runtime ones are `__DEV__` warnings,
+because a throw in the browser would take the page down.
+
+**Build errors (`sigxResume()`):**
+
+- **Named exports only.** A component that leaves the module as
+  `export default` — `export default component(...)`,
+  `export default Counter`, `export { Counter as default }` — is a build
+  error: `resume components must be named exports`. A default export has no
+  name to key the registry and manifest, so it used to be silently
+  non-resumable. A default export that is *not* a component (a config
+  object, a helper) is fine; so is a named export that is *also* aliased to
+  default.
+- **Export names are app-wide keys.** The export name is the `__resumeId`
+  — the registry key on the client and the manifest key on the server — so
+  two resume modules exporting the same name is a build error naming both
+  files. Rename one. (Names in non-resume files don't count.)
+- **`$scope` and `$el` are reserved.** Inside a resumable handler, `$scope`
+  *is* the resumed scope (handlers are re-emitted as `($scope, …) => …`)
+  and `$el` the delegated element. A handler that binds either — as a
+  parameter, a local, a named signal or a destructured prop — or reads it
+  as a free reference is a build error. `obj.$scope` and `{ $scope: 1 }`
+  (member and key positions) are not references and stay allowed.
+
+**Dev warnings (runtime, `@sigx/resume/client`):**
+
+- **Single-element root.** The upgrade hydrates the element immediately
+  before the boundary's trailing marker as the component's root, so a
+  resumable component must render exactly one root element. A fragment root
+  does not match that element, and a root with no element at all (text
+  only, or a conditional that rendered nothing) leaves the boundary **not
+  upgraded**: the QRL ran and its write is buffered, the scope resets so the
+  next write retries — against the same DOM, with the same result — and the
+  page never updates. Dev warns
+  `Cannot upgrade boundary N: no element before its marker`.
+- **Renaming a signal drops buffered writes.** Writes made before the
+  component chunk loads are buffered by *name* and replayed once the live
+  signal exists. If the component no longer declares a named signal of that
+  name (renamed since the page was rendered — a deploy in between), the
+  buffered value is dropped; dev warns `Buffered write to "x" has no live
+  signal after upgrade`.
+- **Wake swallows the triggering event.** A component in wake-on-interaction
+  mode (any ineligible handler, or `ctx.slots`) fully hydrates on its first
+  interaction and does **not** replay that event — its listeners only exist
+  after hydration. If the first click must count, keep the handler
+  resumable (see `DealOfTheDay` in `examples/storefront` for the pattern),
+  or design the first interaction to be harmless to lose.
+
+Server-side, `refreshComponents` must be wired in both the dev and the prod
+refresh entry — see "Single-flight boundary refresh" above.
 
 ## Verification
 
