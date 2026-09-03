@@ -1,6 +1,7 @@
 # RFC: value-first async — loading, lazy, errors; mechanism in core, policy in packs
 
-Status: **proposed / under review — rev 8**. Tracking: signalxjs/core#135.
+Status: **implemented — rev 8** (tracking signalxjs/core#135 closed 2026-07-13;
+the cache pack rides §7 as `@sigx/cache`). Frozen at 1.0 — see `rfc-1.0.md`.
 Pre-1.0, no-compat (same stance as `docs/rfc-use-async.md`): one way to do it.
 
 > **rev-8 changes:** the **key becomes mandatory** — the bare-fetcher

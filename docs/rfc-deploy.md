@@ -1,8 +1,9 @@
 # RFC: deployment — `createFetchHandler` + platform adapters
 
-Status: **proposed**. Tracking: signalxjs/core#321. Pre-1.0, no-compat (same
-stance as `rfc-async.md`, `rfc-ssr-platform.md`, `rfc-server.md`): one way to
-do it.
+Status: **implemented** (tracking signalxjs/core#321 closed 2026-07-17; the
+adapters ship as `@sigx/cloudflare`, `@sigx/vercel`, `@sigx/netlify`). Written
+pre-1.0, no-compat (same stance as `rfc-async.md`, `rfc-ssr-platform.md`,
+`rfc-server.md`): one way to do it. Frozen at 1.0 — see `rfc-1.0.md`.
 
 Relationship to the other RFCs:
 
