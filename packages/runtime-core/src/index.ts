@@ -70,6 +70,12 @@ export type {
     SetupFn,
     ComponentFactory,
     AnyComponentFactory,
+    // Taking a factory apart to build another (#535): the supported reads of
+    // the `__props`/`__events`/`__ref`/`__slots` brands, which stay @internal.
+    CombinedOf,
+    PropsOf,
+    RefOf,
+    SlotsOf,
     ComponentOptions,
     Ref,
     Exposed,
@@ -106,6 +112,14 @@ export type { AsyncAction, AsyncActionBase, ActionOptions, RunResult } from './u
 export { all } from './all.js';
 export type { AllState } from './all.js';
 export { useStream } from './use-stream.js';
+// The `__SIGX_ASYNC__` page blob's read/invalidate half (#449, docs/seams.md).
+// The public WRITE path is `ctx.registerSerializedState` on the server
+// (@sigx/server-renderer); `reviveFromServer` is public via
+// `@sigx/server-renderer/client` (#434). A state-owning pack (`@sigx/store`)
+// seeds from the blob through these two — the contract is in their JSDoc.
+// `writeBack`/`restoredKeys` stay on /internals: they are the engine's and the
+// cache pack's, not a seed reader's.
+export { peekRestored, invalidateRestored } from './async/restore.js';
 
 // Model (two-way binding)
 export { createModel, createModelFromBinding, isModel } from './model.js';

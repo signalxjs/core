@@ -71,13 +71,39 @@ export function reviveFromServer(value: unknown): unknown {
 }
 
 /**
- * Read a server-serialized value for `key` from the page blob.
+ * Read the value stored under `key` in the page's `__SIGX_ASYNC__` blob —
+ * the READ half of the blob's public contract (#449; `docs/seams.md`).
  *
- * THE decode point for `__SIGX_ASYNC__` — `@sigx/cache` reads through this
- * too, so the codec is applied in exactly one place. Decoding must stay
- * idempotent: the blob is a MIXED store, holding server-encoded values
- * alongside live ones `writeBack` put there after a client fetch
- * (`reviveWithHandlers` returns non-plain objects untouched — #369).
+ * The blob is the page's data cache for its lifetime: the server fills it
+ * (`ctx.registerSerializedState` is the public writer) and successful keyed
+ * client fetches write back into it, so a state-owning pack seeding from it
+ * gets the latest value regardless of which side produced it. Reading does
+ * NOT consume: the entry stays for every later mount that asks — the
+ * default every first-party reader (`useData`, `useStream`, `@sigx/cache`)
+ * relies on. A pack whose seed must not outlive its own instance pairs the
+ * read with {@link invalidateRestored}; that is an opt-in, never the default,
+ * because a consuming reader starves every later instance under islands and
+ * separately-upgraded resume boundaries.
+ *
+ * - `hit` is own-key membership, not truthiness: a transferred `null` (or a
+ *   codec-carried `undefined`) is a hit.
+ * - Servers get a miss unconditionally — the accessors gate on
+ *   `isLiveClient()` (#407), so a long-lived Node process never leaks one
+ *   request's blob into another. Windowless live clients (lynx, terminal)
+ *   declare themselves via `declareLiveClient(true)`.
+ * - THE decode point for the seam: the boundary codec is applied here and
+ *   nowhere else (`@sigx/cache` reads through this too). Decoding stays
+ *   idempotent because the blob is a MIXED store — server-encoded values sit
+ *   beside live ones `writeBack` put there (`reviveWithHandlers` returns
+ *   non-plain objects untouched — #369).
+ * - **The value is shared with the blob, not a private copy.** Plain JSON
+ *   happens to be rebuilt by the codec walk, but a live value written back
+ *   after a client fetch — a `Map`, a `Set`, a class instance, anything the
+ *   codec leaves untouched — comes back by reference, and nothing in this
+ *   contract promises otherwise. A pack that turns the value into reactive
+ *   state must copy it first: a store proxying the blob's own objects writes
+ *   its mutations straight back into the blob, and from there into every
+ *   instance seeded afterwards.
  */
 export function peekRestored(key: string): { hit: boolean; value: unknown } {
     if (!isLiveClient()) return MISS;
@@ -104,7 +130,23 @@ export function restoredKeys(): string[] {
     return blob ? Object.keys(blob) : [];
 }
 
-/** Invalidate a restored entry — called before fetching fresh data. */
+/**
+ * Drop the entry stored under `key` — the INVALIDATE half of the blob's
+ * public contract (#449; `docs/seams.md`).
+ *
+ * The cache calls this before fetching fresh data, so a later mount fetches
+ * instead of restoring a value that is no longer the truth. A state-owning
+ * pack calls it right after {@link peekRestored} to give a seed
+ * instance scope (consume-once) — `@sigx/store`'s `ssrState(ctx, slice,
+ * { scope: 'instance' })` is that opt-in; leaving the entry in place is the
+ * default, because the blob is a page-lifetime cache every later instance
+ * seeds from. A no-op for a missing key, and on the server (`isLiveClient()`
+ * gate, #407).
+ *
+ * Pattern-driven invalidation across mounted cells AND the blob is
+ * `invalidateKeys(patterns)` (`@sigx/runtime-core/internals`), which sweeps
+ * both halves — this function is the blob half only.
+ */
 export function invalidateRestored(key: string): void {
     if (!isLiveClient()) return;
     const blob = (globalThis as AsyncBlobGlobal).__SIGX_ASYNC__;

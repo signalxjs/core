@@ -221,6 +221,44 @@ export const myPlugin: Plugin = {
 };
 ```
 
+### Seeding a pack from the SSR state blob
+
+`peekRestored(key)` and `invalidateRestored(key)` are the public read and
+invalidate half of the page's `__SIGX_ASYNC__` blob — the server fills it
+through `ctx.registerSerializedState` (`@sigx/server-renderer`), and a
+state-owning pack seeds from it on the client:
+
+```ts
+import { peekRestored, invalidateRestored } from '@sigx/runtime-core';
+
+const seed = peekRestored('cart');            // { hit, value } — hit is own-key membership
+if (seed.hit) state.set(copy(seed.value));    // COPY: the value is shared with the blob
+// Only if this seed must not outlive this instance (the default leaves it for later mounts):
+invalidateRestored('cart');
+```
+
+Reads do not consume — the blob is the page's data cache for its lifetime and
+every later mount seeds from it — and servers always miss. `copy` is whatever
+suits the pack's value shape: `structuredClone` covers plain data and the
+built-in codec types, but drops custom prototypes, so a value that can be a
+live class instance (written back after a client fetch) needs a copy that
+knows the type. The full contract is in the functions' JSDoc and
+`docs/seams.md`.
+
+### Taking a component factory apart
+
+`CombinedOf<F>`, `PropsOf<F>`, `RefOf<F>` and `SlotsOf<F>` read the parameters
+a `ComponentFactory` was built with, for types that derive one factory from
+another without touching its `@internal` brands:
+
+```ts
+import type { AnyComponentFactory, ComponentFactory, CombinedOf, RefOf, SlotsOf } from '@sigx/runtime-core';
+
+/** Swap an event on a factory, keeping its ref and slots. */
+type Adapted<F extends AnyComponentFactory, TRemove extends string, TAdd> =
+    ComponentFactory<Omit<CombinedOf<F>, TRemove> & TAdd, RefOf<F>, SlotsOf<F>>;
+```
+
 ### Non-web renderers
 
 This package references no web global unguarded — it runs anywhere. One thing renderer authors must know: `useData`/`useStream` only auto-run their sources on a **live client**, and without a declaration that is detected as "`window` exists" (which keeps server renders safe). A client runtime with no `window` (native, terminal) must say so once, from its platform-identity module:
