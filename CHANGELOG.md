@@ -9,9 +9,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Added
 
 - **`@sigx/runtime-core`: `peekRestored` / `invalidateRestored` are public
-  (#449).** The `__SIGX_ASYNC__` page blob's read and invalidate half moves
-  from `@sigx/runtime-core/internals` to the root entry (and so to `sigx`),
-  completing the blob's public contract: `ctx.registerSerializedState` writes
+  (#449).** The `__SIGX_ASYNC__` page blob's read and invalidate half is now
+  exported from the root entry (and so from `sigx`), not only from
+  `@sigx/runtime-core/internals`, completing the blob's public contract: `ctx.registerSerializedState` writes
   on the server (#407), `reviveFromServer` decodes on the client (#434), and a
   state-owning pack now seeds through a covered surface — `@sigx/store`
   reached both from `/internals`, which the 1.0 contract (#677 §1.2) does not

@@ -630,9 +630,10 @@ export type AnyComponentFactory = {
 };
 
 /**
- * The combined props+events declaration a factory was built from — its
- * `TCombined` parameter, i.e. what `component<T>()` was given. Re-parameterize
- * it to derive one factory type from another (#535):
+ * The whole declaration a factory was built from — its `TCombined`
+ * parameter, i.e. what `component<T>()` was given: props and events together
+ * with the slot, expose and model markers. Re-parameterize it to derive one
+ * factory type from another (#535):
  *
  * @example
  * ```ts

@@ -232,14 +232,18 @@ state-owning pack seeds from it on the client:
 import { peekRestored, invalidateRestored } from '@sigx/runtime-core';
 
 const seed = peekRestored('cart');            // { hit, value } — hit is own-key membership
-if (seed.hit) state.set(structuredClone(seed.value)); // COPY: the value is shared with the blob
+if (seed.hit) state.set(copy(seed.value));    // COPY: the value is shared with the blob
 // Only if this seed must not outlive this instance (the default leaves it for later mounts):
 invalidateRestored('cart');
 ```
 
 Reads do not consume — the blob is the page's data cache for its lifetime and
-every later mount seeds from it — and servers always miss. The full contract is
-in the functions' JSDoc and `docs/seams.md`.
+every later mount seeds from it — and servers always miss. `copy` is whatever
+suits the pack's value shape: `structuredClone` covers plain data and the
+built-in codec types, but drops custom prototypes, so a value that can be a
+live class instance (written back after a client fetch) needs a copy that
+knows the type. The full contract is in the functions' JSDoc and
+`docs/seams.md`.
 
 ### Taking a component factory apart
 
