@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { component, useData, Fragment, Text, defineApp } from 'sigx';
+import { component, useData, Fragment, Text, defineApp, errorScope, getCurrentInstance } from 'sigx';
 import { renderToString, renderToStream, renderToStreamWithCallbacks, type StreamCallbacks } from '../src/server/index';
 import { createSSRContext } from '../src/server/context';
 import { createSSR } from '../src/ssr';
@@ -852,15 +852,16 @@ describe('concurrent SSR requests', () => {
 
     it('should isolate getCurrentInstance across concurrent async renders', async () => {
         // Scope, precisely: every assertion below fires SYNCHRONOUSLY inside a
-        // child's setup, so this pins the guarantee the runtime actually makes
-        // — the current-instance slot is correct for the synchronous span of
-        // setup(), even while two renders are in flight and suspending at
-        // await points around it. It does NOT cover reading the instance from
-        // an async continuation; that window is genuinely unprotected (the
-        // walk holds the pointer across `yield { p }` in render-core), and is
-        // tracked separately. See docs/rfc-use-async.md, "The async-context
-        // problem".
-        const { getCurrentInstance } = await import('sigx');
+        // child's setup, so this pins the slot for the synchronous span of
+        // setup() while two renders are in flight and suspending at await
+        // points around it. The span AFTER a suspension — the render function
+        // an async component runs once its loads settle, the fallback after a
+        // rejected one — is pinned by the "across a suspension" tests below
+        // (#552): the driver saves and restores the slot around every await.
+        // What no test covers, because the runtime does not promise it, is
+        // reading the instance from an async continuation of your OWN (after
+        // an await inside setup, or in a fetcher): that code runs outside the
+        // walk. See docs/rfc-use-async.md, "The async-context problem".
         const instanceChecks: { component: string, isOwnContext: boolean }[] = [];
 
         const SlowParent = component(() => {
@@ -918,6 +919,103 @@ describe('concurrent SSR requests', () => {
         const fastCheck = instanceChecks.find(c => c.component === 'fast');
         expect(slowCheck?.isOwnContext).toBe(true);
         expect(fastCheck?.isOwnContext).toBe(true);
+    });
+
+    it('keeps getCurrentInstance() across a suspension: two interleaved renders resume into their own instance (#552)', async () => {
+        // A component's frame is suspended between its setCurrentInstance and
+        // its finally, so the walk HOLDS the slot across the await. A second
+        // render interleaves there and moves it; the first frame's render
+        // function then runs after the resume — inside the walk's synchronous
+        // span, where the runtime owns the read (unlike a fetcher's own
+        // continuation). The driver must put the slot back before resuming.
+        const seen: Record<string, boolean> = {};
+
+        const probe = (name: string, ms: number) => component((ctx) => {
+            const data = useData(`instance-across-await-${name}`, async () => {
+                await new Promise(r => setTimeout(r, ms));
+                return name;
+            });
+            return () => {
+                seen[name] = getCurrentInstance() === ctx;
+                return <span>{data.value}</span>;
+            };
+        }, { name: `Probe-${name}` });
+
+        // A is entered first and settles FIRST: it resumes while B's frame is
+        // still suspended with the slot pointing at B, and B resumes after
+        // A's finally has restored A's parent (null) over it. Unprotected,
+        // both read the wrong instance — deterministically, not by timing.
+        const A = probe('a', 10);
+        const B = probe('b', 50);
+
+        const [a, b] = await Promise.all([renderToString(<A />), renderToString(<B />)]);
+
+        expect(a).toContain('<span>a</span>');
+        expect(b).toContain('<span>b</span>');
+        expect(seen).toEqual({ a: true, b: true });
+    });
+
+    it('restores getCurrentInstance() after a rejected suspension: the frame\'s own errorScope fallback sees its component (#552)', async () => {
+        const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+        const seen: Record<string, boolean> = {};
+
+        // A legacy async setup is a suspension the driver resumes by THROWING
+        // into the walk. The rejection lands in this frame's catch, and the
+        // errorScope fallback it renders is user code running in that frame —
+        // the throw path needs the same restore as the resolve path.
+        const Rejecting = component(async (ctx) => {
+            errorScope({
+                fallback: (e) => {
+                    seen.fallback = getCurrentInstance() === ctx;
+                    return <i class="fb">{e.message}</i>;
+                }
+            });
+            await new Promise(r => setTimeout(r, 10));
+            throw new Error('setup rejected');
+        }, { name: 'Rejecting' });
+
+        const Other = component((ctx) => {
+            const data = useData('instance-after-rejection-other', async () => {
+                await new Promise(r => setTimeout(r, 50));
+                return 'other';
+            });
+            return () => {
+                seen.other = getCurrentInstance() === ctx;
+                return <span>{data.value}</span>;
+            };
+        }, { name: 'Other' });
+
+        const [rejected, other] = await Promise.all([renderToString(<Rejecting />), renderToString(<Other />)]);
+
+        expect(rejected).toContain('<i class="fb">setup rejected</i>');
+        expect(other).toContain('<span>other</span>');
+        expect(seen).toEqual({ fallback: true, other: true });
+
+        consoleSpy.mockRestore();
+    });
+
+    it('sets getCurrentInstance() for a streamed deferred render (#552)', async () => {
+        // In streaming mode an async component's render function runs in the
+        // deferred closure, after the main walk has moved on or finished and
+        // its finally has cleared the slot. That continuation is still this
+        // component's frame and must re-establish it.
+        let own: boolean | null = null;
+
+        const Deferred = component((ctx) => {
+            const data = useData('instance-in-deferred-render', async () => {
+                await new Promise(r => setTimeout(r, 10));
+                return 'deferred';
+            });
+            return () => {
+                own = getCurrentInstance() === ctx;
+                return <span>{data.value}</span>;
+            };
+        }, { name: 'DeferredProbe' });
+
+        const html = await collectStream(renderToStream(<Deferred />));
+
+        expect(html).toContain('deferred');   // JSON-escaped inside $SIGX_REPLACE
+        expect(own).toBe(true);
     });
 
     it('should handle many concurrent renders without errors', async () => {

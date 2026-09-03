@@ -6,6 +6,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- **`@sigx/server-renderer`: `getCurrentInstance()` is stable across
+  suspensions in a render (#552).** The SSR walk sets the current instance
+  around a component's frame and restores it in a `finally` — but the frame
+  *suspends* in between (its async loads, a legacy async setup), and the
+  driver loops resumed it without saving or restoring the pointer. Anything
+  else in the process running at that await — a concurrent `renderToString`,
+  a streamed deferred render — left the slot pointing at *its* component, so
+  the resumed frame ran its render function against the wrong instance and
+  its `finally` then wrote a stale parent back over the live one. A streamed
+  deferred render never set the instance at all. The drivers now save the
+  slot before every `await` and restore it before re-entering the walk (on
+  the throw path too), and the deferred closure re-establishes its
+  component's frame. The guarantee is therefore the whole of a component's
+  render — `setup()`, the render function that runs once its loads settle,
+  an `errorScope` fallback after a rejected one — not only the synchronous
+  span of `setup()`. No AsyncLocalStorage, no promise hooks. Still
+  unsupported, on the server as in the browser: reading the instance from an
+  async continuation of your own (after an `await` inside setup, or from a
+  fetcher) — that code runs outside the walk.
+
 ## [0.15.6] — 2026-08-17
 
 ### Performance
