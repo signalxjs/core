@@ -168,7 +168,11 @@ pnpm typecheck:examples   # each example against its OWN tsconfig — `pnpm type
 pnpm lint        # oxlint over all packages' src (warnings fail: --deny-warnings)
 pnpm lint:fix
 pnpm size        # size-limit bundle-size check (.size-limit.mjs)
-pnpm verify:pack # verify npm pack output is sane
+pnpm verify:pack # verify npm pack output is sane — packs ALL 14 publishable packages (the list is
+                 # scripts/packages.js, shared with publish.js and cross-checked against packages/*
+                 # on disk, so the two cannot drift), FAILS if any tarball manifest still carries a
+                 # `workspace:`/`catalog:` range, builds a scratch app from the tarballs, and imports
+                 # every server-side entry under Node in both dev and production conditions (#363)
 pnpm test:edge   # WinterCG smoke: stream a document from the prod dist with node: imports forbidden (after pnpm build)
 pnpm smoke:hydration   # did the prod build actually HYDRATE, or silently re-render client-side? (after pnpm build)
                        # Builds examples/spa-ssr + examples/ssr-islands, serves them, and drives Chromium:
