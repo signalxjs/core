@@ -31,8 +31,9 @@ disagree after 1.0.0 ships, the code is a bug.
    definition, so two ecosystem packages one core minor apart cannot share
    a copy of reactivity, and today every package carries core as a plain
    `dependency` (`packages/runtime-core/package.json`: `dependencies:
-   { "@sigx/reactivity": "workspace:^" }`, no `peerDependencies`; the same
-   shape in runtime-dom, cache, server-renderer, resume, server). Two
+   { "@sigx/reactivity": "workspace:^", "@sigx/serialize": "workspace:^" }`,
+   no `peerDependencies`; the same shape in runtime-dom, cache,
+   server-renderer, resume, server). Two
    copies of reactivity is a silent install and an incomprehensible
    runtime. 1.0 is what makes the range wide enough to dedupe; peers are
    what make the app own the copy; a guard is what makes the failure loud
@@ -278,7 +279,8 @@ Decided:
 
 ### 4.2 `ServerFeatureContext.enter()` stays (#628)
 
-`serverFeature().enter(request, fn)` (`packages/server/src/app-config.ts:346-350`)
+`serverFeature().enter(request, fn, options?)` (`packages/server/src/app-config.ts:346-350`;
+`options` is `{ allowAnonymous?: boolean }`)
 has no consumer in the org today and is a five-line wrapper — but it is the
 **only public path** for a feature that owns a raw `Request` to build a
 context and run the prelude: `createRequestContext` is internal
