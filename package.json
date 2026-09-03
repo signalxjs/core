@@ -62,15 +62,15 @@
     },
     "devDependencies": {
         "@size-limit/preset-small-lib": "^11",
-        "@vitest/coverage-v8": "^4.1.10",
+        "@vitest/coverage-v8": "^4.1.11",
         "happy-dom": "^20.10.6",
-        "miniflare": "^4.20260714.0",
-        "oxlint": "^1.73.0",
-        "playwright": "^1.61.1",
+        "miniflare": "^4.20260730.0",
+        "oxlint": "^1.80.0",
+        "playwright": "^1.62.1",
         "size-limit": "^11",
         "typescript": "^7.0.2",
-        "vite": "^8.1.4",
-        "vitest": "^4.1.10"
+        "vite": "^8.2.2",
+        "vitest": "^4.1.11"
     },
     "keywords": [
         "SignalX",
