@@ -325,8 +325,8 @@ Decided per site:
 | Duplicate resume component name across modules (`packages/vite/src/resume.ts:207-227`) | `console.warn`, first wins, rest dropped from the manifest | **build error** naming both files |
 | `export default` in a resume module | silently non-resumable | **build error** ("resume components must be named exports") |
 | `$scope` / `$el` used as a prop name | silent | **build error** |
-| Single-element-root violation at upgrade (`client/upgrade.ts:144-152`) | `__DEV__` warn, boundary not upgraded | stays a `__DEV__` warn — a runtime throw would take the page down; the README documents it |
-| Renamed signal drops buffered writes (`client/upgrade.ts:176-186`) | `__DEV__` warn | stays a `__DEV__` warn, documented |
+| Single-element-root violation at upgrade (`packages/resume/src/client/upgrade.ts:144-152`) | `__DEV__` warn, boundary not upgraded | stays a `__DEV__` warn — a runtime throw would take the page down; the README documents it |
+| Renamed signal drops buffered writes (`packages/resume/src/client/upgrade.ts:176-186`) | `__DEV__` warn | stays a `__DEV__` warn, documented |
 | Wake swallows the first event | undocumented | documented; behaviour unchanged |
 
 The three warn→error changes are breaking and land in PR-4, before rc.
