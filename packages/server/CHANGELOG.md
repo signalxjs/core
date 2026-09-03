@@ -2,6 +2,26 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **The middleware cadence and the feature seam are documented (#628).**
+  Docs only; behaviour is unchanged and frozen for 1.0 (RFC #677 §4.2).
+  `ServerMiddleware` said "runs on EVERY transport" and never stated the
+  cadence: the chain runs once per **operation** — every wire call, every
+  stream open, every in-process call (`runServerPrelude` re-runs it on each
+  entry), so an SSR render with five data cells runs each middleware five
+  times — while `authenticate`, right after it, is memoized per request
+  store and runs once. The JSDoc and the README's `createServerApp` section
+  now say so and point to `perRequest` as the once-per-request seam for
+  middleware work. `ServerFeatureContext`'s JSDoc cross-references the
+  `__sigxAnon` stamp: `handleServerFnRequest` reads anonymity off the
+  wrapper, so a feature minting its own wrappers must stamp it or its
+  `allowAnonymous` operations work in-process and 401 on the wire.
+  `enter()` is the wire entry for a feature that owns the raw `Request`
+  (the only public path from a `Request` to a context); `prelude()` for
+  one that already holds a context. The additive members #628 proposes
+  (`configured`, `wrap()`, the identity gate alone) are deferred to 1.x.
+
 ## [0.15.3] - 2026-08-07
 
 ### Changed

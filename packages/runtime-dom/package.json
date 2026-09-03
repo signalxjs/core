@@ -35,7 +35,18 @@
         "prepublishOnly": "pnpm run build"
     },
     "keywords": [
-        "SignalX"
+        "sigx",
+        "signalx",
+        "SignalX",
+        "runtime",
+        "dom",
+        "renderer",
+        "signals",
+        "reactive",
+        "fine-grained",
+        "components",
+        "jsx",
+        "tsx"
     ],
     "author": "Andreas Ekdahl",
     "license": "MIT",

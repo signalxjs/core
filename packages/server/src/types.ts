@@ -35,6 +35,14 @@ export interface ServerFnInfo {
  * `reviveWire` on attacker-controlled bytes (#559), and it loses nothing by
  * going first. Transport-specific behavior is the body's own branch on
  * `fn.transport`.
+ *
+ * Cadence (#628): the chain runs once per OPERATION, not once per request —
+ * every wire call, every stream open, and every in-process call runs it
+ * again, so one SSR render with five data cells runs each middleware five
+ * times. `authenticate`, right after it in the prelude, is memoized per
+ * request store and runs once. Work that must happen once per request (a
+ * request id, an audit record, a rate-limit debit) belongs in a
+ * `perRequest` value the middleware touches, not in the middleware body.
  */
 export type ServerMiddleware = (rq: ServerFnContext, fn: ServerFnInfo) => void | Promise<void>;
 
@@ -147,13 +155,24 @@ export interface ServerFeatureOp<P = unknown> {
  *
  * Fail-closed throughout: no app configured means no middleware, a `null`
  * principal, and therefore a deny for anything not `allowAnonymous`.
+ *
+ * Anonymity on the wire is read off the WRAPPER, not passed by the feature:
+ * `handleServerFnRequest` runs the prelude with
+ * `fn.__sigxAnon === true` (`server/index.ts`), the flag `serverFn` /
+ * `serverStream` stamp from `allowAnonymous: true` (see
+ * {@link WrappedServerFn.__sigxAnon}). A feature that synthesizes its own
+ * wrappers and hands them to core's endpoint must stamp it the same way —
+ * otherwise its anonymous-allowed operations work in-process (where the
+ * feature passes `allowAnonymous` itself) and 401 on the wire (#628).
  */
 export interface ServerFeatureContext<P = unknown> {
     /**
-     * Wire entry: build the request context, then run middleware →
-     * authenticate → the identity gate for one operation. For a feature
-     * that owns a raw `Request`; one that already holds a context (an
-     * in-process call) uses {@link ServerFeatureContext.prelude}.
+     * Wire entry, for a feature that owns the raw `Request` (rfc-1.0 §4.2):
+     * build the request context, then run middleware → authenticate → the
+     * identity gate for one operation, and hand the context back. This is
+     * the only public path from a `Request` to a context. A feature that
+     * already holds a context (an in-process call, a connection that built
+     * one) uses {@link ServerFeatureContext.prelude} instead.
      */
     enter(
         request: Request,
@@ -164,7 +183,9 @@ export interface ServerFeatureContext<P = unknown> {
      * The same prelude over a context the feature already has — middleware
      * → authenticate (memoized per request store) → identity gate. Throws
      * `ServerFnError(401)` when the operation needs a principal and there
-     * is none.
+     * is none. Per operation, like the rest of the pipeline: calling it N
+     * times on one context runs the middleware chain N times and
+     * `authenticate` once (see {@link ServerMiddleware}).
      */
     prelude(
         rq: ServerFnContext,
