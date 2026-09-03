@@ -1172,5 +1172,3 @@ declare module '@sigx/runtime-core' {
         onTransitionCancel?: (e: TransitionEvent) => void;
     }
 }
-
-export { };

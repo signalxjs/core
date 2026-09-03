@@ -46,7 +46,7 @@ export interface InternalVNode extends VNode {
  * Is this text node pure markup formatting (indentation between tags) rather
  * than content SSR rendered for a component?
  *
- * Deliberately NOT `/\S/`: JavaScript's `\s` class matches NBSP (` `) and
+ * Deliberately NOT `/\S/`: JavaScript's `\s` class matches NBSP (U+00A0) and
  * the other Unicode space separators, which are VISIBLE characters. An SSR
  * `&nbsp;` is real content — skipping it would let the hydrator abandon
  * visible text as an orphan no VNode owns. Only HTML's ASCII whitespace
