@@ -80,7 +80,7 @@ jobs:
 
       - uses: pnpm/action-setup@v6
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           # Recorded into the baseline's fingerprint and compared by MAJOR, so
           # this must stay in step with bench-nightly.yml. If the two drift
