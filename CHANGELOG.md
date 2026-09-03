@@ -18,8 +18,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   the resumed frame ran its render function against the wrong instance and
   its `finally` then wrote a stale parent back over the live one. A streamed
   deferred render never set the instance at all. The drivers now save the
-  slot before every `await` and restore it before re-entering the walk (on
-  the throw path too), and the deferred closure re-establishes its
+  slot before every park (the `await`, and the chunk yield to the consumer
+  that precedes it in `renderToChunks`) and restore it before re-entering
+  the walk (on the throw path too), and the deferred closure re-establishes its
   component's frame. The guarantee is therefore the whole of a component's
   render — `setup()`, the render function that runs once its loads settle,
   an `errorScope` fallback after a rejected one — not only the synchronous

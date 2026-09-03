@@ -8,6 +8,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { component, useData, Fragment, Text, defineApp, errorScope, getCurrentInstance } from 'sigx';
 import { renderToString, renderToStream, renderToStreamWithCallbacks, type StreamCallbacks } from '../src/server/index';
 import { createSSRContext } from '../src/server/context';
+import { renderToChunks } from '../src/server/render-core';
 import { createSSR } from '../src/ssr';
 
 // ─── Test Components ───────────────────────────────────────────────
@@ -1016,6 +1017,60 @@ describe('concurrent SSR requests', () => {
 
         expect(html).toContain('deferred');   // JSON-escaped inside $SIGX_REPLACE
         expect(own).toBe(true);
+    });
+
+    it('captures the instance BEFORE handing a chunk to the consumer: that yield is a suspension too (#552)', async () => {
+        // renderToChunks flushes buffered output to its consumer before it
+        // awaits a suspension — and handing the chunk over is itself a
+        // suspension: the walk parks at `yield chunk` until the consumer
+        // pulls again, and every other render runs meanwhile. Capturing the
+        // slot after that yield would save whatever THEY left behind. This
+        // drives the chunk generator by hand so the park is explicit.
+        const seen: Record<string, boolean> = {};
+
+        // A legacy async setup suspends in streaming mode too (an async load
+        // would defer instead of suspending).
+        const A = component(async (ctx) => {
+            await new Promise(r => setTimeout(r, 5));
+            return () => {
+                seen.a = getCurrentInstance() === ctx;
+                return <span>a</span>;
+            };
+        }, { name: 'ChunkYieldA' });
+
+        const B = component((ctx) => {
+            const data = useData('chunk-yield-b', async () => {
+                await new Promise(r => setTimeout(r, 40));
+                return 'b';
+            });
+            return () => {
+                seen.b = getCurrentInstance() === ctx;
+                return <span>{data.value}</span>;
+            };
+        }, { name: 'ChunkYieldB' });
+
+        const ctx = createSSRContext();
+        ctx._streaming = true;
+        const chunks = renderToChunks(<div>lead<A /></div>, ctx);
+
+        // First pull: A's frame is suspended and the walk is parked at the
+        // chunk yield, holding A's slot.
+        const first = await chunks.next();
+        expect(first.value).toContain('<div>lead');
+
+        // Another render starts and suspends while A is parked: the slot is
+        // B's frame now. A's own setup promise settles in the meantime.
+        const b = renderToString(<B />);
+        await new Promise(r => setTimeout(r, 20));
+
+        // Second pull: A resumes past the yield, then past its setup await,
+        // and runs its render function.
+        let html = first.value as string;
+        for (let r = await chunks.next(); !r.done; r = await chunks.next()) html += r.value;
+
+        expect(html).toContain('<span>a</span>');
+        expect(await b).toContain('<span>b</span>');
+        expect(seen).toEqual({ a: true, b: true });
     });
 
     it('should handle many concurrent renders without errors', async () => {
