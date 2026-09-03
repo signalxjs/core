@@ -415,8 +415,13 @@ export function sigxResume(options: SigxResumeOptions = {}): Plugin {
 
         async hotUpdate({ type, file, read }) {
             if (!filter(file)) return;
-            if (type === 'delete') extractions.delete(normalizePath(file));
-            else extractInto(file, await read());
+            if (type === 'delete') {
+                const key = normalizePath(file);
+                extractions.delete(key);
+                contractErrors.delete(key); // a deleted violation must not keep failing the registry
+            } else {
+                extractInto(file, await read());
+            }
             const graph = this.environment.moduleGraph;
             for (const vid of [RESOLVED_VIRTUAL_ID, RESOLVED_ENTRY_ID, RESOLVED_HANDLERS_PREFIX + relPath(file) + HANDLERS_SUFFIX]) {
                 const mod = graph.getModuleById(vid);
