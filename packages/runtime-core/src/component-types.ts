@@ -628,3 +628,40 @@ export type AnyComponentFactory = {
     __ref: any;
     __slots: any;
 };
+
+/**
+ * The combined props+events declaration a factory was built from — its
+ * `TCombined` parameter, i.e. what `component<T>()` was given. Re-parameterize
+ * it to derive one factory type from another (#535):
+ *
+ * @example
+ * ```ts
+ * type Adapted<F extends AnyComponentFactory, TRemove extends string, TAdd> =
+ *     ComponentFactory<Omit<CombinedOf<F>, TRemove> & TAdd, RefOf<F>, SlotsOf<F>>;
+ * ```
+ *
+ * These aliases are the supported way to take a `ComponentFactory` apart;
+ * the `__props`/`__events`/`__ref`/`__slots` brands they read are `@internal`
+ * and may be renamed without notice.
+ */
+export type CombinedOf<F extends AnyComponentFactory> = F['__events'];
+
+/**
+ * The props view of a factory — {@link CombinedOf} with the internal markers
+ * (`__exposed`, `__slots`, model bindings, `update:*`) stripped, i.e. the
+ * shape its setup's `ctx.props` is typed with. See {@link CombinedOf}.
+ */
+export type PropsOf<F extends AnyComponentFactory> = F['__props'];
+
+/**
+ * The `TRef` parameter of a factory — what `expose()` hands to a `ref`.
+ * The same read as {@link Exposed}; provided under this name so the family
+ * reads uniformly beside {@link CombinedOf} and {@link SlotsOf}.
+ */
+export type RefOf<F extends AnyComponentFactory> = F['__ref'];
+
+/**
+ * The `TSlots` parameter of a factory — the slot table its `Define.Slot`
+ * declarations produced. See {@link CombinedOf}.
+ */
+export type SlotsOf<F extends AnyComponentFactory> = F['__slots'];
