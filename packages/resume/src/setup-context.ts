@@ -39,5 +39,3 @@ declare module '@sigx/runtime-core' {
         $sigxB?: string;
     }
 }
-
-export {};
