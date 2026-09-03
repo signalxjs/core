@@ -33,6 +33,7 @@ import {
 import type { JSXElement, ComponentSetupContext, SlotsObject, DirectiveDefinition, AppContext } from 'sigx';
 import {
     setCurrentInstance,
+    getCurrentInstance,
     createPropsAccessor,
     provideAppContext,
     resolveBuiltInDirective,
@@ -1218,9 +1219,20 @@ function* renderNode(
 
                         let html = '';
                         if (capturedRenderFn) {
-                            const result = (capturedRenderFn as () => any)();
-                            if (result) {
-                                html = await renderVNodeToString(result, capturedCtx, capturedAppContext, capturedComponentCtx);
+                            // This continuation runs with the current-instance
+                            // slot wherever the last walk left it. The deferred
+                            // render is THIS component's frame — its render
+                            // function and the walk of what it returns — so
+                            // re-establish it for the span, as the blocking
+                            // branch has it set by construction (#552).
+                            const prevInstance = setCurrentInstance(capturedComponentCtx);
+                            try {
+                                const result = (capturedRenderFn as () => any)();
+                                if (result) {
+                                    html = await renderVNodeToString(result, capturedCtx, capturedAppContext, capturedComponentCtx);
+                                }
+                            } finally {
+                                setCurrentInstance(prevInstance);
                             }
                         }
 
@@ -1488,12 +1500,22 @@ export async function* renderToChunks(
         if (suspend === FLUSH) {
             result = gen.next();
         } else {
+            // The suspended frame sits between its setCurrentInstance and
+            // its finally, so the slot is ITS component right now — and
+            // every other walk in the process (a concurrent render, a
+            // deferred closure) is free to move it while we await. Put it
+            // back before re-entering the generator, on the throw path
+            // too, so getCurrentInstance() is right for the synchronous
+            // span that follows the resume (#552).
+            const saved = getCurrentInstance();
             try {
                 const v = await suspend.p;
+                setCurrentInstance(saved);
                 result = gen.next(v);
             } catch (e) {
                 // Route the rejection into the walk — the component-level
                 // catch produces its error fallback, same as an inline await.
+                setCurrentInstance(saved);
                 result = gen.throw(e);
             }
         }
@@ -1529,10 +1551,14 @@ export async function renderVNodeToString(element: JSXElement, ctx: SSRContext, 
             result = gen.next();
             continue;
         }
+        // Same save/restore as renderToChunks (#552).
+        const saved = getCurrentInstance();
         try {
             const v = await suspend.p;
+            setCurrentInstance(saved);
             result = gen.next(v);
         } catch (e) {
+            setCurrentInstance(saved);
             result = gen.throw(e);
         }
     }

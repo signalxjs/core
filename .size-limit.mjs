@@ -120,7 +120,11 @@ export default [
     // 13.6 → 13.7 KB with #492: the wrapper-ownership test (only the
     // component the placeholder is named after may descend into it) plus the
     // streamed-boundary liveness guard; sat at 13.62 KB.
-    limit: '13.75 KB',
+    // 13.75 → 13.8 KB with #552: the driver loops save/restore the current
+    // instance around every suspension and the deferred-render closure sets
+    // its component's frame; sat at 13.75 KB (13747 B — 3 B under the old
+    // limit, so the bump is headroom, not growth).
+    limit: '13.8 KB',
     ignore: ['sigx', 'sigx/*', '@sigx/*', 'node:stream'],
   },
   {

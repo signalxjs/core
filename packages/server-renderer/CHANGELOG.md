@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **`getCurrentInstance()` is stable across suspensions in a render (#552).**
+  `renderNode` sets the current instance around a component's frame and
+  restores it in a `finally`, but the frame suspends in between — `yield
+  { p }` for its async loads or a legacy async setup — and the two driver
+  loops (`renderToChunks`, `renderVNodeToString`) resumed it with a bare
+  `await suspend.p; gen.next(v)`. Every other walk in the process ran freely
+  at that await and left the module-level slot on *its* component, so the
+  resumed frame called its render function against the wrong instance and
+  its `finally` then restored a stale parent over the live one. The streamed
+  deferred-render closure never set the instance for its render function at
+  all. The drivers now save the slot before each `await` and restore it
+  before `gen.next(v)` and `gen.throw(e)`; the deferred closure sets its
+  component's frame around `renderFn()` and the walk of what it returns
+  (restored in a `finally`). Guarantee: the instance is correct for the whole
+  of a component's render — `setup()`, the render function that runs once
+  its loads settle (inline or deferred), an `errorScope` fallback after a
+  rejected suspension — however many concurrent renders interleave. No
+  AsyncLocalStorage, no promise hooks (#544). Reading the instance from an
+  async continuation of your own (after an `await` inside setup, or from a
+  fetcher) remains unsupported, on the server as in the browser: that code
+  runs outside the walk.
+
 ## [0.15.5] - 2026-08-15
 
 ### Performance

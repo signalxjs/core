@@ -117,11 +117,16 @@ Request isolation is a contract, not a runtime feature: **the per-request
 required.** Everything a request collects (head configs, response state,
 async results, the boundary table) lives on its own context, created per
 render call; concurrent renders share nothing. There is no AsyncLocalStorage
-anywhere on the render path and never has been — reading
-`getCurrentInstance()` from an async continuation (after the first `await` of
-an async setup, or from a fetcher) is **unsupported on the server exactly as
-it is in the browser**: the current instance is one module-level slot, live
-only for the synchronous span of `setup()`. Resolve everything
+anywhere on the render path and never has been. The current instance is one
+module-level slot, and the walk keeps it correct for the **whole of a
+component's render** — `setup()`, the render function that runs once its
+async loads settle (inline, or in a streamed deferred render), an
+`errorScope` fallback after a rejected one — across every suspension,
+however many concurrent renders interleave at that await (#552). What stays
+**unsupported, on the server exactly as in the browser**, is reading
+`getCurrentInstance()` from an async continuation of your own (after the
+first `await` of an async setup, or from a fetcher): that code runs outside
+the walk, on whatever the slot holds at the time. Resolve everything
 instance-dependent synchronously in setup and close over the result.
 
 ## Request-state registration (packs)
