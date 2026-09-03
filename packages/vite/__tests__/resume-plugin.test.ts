@@ -61,6 +61,9 @@ describe('sigxResume — transform', () => {
         expect(result.code).toContain('ctx.signal(__sigxInit, "count")');
         expect(result.code).toContain('Counter.__resumeId = "Counter"');
         expect(result.code).toContain('Counter.__resumeMode = "resume"');
+        // The handler symbols ride the factory too — resumePlugin's assets()
+        // hook maps them through the manifest to modulepreload links (#410).
+        expect(result.code).toMatch(/Counter\.__resumeQrls = \["Counter_click_[0-9a-f]{8}"\]/);
         expect(warnings).toHaveLength(0);
     });
 
@@ -80,6 +83,8 @@ export const Stepper = component((ctx) => {
             join(root, 'src/resume/Stepper.tsx')
         );
         expect(result.code).toContain('Stepper.__resumeMode = "hydrate"');
+        // Hydrate mode has no handler symbols — nothing to preload.
+        expect(result.code).not.toContain('__resumeQrls');
         expect(result.code).not.toContain('data-sigx-on');
         expect(result.code).toContain('data-sigx-wake:click=""');
         expect(warnings).toHaveLength(1);
@@ -224,20 +229,138 @@ describe('sigxResume — virtual modules', () => {
     });
 });
 
-describe('sigxResume — duplicate component names', () => {
-    it('keeps the first file and warns for registry and manifest', () => {
+/** A plugin `this` whose error() throws like Rollup's does. */
+const failing = {
+    warn: () => {},
+    error: (m: string): never => {
+        throw new Error(m);
+    }
+};
+
+describe('sigxResume — duplicate component names are a build error (§4.5)', () => {
+    it('transform of either file fails naming BOTH files', () => {
+        const { plugin, root } = makeProject({
+            'src/resume/a.tsx': COUNTER.replace('../analytics', '../../analytics'),
+            'src/resume/b/dupe.tsx': COUNTER
+        });
+        try {
+            for (const rel of ['src/resume/a.tsx', 'src/resume/b/dupe.tsx']) {
+                let message = '';
+                try {
+                    plugin.transform.call(failing, COUNTER, join(root, rel));
+                } catch (e) {
+                    message = (e as Error).message;
+                }
+                expect(message).toContain('duplicate resume component name "Counter"');
+                expect(message).toContain('src/resume/a.tsx');
+                expect(message).toContain('src/resume/b/dupe.tsx');
+                expect(message).toContain('must be unique');
+            }
+        } finally {
+            rmSync(root, { recursive: true, force: true });
+        }
+    });
+
+    it('the registry and the manifest refuse to build too (files nothing imported yet)', () => {
         const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
         const { plugin, root } = makeProject({
             'src/resume/a.tsx': COUNTER.replace('../analytics', '../../analytics'),
             'src/resume/b/dupe.tsx': COUNTER
         });
         try {
-            const registry = plugin.load.call({}, '\0virtual:sigx-resume');
-            const registrations = registry.split('\n').filter((l: string) => l.includes('registerComponentChunk("Counter"'));
-            expect(registrations).toHaveLength(1);
-            expect(warn).toHaveBeenCalledWith(expect.stringContaining('duplicate resume component name "Counter"'));
+            expect(() => plugin.load.call(failing, '\0virtual:sigx-resume'))
+                .toThrow(/duplicate resume component name "Counter"/);
+            expect(() => plugin.generateBundle.handler.call(
+                { ...failing, environment: { name: 'client' }, emitFile: () => {} }, {}, {}))
+                .toThrow(/duplicate resume component name "Counter"/);
+            // Never a console warning any more — it is an error or nothing.
+            expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('duplicate'));
         } finally {
             warn.mockRestore();
+            rmSync(root, { recursive: true, force: true });
+        }
+    });
+
+    it('the same component name in two NON-resume files is nobody\'s business', () => {
+        const { plugin, root } = makeProject({
+            'src/resume/a.tsx': COUNTER.replace('../analytics', '../../analytics'),
+            'src/Counter.tsx': COUNTER
+        });
+        try {
+            expect(() => plugin.load.call(failing, '\0virtual:sigx-resume')).not.toThrow();
+        } finally {
+            rmSync(root, { recursive: true, force: true });
+        }
+    });
+});
+
+describe('sigxResume — transform-contract build errors (§4.5)', () => {
+    it('`export default` on a component fails the transform with file:line:col', () => {
+        const code = `
+import { component } from 'sigx';
+const Hidden = component((ctx) => {
+    const n = ctx.signal(0);
+    return () => <button onClick={() => { n.value++; }}>x</button>;
+});
+export default Hidden;
+`;
+        const { plugin, root } = makeProject({ 'src/resume/Hidden.tsx': code });
+        try {
+            let message = '';
+            try {
+                plugin.transform.call(failing, code, join(root, 'src/resume/Hidden.tsx'));
+            } catch (e) {
+                message = (e as Error).message;
+            }
+            expect(message).toContain('resume components must be named exports');
+            expect(message).toMatch(/src\/resume\/Hidden\.tsx:3:7/);
+            // The registry sweep reports it too, so a discovered-but-not-yet-
+            // imported module cannot slip through.
+            expect(() => plugin.load.call(failing, '\0virtual:sigx-resume'))
+                .toThrow(/resume components must be named exports/);
+        } finally {
+            rmSync(root, { recursive: true, force: true });
+        }
+    });
+
+    it('a handler binding $scope / $el fails the transform', () => {
+        const code = `
+import { component } from 'sigx';
+export const Reserved = component((ctx) => {
+    const count = ctx.signal(0);
+    return () => <button onClick={($el) => { count.value++; }}>x</button>;
+});
+`;
+        const { plugin, root } = makeProject({ 'src/resume/Reserved.tsx': code });
+        try {
+            let message = '';
+            try {
+                plugin.transform.call(failing, code, join(root, 'src/resume/Reserved.tsx'));
+            } catch (e) {
+                message = (e as Error).message;
+            }
+            expect(message).toContain('onclick of <Reserved>');
+            expect(message).toContain('reserved name');
+            expect(message).toMatch(/src\/resume\/Reserved\.tsx:5:35/);
+        } finally {
+            rmSync(root, { recursive: true, force: true });
+        }
+    });
+
+    it('a default export that is not a component does not trip the check', () => {
+        const code = `
+import { component } from 'sigx';
+export const Counter = component((ctx) => {
+    const n = ctx.signal(0);
+    return () => <button onClick={() => { n.value++; }}>x</button>;
+});
+export default { step: 1 };
+`;
+        const { plugin, root } = makeProject({ 'src/resume/Ok.tsx': code });
+        try {
+            const result = plugin.transform.call(failing, code, join(root, 'src/resume/Ok.tsx'));
+            expect(result.code).toContain('Counter.__resumeId = "Counter"');
+        } finally {
             rmSync(root, { recursive: true, force: true });
         }
     });

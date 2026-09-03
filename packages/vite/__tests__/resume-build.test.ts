@@ -125,6 +125,9 @@ export const Counter = component((ctx) => {
         expect(componentCode).toContain('data-sigx-on:click');
         expect(componentCode).toContain(symbol);
         expect(componentCode).toContain('__resumeId');
+        // …and its handler symbols, which resumePlugin's assets() hook maps
+        // through the manifest to a modulepreload of the handler chunk (#410).
+        expect(componentCode).toContain('__resumeQrls');
 
         // (e) The registry chunk (behind the entry's dynamic import)
         // registers the symbol and the upgrade chunk.

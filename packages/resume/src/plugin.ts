@@ -61,6 +61,12 @@ interface ResumePluginData {
      * record in afterRenderComponent (rfc-server §6.3 decline).
      */
     lossy: Set<number>;
+    /**
+     * Handler-chunk URLs of the boundaries this request claimed, resolved
+     * through the manifest's `handlers` table — what the `assets()` hook
+     * emits as modulepreload links (#410). Empty without a manifest (dev).
+     */
+    preload: Set<string>;
 }
 
 const PLUGIN_NAME = 'resume';
@@ -74,6 +80,13 @@ const PLUGIN_NAME = 'resume';
  */
 interface ResumeStamps {
     __resumeId?: string;
+    /**
+     * The component's extracted handler symbols (absent in hydrate mode —
+     * all-or-nothing). Keys into `manifest.handlers`; every symbol of one
+     * module shares one handlers chunk, so this usually resolves to a
+     * single URL per component.
+     */
+    __resumeQrls?: string[];
 }
 
 /**
@@ -117,7 +130,8 @@ export function resumePlugin(options?: ResumePluginOptions): SSRPack {
                 ctx.setPluginData<ResumePluginData>(PLUGIN_NAME, {
                     signalMaps: new Map(),
                     claimed: new Set(),
-                    lossy: new Set()
+                    lossy: new Set(),
+                    preload: new Set()
                 });
             },
 
@@ -160,6 +174,18 @@ export function resumePlugin(options?: ResumePluginOptions): SSRPack {
                 const data = ctx.getPluginData<ResumePluginData>(PLUGIN_NAME);
                 data?.claimed.add(id);
 
+                // The handler chunk this boundary's first interaction will
+                // import — warm it from the shell (#410). The manifest is
+                // the only source of chunk URLs; dev runs manifest-less and
+                // the registry resolves symbols lazily there.
+                const handlers = options?.manifest?.handlers;
+                if (data && handlers && stamps.__resumeQrls) {
+                    for (const symbol of stamps.__resumeQrls) {
+                        const ref = handlers[symbol];
+                        if (ref) data.preload.add(ref.chunkUrl);
+                    }
+                }
+
                 // Would a server re-render from this snapshot reproduce the
                 // HTML? children/slots/$models never serialize, and any
                 // other dropped prop (render props, symbols, circulars)
@@ -201,6 +227,21 @@ export function resumePlugin(options?: ResumePluginOptions): SSRPack {
                 // record (#259) — core's __islandId || __name derivation
                 // doesn't apply to resume stamps.
                 return { hydrate: 'never', chunk, component: resumeId, props };
+            },
+
+            assets(ctx: SSRContext): { modulepreload?: string[] } | void {
+                // `ResumeManifest.handlers` does what it says (#410): the
+                // handler chunks of the resume boundaries THIS request
+                // recorded get `<link rel="modulepreload">` from the shell —
+                // the bytes download off the critical path, execution still
+                // waits for the first interaction (the loader stays the
+                // page's only script). A page without a resume boundary
+                // emits nothing; the component (upgrade) chunk is never
+                // warmed — upgrade-on-write is deliberately lazy, and core
+                // already skips `hydrate: 'never'` records' chunks.
+                const data = ctx.getPluginData<ResumePluginData>(PLUGIN_NAME);
+                if (!data || data.preload.size === 0) return;
+                return { modulepreload: [...data.preload] };
             },
 
             transformComponentContext(

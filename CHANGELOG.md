@@ -6,6 +6,52 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- **`@sigx/resume`: `ResumeManifest.handlers` does what it says — handler
+  chunks are modulepreloaded (#410, rfc-1.0 §4.8).** The field was documented
+  as "modulepreload hints" and emitted by the build, but nothing consumed it:
+  `resumePlugin` had no `assets()` hook, so a resumable page's first
+  interaction paid a cold fetch for its handler chunk. The pack now implements
+  the same `assets()` hook `islandsPlugin` uses: the transform stamps each
+  component's handler symbols on its factory (`__resumeQrls`, next to
+  `__resumeId`), the plugin maps the symbols of every boundary the request
+  actually claimed through `manifest.handlers`, and the document gets one
+  `<link rel="modulepreload">` per distinct handlers chunk in its first shell
+  flush. A page without a resume boundary emits nothing; hydrate-mode
+  components (no symbols) and manifest-less dev renders emit nothing; the
+  component (upgrade) chunk is never warmed — upgrade-on-write stays lazy.
+
+### Changed
+
+- **`@sigx/vite/resume`: three transform-time faults are BUILD ERRORS, not
+  warn-and-skip (#409, rfc-1.0 §4.5). Breaking** for a project that relied on
+  the build passing with any of these — each used to leave the component
+  silently broken (or silently non-resumable) in prod with at most a console
+  line:
+  - **Duplicate resume component name across modules.** Was: `console.warn`,
+    first file wins, the second is dropped from the registry and manifest. Now:
+    the transform of either file, the `virtual:sigx-resume` registry and the
+    manifest all fail with `duplicate resume component name "X": a.tsx and
+    b.tsx both export it`. Two resume modules exporting `Counter` — say a
+    copy-pasted file — now fail the build until one is renamed.
+  - **A component reachable only as `export default`** (`export default
+    component(...)`, `export default Counter`, `export { Counter as default }`).
+    Was: silently non-resumable. Now: `resume components must be named exports`,
+    with `file:line:col`. A default export that is not a component, or a named
+    export additionally aliased to default, is still fine.
+  - **A handler that binds or references `$scope` / `$el`** (as a parameter,
+    local, named signal or destructured prop). Was: an ineligible-handler
+    warning and the whole component downgraded to wake-on-interaction. Now: a
+    build error naming the handler. Member and key positions (`obj.$scope`,
+    `{ $scope: 1 }`) stay allowed.
+  The runtime faults keep their `__DEV__` warnings — single-element-root
+  violation, a renamed signal dropping buffered writes, wake swallowing the
+  triggering event — and are now documented as the pack's contract in
+  `packages/resume/README.md`, "Writing resumable components → The contract",
+  together with the two-place `refreshComponents` wiring and the
+  `createBoundaryRefresh({ plugins })`-never-sees-app-DI rule (rfc-1.0 §4.3).
+
 ## [0.15.6] — 2026-08-17
 
 ### Performance

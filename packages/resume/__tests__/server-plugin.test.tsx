@@ -208,3 +208,89 @@ describe('resumePlugin — state capture', () => {
         expect(record.state).toEqual({ kept: 1 });
     });
 });
+
+describe('resumePlugin — handler chunk modulepreload via the assets hook (#410)', () => {
+    const TEMPLATE = `<!doctype html><html><head></head><body><div id="app"><!--ssr-outlet--></div></body></html>`;
+    const manifest = {
+        components: { Counter: { chunkUrl: '/assets/Counter-abc.js', exportName: 'Counter' } },
+        handlers: {
+            Counter_click_ab12cd34: { chunkUrl: '/assets/Counter.handlers-def.js', exportName: 'Counter_click_ab12cd34' }
+        }
+    };
+
+    it('a page with a resume boundary preloads its handler chunk — never the component chunk', async () => {
+        const Counter = makeCounter();
+        Counter.__resumeQrls = ['Counter_click_ab12cd34'];
+        const html = await createSSR({ plugins: [resumePlugin({ manifest })] }).renderDocument(
+            (Counter as any)({ label: 'hits' }), { template: TEMPLATE });
+
+        expect(html).toContain('<link rel="modulepreload" href="/assets/Counter.handlers-def.js">');
+        // Upgrade-on-write stays lazy: the component chunk is not warmed
+        // (core skips hydrate:'never' records, and the pack adds nothing) —
+        // it appears in the boundary TABLE only, for the upgrade loader.
+        expect(html).not.toContain('modulepreload" href="/assets/Counter-abc.js"');
+        expect(html).toContain('"url":"/assets/Counter-abc.js"');
+        // The link lands in the head, before the boundary's own HTML.
+        expect(html.indexOf('modulepreload')).toBeLessThan(html.indexOf('data-sigx-on:click'));
+    });
+
+    it('a page without a resume boundary emits no modulepreload', async () => {
+        const Plain = component(() => () => <p>static</p>, { name: 'Plain' });
+        const html = await createSSR({ plugins: [resumePlugin({ manifest })] }).renderDocument(
+            (Plain as any)({}), { template: TEMPLATE });
+        expect(html).not.toContain('modulepreload');
+    });
+
+    it('two boundaries sharing one handlers chunk preload it once', async () => {
+        const Counter = makeCounter();
+        Counter.__resumeQrls = ['Counter_click_ab12cd34'];
+        const Page = component(() => () => (
+            <div>
+                <Counter label="a" />
+                <Counter label="b" />
+            </div>
+        ), { name: 'Page' });
+        const html = await createSSR({ plugins: [resumePlugin({ manifest })] }).renderDocument(
+            (Page as any)({}), { template: TEMPLATE });
+        expect(html.match(/rel="modulepreload"/g)).toHaveLength(1);
+    });
+
+    it('a hydrate-mode boundary (no QRLs) and a manifest-less render preload nothing', async () => {
+        // Hydrate mode: the transform stamps no __resumeQrls — the first
+        // interaction loads the component chunk, not a handlers chunk.
+        const Waker = makeCounter();
+        Waker.__resumeMode = 'hydrate';
+        const woken = await createSSR({ plugins: [resumePlugin({ manifest })] }).renderDocument(
+            (Waker as any)({}), { template: TEMPLATE });
+        expect(woken).not.toContain('modulepreload');
+
+        // Dev: no manifest, so no URL to warm — the registry resolves lazily.
+        const Counter = makeCounter();
+        Counter.__resumeQrls = ['Counter_click_ab12cd34'];
+        const dev = await createSSR({ plugins: [resumePlugin()] }).renderDocument(
+            (Counter as any)({}), { template: TEMPLATE });
+        expect(dev).not.toContain('modulepreload');
+    });
+
+    it('a symbol the manifest does not know is skipped, not a broken link', async () => {
+        const Counter = makeCounter();
+        Counter.__resumeQrls = ['Counter_click_stale0000', 'Counter_click_ab12cd34'];
+        const html = await createSSR({ plugins: [resumePlugin({ manifest })] }).renderDocument(
+            (Counter as any)({}), { template: TEMPLATE });
+        expect(html.match(/rel="modulepreload"/g)).toHaveLength(1);
+        expect(html).toContain('href="/assets/Counter.handlers-def.js"');
+    });
+
+    it('a boundary islands owns (client:* directive) contributes nothing', async () => {
+        const Counter = makeCounter();
+        Counter.__resumeQrls = ['Counter_click_ab12cd34'];
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        try {
+            const html = await createSSR({ plugins: [islandsPlugin(), resumePlugin({ manifest })] }).renderDocument(
+                (Counter as any)({ 'client:visible': true }), { template: TEMPLATE });
+            expect(html).not.toContain('/assets/Counter.handlers-def.js');
+        } finally {
+            warn.mockRestore();
+        }
+    });
+});
