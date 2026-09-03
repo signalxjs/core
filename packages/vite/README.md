@@ -35,9 +35,11 @@ dead UI):
 - **Dev**: generates a `resolve.alias` entry for every installed `@sigx/*`
   package **and every one of its `exports` subpaths**, each pinned to that
   package's built entry, so the whole family resolves to one physical copy.
-  Subpath entries are emitted before bare ones — Vite matches aliases by
-  prefix, so a bare `@sigx/resume` ahead of `@sigx/resume/client` would rewrite
-  the subpath into a nonexistent path. It also excludes **all** `@sigx/*`
+  Each entry matches its specifier exactly, with or without a query
+  (`@sigx/resume/client`, `@sigx/zero-basic/css?url`) — never as a prefix, so
+  a bare `@sigx/resume` cannot rewrite `@sigx/resume/client` into a
+  nonexistent path, and `?url` / `?raw` / `?inline` / `?worker` imports of a
+  subpath export keep their query (#655). It also excludes **all** `@sigx/*`
   packages from `optimizeDeps` pre-bundling — the core packages plus every
   `@sigx/*` dependency found in your `package.json` (store, router, daisyui,
   …), so prebundled chunks can't carry a second reactivity copy.

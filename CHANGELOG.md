@@ -6,6 +6,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- **`@sigx/vite`: `?url` / `?raw` / `?inline` / `?worker` imports of a
+  package subpath export resolve in the dev server again (#655).**
+  `import css from '@sigx/zero-basic/css?url'` failed with `Failed to
+  resolve import "@sigx/zero-basic/css?url"` on every release since 0.14.0.
+  #500 turned the dev `resolve.alias` map from the always-empty object it had
+  been into a real one, keyed by specifier string — and Vite matches a string
+  alias as `importee === find || importee.startsWith(find + '/')`, then
+  prefix-replaces. A query-suffixed subpath matches no key for itself (`?` is
+  not `/`), falls through to the bare package key, and is rewritten to
+  `…/dist/index.js/css?url`. The entries are now anchored RegExp finds
+  (`^<specifier>(?=\?|$)`) in Vite's array form, so each matches its
+  specifier exactly, with or without a query, and `importee.replace` carries
+  the query onto the rewritten id. Two consequences: the bare key no longer
+  prefix-rewrites a subpath that has no `exports` entry (that import now
+  reaches Vite's own resolver and is reported against the package's real
+  `exports` map instead of as `…/index.js/<subpath>`), and the config hook
+  returns `resolve.alias` as an array of `{ find: RegExp, replacement }`
+  rather than an object — Vite's `mergeConfig` normalizes a user's object map
+  to the same shape, so the "your alias wins, all of a package's entries or
+  none" rule is unchanged.
+
 ## [0.15.6] — 2026-08-17
 
 ### Performance

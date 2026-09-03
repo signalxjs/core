@@ -101,11 +101,19 @@ interface SigxPluginOptions {
  * would leave every `if (__DEV__)` in the family referencing an undefined
  * global. Aliasing to dist is also exactly what the hand-written maps did.
  *
- * The remaining constraint is ORDER: Vite's matcher is `importee === find ||
- * importee.startsWith(find + '/')` followed by a plain prefix replace, so a
- * bare `@sigx/resume` entry ahead of `@sigx/resume/client` rewrites the
- * subpath to `…/dist/index.js/client`. Subpaths must come first — that prefix
- * rule is the whole reason the hand-written maps were so long.
+ * The remaining constraint is how Vite MATCHES. For a string `find` it is
+ * `importee === find || importee.startsWith(find + '/')` followed by a plain
+ * prefix replace — so a bare `@sigx/resume` entry ahead of `@sigx/resume/client`
+ * rewrites the subpath to `…/dist/index.js/client` (that prefix rule is the
+ * whole reason the hand-written maps were so long), and a query-suffixed
+ * subpath such as `@sigx/zero-basic/css?url` matches NO string key for itself
+ * (`?` is not `/`), falls through to the bare `@sigx/zero-basic` key, and is
+ * rewritten to `…/dist/index.js/css?url` — "Failed to resolve import" for
+ * every `?url` / `?raw` / `?inline` / `?worker` import of a subpath export
+ * (#655, since #500 made this map real). A RegExp `find` is applied as
+ * `find.test(importee)` then `importee.replace(find, replacement)`, so each
+ * entry is an anchored RegExp that stops at the end of the specifier or at
+ * `?` — the exact specifier, query carried over, prefix matching gone.
  */
 function resolveSpecifierFile(specifier: string): string | null {
     try {
@@ -140,6 +148,17 @@ function resolvePackageDir(packageName: string): string | null {
 }
 
 /**
+ * The alias `find` for one specifier: the specifier itself, followed by the
+ * end of the importee or a `?` query. Anchored both ends so it never prefix
+ * matches a longer subpath (see the ORDER note on `resolveSpecifierFile`),
+ * and stopping before `?` so `importee.replace(find, file)` keeps `?url` /
+ * `?raw` / `?inline` / `?worker` on the rewritten id (#655).
+ */
+function aliasFindFor(specifier: string): RegExp {
+    return new RegExp(`^${specifier.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')}(?=\\?|$)`);
+}
+
+/**
  * Alias entries for one package: one per `exports` subpath, longest key first,
  * each pointing at the file that subpath actually resolves to.
  */
@@ -165,7 +184,9 @@ function aliasEntriesFor(packageName: string, dir: string): Array<[string, strin
         const file = resolveSpecifierFile(specifier);
         if (file) entries.push([specifier, file]);
     }
-    // Longest specifier first: subpaths must win over the bare name.
+    // Longest specifier first: subpaths must win over the bare name. The
+    // anchored `find` (aliasFindFor) already makes that so; the order keeps
+    // the emitted list readable and is what the tests assert.
     entries.sort((a, b) => b[0].length - a[0].length);
     return entries;
 }
@@ -365,7 +386,11 @@ export function sigxPlugin(options: SigxPluginOptions = {}): Plugin {
                 const isUserAliased = (specifier: string) =>
                     userMatchers.some(m => m(specifier));
 
-                const alias: Record<string, string> = {};
+                // The ARRAY form: only it takes a RegExp `find`, and only a
+                // RegExp `find` can carry a `?url`-style query across the
+                // rewrite (aliasFindFor). Vite's mergeConfig normalizes the
+                // user's object map to the same shape.
+                const alias: Array<{ find: RegExp; replacement: string }> = [];
                 for (const name of collectSigxOptimizeDepsExcludes(root)) {
                     const dir = resolvePackageDir(name);
                     if (!dir) continue;
@@ -376,7 +401,9 @@ export function sigxPlugin(options: SigxPluginOptions = {}): Plugin {
                     // sitting ahead of our `sigx/internals` would prefix-match
                     // first and rewrite the subpath into `…/index.js/internals`.
                     if (entries.some(([specifier]) => isUserAliased(specifier))) continue;
-                    for (const [specifier, file] of entries) alias[specifier] = file;
+                    for (const [specifier, file] of entries) {
+                        alias.push({ find: aliasFindFor(specifier), replacement: file });
+                    }
                 }
                 const serverOverride = await resolveHmrPortOverride(userConfig, hmrPort);
 
