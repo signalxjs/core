@@ -78,12 +78,12 @@ interface SigxPluginOptions {
 }
 
 // ============================================================================
-// Resolve package source paths for aliasing
+// Pin the @sigx family to one physical copy (dev)
 // ============================================================================
 
 /**
- * Every `@sigx/*` dev alias the project needs, generated from what is actually
- * installed (#487).
+ * Every `@sigx/*` specifier the dev server pins, generated from what is
+ * actually installed (#487).
  *
  * This used to be a hand-written list built on `createRequire(...).resolve(
  * '<pkg>/package.json')`. It could never have worked, for two independent
@@ -101,11 +101,8 @@ interface SigxPluginOptions {
  * would leave every `if (__DEV__)` in the family referencing an undefined
  * global. Aliasing to dist is also exactly what the hand-written maps did.
  *
- * The remaining constraint is ORDER: Vite's matcher is `importee === find ||
- * importee.startsWith(find + '/')` followed by a plain prefix replace, so a
- * bare `@sigx/resume` entry ahead of `@sigx/resume/client` rewrites the
- * subpath to `…/dist/index.js/client`. Subpaths must come first — that prefix
- * rule is the whole reason the hand-written maps were so long.
+ * Where the pin is applied — a `resolveId` step, not `resolve.alias` entries
+ * — and why: `pinnedFileFor` in the plugin below (#655).
  */
 function resolveSpecifierFile(specifier: string): string | null {
     try {
@@ -140,10 +137,10 @@ function resolvePackageDir(packageName: string): string | null {
 }
 
 /**
- * Alias entries for one package: one per `exports` subpath, longest key first,
- * each pointing at the file that subpath actually resolves to.
+ * The pinned files of one package: one per literal `exports` subpath (plus
+ * the bare name), each the file that specifier actually resolves to.
  */
-function aliasEntriesFor(packageName: string, dir: string): Array<[string, string]> {
+function pinnedFilesFor(packageName: string, dir: string): Array<[string, string]> {
     let exportsField: unknown;
     try {
         exportsField = (JSON.parse(
@@ -159,14 +156,12 @@ function aliasEntriesFor(packageName: string, dir: string): Array<[string, strin
 
     const entries: Array<[string, string]> = [];
     for (const sub of subpaths) {
-        // Wildcards can't be aliased to one file — skip them.
+        // Wildcards are not one file — `pinnedFileFor` resolves those per import.
         if (sub.includes('*')) continue;
         const specifier = sub === '.' ? packageName : `${packageName}/${sub.slice(2)}`;
         const file = resolveSpecifierFile(specifier);
         if (file) entries.push([specifier, file]);
     }
-    // Longest specifier first: subpaths must win over the bare name.
-    entries.sort((a, b) => b[0].length - a[0].length);
     return entries;
 }
 
@@ -292,6 +287,56 @@ export function sigxPlugin(options: SigxPluginOptions = {}): Plugin {
     /** Absolute client outDir — where virtual:sigx-app reads at build time. */
     let clientDir = '';
 
+    /**
+     * Dev only: the `@sigx` family pinned to ONE physical copy each. Two
+     * copies of `@sigx/reactivity` split the signal graph, and two of any
+     * DI-token owner split `provides` — both fail silently (#431).
+     *
+     * `pinned` maps a query-less specifier (bare name, literal `exports`
+     * subpath, and — filled lazily — any deeper subpath that has been asked
+     * for) to its file, or to `null` once looked up and found not resolvable
+     * from here. `pinnedPackages` are the names whose subpaths are ours.
+     * Both are `null` outside `serve`.
+     *
+     * This is a `resolveId` step rather than generated `resolve.alias`
+     * entries (which it was from #500 to #655) because of where Vite runs
+     * each. `vite:alias` runs BEFORE every `enforce: 'pre'` plugin, so the
+     * project's own aliases — object or array form, exact key, scope or
+     * trailing-slash prefix, RegExp, even a key on the queried form
+     * (`'@sigx/x/css?url'`) — are applied first, by Vite's own matcher, and
+     * whatever they rewrite an import to is no longer a sigx specifier when
+     * it reaches this hook. A user alias always wins, with nothing to
+     * emulate. Alias entries could not do that: a string entry prefix-matched
+     * (`@sigx/x/css?url` matched no key for itself and was rewritten by the
+     * bare `@sigx/x` one into `…/dist/index.js/css?url`), a RegExp entry
+     * re-implemented Vite's matcher and merged AHEAD of the user's own map.
+     * Here the query/fragment is split off the way Vite does it
+     * (`/[?#].*$/`), the file is looked up, and the postfix is handed back to
+     * Vite's resolver, so `?url` / `?raw` / `?worker` / `#…` follow the same
+     * pipeline as for any other file.
+     */
+    let pinned: Map<string, string | null> | null = null;
+    let pinnedPackages: string[] = [];
+
+    /** The pinned file for `id`, postfix carried over — or null when `id` is not ours. */
+    function pinnedFileFor(id: string): string | null {
+        if (!pinned) return null;
+        const clean = id.replace(/[?#].*$/, '');
+        let file = pinned.get(clean);
+        if (file === undefined) {
+            if (!pinnedPackages.some(name => clean.startsWith(name + '/'))) return null;
+            // A subpath with no literal `exports` entry: a wildcard
+            // (`./themes/*`) or an exports-less package. Node's resolver
+            // answers from the same installed copy the bare name pinned to;
+            // if it cannot, Vite resolves the import as it would for any
+            // package this plugin does not pin. Either answer is cached —
+            // the dev server restarts when a package changes.
+            file = resolveSpecifierFile(clean);
+            pinned.set(clean, file);
+        }
+        return file && file + id.slice(clean.length);
+    }
+
     return {
         name: 'sigx',
         enforce: 'pre',
@@ -335,55 +380,26 @@ export function sigxPlugin(options: SigxPluginOptions = {}): Plugin {
         },
 
         async config(userConfig, { command }) {
-            // In dev, resolve the whole @sigx family to ONE physical copy each.
-            // Two copies of @sigx/reactivity split the signal graph, and two of
-            // any DI-token owner split `provides` — both fail silently (#431).
+            // In dev, pin the whole @sigx family to ONE physical copy each
+            // (see `pinnedFileFor`). The map is built here, applied in
+            // `resolveId`; the config result carries no `resolve.alias`, so
+            // the project's alias map reaches later plugins untouched.
             if (command === 'serve') {
                 const root = userConfig.root
                     ? path.resolve(userConfig.root)
                     : process.cwd();
 
-                // The project's own alias keys win: a consumer that pinned a
-                // specifier deliberately must keep it. `mergeConfig(userConfig,
-                // pluginResult)` lets the PLUGIN override on a key collision,
-                // so half-applying our map over a hand-written one would point
-                // the bare specifier and its subpaths at different files —
-                // exactly the two-live-copies failure this exists to prevent.
-                // Vite accepts aliases as an object OR as an array of
-                // `{ find, replacement }` where `find` may be a **RegExp**.
-                // Comparing stringified keys would silently miss the regex
-                // form and generate entries for a package the project is
-                // deliberately routing elsewhere, which is the collision this
-                // check exists to avoid.
-                const userAlias = userConfig.resolve?.alias;
-                const userMatchers: Array<(specifier: string) => boolean> = Array.isArray(userAlias)
-                    ? userAlias.map(a =>
-                        a.find instanceof RegExp
-                            ? (s: string) => (a.find as RegExp).test(s)
-                            : (s: string) => s === String(a.find))
-                    : Object.keys(userAlias ?? {}).map(k => (s: string) => s === k);
-                const isUserAliased = (specifier: string) =>
-                    userMatchers.some(m => m(specifier));
-
-                const alias: Record<string, string> = {};
+                pinned = new Map();
+                pinnedPackages = [];
                 for (const name of collectSigxOptimizeDepsExcludes(root)) {
                     const dir = resolvePackageDir(name);
                     if (!dir) continue;
-                    const entries = aliasEntriesFor(name, dir);
-                    // All of a package's entries or none. Half-applying is
-                    // worse than not applying: the merged alias list is
-                    // user-keys-then-plugin-keys, so a user's bare `sigx`
-                    // sitting ahead of our `sigx/internals` would prefix-match
-                    // first and rewrite the subpath into `…/index.js/internals`.
-                    if (entries.some(([specifier]) => isUserAliased(specifier))) continue;
-                    for (const [specifier, file] of entries) alias[specifier] = file;
+                    pinnedPackages.push(name);
+                    for (const [specifier, file] of pinnedFilesFor(name, dir)) pinned.set(specifier, file);
                 }
                 const serverOverride = await resolveHmrPortOverride(userConfig, hmrPort);
 
                 return {
-                    resolve: {
-                        alias
-                    },
                     optimizeDeps: {
                         // Exclude ALL @sigx packages from pre-bundling — the
                         // core tier plus every @sigx/* dependency the project
@@ -497,10 +513,19 @@ export function sigxPlugin(options: SigxPluginOptions = {}): Plugin {
             }
         },
 
-        resolveId(id, importer) {
+        resolveId(id, importer, options) {
             if (id === SSR_NODE_VIRTUAL_ID) return SSR_NODE_RESOLVED_ID;
             if (id === MANIFESTS_VIRTUAL_ID) return MANIFESTS_RESOLVED_ID;
-            if (id !== APP_VIRTUAL_ID) return;
+            if (id !== APP_VIRTUAL_ID) {
+                // The dev-time single-copy pin (`pinnedFileFor`). Vite's own
+                // resolver finishes the job — file existence, the `?url` /
+                // `?worker` / `#…` postfix, the module id — and `skipSelf`
+                // keeps the absolute path from coming back through here.
+                // (Sync for everything else: the virtual ids above are
+                // read synchronously by tests and by nothing async.)
+                const file = pinnedFileFor(id);
+                return file ? this.resolve(file, importer, { ...options, skipSelf: true }) : null;
+            }
             // External builds materialize the module as dist/server/sigx-app.js
             // (emitFile below). App imports of the virtual resolve to that
             // emitted sibling instead of the module itself — Rolldown would

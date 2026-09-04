@@ -6,6 +6,42 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- **`@sigx/vite`: `?url` / `?raw` / `?inline` / `?worker` imports of a
+  package subpath export resolve in the dev server again (#655).**
+  `import css from '@sigx/zero-basic/css?url'` failed with `Failed to
+  resolve import "@sigx/zero-basic/css?url"` on every release since 0.14.0.
+  #500 turned the dev `resolve.alias` map from the always-empty object it had
+  been into a real one, keyed by specifier string — and Vite matches a string
+  alias as `importee === find || importee.startsWith(find + '/')`, then
+  prefix-replaces. A query-suffixed subpath matches no key for itself (`?` is
+  not `/`), falls through to the bare package key, and is rewritten to
+  `…/dist/index.js/css?url`. The pin is now applied from the plugin's
+  `resolveId` hook instead (see *Changed*): the import is split into the
+  specifier and its `?query` / `#fragment` the way Vite splits it, the
+  specifier is looked up, and Vite's own resolver finishes with the postfix
+  intact.
+
+### Changed
+
+- **`@sigx/vite`: the dev-time single-copy pin no longer writes
+  `resolve.alias` entries; it is a `resolveId` step (#655).** Vite runs
+  `vite:alias` before any `enforce: 'pre'` plugin, so your own aliases of any
+  form — object or array, exact key, a scope or trailing-slash prefix, a
+  RegExp, a key on the queried form — take precedence by Vite's own ordering
+  (an alias merged from the plugin's hook used to shadow a prefix alias, and
+  a plugin ordered after `sigx()` that read `config.resolve.alias` saw the
+  plugin's entries added to yours; both are gone — later plugins now see
+  your alias map unchanged). Subpaths without a literal `exports` entry
+  (wildcards such as `./themes/*`, exports-less packages) are resolved per
+  import through Node's resolver from the same installed copy the bare name
+  pins to, and left to Vite's resolver when that fails — so a nested
+  duplicate install of such a package would then load from that copy, the
+  same as for any package the plugin does not pin. The set of pinned
+  specifiers (bare name + literal `exports` subpaths of every installed
+  `@sigx/*` package) and the files they pin to are what they were.
+
 ## [0.15.6] — 2026-08-17
 
 ### Performance

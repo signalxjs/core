@@ -5,7 +5,8 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import path from 'path';
-import { mergeConfig } from 'vite';
+import { fileURLToPath } from 'url';
+import { createServer, mergeConfig, normalizePath } from 'vite';
 import { sigxPlugin } from '../src/index';
 
 // ============================================================================
@@ -390,121 +391,206 @@ describe('hotUpdate — full-reload for server-only source (#450)', () => {
 });
 
 // ============================================================================
-// resolve.alias (dev) — #487
+// The dev-time single-copy pin — #487, #655
 // ============================================================================
 
 /**
- * The dev alias map is what keeps the whole `@sigx` family resolving to ONE
- * physical copy each. It was dead code from the day it was written: it looked
- * packages up with `require.resolve('<pkg>/package.json')`, which no `@sigx`
- * package exports, so every lookup threw and the map was always `{}`. Nothing
- * asserted on it — `optimizeDeps.exclude` and `ssr.noExternal` were covered,
- * `resolve.alias` was not — so the README documented behaviour that never ran
- * and apps carried hand-written maps instead.
+ * In dev the whole `@sigx` family must resolve to ONE physical copy each
+ * (#431). From #487 to #655 that was a generated `resolve.alias` map — dead
+ * code before #500 (it looked packages up in a way that threw for every one,
+ * so the map was always `{}` and nothing asserted on it), then, once real,
+ * a string-keyed map that Vite prefix-matched: `@sigx/x/css?url` matched no
+ * key for itself, fell through to the bare `@sigx/x` key, and came out as
+ * `…/dist/index.js/css?url` (#655). It is now a `resolveId` step on the
+ * plugin, and these tests hold it to what the dev server actually does.
  *
- * These tests exist mostly to make that impossible again: the first one fails
- * on the whole class of "the map came out empty".
+ * Two layers. The hook is called directly with a recording `this.resolve`
+ * for everything that needs no built dist — what it hands Vite for a given
+ * import, and what it stays out of. A real `createServer` (no socket, no dep
+ * scan) then asks the client environment's plugin container, which is the
+ * path `vite:import-analysis` takes and the path the issue reports;
+ * resolutions through it need the pinned file to exist, so those few run
+ * only where `pnpm build` has (CI does, before `pnpm test`).
  */
-describe('config hook — resolve.alias (serve, #487)', () => {
-    it('resolves the core packages — the lookup that used to throw for every one', async () => {
-        const root = makeProjectRoot();
-        const config = await runConfigHook({ root }, 'serve');
 
+/** The plugin after its serve-mode `config` hook, ready for `resolveId`. */
+async function servePlugin(userConfig: any = {}) {
+    const plugin: any = sigxPlugin();
+    const root = makeProjectRoot();
+    const config = await plugin.config({ root, ...userConfig }, { command: 'serve', mode: 'development' });
+    return { plugin, config };
+}
+
+/**
+ * Call the hook the way Vite would, with a `this.resolve` that records the
+ * id and options it is handed and pretends to resolve it. Returns what the
+ * hook returned plus the recorded call, if any.
+ */
+async function callResolveId(plugin: any, id: string, importer = '/proj/src/main.ts') {
+    const calls: Array<{ id: string; options: any }> = [];
+    const ctx = {
+        environment: { name: 'client' },
+        resolve: async (rid: string, _imp: string | undefined, options: any) => {
+            calls.push({ id: rid, options });
+            return { id: rid };
+        }
+    };
+    const result = await plugin.resolveId.call(ctx, id, importer, { attributes: {}, isEntry: false });
+    return { result, call: calls[0] };
+}
+
+/** A dev server with the plugin: no websocket, no watcher, no dep scan. */
+const servers: Array<{ close(): Promise<void> }> = [];
+async function devServer(userConfig: any = {}) {
+    const root = makeProjectRoot();
+    fs.mkdirSync(path.join(root, 'src'));
+    const importer = path.join(root, 'src', 'main.ts');
+    fs.writeFileSync(importer, '', 'utf-8');
+    const server = await createServer({
+        root,
+        configFile: false,
+        logLevel: 'silent',
+        server: { middlewareMode: true, watch: null, hmr: false },
+        optimizeDeps: { noDiscovery: true, include: [] },
+        ...userConfig,
+        plugins: [sigxPlugin()]
+    });
+    servers.push(server);
+    const resolve = (id: string) => server.environments.client.pluginContainer.resolveId(id, importer);
+    return { server, resolve };
+}
+
+afterAll(async () => {
+    for (const server of servers) await server.close();
+    servers.length = 0;
+});
+
+const SUBPATH = '@sigx/runtime-core/internals';
+const BARE = '@sigx/runtime-core';
+/** Vite ids are `/`-separated on every platform (#324). */
+const builtInternals = normalizePath(fileURLToPath(new URL('../../runtime-core/dist/internals.js', import.meta.url)));
+const builtIndex = normalizePath(fileURLToPath(new URL('../../runtime-core/dist/index.js', import.meta.url)));
+
+describe('the dev pin — what the resolveId hook hands Vite (serve, #487)', () => {
+    it('pins the core packages — the lookup that used to throw for every one', async () => {
+        const { plugin } = await servePlugin();
         for (const pkg of SIGX_CORE_PACKAGES) {
-            expect(config.resolve.alias[pkg], `alias for ${pkg}`).toBeTruthy();
+            const { call } = await callResolveId(plugin, pkg);
+            expect(call, `pin for ${pkg}`).toBeTruthy();
             // Built dist, never src: `__DEV__` is defined by the package builds
-            // only, so a src alias would leave the family referencing an
+            // only, so a src pin would leave the family referencing an
             // undefined global.
-            expect(config.resolve.alias[pkg]).not.toMatch(/[/\\]src[/\\]/);
-            expect(config.resolve.alias[pkg]).toMatch(/[/\\]dist[/\\]/);
-            // Existence is a claim about the BUILD, not about this config hook,
-            // and it only holds after `pnpm build` — which CI runs before
-            // `pnpm test` (ci.yml), but a fresh clone does not (#512). Asserting
-            // it unconditionally made `pnpm test` fail on any tree that had
-            // never built, which reads as "the alias map is broken" and is not.
-            // Where the dist exists, the check still runs.
-            if (fs.existsSync(path.dirname(config.resolve.alias[pkg]))) {
-                expect(fs.existsSync(config.resolve.alias[pkg])).toBe(true);
+            expect(call.id).not.toMatch(/[/\\]src[/\\]/);
+            expect(call.id).toMatch(/[/\\]dist[/\\]/);
+            // Existence is a claim about the BUILD, not about this hook, and
+            // it only holds after `pnpm build` (#512). Where the dist exists,
+            // the check still runs.
+            if (fs.existsSync(path.dirname(call.id))) {
+                expect(fs.existsSync(call.id)).toBe(true);
             }
         }
     });
 
-    it('emits an entry per exports subpath, subpaths ordered before the bare name', async () => {
-        const root = makeProjectRoot();
-        const config = await runConfigHook({ root }, 'serve');
-        const keys = Object.keys(config.resolve.alias);
+    it('pins every exports subpath to its own file, never the bare name\'s', async () => {
+        const { plugin } = await servePlugin();
+        const { call: internals } = await callResolveId(plugin, '@sigx/runtime-core/internals');
+        const { call: bare } = await callResolveId(plugin, '@sigx/runtime-core');
+        expect(internals.id).toMatch(/[/\\]internals\.js$/);
+        expect(bare.id).toMatch(/[/\\]index\.js$/);
+        expect((await callResolveId(plugin, 'sigx/internals')).call.id).toMatch(/[/\\]internals\.js$/);
+    });
 
-        // Subpath entries exist at all (the reason a hand map grows per package).
-        expect(keys).toContain('@sigx/runtime-core/internals');
-        expect(keys).toContain('sigx/internals');
-        expect(config.resolve.alias['@sigx/runtime-core/internals'])
-            .not.toBe(config.resolve.alias['@sigx/runtime-core']);
+    it('hands the absolute file to Vite with skipSelf, so it never comes back through the hook', async () => {
+        const { plugin } = await servePlugin();
+        const { result, call } = await callResolveId(plugin, BARE);
+        expect(call.options.skipSelf).toBe(true);
+        expect(result).toEqual({ id: call.id });
+        // The absolute path itself is not a sigx specifier.
+        expect((await callResolveId(plugin, call.id)).call).toBeUndefined();
+    });
 
-        // Vite matches `importee === find || importee.startsWith(find + '/')`
-        // and then prefix-REPLACES, so a bare key ahead of its own subpath
-        // would rewrite `@sigx/runtime-core/internals` to `…/index.js/internals`.
-        for (const key of keys) {
-            const bare = keys.indexOf(key.split('/').slice(0, key.startsWith('@') ? 2 : 1).join('/'));
-            const self = keys.indexOf(key);
-            if (bare !== -1 && bare !== self) {
-                expect(bare, `${key} must be ordered before its bare specifier`).toBeGreaterThan(self);
-            }
+    it('stays out of everything that is not a pinned specifier', async () => {
+        const { plugin } = await servePlugin();
+        for (const id of ['./local.ts', '/abs/file.js', 'react', '@other/pkg/sub', '@sigx/not-installed', '@sigx/runtime-core-extra']) {
+            const { result, call } = await callResolveId(plugin, id);
+            expect(result, id).toBeNull();
+            expect(call, id).toBeUndefined();
         }
     });
 
-    it('leaves a package alone when the project already aliases any of its specifiers', async () => {
-        const root = makeProjectRoot();
-        const config = await runConfigHook(
-            { root, resolve: { alias: { 'sigx': '/pinned/sigx.js' } } },
-            'serve'
-        );
-
-        // All of a package's entries or none: a user's bare `sigx` merged ahead
-        // of our `sigx/internals` would prefix-match first and break it.
-        expect(config.resolve.alias['sigx']).toBeUndefined();
-        expect(config.resolve.alias['sigx/internals']).toBeUndefined();
-        // Other packages are unaffected.
-        expect(config.resolve.alias['@sigx/reactivity']).toBeTruthy();
+    it('leaves a subpath with no literal exports entry to Vite when Node cannot resolve it', async () => {
+        // The pinned package's own resolver is asked (that is what serves a
+        // wildcard export such as `./themes/*` — no workspace package has one
+        // to test against, and the lookup is anchored at the plugin's own
+        // location, so a fixture in a temp node_modules would be invisible to
+        // it); when it has no answer, Vite resolves the import as for any
+        // package this plugin does not pin — a loud, accurate error instead
+        // of the old `…/index.js/not-exported` mangling.
+        const { plugin } = await servePlugin();
+        const { result, call } = await callResolveId(plugin, BARE + '/not-exported');
+        expect(result).toBeNull();
+        expect(call).toBeUndefined();
     });
 
-    it('honours the ARRAY alias form, including a RegExp find', async () => {
-        const root = makeProjectRoot();
-        const config = await runConfigHook(
-            { root, resolve: { alias: [{ find: /^@sigx\/reactivity/, replacement: '/pinned/reactivity.js' }] } },
-            'serve'
-        );
-
-        // A stringified RegExp key never equals a specifier, so a naive
-        // comparison would generate entries for a package the project is
-        // deliberately routing elsewhere.
-        expect(config.resolve.alias['@sigx/reactivity']).toBeUndefined();
-        expect(config.resolve.alias['@sigx/reactivity/internals']).toBeUndefined();
-        expect(config.resolve.alias['sigx']).toBeTruthy();
-    });
-
-    it('honours an exact string find in the array form', async () => {
-        const root = makeProjectRoot();
-        const config = await runConfigHook(
-            { root, resolve: { alias: [{ find: 'sigx', replacement: '/pinned/sigx.js' }] } },
-            'serve'
-        );
-
-        expect(config.resolve.alias['sigx']).toBeUndefined();
-        expect(config.resolve.alias['sigx/internals']).toBeUndefined();
-        expect(config.resolve.alias['@sigx/reactivity']).toBeTruthy();
-    });
-
-    it('the user entry survives the merge Vite performs', async () => {
-        const root = makeProjectRoot();
-        const userConfig: any = { root, resolve: { alias: { 'sigx': '/pinned/sigx.js' } } };
-        const merged = mergeConfig(userConfig, await runConfigHook(userConfig, 'serve'));
-
-        expect(merged.resolve.alias['sigx']).toBe('/pinned/sigx.js');
-    });
-
-    it('adds no aliases in build mode', async () => {
-        const root = makeProjectRoot();
-        const config = await runConfigHook({ root }, 'build');
+    it('does nothing in build mode', async () => {
+        const plugin: any = sigxPlugin();
+        const config = await plugin.config({ root: makeProjectRoot() }, { command: 'build', mode: 'production' });
         expect(config.resolve?.alias).toBeUndefined();
+        expect((await callResolveId(plugin, BARE)).result).toBeNull();
     });
+
+    it('writes no resolve.alias — the project\'s own map reaches later plugins unchanged', async () => {
+        const userAlias = { 'sigx': '/pinned/sigx.js', '@app': '/proj/src' };
+        const userConfig: any = { resolve: { alias: userAlias } };
+        const { config } = await servePlugin(userConfig);
+        expect(config.resolve?.alias).toBeUndefined();
+        // …and after the merge Vite performs it is still the user's object.
+        const merged = mergeConfig(userConfig, config);
+        expect(merged.resolve.alias).toEqual(userAlias);
+    });
+});
+
+describe('the dev pin — a real dev server (serve, #655)', () => {
+    it.runIf(fs.existsSync(builtInternals))(
+        'resolves the bare name, a subpath, and its `?url` / `?raw` / `?worker` / `#…` forms',
+        async () => {
+            const { resolve } = await devServer();
+            expect((await resolve(BARE))?.id).toBe(builtIndex);
+            expect((await resolve(SUBPATH))?.id).toBe(builtInternals);
+            for (const postfix of ['?url', '?raw', '?worker', '#frag']) {
+                const resolved = await resolve(SUBPATH + postfix);
+                // `vite:alias`'s `noResolved` marker is what import-analysis
+                // turns into "Failed to resolve import … Does the file exist?".
+                expect(resolved?.meta?.['vite:alias']?.noResolved, SUBPATH + postfix).toBeFalsy();
+                expect(resolved?.id, SUBPATH + postfix).toBe(builtInternals + postfix);
+            }
+        }
+    );
+
+    // The user's alias must win in EVERY form Vite accepts. None of these
+    // needs a built dist: the user's target does not exist, so Vite hands
+    // back the rewritten id itself — which is the assertion.
+    const userAliasWins: Array<[string, any, string, string]> = [
+        ['a scope prefix', { '@sigx': '/fork' }, '@sigx/reactivity', '/fork/reactivity'],
+        ['a trailing-slash pair', { '@sigx/reactivity/': '/pinned/' }, '@sigx/reactivity/internals', '/pinned/internals'],
+        ['a bare exact key', { '@sigx/reactivity': '/pinned/r.js' }, '@sigx/reactivity', '/pinned/r.js'],
+        ['an array RegExp entry', [{ find: /^@sigx\/reactivity/, replacement: '/pinned/r' }], '@sigx/reactivity/internals', '/pinned/r/internals'],
+        // The workaround people wrote for #655 itself.
+        ['a key on the queried form', { [SUBPATH + '?url']: '/my/theme.css?url' }, SUBPATH + '?url', '/my/theme.css?url'],
+    ];
+    for (const [form, alias, id, target] of userAliasWins) {
+        it(`a user alias wins by Vite's own ordering: ${form}`, async () => {
+            const { resolve } = await devServer({ resolve: { alias } });
+            expect((await resolve(id))?.id).toBe(target);
+        });
+    }
+
+    it.runIf(fs.existsSync(builtInternals))(
+        'a user alias on one package leaves the others pinned',
+        async () => {
+            const { resolve } = await devServer({ resolve: { alias: { '@sigx/reactivity': '/pinned/r.js' } } });
+            expect((await resolve('@sigx/reactivity'))?.id).toBe('/pinned/r.js');
+            expect((await resolve(SUBPATH + '?url'))?.id).toBe(builtInternals + '?url');
+        }
+    );
 });
