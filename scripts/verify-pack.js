@@ -145,12 +145,19 @@ function runtimeEntries(packed) {
     const entries = [];
     for (const { name, manifest } of packed) {
         const exportsMap = manifest.exports;
-        const map = typeof exportsMap === 'string' ? { '.': exportsMap } : exportsMap;
-        if (!map || typeof map !== 'object') {
+        if (!exportsMap || (typeof exportsMap !== 'string' && typeof exportsMap !== 'object')) {
             throw new Error(`${name}: tarball manifest has no exports map`);
         }
+        // Normalize the three valid shapes to a subpath map. A string is the
+        // root target; a "bare conditions object" (`{ import, types }`, no
+        // key starting with '.') is the root's conditions — Node forbids
+        // mixing the two forms, so one '.'-prefixed key means subpath form.
+        const map =
+            typeof exportsMap === 'string' || !Object.keys(exportsMap).some((k) => k.startsWith('.'))
+                ? { '.': exportsMap }
+                : exportsMap;
         for (const [key, target] of Object.entries(map)) {
-            if (key !== '.' && !key.startsWith('./')) continue; // a bare conditions object, not a subpath map
+            if (!key.startsWith('.')) continue;
             if (key.includes('*') || SKIPPED_SUBPATHS.has(key)) continue;
             const conditions = typeof target === 'string' ? ['import'] : Object.keys(target ?? {});
             if (!conditions.some((c) => c !== 'types')) continue;
