@@ -4,11 +4,14 @@
  * SignalX - Bump every publishable package to the same version
  *
  * Usage:
- *   node scripts/bump-version.js <patch|minor|major|X.Y.Z[-pre][+build]> [--dry-run]
+ *   node scripts/bump-version.js <patch|minor|major|X.Y.Z[-pre]> [--dry-run]
  *   node scripts/bump-version.js --help
  *
  * Exactly one bump argument is accepted: a bump type, or an exact semver
- * (prereleases like `1.0.0-rc.0` included). ANYTHING else — a typo, an
+ * (prereleases like `1.0.0-rc.0` included; build metadata `+sha` is NOT —
+ * npm strips it on publish, so `isAlreadyPublished` and publish.js's
+ * post-wave gate would compare `1.0.0+sha` against a registry `1.0.0` and
+ * fail every package). ANYTHING else — a typo, an
  * unknown flag, no argument — prints usage and exits 2 without touching a
  * file. It used to default to `patch` with a `switch` fallthrough, so
  * `node scripts/bump-version.js --help` bumped all 14 packages (#363, #629).
@@ -26,15 +29,17 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const packagesDir = join(__dirname, '..', 'packages');
 
 const BUMP_TYPES = ['patch', 'minor', 'major'];
-// semver 2.0.0 core + optional prerelease + optional build metadata.
-const SEMVER_RE = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/;
+// semver 2.0.0 core + optional prerelease. No build metadata: the registry
+// never stores it, so a `+build` version can never verify after publish.
+const SEMVER_RE = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*))?$/;
 
 const USAGE = [
-    'Usage: node scripts/bump-version.js <patch|minor|major|X.Y.Z[-pre][+build]> [--dry-run]',
+    'Usage: node scripts/bump-version.js <patch|minor|major|X.Y.Z[-pre]> [--dry-run]',
     '',
     '  patch | minor | major   bump every publishable package from its current version',
-    '  X.Y.Z[-pre][+build]     set every publishable package to this exact version',
-    '                          (prereleases such as 1.0.0-rc.0 are accepted)',
+    '  X.Y.Z[-pre]             set every publishable package to this exact version',
+    '                          (prereleases such as 1.0.0-rc.0 are accepted; build',
+    '                          metadata like 1.0.0+sha is not — npm strips it on publish)',
     '  --dry-run               print old -> new per package, write nothing',
     '  -h, --help              show this help',
     '',
@@ -68,8 +73,8 @@ function parseArgs(argv) {
 
 /**
  * node-semver's `inc` semantics: bumping a prerelease "releases" it
- * (1.0.0-rc.0 → patch → 1.0.0, not 1.0.1), and the prerelease/build suffix
- * never survives a bump.
+ * (1.0.0-rc.0 → patch → 1.0.0, not 1.0.1), and the prerelease suffix never
+ * survives a bump.
  */
 function bumpVersion(version, type) {
     const m = SEMVER_RE.exec(version);

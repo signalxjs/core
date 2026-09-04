@@ -172,7 +172,8 @@ pnpm verify:pack # verify npm pack output is sane — packs ALL 14 publishable p
                  # scripts/packages.js, shared with publish.js and cross-checked against packages/*
                  # on disk, so the two cannot drift), FAILS if any tarball manifest still carries a
                  # `workspace:`/`catalog:` range, builds a scratch app from the tarballs, and imports
-                 # every server-side entry under Node in both dev and production conditions (#363)
+                 # every runtime export subpath of every tarball under Node in both dev and production
+                 # conditions — the subpath list is derived from the packed manifests' `exports` (#363)
 pnpm test:edge   # WinterCG smoke: stream a document from the prod dist with node: imports forbidden (after pnpm build)
 pnpm smoke:hydration   # did the prod build actually HYDRATE, or silently re-render client-side? (after pnpm build)
                        # Builds examples/spa-ssr + examples/ssr-islands, serves them, and drives Chromium:

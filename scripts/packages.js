@@ -75,10 +75,15 @@ export function assertPackagesComplete() {
 }
 
 /**
- * The dependency fields a published manifest must have fully resolved.
- * `devDependencies` are not published, so they are deliberately not checked.
+ * The dependency fields checked in a packed manifest. The first three are
+ * what consumers install, so an unresolved range there breaks every install.
+ * `devDependencies` IS published (pnpm pack ships the field and rewrites
+ * `workspace:` there too) but never installed by consumers, so a leftover
+ * there is harmless to them — it is checked anyway as the stronger signal
+ * that the tarball came from `pnpm pack` and not something that skipped the
+ * workspace rewrite altogether.
  */
-const DEPENDENCY_FIELDS = ['dependencies', 'peerDependencies', 'optionalDependencies'];
+const DEPENDENCY_FIELDS = ['dependencies', 'peerDependencies', 'optionalDependencies', 'devDependencies'];
 
 /**
  * Find every dependency range in a (packed) package.json that still carries a

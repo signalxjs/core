@@ -14,12 +14,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   (`scripts/packages.js`) shared with `scripts/publish.js` and cross-checked
   against `packages/*` on disk, and it fails if any tarball manifest still
   carries a `workspace:`/`catalog:` range (the header claimed this check for
-  months; it did not exist). Every server-side entry is now imported under
-  Node from the installed tarballs, in both dev and production conditions.
+  months; it did not exist). Every runtime export subpath of every tarball —
+  derived from the packed `exports` maps, minus `./internals` — is now
+  imported under Node from the installed tarballs, in both dev and
+  production conditions.
   `scripts/publish.js` reads every package's dist-tag back from the registry
   after the wave and exits non-zero on any mismatch with the local version.
   `scripts/bump-version.js` accepts exactly `patch|minor|major|<semver>`
-  (prereleases like `1.0.0-rc.0` included); any other argument — `--help`
+  (prereleases like `1.0.0-rc.0` included; `+build` metadata rejected — npm
+  strips it, so it could never verify); any other argument — `--help`
   used to bump all 14 packages — prints usage and exits 2 without writing;
   `--dry-run` added. Tooling only; no package behaviour changes.
 

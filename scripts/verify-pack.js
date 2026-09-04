@@ -18,8 +18,9 @@
  *      every consumer the moment it reaches the registry.
  *   4. Spin up a minimal scratch project with file: deps to those tarballs.
  *   5. Build it with vite to prove the published shape actually works, and
- *      import every server-side entry under Node (dev + production
- *      conditions) to prove the export maps resolve at runtime.
+ *      import every runtime export subpath of every tarball under Node (dev +
+ *      production conditions) to prove the export maps resolve and the dist
+ *      files evaluate. The subpath list is derived from the packed manifests.
  *
  * Usage:
  *   node scripts/verify-pack.js
@@ -35,27 +36,13 @@ import { gunzipSync } from 'zlib';
 import { PACKAGES, rootDir, assertPackagesComplete, findUnresolvedRanges } from './packages.js';
 
 /**
- * [specifier, named export] — the entries the scratch-app bundle cannot reach
- * (server / Node / tooling), imported under Node instead. Covers the three
- * packages verify-pack used to skip (#363): @sigx/resume's server + client +
- * loader entries and its @sigx/vite transform, @sigx/server's ./server,
- * ./node, ./client and root entries, and @sigx/cache.
+ * Export subpaths that are never imported under Node:
+ *   - `./internals` — the cross-package private seam (#416 guard test
+ *     rejects it from packs), not a consumer entry.
+ * Everything else a tarball's `exports` map exposes with a runtime condition
+ * is imported — see `runtimeEntries()`.
  */
-const NODE_ENTRIES = [
-    ['@sigx/server-renderer/server', 'renderToString'],
-    ['@sigx/resume', 'resumePlugin'],
-    ['@sigx/resume/server', 'createBoundaryRefresh'],
-    ['@sigx/resume/client', 'resolveQrl'],
-    ['@sigx/resume/loader', 'initResume'],
-    ['@sigx/cache', 'cachePlugin'],
-    ['@sigx/server', 'serverFn'],
-    ['@sigx/server/server', 'createServerApp'],
-    ['@sigx/server/node', 'createServerFnHandler'],
-    ['@sigx/server/client', 'configureServerFn'],
-    ['@sigx/server/plugin', 'serverPlugin'],
-    ['@sigx/vite/resume', 'sigxResume'],
-    ['@sigx/vite/server', 'sigxServer'],
-];
+const SKIPPED_SUBPATHS = new Set(['./internals']);
 
 const sandbox = join(tmpdir(), `sigx-verify-pack-${Date.now()}`);
 const tarballDir = join(sandbox, 'tarballs');
@@ -132,7 +119,7 @@ function readPackageJsonFromTarball(tarball) {
  */
 function assertRangesResolved(packed) {
     for (const p of packed) {
-        const manifest = readPackageJsonFromTarball(p.tarball);
+        const { manifest } = p;
         if (manifest.name !== p.name) {
             throw new Error(`${p.tarball}: tarball manifest is ${manifest.name}, expected ${p.name}`);
         }
@@ -145,6 +132,32 @@ function assertRangesResolved(packed) {
             );
         }
     }
+}
+
+/**
+ * Every import specifier the packed tarballs expose at runtime, derived from
+ * each manifest's `exports` map so the list can never lag a new subpath:
+ * `.` and `./x` keys whose target is a plain path or carries any condition
+ * other than `types` (a types-only key such as `@sigx/vite/client` has
+ * nothing to load), minus `SKIPPED_SUBPATHS` and pattern keys (`./*`).
+ */
+function runtimeEntries(packed) {
+    const entries = [];
+    for (const { name, manifest } of packed) {
+        const exportsMap = manifest.exports;
+        const map = typeof exportsMap === 'string' ? { '.': exportsMap } : exportsMap;
+        if (!map || typeof map !== 'object') {
+            throw new Error(`${name}: tarball manifest has no exports map`);
+        }
+        for (const [key, target] of Object.entries(map)) {
+            if (key !== '.' && !key.startsWith('./')) continue; // a bare conditions object, not a subpath map
+            if (key.includes('*') || SKIPPED_SUBPATHS.has(key)) continue;
+            const conditions = typeof target === 'string' ? ['import'] : Object.keys(target ?? {});
+            if (!conditions.some((c) => c !== 'types')) continue;
+            entries.push(key === '.' ? name : `${name}/${key.slice(2)}`);
+        }
+    }
+    return entries;
 }
 
 function main() {
@@ -161,6 +174,8 @@ function main() {
     assertPackagesComplete();
     const packed = PACKAGES.map(packPackage);
     for (const p of packed) {
+        // The manifest INSIDE the tarball is the one the registry will serve.
+        p.manifest = readPackageJsonFromTarball(p.tarball);
         console.log(`   📦 ${p.name}@${p.version}  →  ${p.tarball}`);
     }
 
@@ -248,26 +263,31 @@ function main() {
         ].join('\n')
     );
 
-    // Every server-side / tooling entry, imported for real under Node from the
-    // installed tarballs — vite never type-checks, so a type-only reference
-    // would prove nothing. Each entry must resolve through its export map AND
-    // expose the named export, under both the dev and production conditions.
+    // Every runtime export subpath of every tarball, imported for real under
+    // Node from the installed packages — vite never type-checks, so a
+    // type-only reference would prove nothing. The list is derived from the
+    // packed manifests' `exports` maps, so a new subpath is covered the day
+    // it is added. The guard is "the module loads": resolution through the
+    // export map plus top-level evaluation, under both the default and the
+    // production conditions (`@sigx/runtime-dom/platform` legitimately
+    // exports nothing, so a named-export check would be wrong there).
+    const entries = runtimeEntries(packed);
     writeFileSync(
         join(appDir, 'smoke-entries.mjs'),
         [
-            'const ENTRIES = [',
-            ...NODE_ENTRIES.map(([spec, named]) => `  [${JSON.stringify(spec)}, ${JSON.stringify(named)}],`),
-            '];',
-            'for (const [spec, named] of ENTRIES) {',
-            '  const mod = await import(spec);',
-            '  if (typeof mod[named] === "undefined") {',
-            '    throw new Error(`${spec}: named export "${named}" missing from the published shape`);',
+            `const ENTRIES = ${JSON.stringify(entries, null, 2)};`,
+            'for (const spec of ENTRIES) {',
+            '  try {',
+            '    await import(spec);',
+            '  } catch (err) {',
+            '    throw new Error(`${spec}: failed to load from the published shape — ${err.message}`);',
             '  }',
             '}',
-            'console.log(`   ✔ ${ENTRIES.length} entries resolved`);',
+            'console.log(`   ✔ ${ENTRIES.length} export subpaths load`);',
             '',
         ].join('\n')
     );
+    console.log(`   ${entries.length} runtime export subpaths across ${packed.length} packages`);
 
     step('Install scratch app (npm — to avoid pnpm workspace hoisting interference)');
     run('npm install --no-audit --no-fund --loglevel=error', { cwd: appDir });
@@ -275,7 +295,7 @@ function main() {
     step('Build scratch app');
     run('npm run build', { cwd: appDir });
 
-    step('Import every server-side entry under Node (default + production conditions)');
+    step('Import every runtime export subpath under Node (default + production conditions)');
     run('node smoke-entries.mjs', { cwd: appDir });
     run('node --conditions production smoke-entries.mjs', { cwd: appDir });
 
