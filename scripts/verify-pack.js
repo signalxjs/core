@@ -11,9 +11,16 @@
  *
  * What it does:
  *   1. Build the publishable packages (delegates to `pnpm run build`).
- *   2. `pnpm pack` each package into a temp dir.
- *   3. Spin up a minimal scratch project with file: deps to those tarballs.
- *   4. Build it with vite to prove the published shape actually works.
+ *   2. `pnpm pack` each package into a temp dir — every package in
+ *      scripts/packages.js, the same list publish.js ships (#363).
+ *   3. Read each tarball's package.json and FAIL if any dependency range is
+ *      still `workspace:` / `catalog:` — such a manifest is uninstallable for
+ *      every consumer the moment it reaches the registry.
+ *   4. Spin up a minimal scratch project with file: deps to those tarballs.
+ *   5. Build it with vite to prove the published shape actually works, and
+ *      import every runtime export subpath of every tarball under Node (dev +
+ *      production conditions) to prove the export maps resolve and the dist
+ *      files evaluate. The subpath list is derived from the packed manifests.
  *
  * Usage:
  *   node scripts/verify-pack.js
@@ -22,30 +29,20 @@
  */
 
 import { execSync } from 'child_process';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync, readdirSync, copyFileSync } from 'fs';
-import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync, readdirSync } from 'fs';
+import { join } from 'path';
 import { tmpdir } from 'os';
+import { gunzipSync } from 'zlib';
+import { PACKAGES, rootDir, assertPackagesComplete, findUnresolvedRanges } from './packages.js';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const rootDir = join(__dirname, '..');
-
-const PACKAGES = [
-    // Must be packed: @sigx/runtime-core depends on it, so without a local
-    // tarball the scratch app resolves @sigx/serialize from the registry —
-    // a 404 until the first publish lands.
-    'packages/serialize',
-    'packages/reactivity',
-    'packages/runtime-core',
-    'packages/runtime-dom',
-    'packages/sigx',
-    'packages/server-renderer',
-    'packages/ssr-islands',
-    'packages/vite',
-    'packages/cloudflare',
-    'packages/vercel',
-    'packages/netlify',
-];
+/**
+ * Export subpaths that are never imported under Node:
+ *   - `./internals` — the cross-package private seam (#416 guard test
+ *     rejects it from packs), not a consumer entry.
+ * Everything else a tarball's `exports` map exposes with a runtime condition
+ * is imported — see `runtimeEntries()`.
+ */
+const SKIPPED_SUBPATHS = new Set(['./internals']);
 
 const sandbox = join(tmpdir(), `sigx-verify-pack-${Date.now()}`);
 const tarballDir = join(sandbox, 'tarballs');
@@ -79,6 +76,97 @@ function packPackage(pkgPath) {
     return { name: pkgJson.name, version: pkgJson.version, tarball: join(tarballDir, match) };
 }
 
+/** Read a NUL-terminated field out of a 512-byte tar header. */
+function tarField(header, start, length) {
+    const raw = header.subarray(start, start + length).toString('utf-8');
+    const nul = raw.indexOf('\0');
+    return nul === -1 ? raw : raw.slice(0, nul);
+}
+
+/**
+ * Pull `package/package.json` out of a packed tarball without shelling out to
+ * `tar` (not on every Windows PATH) or adding a dependency. A tar stream is a
+ * sequence of 512-byte headers each followed by the entry's data padded to a
+ * 512-byte boundary; two zero blocks end it. npm/pnpm pack always root the
+ * archive at `package/`.
+ */
+function readPackageJsonFromTarball(tarball) {
+    const buf = gunzipSync(readFileSync(tarball));
+    let offset = 0;
+    while (offset + 512 <= buf.length) {
+        const header = buf.subarray(offset, offset + 512);
+        if (header.every((b) => b === 0)) break;
+        const name = tarField(header, 0, 100);
+        const prefix = tarField(header, 345, 155);
+        const size = parseInt(tarField(header, 124, 12).trim() || '0', 8);
+        const typeflag = header[156];
+        const path = prefix ? `${prefix}/${name}` : name;
+        const dataStart = offset + 512;
+        // typeflag '0' or NUL = regular file (skip pax/long-name pseudo entries).
+        if (path === 'package/package.json' && (typeflag === 0x30 || typeflag === 0)) {
+            return JSON.parse(buf.subarray(dataStart, dataStart + size).toString('utf-8'));
+        }
+        offset = dataStart + Math.ceil(size / 512) * 512;
+    }
+    throw new Error(`${tarball}: no package/package.json entry in the tarball`);
+}
+
+/**
+ * The manifest that reaches the registry is the one INSIDE the tarball, not
+ * the one on disk — pnpm rewrites `workspace:^` on the way in, so this is the
+ * only place the rewrite can be checked. Throws on the first dirty package,
+ * listing every offending range.
+ */
+function assertRangesResolved(packed) {
+    for (const p of packed) {
+        const { manifest } = p;
+        if (manifest.name !== p.name) {
+            throw new Error(`${p.tarball}: tarball manifest is ${manifest.name}, expected ${p.name}`);
+        }
+        const dirty = findUnresolvedRanges(manifest);
+        if (dirty.length > 0) {
+            const lines = dirty.map((d) => `${d.field}.${d.name} = ${JSON.stringify(d.range)}`);
+            throw new Error(
+                `${p.name}@${p.version} would publish with unresolved ranges — ` +
+                `a consumer cannot install it:\n     ${lines.join('\n     ')}`
+            );
+        }
+    }
+}
+
+/**
+ * Every import specifier the packed tarballs expose at runtime, derived from
+ * each manifest's `exports` map so the list can never lag a new subpath:
+ * `.` and `./x` keys whose target is a plain path or carries any condition
+ * other than `types` (a types-only key such as `@sigx/vite/client` has
+ * nothing to load), minus `SKIPPED_SUBPATHS` and pattern keys (`./*`).
+ */
+function runtimeEntries(packed) {
+    const entries = [];
+    for (const { name, manifest } of packed) {
+        const exportsMap = manifest.exports;
+        if (!exportsMap || (typeof exportsMap !== 'string' && typeof exportsMap !== 'object')) {
+            throw new Error(`${name}: tarball manifest has no exports map`);
+        }
+        // Normalize the three valid shapes to a subpath map. A string is the
+        // root target; a "bare conditions object" (`{ import, types }`, no
+        // key starting with '.') is the root's conditions — Node forbids
+        // mixing the two forms, so one '.'-prefixed key means subpath form.
+        const map =
+            typeof exportsMap === 'string' || !Object.keys(exportsMap).some((k) => k.startsWith('.'))
+                ? { '.': exportsMap }
+                : exportsMap;
+        for (const [key, target] of Object.entries(map)) {
+            if (!key.startsWith('.')) continue;
+            if (key.includes('*') || SKIPPED_SUBPATHS.has(key)) continue;
+            const conditions = typeof target === 'string' ? ['import'] : Object.keys(target ?? {});
+            if (!conditions.some((c) => c !== 'types')) continue;
+            entries.push(key === '.' ? name : `${name}/${key.slice(2)}`);
+        }
+    }
+    return entries;
+}
+
 function main() {
     step(`Sandbox: ${sandbox}`);
     mkdirSync(tarballDir, { recursive: true });
@@ -88,10 +176,19 @@ function main() {
     run('pnpm run build', { cwd: rootDir });
 
     step('Pack each publishable package');
+    // The list is shared with publish.js and cross-checked against packages/*
+    // on disk, so nothing publishable can escape verification again (#363).
+    assertPackagesComplete();
     const packed = PACKAGES.map(packPackage);
     for (const p of packed) {
+        // The manifest INSIDE the tarball is the one the registry will serve.
+        p.manifest = readPackageJsonFromTarball(p.tarball);
         console.log(`   📦 ${p.name}@${p.version}  →  ${p.tarball}`);
     }
+
+    step('Assert every packed manifest has workspace:/catalog: ranges resolved');
+    assertRangesResolved(packed);
+    console.log(`   ✔ ${packed.length} tarball manifests clean`);
 
     step('Create scratch app');
     // Minimal vite + sigx app: import from `sigx`, render a counter, build with vite.
@@ -147,7 +244,11 @@ function main() {
     writeFileSync(
         join(appDir, 'src', 'main.tsx'),
         [
-            "import { component, signal, render } from 'sigx';",
+            "import { component, signal, defineApp } from 'sigx';",
+            // The two client-installed packs ride the same app: their browser
+            // entries must resolve from the tarballs and bundle cleanly.
+            "import { cachePlugin } from '@sigx/cache';",
+            "import { serverPlugin } from '@sigx/server/plugin';",
             '',
             'const Counter = component(() => {',
             '  const count = signal(0);',
@@ -161,27 +262,49 @@ function main() {
             '  );',
             '});',
             '',
-            "render(<Counter />, document.getElementById('app')!);",
+            'defineApp(<Counter />)',
+            '  .use(cachePlugin({ staleTime: 30_000 }))',
+            '  .use(serverPlugin())',
+            "  .mount(document.getElementById('app')!);",
             '',
         ].join('\n')
     );
 
-    // Also exercise SSR import path from the published @sigx/server-renderer tarball.
+    // Every runtime export subpath of every tarball, imported for real under
+    // Node from the installed packages — vite never type-checks, so a
+    // type-only reference would prove nothing. The list is derived from the
+    // packed manifests' `exports` maps, so a new subpath is covered the day
+    // it is added. The guard is "the module loads": resolution through the
+    // export map plus top-level evaluation, under both the default and the
+    // production conditions (`@sigx/runtime-dom/platform` legitimately
+    // exports nothing, so a named-export check would be wrong there).
+    const entries = runtimeEntries(packed);
     writeFileSync(
-        join(appDir, 'src', 'ssr-check.ts'),
+        join(appDir, 'smoke-entries.mjs'),
         [
-            "import { renderToString } from '@sigx/server-renderer/server';",
-            "// Type-only smoke check that the named export is reachable from the published shape.",
-            'export type _R = typeof renderToString;',
+            `const ENTRIES = ${JSON.stringify(entries, null, 2)};`,
+            'for (const spec of ENTRIES) {',
+            '  try {',
+            '    await import(spec);',
+            '  } catch (err) {',
+            '    throw new Error(`${spec}: failed to load from the published shape — ${err.message}`);',
+            '  }',
+            '}',
+            'console.log(`   ✔ ${ENTRIES.length} export subpaths load`);',
             '',
         ].join('\n')
     );
+    console.log(`   ${entries.length} runtime export subpaths across ${packed.length} packages`);
 
     step('Install scratch app (npm — to avoid pnpm workspace hoisting interference)');
     run('npm install --no-audit --no-fund --loglevel=error', { cwd: appDir });
 
     step('Build scratch app');
     run('npm run build', { cwd: appDir });
+
+    step('Import every runtime export subpath under Node (default + production conditions)');
+    run('node smoke-entries.mjs', { cwd: appDir });
+    run('node --conditions production smoke-entries.mjs', { cwd: appDir });
 
     step('Assert production build resolved the production dist (devtools/dev-warnings stripped)');
     const assetsDir = join(appDir, 'dist', 'assets');
