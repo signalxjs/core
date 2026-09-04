@@ -238,14 +238,22 @@ export function sigxResume(options: SigxResumeOptions = {}): Plugin {
     function duplicateOf(name: string, file: string): string | null {
         for (const [otherFile, extraction] of extractions) {
             if (otherFile === file) continue;
-            if (extraction.components.some((c) => c.exported === name)) return otherFile;
+            // Only STAMPABLE components become registry/manifest keys — an
+            // export with no handler sites and no named signals is never
+            // registered, so a name collision with one is not a collision.
+            if (stampable(extraction).some((c) => c.exported === name)) return otherFile;
         }
         return null;
     }
 
-    /** Every §4.5 violation the plugin knows for FILE (or all files), as `this.error` messages. */
+    /**
+     * Every §4.5 violation the plugin knows for FILE (or all files), as
+     * `this.error` messages. FILE may be a raw Vite id (backslashes on
+     * Windows) — the maps are keyed by `normalizePath`, like `extractInto`.
+     */
     function violationsIn(file?: string): string[] {
         const out: string[] = [];
+        if (file) file = normalizePath(file);
         // A module whose ONLY component is default-exported has an error
         // entry but no extraction — the union keeps it reportable.
         const files = file ? [file] : [...new Set([...contractErrors.keys(), ...extractions.keys()])];

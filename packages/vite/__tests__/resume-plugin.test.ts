@@ -281,6 +281,24 @@ describe('sigxResume — duplicate component names are a build error (§4.5)', (
         }
     });
 
+    it('a collision with an UNSTAMPABLE export (no handlers, no named signals) is not a duplicate', () => {
+        // Such a component is never registered or put in the manifest, so
+        // its name is not a key anything could collide with.
+        const { plugin, root } = makeProject({
+            'src/resume/a.tsx': COUNTER.replace('../analytics', '../../analytics'),
+            'src/resume/static.tsx': `
+import { component } from 'sigx';
+export const Counter = component<{ label: string }>((ctx) => () => <p>{ctx.props.label}</p>);
+`
+        });
+        try {
+            expect(() => plugin.transform.call(failing, COUNTER, join(root, 'src/resume/a.tsx'))).not.toThrow();
+            expect(() => plugin.load.call(failing, '\0virtual:sigx-resume')).not.toThrow();
+        } finally {
+            rmSync(root, { recursive: true, force: true });
+        }
+    });
+
     it('the same component name in two NON-resume files is nobody\'s business', () => {
         const { plugin, root } = makeProject({
             'src/resume/a.tsx': COUNTER.replace('../analytics', '../../analytics'),
