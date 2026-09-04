@@ -537,7 +537,13 @@ function scanModule(program: Node): ModuleScan {
                 for (const spec of (stmt.specifiers as Node[]) ?? []) {
                     const local = ((spec.local as Node)?.name as string) ?? '';
                     const exported = ((spec.exported as Node)?.name as string) ?? '';
-                    if (local && exported) scan.exportsByLocal.set(local, exported);
+                    if (!local || !exported) continue;
+                    // A NAMED export always wins over a default alias of the
+                    // same local, whatever the statement order: `export const
+                    // Counter = …; export { Counter as default }` is keyed
+                    // "Counter", not flagged default-only (§4.5).
+                    if (exported === 'default' && scan.exportsByLocal.has(local)) continue;
+                    scan.exportsByLocal.set(local, exported);
                 }
             }
         } else {

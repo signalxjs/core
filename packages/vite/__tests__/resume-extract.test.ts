@@ -568,6 +568,23 @@ export default Counter;
 `, '/src/Both.resume.tsx');
         expect(aliased.errors).toHaveLength(0);
         expect(aliased.components.map((c) => c.exported)).toEqual(['Counter']);
+        // …in either spelling and either order: the named export wins over
+        // the default alias, it never overwrites the registry key.
+        for (const tail of ['export { Counter as default };', '']) {
+            for (const head of ['', 'export { Counter as default };']) {
+                const both = extractResumeHandlers(`
+import { component } from 'sigx';
+${head}
+export const Counter = component((ctx) => {
+    const n = ctx.signal(0);
+    return () => <button onClick={() => { n.value++; }}>x</button>;
+});
+${tail}
+`, '/src/Both.resume.tsx');
+                expect(both.errors).toHaveLength(0);
+                expect(both.components.map((c) => c.exported)).toEqual(['Counter']);
+            }
+        }
     });
 });
 
