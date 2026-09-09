@@ -149,10 +149,13 @@ function pinnedFilesFor(packageName: string, dir: string): Array<[string, string
     } catch {
         return [];
     }
-    const subpaths =
+    let subpaths =
         exportsField && typeof exportsField === 'object' && !Array.isArray(exportsField)
             ? Object.keys(exportsField as Record<string, unknown>).filter(k => k.startsWith('.'))
             : ['.'];
+    // An `exports` object keyed by conditions alone (`{ import, require }`)
+    // IS the root entry, not a subpath map: pin the bare name.
+    if (subpaths.length === 0) subpaths = ['.'];
 
     const entries: Array<[string, string]> = [];
     for (const sub of subpaths) {

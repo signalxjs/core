@@ -22,6 +22,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   specifier and its `?query` / `#fragment` the way Vite splits it, the
   specifier is looked up, and Vite's own resolver finishes with the postfix
   intact.
+- **`@sigx/vite`: a package whose `exports` is a conditional-root object
+  (`{ "import": …, "require": … }`, no `.`-keyed subpaths) is pinned by its
+  bare name (#655).** Such a manifest used to yield no pin at all — the
+  subpath filter found no `.` keys and never fell back to the root entry —
+  so a second copy of that package could load unnoticed.
 
 ### Changed
 
