@@ -315,7 +315,7 @@ export function sigxPlugin(options: SigxPluginOptions = {}): Plugin {
      * re-implemented Vite's matcher and merged AHEAD of the user's own map.
      * Here the query/fragment is split off the way Vite does it
      * (`/[?#].*$/`), the file is looked up, and the postfix is handed back to
-     * Vite's resolver, so `?url` / `?raw` / `?worker` / `#…` follow the same
+     * Vite's resolver, so `?url` / `?raw` / `?inline` / `?worker` / `#…` follow the same
      * pipeline as for any other file.
      */
     let pinned: Map<string, string | null> | null = null;
@@ -526,8 +526,8 @@ export function sigxPlugin(options: SigxPluginOptions = {}): Plugin {
             if (id === MANIFESTS_VIRTUAL_ID) return MANIFESTS_RESOLVED_ID;
             if (id !== APP_VIRTUAL_ID) {
                 // The dev-time single-copy pin (`pinnedFileFor`). Vite's own
-                // resolver finishes the job — file existence, the `?url` /
-                // `?worker` / `#…` postfix, the module id — and `skipSelf`
+                // resolver finishes the job — file existence, any `?query` /
+                // `#fragment` postfix, the module id — and `skipSelf`
                 // keeps the absolute path from coming back through here.
                 // (Sync for everything else: the virtual ids above are
                 // read synchronously by tests and by nothing async.)
