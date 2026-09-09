@@ -296,7 +296,7 @@ export function sigxPlugin(options: SigxPluginOptions = {}): Plugin {
      * subpath, and — filled lazily — any deeper subpath that has been asked
      * for) to its file, or to `null` once looked up and found not resolvable
      * from here. `pinnedPackages` are the names whose subpaths are ours.
-     * Both are `null` outside `serve`.
+     * `pinned` is `null` outside `serve`; `pinnedPackages` is empty there.
      *
      * This is a `resolveId` step rather than generated `resolve.alias`
      * entries (which it was from #500 to #655) because of where Vite runs
