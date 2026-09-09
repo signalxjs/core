@@ -316,8 +316,10 @@ describe('virtual:sigx-app assetsFor (#501)', () => {
             };
             writeFileSync(join(dir, '.vite', 'manifest.json'), JSON.stringify(manifest));
             const code = generateAppModuleCode(dir, '/app/');
-            // Self-contained by construction: the resolver is inlined, never imported.
-            expect(code).not.toMatch(/\bimport\b|\brequire\s*\(/);
+            // Self-contained by construction: the resolver is inlined, never
+            // imported. Statement-anchored, so the word inside the inlined
+            // template (an inline `<script type="module">`) cannot trip it.
+            expect(code).not.toMatch(/^\s*import\b|\brequire\s*\(/m);
             expect(code).toContain('export function assetsFor(');
 
             const file = join(dir, 'sigx-app.mjs');
