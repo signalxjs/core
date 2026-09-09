@@ -112,7 +112,7 @@ ordinarily fine.
 | | |
 |---|---|
 | **Written by** | `server-renderer/src/server/state.ts` → `assignmentJs` (`server/serialize.ts`), from `server/state-plugin.ts` — shell script, mid-stream preScripts, and the `onStreamEnd` final drain. Server-side, packs feed it through `ctx.registerSerializedState` (#407), **the only public writer** — useAsync/useStream record their keys through the same `_unflushedAsyncKeys` dirty-set internally. |
-| **Read by** | `runtime-core/src/async/restore.ts` — **the only accessor module**, four functions: `peekRestored` (:82, the sole *read*), `restoredKeys` (:101), `invalidateRestored` (:108), `writeBack` (:121). `@sigx/cache` imports them from `@sigx/runtime-core/internals` rather than touching the global. |
+| **Read by** | `runtime-core/src/async/restore.ts` — **the only accessor module**, four functions: `peekRestored` (the sole *read*), `invalidateRestored`, `restoredKeys`, `writeBack`. The read/invalidate pair is **public from `@sigx/runtime-core`** (#449) — the seed path for a state-owning pack such as `@sigx/store`; `restoredKeys` and `writeBack` stay on `@sigx/runtime-core/internals`, where `@sigx/cache` imports all four rather than touching the global. |
 | **Shape** | Null-prototype object, `key → value`. Values are encoded by `@sigx/serialize`. |
 | **Visibility** | Enumerable — a wire seam (see "Visible or hidden"). |
 
@@ -145,6 +145,17 @@ the contract.
 > client fetch. **Anything that transforms this blob must be idempotent** —
 > assuming otherwise flattened live `Date`/`Map`/`Set` values to `{}` (#369).
 >
+> **⚠️ `peekRestored` hands back a value shared with the blob, not a private
+> copy.** The codec walk happens to rebuild plain JSON, but a live value
+> written back after a client fetch — a `Map`, a `Set`, a class instance,
+> anything the codec leaves untouched — comes back by reference, and the
+> contract promises nothing better. Because the entry outlives the read (it is
+> the page's cache, above), **a pack that hands blob values to reactive state
+> must copy them first**: a store that patches the blob's nested objects
+> through its own proxy writes every mutation back into the blob, and from
+> there into every instance seeded afterwards (#472). This follows from the
+> blob's lifetime, not from any one pack.
+>
 > It is also written **progressively** during streaming SSR, so "decode once at
 > load" is not available. Decode is per-read and must stay cheap.
 >
@@ -152,7 +163,12 @@ the contract.
 > state in the response envelope + boundary table and deliberately does **not**
 > touch this blob — entries a refreshed boundary's packs registered earlier
 > stay as-is (#407, decided). Pack seeds that must not outlive their instance
-> should consume-once on pickup (as `@sigx/store` does).
+> should consume-once on pickup — `peekRestored` then `invalidateRestored`.
+> `@sigx/store`'s `ssrState` offers this as `scope: 'instance'`; its default
+> (since 0.11.0, signalxjs/store#71) is to leave the entry in place, so every
+> instance in the runtime seeds from it — the consuming default broke every
+> store after the first under islands and separately-upgraded resume
+> boundaries (#472).
 
 ### `__SIGX_BOUNDARIES__`
 

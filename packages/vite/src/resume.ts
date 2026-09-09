@@ -8,10 +8,13 @@
  *    rewrites resume modules so handled elements carry
  *    `data-sigx-on:<event>="<symbol>"` QRL attributes, and produces a per-file
  *    handlers module of `($scope, …) => …` exports.
- * 2. **Stable identity** — stamps `__resumeId` (export name, the registry key)
- *    and `__resumeMode` ('resume', or 'hydrate' when any handler was
- *    ineligible / the component consumes slots) on exported factories, and
- *    keys named signals via `injectSignalNames` (shared with islands).
+ * 2. **Stable identity** — stamps `__resumeId` (export name, the registry key),
+ *    `__resumeMode` ('resume', or 'hydrate' when any handler was
+ *    ineligible / the component consumes slots) and `__resumeQrls` (the
+ *    component's handler symbols — what `resumePlugin`'s `assets()` hook
+ *    turns into modulepreload links via the manifest, #410) on exported
+ *    factories, and keys named signals via `injectSignalNames` (shared with
+ *    islands).
  * 3. **Client registration** — `virtual:sigx-resume` registers a lazy QRL
  *    loader per handler symbol and an upgrade-chunk loader per component;
  *    both code-split behind dynamic imports that only execute on interaction.
@@ -22,6 +25,12 @@
  *    `.vite/sigx-resume-manifest.json` (`components` for upgrade chunks —
  *    feed to `resumePlugin({ manifest })` — and `handlers` for
  *    modulepreload hints).
+ *
+ * Transform-time contract violations are BUILD ERRORS (rfc-1.0 §4.5), never
+ * warn-and-skip: a duplicate component name across resume modules, a
+ * component reachable only as `export default`, and a handler that binds or
+ * references `$scope` / `$el`. Runtime faults (single-element root, a renamed
+ * signal's buffered writes) stay `__DEV__` warnings in `@sigx/resume`.
  *
  * Handlers modules may contain TypeScript (annotations are preserved
  * verbatim); `load()` strips the types itself via `transformWithOxc` — the
@@ -76,6 +85,13 @@ export function sigxResume(options: SigxResumeOptions = {}): Plugin {
     let isServe = false;
     /** Latest extraction per absolute module path (files with components only). */
     const extractions = new Map<string, ResumeExtraction>();
+    /**
+     * Build-failing contract violations per module (§4.5), formatted with
+     * their source location at extraction time — `load()` has no source to
+     * locate against, and the registry is where files nothing imported yet
+     * still get reported.
+     */
+    const contractErrors = new Map<string, string[]>();
     /**
      * §6.4: sigx:server's public `api`, grabbed in configResolved. When
      * present (and not a `role: 'client'` build — a live client posts
@@ -174,6 +190,17 @@ export function sigxResume(options: SigxResumeOptions = {}): Plugin {
             console.warn(`[sigx:resume] extraction failed for ${relPath(file)}:`, error);
             return null;
         }
+        if (extraction.errors.length > 0) {
+            contractErrors.set(
+                file,
+                extraction.errors.map((e) => {
+                    const { line, column } = offsetToLoc(code, e.offset);
+                    return `[sigx:resume] ${relPath(file)}:${line}:${column}: ${e.message}`;
+                })
+            );
+        } else {
+            contractErrors.delete(file);
+        }
         if (extraction.components.length === 0) {
             extractions.delete(file);
             return extraction;
@@ -190,6 +217,7 @@ export function sigxResume(options: SigxResumeOptions = {}): Plugin {
 
     function discover(): void {
         extractions.clear();
+        contractErrors.clear();
         for (const file of walkFiles(root)) {
             if (!filter(file)) continue;
             extractInto(file, fs.readFileSync(file, 'utf-8'));
@@ -202,28 +230,59 @@ export function sigxResume(options: SigxResumeOptions = {}): Plugin {
 
     /**
      * Component export names are app-wide registry/manifest keys (like island
-     * names). Duplicates across resume modules would silently overwrite each
-     * other's upgrade loaders — first file wins, the rest warn and are
-     * skipped from registration and the manifest.
+     * names). Two resume modules exporting the same name would silently
+     * overwrite each other's upgrade loaders, so a duplicate is a BUILD ERROR
+     * naming both files (§4.5) — it used to warn and keep the first, which
+     * left the second component broken in prod with only a console line.
      */
-    const warnedDuplicates = new Set<string>();
-    function ownedBy(name: string, file: string): boolean {
+    function duplicateOf(name: string, file: string): string | null {
         for (const [otherFile, extraction] of extractions) {
-            if (otherFile === file) return true;
-            if (extraction.components.some((c) => c.exported === name)) {
-                // Called from load() AND generateBundle() — warn once per pair.
-                const key = `${name}\0${file}`;
-                if (!warnedDuplicates.has(key)) {
-                    warnedDuplicates.add(key);
-                    console.warn(
-                        `[sigx:resume] duplicate resume component name "${name}" ` +
-                        `(${otherFile} vs ${file}) — component names must be unique; keeping the first.`
-                    );
-                }
-                return false;
+            if (otherFile === file) continue;
+            // Only STAMPABLE components become registry/manifest keys — an
+            // export with no handler sites and no named signals is never
+            // registered, so a name collision with one is not a collision.
+            if (stampable(extraction).some((c) => c.exported === name)) return otherFile;
+        }
+        return null;
+    }
+
+    /**
+     * Every §4.5 violation the plugin knows for FILE (or all files), as
+     * `this.error` messages. FILE may be a raw Vite id (backslashes on
+     * Windows) — the maps are keyed by `normalizePath`, like `extractInto`.
+     */
+    function violationsIn(file?: string): string[] {
+        const out: string[] = [];
+        if (file) file = normalizePath(file);
+        // A module whose ONLY component is default-exported has an error
+        // entry but no extraction — the union keeps it reportable.
+        const files = file ? [file] : [...new Set([...contractErrors.keys(), ...extractions.keys()])];
+        for (const f of files) {
+            for (const msg of contractErrors.get(f) ?? []) out.push(msg);
+            const extraction = extractions.get(f);
+            if (!extraction) continue;
+            for (const comp of stampable(extraction)) {
+                const other = duplicateOf(comp.exported, f);
+                if (!other) continue;
+                // Report each pair once when sweeping everything.
+                if (!file && other < f) continue;
+                out.push(
+                    `[sigx:resume] duplicate resume component name "${comp.exported}": ` +
+                    `${relPath(f)} and ${relPath(other)} both export it — export names are ` +
+                    `app-wide registry and manifest keys and must be unique; rename one of them.`
+                );
             }
         }
-        return true;
+        return out;
+    }
+
+    /**
+     * Fail the build with every violation at once. Each hook gets one
+     * `this.error` (Rollup renders the message; the join keeps all of them
+     * visible instead of a fix-one-rebuild loop).
+     */
+    function failOn(ctx: { error(message: string): never }, violations: string[]): void {
+        if (violations.length > 0) ctx.error(violations.join('\n'));
     }
 
     return {
@@ -259,6 +318,7 @@ export function sigxResume(options: SigxResumeOptions = {}): Plugin {
 
         load(id) {
             if (id === RESOLVED_VIRTUAL_ID) {
+                failOn(this, violationsIn());
                 const lines = [
                     "import { __registerResumeQrl } from '@sigx/resume/client';",
                     "import { registerComponentChunk } from '@sigx/server-renderer/client';"
@@ -272,7 +332,6 @@ export function sigxResume(options: SigxResumeOptions = {}): Plugin {
                     }
                     const moduleSpec = JSON.stringify('/' + relPath(file));
                     for (const comp of stampable(extraction)) {
-                        if (!ownedBy(comp.exported, file)) continue;
                         lines.push(
                             `registerComponentChunk(${JSON.stringify(comp.exported)}, () => import(${moduleSpec}).then(m => m[${JSON.stringify(comp.exported)}]));`
                         );
@@ -311,7 +370,11 @@ export function sigxResume(options: SigxResumeOptions = {}): Plugin {
             // The incoming code is authoritative (dev edits arrive here before
             // any fs watcher) — re-extract and refresh the registry cache.
             const extraction = extractInto(clean, code);
-            if (!extraction || extraction.components.length === 0) return null;
+            if (!extraction) return null;
+            // §4.5: contract violations fail the build here, where Vite
+            // attributes the error to this module (dev overlay included).
+            failOn(this, violationsIn(clean));
+            if (extraction.components.length === 0) return null;
 
             if (extraction.ineligible.length > 0) {
                 if (isServe) {
@@ -337,10 +400,22 @@ export function sigxResume(options: SigxResumeOptions = {}): Plugin {
             }
 
             const stamps = stampable(extraction)
-                .map(({ local, exported, mode }) =>
-                    `if (typeof ${local} === 'function' && ${local}.__setup) { ` +
-                    `${local}.__resumeId = ${JSON.stringify(exported)}; ` +
-                    `${local}.__resumeMode = ${JSON.stringify(mode)}; }`)
+                .map(({ local, exported, mode }) => {
+                    // The component's handler symbols: resumePlugin's
+                    // assets() hook maps them through the manifest to the
+                    // handlers chunk and modulepreloads it (#410). Hydrate
+                    // mode has none (all-or-nothing) — no stamp, no preload.
+                    const qrls = extraction.handlers
+                        .filter((h) => h.component === exported)
+                        .map((h) => h.symbol);
+                    return (
+                        `if (typeof ${local} === 'function' && ${local}.__setup) { ` +
+                        `${local}.__resumeId = ${JSON.stringify(exported)}; ` +
+                        `${local}.__resumeMode = ${JSON.stringify(mode)}; ` +
+                        (qrls.length > 0 ? `${local}.__resumeQrls = ${JSON.stringify(qrls)}; ` : '') +
+                        `}`
+                    );
+                })
                 .join('\n');
             if (!stamps && extraction.code === code) return null;
             return { code: `${injectSignalNames(extraction.code)}\n;${stamps}\n`, map: null };
@@ -348,8 +423,13 @@ export function sigxResume(options: SigxResumeOptions = {}): Plugin {
 
         async hotUpdate({ type, file, read }) {
             if (!filter(file)) return;
-            if (type === 'delete') extractions.delete(normalizePath(file));
-            else extractInto(file, await read());
+            if (type === 'delete') {
+                const key = normalizePath(file);
+                extractions.delete(key);
+                contractErrors.delete(key); // a deleted violation must not keep failing the registry
+            } else {
+                extractInto(file, await read());
+            }
             const graph = this.environment.moduleGraph;
             for (const vid of [RESOLVED_VIRTUAL_ID, RESOLVED_ENTRY_ID, RESOLVED_HANDLERS_PREFIX + relPath(file) + HANDLERS_SUFFIX]) {
                 const mod = graph.getModuleById(vid);
@@ -361,6 +441,7 @@ export function sigxResume(options: SigxResumeOptions = {}): Plugin {
             handler(_, bundle) {
                 // Only the client build carries browser chunk URLs.
                 if (this.environment?.name && this.environment.name !== 'client') return;
+                failOn(this, violationsIn());
 
                 const manifest: SigxResumeManifest = { components: {}, handlers: {} };
                 const byModule = new Map<string, string>();
@@ -373,7 +454,6 @@ export function sigxResume(options: SigxResumeOptions = {}): Plugin {
                     const componentChunk = byModule.get(file.replace(/\\/g, '/'));
                     if (componentChunk) {
                         for (const comp of stampable(extraction)) {
-                            if (!ownedBy(comp.exported, file)) continue;
                             manifest.components[comp.exported] = { chunkUrl: '/' + componentChunk, exportName: comp.exported };
                         }
                     }

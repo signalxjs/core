@@ -6,7 +6,157 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- **`@sigx/runtime-core`: `peekRestored` / `invalidateRestored` are public
+  (#449).** The `__SIGX_ASYNC__` page blob's read and invalidate half is now
+  exported from the root entry (and so from `sigx`), not only from
+  `@sigx/runtime-core/internals`, completing the blob's public contract: `ctx.registerSerializedState` writes
+  on the server (#407), `reviveFromServer` decodes on the client (#434), and a
+  state-owning pack now seeds through a covered surface — `@sigx/store`
+  reached both from `/internals`, which the 1.0 contract (#677 §1.2) does not
+  cover. The same functions, not copies; `/internals` keeps exporting them
+  alongside `writeBack`/`restoredKeys`, which stay engine-and-cache-only. The
+  JSDoc now spells out the contract: reads do not consume (instance scope is
+  the peek-then-invalidate opt-in), presence is own-key membership, servers
+  always miss, and **the value is shared with the blob, not a private copy** —
+  copy before handing it to reactive state.
+- **`@sigx/runtime-core`: `CombinedOf<F>`, `PropsOf<F>`, `RefOf<F>`,
+  `SlotsOf<F>` (#535).** Public type aliases that take a `ComponentFactory`
+  apart — the declaration it was built from, the stripped props view, the
+  exposed ref, the slot table — so a factory-transforming type
+  (`@sigx/zero`'s `Adapted`, which swaps events while keeping ref and slots)
+  is written as `ComponentFactory<Omit<CombinedOf<F>, X> & Y, RefOf<F>,
+  SlotsOf<F>>` instead of reading the `@internal` `__events`/`__ref`/`__slots`
+  brands by name. `RefOf` is the same read as the existing `Exposed`; the
+  brands may now be renamed without breaking downstream types.
+
+- **`@sigx/resume`: `ResumeManifest.handlers` does what it says — handler
+  chunks are modulepreloaded (#410, rfc-1.0 §4.8).** The field was documented
+  as "modulepreload hints" and emitted by the build, but nothing consumed it:
+  `resumePlugin` had no `assets()` hook, so a resumable page's first
+  interaction paid a cold fetch for its handler chunk. The pack now implements
+  the same `assets()` hook `islandsPlugin` uses: the transform stamps each
+  component's handler symbols on its factory (`__resumeQrls`, next to
+  `__resumeId`), the plugin maps the symbols of every boundary the request
+  actually claimed through `manifest.handlers`, and the document gets one
+  `<link rel="modulepreload">` per distinct handlers chunk in its first shell
+  flush. A page without a resume boundary emits nothing; hydrate-mode
+  components (no symbols) and manifest-less dev renders emit nothing; the
+  component (upgrade) chunk is never warmed — upgrade-on-write stays lazy.
+
+### Changed
+
+- **Release tooling hardened for 1.0 (#363).** `scripts/verify-pack.js` now
+  packs and smoke-tests all 14 publishable packages — `@sigx/resume`,
+  `@sigx/cache` and `@sigx/server` were never pack-verified — from one list
+  (`scripts/packages.js`) shared with `scripts/publish.js` and cross-checked
+  against `packages/*` on disk, and it fails if any tarball manifest still
+  carries a `workspace:`/`catalog:` range (the header claimed this check for
+  months; it did not exist). Every runtime export subpath of every tarball —
+  derived from the packed `exports` maps, minus `./internals` — is now
+  imported under Node from the installed tarballs, in both dev and
+  production conditions.
+  `scripts/publish.js` reads every package's dist-tag back from the registry
+  after the wave and exits non-zero on any mismatch with the local version.
+  `scripts/bump-version.js` accepts exactly `patch|minor|major|<semver>`
+  (prereleases like `1.0.0-rc.0` included; `+build` metadata rejected — npm
+  strips it, so it could never verify); any other argument — `--help`
+  used to bump all 14 packages — prints usage and exits 2 without writing;
+  `--dry-run` added. Tooling only; no package behaviour changes.
+- **`@sigx/server`: the middleware cadence and the feature seam are
+  documented (#628).** Docs only — behaviour is unchanged and frozen for 1.0
+  (RFC #677 §4.2). `ServerMiddleware`'s JSDoc and the README now state that
+  the chain runs once per *operation* (every wire call, stream open and
+  in-process call — five data cells in one SSR render run it five times)
+  while `authenticate` is memoized per request store, and point to
+  `perRequest` for once-per-request work. `ServerFeatureContext`
+  cross-references the `__sigxAnon` wrapper stamp core's endpoint reads for
+  anonymity, and `enter()` is documented as the wire entry for a feature
+  that owns the raw `Request`, `prelude()` for one that already holds a
+  context. The seam additions #628 proposes (`configured`, `wrap()`, the
+  identity gate alone) are 1.x.
+- **npm keywords for `sigx`, `@sigx/runtime-dom` and `@sigx/vite`
+  (#606).** Metadata only: the three packages still publishing
+  `keywords: ["SignalX"]` now carry real lists (signals, reactivity,
+  fine-grained, components, jsx/tsx, ssr; `vite`/`vite-plugin` for the
+  plugin) in the style of the other eleven. Takes effect on the next publish.
+
+- **`@sigx/vite/resume`: three transform-time faults are BUILD ERRORS, not
+  warn-and-skip (#409, rfc-1.0 §4.5). Breaking** for a project that relied on
+  the build passing with any of these — each used to leave the component
+  silently broken (or silently non-resumable) in prod with at most a console
+  line:
+  - **Duplicate resume component name across modules.** Was: `console.warn`,
+    first file wins, the second is dropped from the registry and manifest. Now:
+    the transform of either file, the `virtual:sigx-resume` registry and the
+    manifest all fail with `duplicate resume component name "X": a.tsx and
+    b.tsx both export it`. Two resume modules exporting `Counter` — say a
+    copy-pasted file — now fail the build until one is renamed.
+  - **A component reachable only as `export default`** (`export default
+    component(...)`, `export default Counter`, `export { Counter as default }`).
+    Was: silently non-resumable. Now: `resume components must be named exports`,
+    with `file:line:col`. A default export that is not a component, or a named
+    export additionally aliased to default, is still fine.
+  - **A handler that binds or references `$scope` / `$el`** (as a parameter,
+    local, named signal or destructured prop). Was: an ineligible-handler
+    warning and the whole component downgraded to wake-on-interaction. Now: a
+    build error naming the handler. Member and key positions (`obj.$scope`,
+    `{ $scope: 1 }`) stay allowed.
+  The runtime faults keep their `__DEV__` warnings — single-element-root
+  violation, a renamed signal dropping buffered writes, wake swallowing the
+  triggering event — and are now documented as the pack's contract in
+  `packages/resume/README.md`, "Writing resumable components → The contract",
+  together with the two-place `refreshComponents` wiring and the
+  `createBoundaryRefresh({ plugins })`-never-sees-app-DI rule (rfc-1.0 §4.3).
+
+- **`@sigx/vite`: the dev-time single-copy pin no longer writes
+  `resolve.alias` entries; it is a `resolveId` step (#655).** Vite runs
+  `vite:alias` before any `enforce: 'pre'` plugin, so your own aliases of any
+  form — object or array, exact key, a scope or trailing-slash prefix, a
+  RegExp, a key on the queried form — take precedence by Vite's own ordering
+  (an alias merged from the plugin's hook used to shadow a prefix alias, and
+  a plugin ordered after `sigx()` that read `config.resolve.alias` saw the
+  plugin's entries added to yours; both are gone — later plugins now see
+  your alias map unchanged). Subpaths without a literal `exports` entry
+  (wildcards such as `./themes/*`, exports-less packages) are resolved per
+  import through Node's resolver from the same installed copy the bare name
+  pins to, and left to Vite's resolver when that fails — so a nested
+  duplicate install of such a package would then load from that copy, the
+  same as for any package the plugin does not pin. The set of pinned
+  specifiers (bare name + literal `exports` subpaths of every installed
+  `@sigx/*` package) and the files they pin to are what they were.
+
 ### Fixed
+
+- **`@sigx/server-renderer`: `getCurrentInstance()` is stable across
+  suspensions in a render (#552).** The SSR walk sets the current instance
+  around a component's frame and restores it in a `finally` — but the frame
+  *suspends* in between (its async loads, a legacy async setup), and the
+  driver loops resumed it without saving or restoring the pointer. Anything
+  else in the process running at that await — a concurrent `renderToString`,
+  a streamed deferred render — left the slot pointing at *its* component, so
+  the resumed frame ran its render function against the wrong instance and
+  its `finally` then wrote a stale parent back over the live one. A streamed
+  deferred render never set the instance at all. The drivers now save the
+  slot before every park (the `await`, and the chunk yield to the consumer
+  that precedes it in `renderToChunks`) and restore it before re-entering
+  the walk (on the throw path too), and the deferred closure re-establishes its
+  component's frame. The guarantee is therefore the whole of a component's
+  render — `setup()`, the render function that runs once its loads settle,
+  an `errorScope` fallback after a rejected one — not only the synchronous
+  span of `setup()`. No AsyncLocalStorage, no promise hooks. Still
+  unsupported, on the server as in the browser: reading the instance from an
+  async continuation of your own (after an `await` inside setup, or from a
+  fetcher) — that code runs outside the walk.
+
+- **`docs/seams.md`: the `__SIGX_ASYNC__` consume-once note pointed at
+  `@sigx/store`'s old default (#472).** `ssrState` has left the entry in
+  place since store 0.11.0 (consume-once is the `scope: 'instance'` opt-in);
+  the note now says so, names the peek-then-invalidate pair that implements
+  it, and gains the copy-first warning beside the mixed-store one: a pack
+  that proxies blob values into reactive state writes its mutations back
+  into the blob, and from there into every later seed.
 
 - **`@sigx/vite`: `?url` / `?raw` / `?inline` / `?worker` imports of a
   package subpath export resolve in the dev server again (#655).**
@@ -28,24 +178,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   subpath filter found no `.` keys and never fell back to the root entry —
   so a second copy of that package could load unnoticed.
 
-### Changed
-
-- **`@sigx/vite`: the dev-time single-copy pin no longer writes
-  `resolve.alias` entries; it is a `resolveId` step (#655).** Vite runs
-  `vite:alias` before any `enforce: 'pre'` plugin, so your own aliases of any
-  form — object or array, exact key, a scope or trailing-slash prefix, a
-  RegExp, a key on the queried form — take precedence by Vite's own ordering
-  (an alias merged from the plugin's hook used to shadow a prefix alias, and
-  a plugin ordered after `sigx()` that read `config.resolve.alias` saw the
-  plugin's entries added to yours; both are gone — later plugins now see
-  your alias map unchanged). Subpaths without a literal `exports` entry
-  (wildcards such as `./themes/*`, exports-less packages) are resolved per
-  import through Node's resolver from the same installed copy the bare name
-  pins to, and left to Vite's resolver when that fails — so a nested
-  duplicate install of such a package would then load from that copy, the
-  same as for any package the plugin does not pin. The set of pinned
-  specifiers (bare name + literal `exports` subpaths of every installed
-  `@sigx/*` package) and the files they pin to are what they were.
 
 ## [0.15.6] — 2026-08-17
 

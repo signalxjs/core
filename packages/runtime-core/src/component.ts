@@ -41,6 +41,10 @@ export type {
     ComponentRef,
     ComponentFactory,
     AnyComponentFactory,
+    CombinedOf,
+    PropsOf,
+    RefOf,
+    SlotsOf,
     ComponentOptions,
 } from './component-types.js';
 export type { Model } from './component-types.js';

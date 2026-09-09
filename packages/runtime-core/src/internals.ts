@@ -81,6 +81,8 @@ export { reportUnhandledAsyncError } from './app.js';
 // (docs/seams.md). Exported so `@sigx/cache` reads the blob through the same
 // functions instead of re-implementing them; a second copy meant a second
 // place to apply the codec, and the decode was already missed once.
+// `peekRestored`/`invalidateRestored` are ALSO public from the root entry
+// (#449) — same functions; kept here so in-tree packs' imports stay put.
 export { peekRestored, invalidateRestored, writeBack, reviveFromServer, restoredKeys } from './async/restore.js';
 // Key-addressable refresh of mounted useData cells (#484) — what an engine
 // pack's `invalidate(pattern)` delegates to, and the canonical meaning of an

@@ -77,7 +77,17 @@
         "@sigx/server": "workspace:^"
     },
     "keywords": [
-        "SignalX"
+        "sigx",
+        "signalx",
+        "vite",
+        "vite-plugin",
+        "jsx",
+        "tsx",
+        "hmr",
+        "ssr",
+        "server-functions",
+        "signals",
+        "framework"
     ],
     "author": "Andreas Ekdahl",
     "license": "MIT",

@@ -2,6 +2,39 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Handler chunks are modulepreloaded — `ResumeManifest.handlers` does what
+  it says (#410, rfc-1.0 §4.8).** `resumePlugin` now implements the pack
+  `assets()` hook (the `islandsPlugin` precedent): for every boundary a
+  request actually claims, the component's handler symbols (stamped by the
+  transform as `__resumeQrls`) are resolved through `manifest.handlers` and
+  the document's first shell flush carries `<link rel="modulepreload">` for
+  each distinct handlers chunk — bytes off the critical path, execution still
+  gated on the first interaction, the loader still the page's only script. A
+  page with no resume boundary emits nothing; a hydrate-mode component has no
+  symbols and emits nothing; a manifest-less (dev) render emits nothing; the
+  component (upgrade) chunk is never warmed. Requires a client build from the
+  matching `@sigx/vite` — an older transform stamps no symbols, and the hook
+  then contributes nothing.
+
+### Changed
+
+- **The transform's contract violations are build errors (#409, rfc-1.0 §4.5)
+  — breaking for a build that relied on warn-and-skip.** In `@sigx/vite/resume`:
+  a duplicate component name across resume modules (was: warn, first wins),
+  a component reachable only as `export default` (was: silently
+  non-resumable) and a handler binding or referencing `$scope` / `$el` (was:
+  downgraded to wake-on-interaction with a warning) now fail the build with a
+  located message. Root `CHANGELOG.md` has the per-case before/after. The
+  runtime cases stay `__DEV__` warnings (single-element root, renamed-signal
+  buffered writes, wake swallowing its triggering event) and are documented
+  in the README's new "The contract" section, alongside the two-place
+  `refreshComponents` wiring and the rule that
+  `createBoundaryRefresh({ plugins })` never sees app-level DI — pass
+  `app: () => createApp()` when the app installs `serverPlugin({ types })` or
+  `provideTypeHandlers` (rfc-1.0 §4.3).
+
 ## [0.15.3] - 2026-08-07
 
 ### Changed

@@ -1,6 +1,7 @@
 # RFC: SSR platform — one boundary model, the request lifecycle, the last mile
 
-Status: **proposed / under review — rev 2**. Tracking: signalxjs/core#171.
+Status: **implemented — rev 2** (tracking signalxjs/core#171 closed 2026-07-14).
+Frozen at 1.0 — see `rfc-1.0.md`.
 Pre-1.0, no-compat (same stance as `rfc-use-async.md` and the value-first async
 RFC, #135/#136): one way to do it. One deliberate revision to a frozen contract
 is called out explicitly (§1.3); everything else the `ssr-next` program froze

@@ -8,8 +8,15 @@
  * Usage:
  *   node scripts/publish.js [--dry-run] [--tag <tag>] [--provenance]
  *
+ * After the wave, every package's registry dist-tag (`latest`, or `--tag`)
+ * is read back with `npm view` and compared to the local version; any
+ * mismatch fails the run (#363). A step that shows green while `npm view`
+ * disagrees is how a partial 1.0.0 would slip out unnoticed — and a broken
+ * publish cannot be unpublished after 72 h.
+ *
  * Options:
  *   --dry-run     Show what would be published without actually publishing
+ *                 (skips the post-wave registry verification too)
  *   --tag         Publish with a specific tag (e.g., beta, next)
  *   --provenance  Attach an npm provenance attestation. Requires running in a
  *                 GitHub Actions workflow with `permissions: id-token: write`.
@@ -24,34 +31,12 @@
 
 import { execSync } from 'child_process';
 import { existsSync, readFileSync, writeFileSync, unlinkSync } from 'fs';
-import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
+import { join } from 'path';
 import { homedir } from 'os';
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const rootDir = join(__dirname, '..');
-
-// Packages in dependency order (dependencies first).
-// Other SignalX packages (router, store, ssg, daisyui, runtime-terminal, etc.)
-// live in their own repos under https://github.com/signalxjs and are published
-// from there.
-const PACKAGES = [
-    // Zero dependencies — the base of the stack, so it publishes first.
-    'packages/serialize',
-    'packages/reactivity',
-    'packages/runtime-core',
-    'packages/runtime-dom',
-    'packages/sigx',
-    'packages/server-renderer',
-    'packages/ssr-islands',
-    'packages/resume',
-    'packages/cache',
-    'packages/server',
-    'packages/vite',
-    'packages/cloudflare',
-    'packages/vercel',
-    'packages/netlify',
-];
+// The one list of publishable packages, in dependency order — shared with
+// verify-pack.js so what ships and what gets pack-verified can never drift
+// again (#363).
+import { PACKAGES, rootDir, assertPackagesComplete } from './packages.js';
 
 const args = process.argv.slice(2);
 const dryRun = args.includes('--dry-run');
@@ -147,6 +132,52 @@ function getPackageInfo(packagePath) {
     };
 }
 
+/**
+ * What the registry currently serves for `name` under `distTag` — or null
+ * when the package/tag is unknown (never published, or `npm view` failed).
+ */
+function publishedVersion(name, distTag) {
+    try {
+        const result = execSync(`npm view ${name} dist-tags.${distTag}`, {
+            encoding: 'utf-8',
+            stdio: ['pipe', 'pipe', 'pipe'],
+        }).trim();
+        return result || null;
+    } catch {
+        return null;
+    }
+}
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Post-wave verification: the registry must agree with the local version for
+ * EVERY package in the list — published or skipped-as-already-published alike.
+ * A freshly published version can take a few seconds to show up in `npm view`,
+ * so each package gets a handful of retries before it counts as a mismatch.
+ * Returns the list of mismatches (empty = the wave is verified).
+ */
+async function verifyPublishedVersions(distTag, { attempts = 5, delayMs = 5000 } = {}) {
+    const mismatches = [];
+    for (const packagePath of PACKAGES) {
+        const pkg = getPackageInfo(packagePath);
+        if (!pkg) continue;
+        let seen = null;
+        for (let attempt = 1; attempt <= attempts; attempt++) {
+            seen = publishedVersion(pkg.name, distTag);
+            if (seen === pkg.version) break;
+            if (attempt < attempts) await sleep(delayMs);
+        }
+        if (seen === pkg.version) {
+            console.log(`   ✅ ${pkg.name}@${distTag} = ${seen}`);
+        } else {
+            console.error(`   ❌ ${pkg.name}@${distTag} = ${seen ?? '(not found)'}  — local is ${pkg.version}`);
+            mismatches.push({ name: pkg.name, expected: pkg.version, actual: seen });
+        }
+    }
+    return mismatches;
+}
+
 function isAlreadyPublished(name, version) {
     try {
         const result = execSync(`npm view ${name}@${version} version`, { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
@@ -227,6 +258,10 @@ async function main() {
         }
     }
 
+    // Refuse to ship a list that disagrees with packages/* on disk: a package
+    // missing from the list would silently never publish.
+    assertPackagesComplete();
+
     // Build all packages first
     console.log('🔨 Building all packages...');
     try {
@@ -285,7 +320,30 @@ async function main() {
     // anyway, npm-vs-tag drift, etc.
     if (results.failed.length > 0) {
         process.exitCode = 1;
+        return;
     }
+
+    // Post-wave verification (#363): don't trust the publish loop's own
+    // accounting — ask the registry. Every package, including the ones
+    // skipped as already published, must serve the local version under the
+    // dist-tag this wave targeted. Skipped for dry runs: nothing was shipped.
+    if (dryRun) {
+        console.log('\n🔍 DRY RUN — skipping post-wave registry verification');
+        return;
+    }
+    const distTag = tag ?? 'latest';
+    console.log(`\n🔎 Verifying the registry serves every package at its local version (dist-tag: ${distTag})...`);
+    const mismatches = await verifyPublishedVersions(distTag);
+    if (mismatches.length > 0) {
+        console.error(`\n❌ Post-wave verification failed for ${mismatches.length} package(s):`);
+        for (const m of mismatches) {
+            console.error(`   ${m.name}: expected ${m.expected}, registry serves ${m.actual ?? '(nothing)'}`);
+        }
+        console.error('   The wave is incomplete or the dist-tag did not move — investigate before tagging a GitHub release.');
+        process.exitCode = 1;
+        return;
+    }
+    console.log(`✅ Registry verified: ${PACKAGES.length} packages at their local versions`);
 }
 
 main()
