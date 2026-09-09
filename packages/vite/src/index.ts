@@ -324,6 +324,9 @@ export function sigxPlugin(options: SigxPluginOptions = {}): Plugin {
     /** The pinned file for `id`, postfix carried over — or null when `id` is not ours. */
     function pinnedFileFor(id: string): string | null {
         if (!pinned) return null;
+        // Every pinned name is `sigx` or `@sigx/*`; skip the map for the
+        // rest of the module graph.
+        if (id !== 'sigx' && !id.startsWith('sigx/') && !id.startsWith('@sigx/')) return null;
         const clean = id.replace(/[?#].*$/, '');
         let file = pinned.get(clean);
         if (file === undefined) {
@@ -392,9 +395,10 @@ export function sigxPlugin(options: SigxPluginOptions = {}): Plugin {
                     ? path.resolve(userConfig.root)
                     : process.cwd();
 
+                const family = collectSigxOptimizeDepsExcludes(root);
                 pinned = new Map();
                 pinnedPackages = [];
-                for (const name of collectSigxOptimizeDepsExcludes(root)) {
+                for (const name of family) {
                     const dir = resolvePackageDir(name);
                     if (!dir) continue;
                     pinnedPackages.push(name);
@@ -410,7 +414,7 @@ export function sigxPlugin(options: SigxPluginOptions = {}): Plugin {
                         // source module graph and shares one reactivity
                         // instance. Vite merges this with (not over) any
                         // user-specified excludes.
-                        exclude: collectSigxOptimizeDepsExcludes(root)
+                        exclude: family
                     },
                     ssr: {
                         noExternal: SIGX_SSR_NO_EXTERNAL
