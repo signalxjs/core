@@ -112,6 +112,58 @@ describe('vnode props reach the renderer raw (#191)', () => {
         expect(container.querySelector('.who')?.textContent).toBe('Grace');
     });
 
+    it('a user object SHAPED like a vnode is not a vnode: it stays reactive (#274)', async () => {
+        // A CMS/editor node that happens to carry type/props/children/dom.
+        const state = signal({ node: { type: 'div', props: { label: 'one' }, children: [] as unknown[], dom: null } });
+        type P = Define.Prop<'node', { type: string; props: { label: string }; children: unknown[]; dom: null }>;
+        let seen: unknown;
+        const Show = component<P>((ctx) => {
+            seen = ctx.props.node;
+            return () => <div class="lbl">{ctx.props.node?.props.label}</div>;
+        });
+        const App = component(() => () => jsx(Show as any, { node: state.node }));
+        const container = mount(jsx(App, {}));
+
+        expect(container.querySelector('.lbl')?.textContent).toBe('one');
+        expect(toRaw(seen as object)).not.toBe(seen); // a reactive proxy, not the raw object
+
+        state.node.props.label = 'two';
+        await settle();
+        expect(container.querySelector('.lbl')?.textContent).toBe('two');
+    });
+
+    it('an array whose first element is vnode-shaped user data stays reactive (#274)', async () => {
+        const state = signal({ rows: [{ type: 'row', props: { n: 1 }, children: [], dom: null }] });
+        type P = Define.Prop<'rows', Array<{ type: string; props: { n: number }; children: unknown[]; dom: null }>>;
+        const Sum = component<P>((ctx) => () => <div class="sum">{ctx.props.rows?.map(r => r.props.n).join(',')}</div>);
+        const App = component(() => () => jsx(Sum as any, { rows: state.rows }));
+        const container = mount(jsx(App, {}));
+
+        expect(container.querySelector('.sum')?.textContent).toBe('1');
+        state.rows[0].props.n = 5;
+        await settle();
+        expect(container.querySelector('.sum')?.textContent).toBe('5');
+        state.rows.push({ type: 'row', props: { n: 7 }, children: [], dom: null });
+        await settle();
+        expect(container.querySelector('.sum')?.textContent).toBe('5,7');
+    });
+
+    it('a vnode from a direct component-factory call is a runtime vnode: returned raw', () => {
+        const Fallback = component(() => () => <div class="fb">fb</div>);
+        const fb = (Fallback as any)({}); // the factory body's literal, no jsx()
+        let seen: unknown;
+        type P = Define.Prop<'fb', JSXElement>;
+        const Box = component<P>((ctx) => {
+            seen = ctx.props.fb;
+            return () => <div />;
+        });
+        const App = component(() => () => jsx(Box as any, { fb }));
+        mount(jsx(App, {}));
+
+        expect(seen).toBe(fb);
+        expect(toRaw(seen as object)).toBe(seen);
+    });
+
     it('<Defer> element fallback (with text) works without the old toRaw workaround', async () => {
         const { lazy, Defer } = await import('sigx');
         let resolveModule!: (mod: any) => void;

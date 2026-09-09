@@ -8,6 +8,7 @@
 
 import { getComponentPlugins } from "./plugins.js";
 import { normalizeKey } from "./utils/normalize-key.js";
+import { VNODE } from "./vnode-brand.js";
 import type {
     ComponentSetupContext,
     PlatformElement,
@@ -133,7 +134,8 @@ export function component<
             props: props || {},
             key: normalizeKey(props?.key),
             children: [],
-            dom: null
+            dom: null,
+            [VNODE]: true
         };
     } as unknown as ComponentFactory<TCombined, TRef, TSlots>;
 

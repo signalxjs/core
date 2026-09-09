@@ -29,6 +29,7 @@ import {
     applyErrorScope,
     collectSetupScope,
     takeSetupDisposers,
+    markVNode,
 } from 'sigx/internals';
 import type { SchedulerJob } from 'sigx/internals';
 import {
@@ -72,6 +73,9 @@ export function hydrateComponent(
     trailingMarker?: Comment | null,
     regionEnd: Node | null = null
 ): Node | null {
+    // A root built by hand (resume's upgrade, a third-party pack) is a
+    // runtime vnode from here on: brand it (#274).
+    markVNode(vnode);
     const componentFactory = vnode.type as unknown as ComponentFactory;
     const setup = componentFactory.__setup;
     const componentName = componentFactory.__name || 'Anonymous';

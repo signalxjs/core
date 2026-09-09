@@ -5,15 +5,7 @@
 
 import { toRaw } from '@sigx/reactivity';
 import { PropsAccessor } from '../component.js';
-
-/**
- * Structural vnode check (type + props + children + dom are all assigned at
- * vnode creation — see jsx-runtime). Runs on RAW objects only, so the
- * property reads are plain and untracked.
- */
-function isVNodeLike(v: any): boolean {
-    return v.type !== undefined && v.props !== undefined && v.children !== undefined && 'dom' in v;
-}
+import { isVNode } from '../vnode-brand.js';
 
 /**
  * VNodes are renderer-owned descriptors — the renderer writes its dom
@@ -22,12 +14,18 @@ function isVNodeLike(v: any): boolean {
  * vnode-valued prop (or an array of vnodes, e.g. a fallback or icon prop)
  * is handed back RAW. The property READ itself still goes through the
  * reactive props signal first, so replacing the prop re-renders as usual.
+ *
+ * What counts as a vnode is the brand the runtime stamps at creation
+ * (`vnode-brand.ts`), checked on the RAW object — not the shape. A user
+ * object that happens to carry `type`/`props`/`children`/`dom` (a CMS node,
+ * an editor AST) is user data and stays reactive (#274). An array is
+ * unwrapped when its first element is a runtime vnode.
  */
 function unwrapVNodeValue<T>(v: T): T {
     if (v && typeof v === 'object') {
         const raw = toRaw(v as object) as any;
-        if (isVNodeLike(raw)) return raw;
-        if (Array.isArray(raw) && raw.length > 0 && raw[0] && typeof raw[0] === 'object' && isVNodeLike(raw[0])) {
+        if (isVNode(raw)) return raw;
+        if (Array.isArray(raw) && raw.length > 0 && raw[0] && typeof raw[0] === 'object' && isVNode(raw[0])) {
             return raw as T;
         }
     }

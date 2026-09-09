@@ -6,6 +6,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- **`@sigx/runtime-core`: only vnodes the runtime created bypass the props
+  proxy (#274, rfc-1.0 §4.7).** `ctx.props` hands a vnode-valued prop back
+  raw (#191) — and decided "is this a vnode?" by shape: any object carrying
+  `type`, `props`, `children` and a `dom` key was returned `toRaw()`, so a
+  plain data prop of that shape (a CMS node, an editor AST) silently lost
+  reactivity. The check is now an internal brand every runtime creation site
+  stamps (`jsx()`, a direct component-factory call, the render-result and
+  SSR/hydration normalizers), never the shape. Per input:
+  - a vnode from `jsx()` / TSX or from calling a component factory, or an
+    array whose first element is one: raw before, raw after — unchanged.
+  - a plain object with `type` / `props` / `children` / `dom`: raw before
+    (untracked), a reactive proxy after — it re-renders like any other prop.
+  - **a vnode literal assembled by hand** (`{ type: Comp, props, key: null,
+    children: [], dom: null }`, as a test helper or a library building
+    elements without `jsx()`) passed as a prop: raw before, a proxy after,
+    which the renderer must not receive (#191). This is the pattern that
+    breaks; build such elements through `jsx()` or by calling the factory.
+  The brand is a module-local symbol, not exported: nothing downstream can
+  spell it, and a second copy of the runtime does not recognise it.
+
 ### Added
 
 - **`@sigx/runtime-core`: `peekRestored` / `invalidateRestored` are public

@@ -47,6 +47,7 @@ import {
     // Moved into @sigx/runtime-core when mergeProps needed the same parser.
     // Re-exported below so this module's surface is unchanged.
     parseStringStyle,
+    markVNode,
 } from 'sigx/internals';
 export { parseStringStyle };
 import type { SSRContext, SSRErrorInfo } from './context';
@@ -886,7 +887,7 @@ function* emitStreamPlaceholder(
  * nothing at all).
  */
 function fragmentOf(items: JSXElement[]): VNode {
-    return { type: Fragment, props: {}, key: null, children: items as VNode[], dom: null } as VNode;
+    return markVNode({ type: Fragment, props: {}, key: null, children: items as VNode[], dom: null } as VNode);
 }
 
 /** Rollback wrapper: on bail-out, restores buf/state to the entry marks. */

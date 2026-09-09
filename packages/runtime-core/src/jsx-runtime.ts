@@ -6,6 +6,7 @@ import { getModelProcessors } from './platform.js';
 import { getModelModifier, wrapModelWriteBack } from './model-modifiers.js';
 import { isComponent } from './utils/is-component.js';
 import { normalizeKey } from './utils/normalize-key.js';
+import { VNODE } from './vnode-brand.js';
 
 // Re-export platform types and functions
 export { setPlatformModelProcessor, getPlatformModelProcessor, registerModelProcessor } from './platform.js';
@@ -42,11 +43,11 @@ export const EMPTY_PROPS: Record<string, any> = {};
 export const EMPTY_CHILDREN: VNode[] = [];
 
 function createCommentVNode(): VNode {
-    return { type: Comment, props: EMPTY_PROPS, key: null, children: EMPTY_CHILDREN, dom: null };
+    return { type: Comment, props: EMPTY_PROPS, key: null, children: EMPTY_CHILDREN, dom: null, [VNODE]: true } as VNode;
 }
 
 function createTextVNode(text: string | number): VNode {
-    return { type: Text, props: EMPTY_PROPS, key: null, children: EMPTY_CHILDREN, dom: null, text };
+    return { type: Text, props: EMPTY_PROPS, key: null, children: EMPTY_CHILDREN, dom: null, text, [VNODE]: true } as VNode;
 }
 
 // Exported for normalizeSubTree: a component render result that is a raw
@@ -95,7 +96,7 @@ function normalizeChild(c: JSXChild): VNode {
         // must keep one vnode shape as it grows or shrinks, or crossing a
         // length boundary changes the type at its position and the
         // reconciler remounts every item (#658).
-        return { type: Fragment, props: EMPTY_PROPS, key: null, children: normalizeChildren(c), dom: null } as VNode;
+        return { type: Fragment, props: EMPTY_PROPS, key: null, children: normalizeChildren(c), dom: null, [VNODE]: true } as VNode;
     }
     if ((c as VNode).type) {
         return c as VNode;
@@ -213,8 +214,9 @@ export function jsx(
                 props: componentProps,
                 key: normalizeKey(key ?? componentProps.key),
                 children: EMPTY_CHILDREN,
-                dom: null
-            };
+                dom: null,
+                [VNODE]: true
+            } as VNode;
         }
 
         if (typeof type === 'function' && (type as any) !== Fragment) {
@@ -236,8 +238,9 @@ export function jsx(
             props: hasProps ? rest : EMPTY_PROPS,
             key: normalizeKey(key ?? rest.key),
             children: normalizeChildren(children),
-            dom: null
-        };
+            dom: null,
+            [VNODE]: true
+        } as VNode;
     }
 
     // Slow path: model bindings present, clone props for mutation
@@ -420,8 +423,9 @@ export function jsx(
             props: processedProps,
             key: normalizeKey(key ?? processedProps.key),
             children: [], // Children are passed via props for components
-            dom: null
-        };
+            dom: null,
+            [VNODE]: true
+        } as VNode;
     }
 
     // Handle plain function components (not sigx component)
@@ -431,13 +435,14 @@ export function jsx(
 
     const { children, ...rest } = processedProps;
 
-    const vnode: VNode = {
+    const vnode = {
         type: type as string | typeof Fragment,
         props: rest,
         key: normalizeKey(key ?? rest.key),
         children: normalizeChildren(children),
-        dom: null
-    };
+        dom: null,
+        [VNODE]: true
+    } as VNode;
 
     return vnode;
 }

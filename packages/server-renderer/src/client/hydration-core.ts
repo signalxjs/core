@@ -20,7 +20,7 @@ import { registerComponent, type ComponentFactory } from './registry';
 import { seedBoundaryState } from './boundary-state';
 // Decode server-sent boundary payloads here, in the LAZY chunk — never in the
 // eager scheduler, whose size guard forbids pulling a runtime (docs/seams.md).
-import { reviveFromServer } from 'sigx/internals';
+import { reviveFromServer, markVNode } from 'sigx/internals';
 import {
     getBoundaryTable,
     getBoundaryRecord,
@@ -66,13 +66,13 @@ type PendingCarrier = { __sigxPendingBoundary?: PendingBoundary };
 
 /** Build the mount vnode for a data-driven boundary (props from the table). */
 function recordVNode(component: ComponentFactory, record: SSRBoundaryRecord): VNode {
-    return {
+    return markVNode({
         type: component as any,
         props: (reviveFromServer(record.props) as Record<string, unknown>) || {},
         key: null,
         children: [],
         dom: null
-    } as VNode;
+    } as VNode);
 }
 
 /**
