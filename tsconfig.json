@@ -61,5 +61,13 @@
     "packages/*/__tests__/**/*.ts",
     "packages/*/__tests__/**/*.tsx"
   ],
-  "exclude": ["node_modules", "**/dist", "examples"]
+  "exclude": [
+    "node_modules",
+    "**/dist",
+    "examples",
+    // runtime-core's test-only JSX.IntrinsicElements ambient: this program
+    // has @sigx/runtime-dom's real table in scope, and the two would merge
+    // conflicting property types (#529). It serves tsconfig.test.json only.
+    "packages/runtime-core/__tests__/env.d.ts"
+  ]
 }

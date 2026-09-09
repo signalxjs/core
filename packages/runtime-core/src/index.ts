@@ -171,8 +171,9 @@ export * from './di/factory.js';
 export { defineDirective, isDirective } from './directives.js';
 export type { DirectiveBinding, DirectiveDefinition, DirectiveDefinitionExtensions, ResolvedDirective } from './directives.js';
 
-// JSX type augmentation
-import './jsx-types.d.ts';
+// The global JSX base namespace (Element, IntrinsicAttributes, ElementChildrenAttribute).
+// A side-effect import of an emitted module, so it ships in dist/index.d.ts (#529).
+import './jsx-types.js';
 
 // Re-export signal from reactivity for convenience
 export { signal } from '@sigx/reactivity';

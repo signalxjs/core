@@ -221,7 +221,11 @@ function main() {
                     jsxImportSource: '@sigx/runtime-core',
                     strict: true,
                     esModuleInterop: true,
-                    skipLibCheck: true,
+                    // false on purpose: the tarballs' emitted .d.ts are what is
+                    // under test. runtime-core's dist/index.d.ts carried a
+                    // dangling side-effect import for months, hidden by every
+                    // skipLibCheck in the repo (#529).
+                    skipLibCheck: false,
                 },
                 include: ['src'],
             },
@@ -301,6 +305,12 @@ function main() {
 
     step('Build scratch app');
     run('npm run build', { cwd: appDir });
+
+    // vite never typechecks. This is the one place the PUBLISHED types face a
+    // consumer: the JSX base namespace must reach a jsxImportSource of
+    // @sigx/runtime-core, and every .d.ts in the tarballs must resolve.
+    step('Typecheck scratch app against the tarballs\' emitted types (skipLibCheck: false)');
+    run('npx tsc --noEmit -p tsconfig.json', { cwd: appDir });
 
     step('Import every runtime export subpath under Node (default + production conditions)');
     run('node smoke-entries.mjs', { cwd: appDir });

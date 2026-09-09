@@ -15,8 +15,10 @@ build/
 docs/dist/
 *.d.ts
 *.d.ts.map
-!packages/runtime-core/src/jsx-types.d.ts
 !packages/*/src/env.d.ts
+# runtime-core's test-only JSX.IntrinsicElements ambient (#529) — the
+# per-package src exception above does not cover __tests__.
+!packages/runtime-core/__tests__/env.d.ts
 !examples/*/src/*.d.ts
 # Shared ambients for the examples' type-check (__DEV__) — sits at the
 # examples root, so the per-example exception above does not cover it.

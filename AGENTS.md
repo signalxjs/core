@@ -173,7 +173,11 @@ pnpm verify:pack # verify npm pack output is sane — packs ALL 14 publishable p
                  # on disk, so the two cannot drift), FAILS if any tarball manifest still carries a
                  # `workspace:`/`catalog:` range, builds a scratch app from the tarballs, and imports
                  # every runtime export subpath of every tarball under Node in both dev and production
-                 # conditions — the subpath list is derived from the packed manifests' `exports` (#363)
+                 # conditions — the subpath list is derived from the packed manifests' `exports` (#363).
+                 # The scratch app is also TYPECHECKED against the tarballs' emitted types
+                 # (jsxImportSource @sigx/runtime-core, skipLibCheck false): the only place the
+                 # published .d.ts are proven — vite never typechecks, and a dangling import in
+                 # dist/index.d.ts shipped for months unnoticed (#529)
 pnpm test:edge   # WinterCG smoke: stream a document from the prod dist with node: imports forbidden (after pnpm build)
 pnpm smoke:hydration   # did the prod build actually HYDRATE, or silently re-render client-side? (after pnpm build)
                        # Builds examples/spa-ssr + examples/ssr-islands, serves them, and drives Chromium:

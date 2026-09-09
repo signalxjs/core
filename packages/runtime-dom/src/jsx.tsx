@@ -167,25 +167,12 @@ interface CSSProperties {
 
 declare global {
     namespace JSX {
-        /**
-         * Added by TypeScript to EVERY JSX element type, intrinsic and
-         * component alike — so anything declared here is accepted on every
-         * component whether or not it forwards it.
-         *
-         * That is why it carries `key` and nothing else. `id`, `class`,
-         * `style` and the `data-*`/`aria-*` patterns used to live here, which
-         * meant `<SomeComponent data-density="compact">` typechecked on a
-         * component that never forwarded it — the attribute simply vanished.
-         * Host attributes are now an opt-in a component declares for itself
-         * (`& Define.Attrs`, see ComponentAttributes below).
-         *
-         * Intrinsic elements are unaffected: `HTMLAttributes` declares `id`,
-         * `class`, `className`, `style` and both index signatures directly.
-         */
-        interface IntrinsicAttributes {
-            key?: string | number | null;
-        }
-
+        // `Element`, `IntrinsicAttributes` (`key` and nothing else — anything
+        // declared there is accepted on EVERY component, forwarded or not;
+        // host attributes are a per-component opt-in via `Define.Attrs`,
+        // see ComponentAttributes below) and `ElementChildrenAttribute` come
+        // from @sigx/runtime-core (imported above). This file adds only what
+        // the DOM can render (#529, rfc-1.0 §4.1).
         interface IntrinsicElements {
             // HTML
             a: HTMLAttributes<HTMLAnchorElement>;

@@ -277,7 +277,41 @@ type Adapted<F extends AnyComponentFactory, TRemove extends string, TAdd> =
 
 ### Non-web renderers
 
-This package references no web global unguarded — it runs anywhere. One thing renderer authors must know: `useData`/`useStream` only auto-run their sources on a **live client**, and without a declaration that is detected as "`window` exists" (which keeps server renders safe). A client runtime with no `window` (native, terminal) must say so once, from its platform-identity module:
+This package references no web global unguarded — it runs anywhere.
+
+**JSX and `ctx` are extension seams.** Set `jsxImportSource: "@sigx/runtime-core"`
+(apps on `sigx` keep `"sigx"`). runtime-core ships the platform-neutral base of
+the global `JSX` namespace — `JSX.Element`, `IntrinsicAttributes` (`key`) and
+`ElementChildrenAttribute` — and deliberately no `IntrinsicElements`: the
+renderer declares the elements it can render by global merging, exactly as
+`@sigx/runtime-dom` does for HTML/SVG. Anything the renderer wants on `ctx` is a
+`ComponentSetupContext` augmentation, delivered at runtime by
+`registerContextExtension` (from `@sigx/runtime-core/internals`):
+
+```ts
+// terminal-jsx.ts — the elements this renderer knows
+declare global {
+    namespace JSX {
+        interface IntrinsicElements {
+            box: BoxProps;
+            text: TextProps;
+        }
+    }
+}
+
+// the per-component context this renderer adds
+declare module '@sigx/runtime-core' {
+    interface ComponentSetupContext {
+        /** The terminal this component renders into. */
+        terminal: Terminal;
+    }
+}
+registerContextExtension((ctx) => { (ctx as any).terminal = currentTerminal(); });
+```
+
+Both are plain interfaces, so several packages can merge into them.
+
+One more thing renderer authors must know: `useData`/`useStream` only auto-run their sources on a **live client**, and without a declaration that is detected as "`window` exists" (which keeps server renders safe). A client runtime with no `window` (native, terminal) must say so once, from its platform-identity module:
 
 ```ts
 import { declareLiveClient } from '@sigx/runtime-core/internals';

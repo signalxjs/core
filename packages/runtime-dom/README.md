@@ -91,6 +91,13 @@ package's published types) can declare it, and every JSX file gets the
 typed attribute. Unregistered names still work untyped via the
 `use:${string}` catch-all.
 
+The `JSX` namespace is layered the same way: `JSX.Element`,
+`IntrinsicAttributes` (`key`) and `ElementChildrenAttribute` come from
+`@sigx/runtime-core`; this package adds the HTML/SVG `IntrinsicElements`
+table and the directive extension point above. A non-DOM renderer declares
+its own `IntrinsicElements` instead (see the `@sigx/runtime-core` README,
+"Non-web renderers").
+
 ## Host attributes on components (`Define.Attrs`)
 
 This package owns what `Define.Attrs` means on the web, by augmenting
