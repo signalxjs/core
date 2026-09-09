@@ -556,6 +556,8 @@ describe('the dev pin — a real dev server (serve, #655)', () => {
         async () => {
             const { resolve } = await devServer();
             expect((await resolve(BARE))?.id).toBe(builtIndex);
+            // The bare name with a postfix: the split happens before the pin decides.
+            expect((await resolve(BARE + '?raw'))?.id).toBe(builtIndex + '?raw');
             expect((await resolve(SUBPATH))?.id).toBe(builtInternals);
             for (const postfix of ['?url', '?raw', '?inline', '?worker', '#frag']) {
                 const resolved = await resolve(SUBPATH + postfix);

@@ -324,10 +324,11 @@ export function sigxPlugin(options: SigxPluginOptions = {}): Plugin {
     /** The pinned file for `id`, postfix carried over — or null when `id` is not ours. */
     function pinnedFileFor(id: string): string | null {
         if (!pinned) return null;
-        // Every pinned name is `sigx` or `@sigx/*`; skip the map for the
-        // rest of the module graph.
-        if (id !== 'sigx' && !id.startsWith('sigx/') && !id.startsWith('@sigx/')) return null;
         const clean = id.replace(/[?#].*$/, '');
+        // Every pinned name is `sigx` or `@sigx/*`; skip the map for the
+        // rest of the module graph. (On the split specifier: `sigx?raw` is
+        // the bare name with a postfix.)
+        if (clean !== 'sigx' && !clean.startsWith('sigx/') && !clean.startsWith('@sigx/')) return null;
         let file = pinned.get(clean);
         if (file === undefined) {
             if (!pinnedPackages.some(name => clean.startsWith(name + '/'))) return null;
