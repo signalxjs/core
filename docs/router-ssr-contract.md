@@ -98,7 +98,7 @@ interface RouteDefinition {
 Two consumers:
 
 - **Server, shell preloads:** the matched route's chunk refs (mapped through
-  the client build manifest via `collectAssets` from `@sigx/vite/ssr`) feed
+  the inlined client manifest via `assetsFor` from `virtual:sigx-app`) feed
   `DocumentOptions.assets`, so `<link rel="modulepreload">` for the route's
   code ships in the first flush. Boundary chunks (islands) are preloaded
   automatically by `renderDocument`; route chunks are the router's
@@ -135,7 +135,7 @@ router is simply the natural owner of the miss/guard decisions.
 - The provide helper and the `createApp` wiring sugar.
 - The client hydrate helper that performs §2's pre-hydration chunk settling.
 - Guard → `useResponse` redirect plumbing; miss → 404 + not-found view.
-- Exposure of the matched route's chunk refs in a shape `collectAssets`
+- Exposure of the matched route's chunk refs in a shape `assetsFor`
   consumes.
 
 What it must **not** do: reach into `@sigx/server-renderer` internals, own a
