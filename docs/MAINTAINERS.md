@@ -63,7 +63,8 @@ GH release while every npm PUT failed).
 | `404 Not Found - PUT https://registry.npmjs.org/<pkg>` | OIDC claim was rejected. Either npm is too old (< 11.5.1, see above), the trusted-publisher config on npmjs.com doesn't match (workflow filename, owner, repo, environment), or no trusted publisher is registered for that package. The 404 is npm's deliberate ambiguity — it does NOT mean the package is missing. |
 | `Provenance statement published to transparency log` followed by 404 | Same as above. Provenance signing succeeds via sigstore (different code path that accepts the raw OIDC token), so a successful provenance line doesn't mean the publish itself succeeded. |
 | Job step shows ✅ but `npm view <pkg> version` is unchanged | `scripts/publish.js` previously had a bug where partial failures didn't propagate as a non-zero exit code. Fixed in 14dc29e. If you ever see this again, check the bottom of the publish script for the `process.exitCode = 1` guard. |
-| Trusted-publisher card on npmjs.com looks correct but still 404 | Verify **every** package — the publish script stops at the first failure, so a misconfigured later-in-the-list package wouldn't surface until the earlier ones are fixed. The authoritative list and order is the `PACKAGES` array in `scripts/publish.js` (dependency order, `@sigx/serialize` first). |
+| Trusted-publisher card on npmjs.com looks correct but still 404 | Verify **every** package — the publish script stops at the first failure, so a misconfigured later-in-the-list package wouldn't surface until the earlier ones are fixed. The authoritative list and order is the `PACKAGES` array in `scripts/packages.js` (dependency order, `@sigx/serialize` first; shared by `publish.js` and `verify-pack.js`). |
+| Publish step fails with "Post-wave verification failed" | `scripts/publish.js` reads every package's dist-tag back from the registry after the wave (`npm view <pkg> dist-tags.<tag>`, `latest` unless `--tag`) and fails when any does not equal the local version — even if every `pnpm publish` reported success. The listed packages either never landed or the dist-tag did not move; fix, then re-run via `workflow_dispatch` (already-published versions are skipped, the verification is not). |
 
 ## Notifying consumer repos
 
@@ -175,24 +176,32 @@ Settings → Rules → Rulesets → New branch ruleset:
 ## Releasing
 
 1. Bump versions: `node scripts/bump-version.js patch` (or `minor` / `major`,
-   or an exact version like `1.2.3`). Skip `pnpm version:patch` — pnpm v11's
-   pre-run deps-status check fails interactively here.
+   or an exact version like `1.2.3` / `1.0.0-rc.0`). The script accepts
+   exactly one of those and nothing else: an unknown flag, a typo or a missing
+   argument prints usage and exits 2 without touching a file (`--help` exits
+   0; `--dry-run` prints the old → new table and writes nothing). Skip
+   `pnpm version:patch` — pnpm v11's pre-run deps-status check fails
+   interactively here.
 2. Update `CHANGELOG.md` — move `Unreleased` content under a new heading
    `## [X.Y.Z] — YYYY-MM-DD`, add the `[X.Y.Z]: …/releases/tag/vX.Y.Z` link,
    update the `[Unreleased]` compare URL.
 3. Refresh the lockfile: `pnpm install --lockfile-only` (regenerates
    `pnpm-lock.yaml` so `pnpm install --frozen-lockfile` in CI passes).
 4. Local sanity: `pnpm build && pnpm verify:pack` — catches packaging bugs
-   (missing files, broken `exports`, unresolved `workspace:^`) before the
-   tag exists. The CI's `verify-pack` job re-runs this, but a tag is harder
-   to undo than a commit.
+   (missing files, broken `exports`, an unresolved `workspace:`/`catalog:`
+   range in any of the 14 tarball manifests) before the tag exists. The
+   CI's `verify-pack` job re-runs this, but a tag is harder to undo than a
+   commit.
 5. Commit: `git commit -am "chore: release vX.Y.Z"`.
 6. Tag and push: `git tag -a vX.Y.Z -m "vX.Y.Z" && git push --follow-tags`.
 7. `release.yml` takes over — see the two-job structure above. End state:
    every package lives at `X.Y.Z` on npm with provenance (npm versions carry no
    leading `v` — that is the git-tag convention), and the `vX.Y.Z` GitHub
-   Release is marked latest. Confirm it, package by package — a tag run can fail
-   partially and silently:
+   Release is marked latest. `publish.js` verifies this itself after the wave
+   (every package's dist-tag read back from the registry and compared to the
+   local version; a mismatch fails the job before `github-release` runs), but
+   confirm it by hand too, package by package — a tag run can fail partially
+   and silently:
    ```sh
    node -e "for (const p of require('./docs/ecosystem.json').corePackages) console.log(p)" \
      | xargs -I{} sh -c 'printf "%-24s %s\n" {} "$(npm view {} version)"'

@@ -49,6 +49,7 @@ packages/
 | Run tests in watch mode | `pnpm test:watch` |
 | Lint | `pnpm lint` |
 | Typecheck the examples (each against its own tsconfig) | `pnpm typecheck:examples` |
+| Verify npm pack output — all 14 packages, `workspace:`/`catalog:` leftovers, every export subpath loads (after `pnpm build`) | `pnpm verify:pack` |
 | Edge smoke test (after `pnpm build`) | `pnpm test:edge` |
 | Hydration smoke — did a prod build hydrate, or re-render client-side? (after `pnpm build`) | `pnpm smoke:hydration` (needs `pnpm exec playwright install chromium` once) |
 | SSR benchmarks (after `pnpm build`) | `pnpm bench:ssr:quick` (quick + regression table) / `pnpm bench:ssr` (vs Vue, React, Preact) |
