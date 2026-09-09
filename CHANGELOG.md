@@ -8,6 +8,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- **`@sigx/runtime-core` no longer declares `JSX.IntrinsicElements` (#529,
+  rfc-1.0 §4.1).** The `[elemName: string]: any` index signature is gone:
+  runtime-core has no elements of its own, and a platform package declares
+  the ones it can render by global merging (`@sigx/runtime-dom` for HTML/SVG;
+  a terminal or native renderer for its own). Per consumer:
+  - an app on `sigx` / `@sigx/runtime-dom`: real tags are typed by
+    runtime-dom's table before and after. An unknown tag (`<blink>`) used to
+    typecheck as `any` wherever runtime-core's source was in the program
+    (the examples, a workspace consumer); it is an error now — the table
+    wins, as it was always meant to.
+  - a headless renderer on `@sigx/runtime-core` alone: the published dist
+    gave it no `JSX` namespace at all (see *Fixed*); from source, every tag
+    was `any`. It now gets the base and **must declare its own
+    `IntrinsicElements`** — the pattern that breaks, and the one the
+    runtime-core README "Non-web renderers" now shows next to the matching
+    `ComponentSetupContext` augmentation for `ctx`.
+  No runtime change.
+
 - **`@sigx/runtime-core`: only vnodes the runtime created bypass the props
   proxy (#274, rfc-1.0 §4.7).** `ctx.props` hands a vnode-valued prop back
   raw (#191) — and decided "is this a vnode?" by shape: any object carrying
@@ -151,6 +169,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- **`@sigx/runtime-core`: the JSX base namespace ships in the emitted types
+  (#529).** `JSX.Element`, `IntrinsicAttributes` (`key`) and
+  `ElementChildrenAttribute` were declared in a hand-written `src/jsx-types.d.ts`
+  that `tsc` never copies out of `rootDir`, so `dist/index.d.ts` carried a
+  dangling `import './jsx-types.d.ts'` (TS2882 under `skipLibCheck: false`)
+  and the namespace never reached a consumer — the emitted `ComponentFactory`
+  type names `JSX.IntrinsicAttributes`, which resolved only when
+  `@sigx/runtime-dom` happened to be in the program. The declarations now
+  live in an emitted `src/jsx-types.ts` module that the root entry imports for
+  side effects. `pnpm verify:pack` typechecks its tarball-installed scratch
+  app (`jsxImportSource: "@sigx/runtime-core"`, `skipLibCheck: false`) so
+  the published types are proven, not assumed.
 - **`@sigx/server-renderer`: `getCurrentInstance()` is stable across
   suspensions in a render (#552).** The SSR walk sets the current instance
   around a component's frame and restores it in a `finally` — but the frame
