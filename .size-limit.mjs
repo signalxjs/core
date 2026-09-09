@@ -120,7 +120,11 @@ export default [
     // 13.6 → 13.7 KB with #492: the wrapper-ownership test (only the
     // component the placeholder is named after may descend into it) plus the
     // streamed-boundary liveness guard; sat at 13.62 KB.
-    limit: '13.75 KB',
+    // 13.75 → 13.8 KB with #274: the vnode brand (rfc-1.0 §4.7) — markVNode
+    // at the fragment/text/boundary-root builders and on hydrateComponent's
+    // entry, so a root a pack builds by hand is a runtime vnode too; sat at
+    // 13.79 KB (main was 13.72 KB).
+    limit: '13.8 KB',
     ignore: ['sigx', 'sigx/*', '@sigx/*', 'node:stream'],
   },
   {

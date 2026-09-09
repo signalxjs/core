@@ -5,6 +5,7 @@ import { ComponentSetupContext, setCurrentInstance, getCurrentInstance, MountCon
 import { createPropsAccessor } from './utils/props-accessor.js';
 import { createSlots } from './utils/slots.js';
 import { normalizeSubTree } from './utils/normalize.js';
+import { VNODE } from './vnode-brand.js';
 import { applyContextExtensions } from './plugins.js';
 import { isComponent } from './utils/is-component.js';
 import { createEmit, splitComponentProps } from './utils/component-props.js';
@@ -255,8 +256,9 @@ export function createRenderer<HostNode = any, HostElement = any>(
                     key: null,
                     children: [],
                     dom: null,
-                    text: element
-                };
+                    text: element,
+                    [VNODE]: true
+                } as VNode;
             } else if (isComponent(element)) {
                 // Handle component factory passed directly (e.g., defineApp(Counter))
                 vnode = {
@@ -264,8 +266,9 @@ export function createRenderer<HostNode = any, HostElement = any>(
                     props: {},
                     key: null,
                     children: [],
-                    dom: null
-                };
+                    dom: null,
+                    [VNODE]: true
+                } as VNode;
             } else {
                 vnode = element as VNode;
             }

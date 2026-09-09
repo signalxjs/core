@@ -14,7 +14,7 @@ import {
     VNode,
     Text,
 } from 'sigx';
-import { registerContextExtension } from 'sigx/internals';
+import { registerContextExtension, markVNode } from 'sigx/internals';
 
 // Re-export the eager plugin registry / app-context surface: this module is
 // where these names historically lived, and the hydration-side modules
@@ -69,14 +69,14 @@ export function normalizeElement(element: any): VNode | null {
     }
 
     if (typeof element === 'string' || typeof element === 'number') {
-        return {
+        return markVNode({
             type: Text,
             props: {},
             key: null,
             children: [],
             dom: null,
             text: element
-        };
+        } as VNode);
     }
 
     return element as VNode;

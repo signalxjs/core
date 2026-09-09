@@ -94,6 +94,22 @@ Chaining cannot express *swallow*. A component that gates a consumer handler —
 dropping `onClick` while disabled — keeps destructuring it out and calling it
 itself.
 
+### Vnode-valued props reach the renderer raw
+
+A prop that holds an element — a `fallback`, an `icon`, an array of items —
+comes out of `ctx.props` as the very object `jsx()` created, not wrapped in
+the reactive props proxy: the renderer writes its bookkeeping onto vnodes and
+compares them by identity, and a proxied vnode would corrupt both. Replacing
+the prop still re-renders, because the read itself goes through the props
+signal.
+
+The runtime recognises **its own** vnodes (those from `jsx()` / TSX, or from
+calling a component factory directly) by an internal brand, not by shape. A
+plain object of yours that happens to have `type`, `props`, `children` and
+`dom` keys — a CMS node, an editor AST — is user data and stays reactive. A
+vnode literal you assemble by hand is not a runtime vnode; create it through
+`jsx()` instead.
+
 ### Setup reactions are disposed on unmount
 
 `effect()`, `watch()`, and non-detached `effectScope()` created **directly in a

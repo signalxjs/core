@@ -6,6 +6,7 @@
 import { isComputed } from '@sigx/reactivity';
 import { VNode, Fragment, Text, JSXElement, normalizeChildren } from '../jsx-runtime.js';
 import type { JSXChildren } from '../jsx-runtime.js';
+import { VNODE } from '../vnode-brand.js';
 
 /**
  * Normalize render result to a VNode (wrapping arrays in Fragment).
@@ -43,8 +44,9 @@ export function normalizeSubTree(result: JSXElement | JSXElement[] | null | unde
             key: null,
             children: [],
             dom: null,
-            text: ''
-        };
+            text: '',
+            [VNODE]: true
+        } as VNode;
     }
 
     // Auto-unwrap computed signals
@@ -62,8 +64,9 @@ export function normalizeSubTree(result: JSXElement | JSXElement[] | null | unde
             // a raw string cannot carry `.parent`), falsy items become
             // Comment placeholders so positional diffing keeps its indices.
             children: normalizeChildren(result as JSXChildren),
-            dom: null
-        };
+            dom: null,
+            [VNODE]: true
+        } as VNode;
     }
 
     if (typeof result === 'string' || typeof result === 'number') {
@@ -73,8 +76,9 @@ export function normalizeSubTree(result: JSXElement | JSXElement[] | null | unde
             key: null,
             children: [],
             dom: null,
-            text: result
-        };
+            text: result,
+            [VNODE]: true
+        } as VNode;
     }
 
     return result as VNode;
