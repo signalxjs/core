@@ -23,18 +23,23 @@ const servers = readdirSync(EXAMPLES)
     .filter((file) => existsSync(file));
 
 /**
- * The file with `//` line comments blanked — prose mentions are not imports.
- * Split on CRLF too and strip without `$`: a Windows checkout ends lines in
- * `\r`, which `.` never crosses, so `.*$` left the comment in place there.
+ * The file with comments blanked (`/* … *\/` blocks first, then `//` lines,
+ * keeping line numbers) — prose mentions are not imports. Split on CRLF too
+ * and strip without `$`: a Windows checkout ends lines in `\r`, which `.`
+ * never crosses, so `.*$` left the comment in place there.
  */
 function codeLines(file: string): string[] {
-    return readFileSync(file, 'utf-8').split(/\r?\n/).map((l) => l.replace(/\/\/.*/, ''));
+    const raw = readFileSync(file, 'utf-8').replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\r\n]/g, ' '));
+    return raw.split(/\r?\n/).map((l) => l.replace(/\/\/.*/, ''));
 }
 const IMPORTS_VITE = /(?:import\s*\(\s*|from\s*)['"]@sigx\/vite(?:\/[^'"]*)?['"]/;
 
 describe('example servers keep @sigx/vite out of production (#501)', () => {
-    it('finds the Node example servers', () => {
-        expect(servers.length).toBeGreaterThanOrEqual(4);
+    it('finds the Node example servers, including the two this rule was written for', () => {
+        expect(servers.length).toBeGreaterThanOrEqual(1);
+        for (const dir of ['spa-ssr', 'ssr-islands']) {
+            expect(servers.some((f) => f.includes(join('examples', dir, 'server.mjs'))), dir).toBe(true);
+        }
     });
 
     for (const file of servers) {
