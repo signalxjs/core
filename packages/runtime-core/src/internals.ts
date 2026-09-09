@@ -33,8 +33,9 @@ export type { SchedulerJob } from './scheduler.js';
 export { createPropsAccessor } from './utils/props-accessor.js';
 // The vnode brand (#274): a vnode built outside runtime-core (server-renderer's
 // fragment/text/boundary roots) is stamped with `markVNode` so the props
-// accessor recognises it; the symbol itself is not exported anywhere.
-export { markVNode, isVNode } from './vnode-brand.js';
+// accessor recognises it. Detection stays inside runtime-core (rfc-1.0 §4.7)
+// and the symbol itself is not exported anywhere.
+export { markVNode } from './vnode-brand.js';
 export { createSlots, invokeFunctionChildren, invokeSlotFn, namedSlotFor } from './utils/slots.js';
 export type { InternalSlotsObject } from './utils/slots.js';
 export { normalizeSubTree } from './utils/normalize.js';
