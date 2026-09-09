@@ -261,7 +261,7 @@ export const Reassign = component((ctx) => {
         expect(reason).toContain('reassigns');
     });
 
-    it('rejects `this` in arrow handlers and reserved names', () => {
+    it('rejects `this` in arrow handlers', () => {
         expect(firstReason(`
 import { component } from 'sigx';
 export const This = component((ctx) => {
@@ -269,14 +269,35 @@ export const This = component((ctx) => {
     return () => <button onClick={() => { n.value = this.x; }}>x</button>;
 });
 `)).toContain('this');
+    });
 
-        expect(firstReason(`
+    it('a handler binding or referencing $scope / $el is a build ERROR, not a hydrate downgrade (§4.5)', () => {
+        // Parameter named $scope — a binding.
+        const bound = extractResumeHandlers(`
 import { component } from 'sigx';
 export const Reserved = component((ctx) => {
     const n = ctx.signal(0);
     return () => <button onClick={($scope) => { n.value++; }}>x</button>;
 });
-`)).toContain('reserved');
+`, '/src/X.resume.tsx');
+        expect(bound.errors).toHaveLength(1);
+        expect(bound.errors[0].message).toContain('onclick of <Reserved>');
+        expect(bound.errors[0].message).toContain('reserved name');
+        // Not ALSO an ineligible: an error is not a warning.
+        expect(bound.ineligible).toHaveLength(0);
+
+        // A named signal called $el, read from the handler — a reference.
+        const ref = extractResumeHandlers(`
+import { component } from 'sigx';
+export const RefEl = component((ctx) => {
+    const $el = ctx.signal(0);
+    return () => <button onClick={() => { $el.value++; }}>x</button>;
+});
+`, '/src/X.resume.tsx');
+        expect(ref.errors).toHaveLength(1);
+        expect(ref.errors[0].message).toContain('$el');
+        // The offset points at the handler expression, for a file:line:col.
+        expect(ref.errors[0].offset).toBe(ref.code.indexOf('() => { $el'));
     });
 
     it('allows reserved names in non-reference positions (keys, member props)', () => {
@@ -464,7 +485,23 @@ describe('extractResumeHandlers — non-matches', () => {
         expect(result.components).toHaveLength(0);
     });
 
-    it('skips non-exported and default-exported components', () => {
+    it('skips a non-exported component silently (nothing outside can render it)', () => {
+        const result = extractResumeHandlers(`
+import { component } from 'sigx';
+const Hidden = component((ctx) => {
+    const n = ctx.signal(0);
+    return () => <button onClick={() => { n.value++; }}>x</button>;
+});
+export const useHidden = () => Hidden;
+`, '/src/Hidden.resume.tsx');
+        expect(result.components).toHaveLength(0);
+        expect(result.handlers).toHaveLength(0);
+        expect(result.errors).toHaveLength(0);
+    });
+
+    // §4.5: a default-exported component used to be silently non-resumable.
+    // All three spellings are a build error now.
+    it('`export default Local` on a component is a build ERROR', () => {
         const result = extractResumeHandlers(`
 import { component } from 'sigx';
 const Hidden = component((ctx) => {
@@ -475,9 +512,12 @@ export default Hidden;
 `, '/src/Hidden.resume.tsx');
         expect(result.components).toHaveLength(0);
         expect(result.handlers).toHaveLength(0);
+        expect(result.errors).toHaveLength(1);
+        expect(result.errors[0].message).toContain('resume components must be named exports');
+        expect(result.errors[0].message).toContain('<Hidden>');
     });
 
-    it('skips `export { Local as default }` components', () => {
+    it('`export { Local as default }` on a component is a build ERROR', () => {
         const result = extractResumeHandlers(`
 import { component } from 'sigx';
 const Local = component((ctx) => {
@@ -487,7 +527,64 @@ const Local = component((ctx) => {
 export { Local as default };
 `, '/src/Aliased.resume.tsx');
         expect(result.components).toHaveLength(0);
-        expect(result.handlers).toHaveLength(0);
+        expect(result.errors).toHaveLength(1);
+        expect(result.errors[0].message).toContain('resume components must be named exports');
+    });
+
+    it('`export default component(...)` inline is a build ERROR', () => {
+        const code = `
+import { component } from 'sigx';
+export default component((ctx) => {
+    const n = ctx.signal(0);
+    return () => <button onClick={() => { n.value++; }}>x</button>;
+});
+`;
+        const result = extractResumeHandlers(code, '/src/Inline.resume.tsx');
+        expect(result.errors).toHaveLength(1);
+        expect(result.errors[0].message).toContain('export default component(...)');
+        expect(result.errors[0].offset).toBe(code.indexOf('export default'));
+    });
+
+    it('a default export that is NOT a component is fine (resume/ dirs hold helpers too)', () => {
+        const result = extractResumeHandlers(`
+import { component } from 'sigx';
+export const Counter = component((ctx) => {
+    const n = ctx.signal(0);
+    return () => <button onClick={() => { n.value++; }}>x</button>;
+});
+const config = { step: 1 };
+export default config;
+`, '/src/Mixed.resume.tsx');
+        expect(result.errors).toHaveLength(0);
+        expect(result.components).toHaveLength(1);
+        // And a named export ALSO aliased to default is still keyed by its name.
+        const aliased = extractResumeHandlers(`
+import { component } from 'sigx';
+export const Counter = component((ctx) => {
+    const n = ctx.signal(0);
+    return () => <button onClick={() => { n.value++; }}>x</button>;
+});
+export default Counter;
+`, '/src/Both.resume.tsx');
+        expect(aliased.errors).toHaveLength(0);
+        expect(aliased.components.map((c) => c.exported)).toEqual(['Counter']);
+        // …in either spelling and either order: the named export wins over
+        // the default alias, it never overwrites the registry key.
+        for (const tail of ['export { Counter as default };', '']) {
+            for (const head of ['', 'export { Counter as default };']) {
+                const both = extractResumeHandlers(`
+import { component } from 'sigx';
+${head}
+export const Counter = component((ctx) => {
+    const n = ctx.signal(0);
+    return () => <button onClick={() => { n.value++; }}>x</button>;
+});
+${tail}
+`, '/src/Both.resume.tsx');
+                expect(both.errors).toHaveLength(0);
+                expect(both.components.map((c) => c.exported)).toEqual(['Counter']);
+            }
+        }
     });
 });
 
