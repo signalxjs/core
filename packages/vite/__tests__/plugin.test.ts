@@ -552,12 +552,12 @@ describe('the dev pin — what the resolveId hook hands Vite (serve, #487)', () 
 
 describe('the dev pin — a real dev server (serve, #655)', () => {
     it.runIf(fs.existsSync(builtInternals))(
-        'resolves the bare name, a subpath, and its `?url` / `?raw` / `?worker` / `#…` forms',
+        'resolves the bare name, a subpath, and its `?url` / `?raw` / `?inline` / `?worker` / `#…` forms',
         async () => {
             const { resolve } = await devServer();
             expect((await resolve(BARE))?.id).toBe(builtIndex);
             expect((await resolve(SUBPATH))?.id).toBe(builtInternals);
-            for (const postfix of ['?url', '?raw', '?worker', '#frag']) {
+            for (const postfix of ['?url', '?raw', '?inline', '?worker', '#frag']) {
                 const resolved = await resolve(SUBPATH + postfix);
                 // `vite:alias`'s `noResolved` marker is what import-analysis
                 // turns into "Failed to resolve import … Does the file exist?".
