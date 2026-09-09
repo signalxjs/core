@@ -1,6 +1,7 @@
 # RFC: rfc-server v4 — the middleware / authentication / authorization split, and the server platform
 
-Status: **proposed**. Tracking: signalxjs/core#607.
+Status: **implemented** (tracking signalxjs/core#607 closed 2026-08-04; shipped
+in 0.15.x). Frozen at 1.0 — see `rfc-1.0.md`.
 Amends `rfc-server-v3.md` §1 (guard completeness), §2.8 (one naming paragraph)
 and §3 (two non-goals), and `rfc-server.md` §2.1 (the guard block and
 `serverFnPreset`). Pre-1.0, no-compat, same stance as the parent RFC: one way
