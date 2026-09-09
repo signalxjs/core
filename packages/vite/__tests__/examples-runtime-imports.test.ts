@@ -22,9 +22,13 @@ const servers = readdirSync(EXAMPLES)
     .map((name) => join(EXAMPLES, name, 'server.mjs'))
     .filter((file) => existsSync(file));
 
-/** The file with `//` line comments blanked — prose mentions are not imports. */
+/**
+ * The file with `//` line comments blanked — prose mentions are not imports.
+ * Split on CRLF too and strip without `$`: a Windows checkout ends lines in
+ * `\r`, which `.` never crosses, so `.*$` left the comment in place there.
+ */
 function codeLines(file: string): string[] {
-    return readFileSync(file, 'utf-8').split('\n').map((l) => l.replace(/\/\/.*$/, ''));
+    return readFileSync(file, 'utf-8').split(/\r?\n/).map((l) => l.replace(/\/\/.*/, ''));
 }
 const IMPORTS_VITE = /(?:import\s*\(\s*|from\s*)['"]@sigx\/vite(?:\/[^'"]*)?['"]/;
 
