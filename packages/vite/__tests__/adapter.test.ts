@@ -297,6 +297,44 @@ describe('virtual:sigx-app codegen error surfaces', () => {
     });
 });
 
+describe('virtual:sigx-app assetsFor (#501)', () => {
+    it('resolves per-route entries from the inlined manifest with no imports in the module', async () => {
+        const { mkdtempSync, writeFileSync, mkdirSync, rmSync } = await import('node:fs');
+        const { tmpdir } = await import('node:os');
+        const { join } = await import('node:path');
+        const { pathToFileURL } = await import('node:url');
+        const { generateAppModuleCode } = await import('../src/app-module');
+        const { collectAssets } = await import('../src/assets');
+        const dir = mkdtempSync(join(tmpdir(), 'sigx-app-assets-for-'));
+        try {
+            mkdirSync(join(dir, '.vite'), { recursive: true });
+            writeFileSync(join(dir, 'index.html'), '<!doctype html><div id="app"><!--ssr-outlet--></div>');
+            const manifest = {
+                'index.html': { file: 'assets/index-abc.js', isEntry: true, imports: ['_shared-def.js'], css: ['assets/index.css'] },
+                'src/about/About.tsx': { file: 'assets/About-ghi.js', imports: ['_shared-def.js'] },
+                '_shared-def.js': { file: 'assets/shared-def.js' }
+            };
+            writeFileSync(join(dir, '.vite', 'manifest.json'), JSON.stringify(manifest));
+            const code = generateAppModuleCode(dir, '/app/');
+            // Self-contained by construction: the resolver is inlined, never imported.
+            expect(code).not.toMatch(/\bimport\b|\brequire\s*\(/);
+            expect(code).toContain('export function assetsFor(');
+
+            const file = join(dir, 'sigx-app.mjs');
+            writeFileSync(file, code);
+            const mod = await import(/* @vite-ignore */ pathToFileURL(file).href);
+            expect(mod.assetsFor(['src/about/About.tsx'])).toEqual(collectAssets(manifest, ['src/about/About.tsx'], '/app/'));
+            expect(mod.assetsFor(['src/about/About.tsx']).modulepreload).toEqual(['/app/assets/About-ghi.js', '/app/assets/shared-def.js']);
+            // The build's base is the default; a caller may override it.
+            expect(mod.assetsFor(['index.html'], '/cdn/').stylesheets).toEqual(['/cdn/assets/index.css']);
+            // The precomputed `assets` is the same resolver over every entry.
+            expect(mod.assetsFor(['index.html'])).toEqual(mod.assets);
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
+    });
+});
+
 describe('buildApp ordering (rfc-deploy §3.1)', () => {
     function fakeBuilder(generateSpy?: SigxAdapter['generate']) {
         const order: string[] = [];
