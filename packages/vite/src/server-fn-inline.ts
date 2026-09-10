@@ -41,6 +41,8 @@ import {
     readServerFnAuthorizeOption,
     mintIdentity,
     optionsSpreadError,
+    hasOptionsLiteralArgument,
+    optionsLiteralError,
     nonLiteralIdError,
     nonLiteralTrueError,
     invalidLiteralTrueOption,
@@ -507,6 +509,10 @@ export function extractInlineServerFns(
             if (bad) continue;
 
             const stream = calleeKind(call.callee as Node) === 'stream';
+            if (!hasOptionsLiteralArgument(call)) {
+                errors.push({ offset: call.start, message: optionsLiteralError(name, stream) });
+                continue;
+            }
             // Explicit `id` is the OPTIONS form's field — serverStream is
             // direct-form only, so only serverFn calls are probed.
             const idOption = stream
@@ -514,7 +520,7 @@ export function extractInlineServerFns(
                 : readServerFnIdOption(call);
             if (idOption.nonLiteral) errors.push({ offset: call.start, message: nonLiteralIdError(name) });
             if (idOption.id !== undefined) warnIfIdRewritten(warnings, name, idOption.id);
-            if (!stream && hasServerFnOptionsSpread(call)) {
+            if (hasServerFnOptionsSpread(call)) {
                 errors.push({ offset: call.start, message: optionsSpreadError(name) });
             }
             for (const key of stream ? ['allowAnonymous'] : ['form', 'allowAnonymous']) {
