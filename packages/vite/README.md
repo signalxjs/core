@@ -164,7 +164,8 @@ export default defineConfig({
 // src/api.server.ts — never shipped to the browser
 export const getProduct = serverFn({
   allowAnonymous: true,
-  handler: async (rq, id: string) => db.get(id)
+  input: z.string(),
+  handler: async ({ input: id }) => db.get(id)
 });
 ```
 

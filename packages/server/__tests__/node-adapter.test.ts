@@ -23,25 +23,33 @@ afterEach(() => {
     restoreApp();
 });
 
-const twoCookies = serverFn(async (rq) => {
-    rq.responseHeaders.append('set-cookie', 'a=1; Path=/');
-    rq.responseHeaders.append('set-cookie', 'b=2; Path=/');
-    return 'ok';
+const twoCookies = serverFn({
+    handler: async ({ rq }) => {
+        rq.responseHeaders.append('set-cookie', 'a=1; Path=/');
+        rq.responseHeaders.append('set-cookie', 'b=2; Path=/');
+        return 'ok';
+    }
 });
-const add = serverFn(async (_rq, a: number, b: number) => a + b);
+// One tuple input — a server function takes a single input (rfc-server-v5
+// §1.2), so the wire body is `{"args":[[a, b]]}`.
+const add = serverFn({
+    handler: async ({ input: [a, b] }: { input: [number, number] }) => a + b
+});
 const cachedRead = serverFn({
     cache: { maxAge: 60 },
-    handler: async (_rq, input: { id: string }) => ({ id: input.id })
+    handler: async ({ input }: { input: { id: string } }) => ({ id: input.id })
 });
 
 let releaseSecondTick: () => void = () => {};
 const tickGate = new Promise<void>((resolve) => {
     releaseSecondTick = resolve;
 });
-const ticks = serverStream(async function* () {
-    yield 'first';
-    await tickGate;
-    yield 'second';
+const ticks = serverStream({
+    handler: async function* () {
+        yield 'first';
+        await tickGate;
+        yield 'second';
+    }
 });
 
 describe('createServerFnHandler over node:http', () => {
@@ -83,7 +91,7 @@ describe('createServerFnHandler over node:http', () => {
         const res = await fetch(`${origin}/_sigx/fn/add_fn_00000002`, {
             method: 'POST',
             headers: { 'content-type': 'application/json', origin },
-            body: '{"args":[20,22]}'
+            body: '{"args":[[20,22]]}'
         });
         expect(res.status).toBe(200);
         await expect(res.json()).resolves.toEqual({ data: 42 });
@@ -118,7 +126,7 @@ describe('createServerFnHandler over node:http', () => {
                 origin: httpsOrigin,
                 'x-forwarded-proto': 'https'
             },
-            body: '{"args":[1,1]}'
+            body: '{"args":[[1,1]]}'
         });
         expect(res.status).toBe(200);
     });
@@ -132,7 +140,7 @@ describe('createServerFnHandler over node:http', () => {
                 'x-forwarded-proto': 'https',
                 'x-forwarded-host': 'app.example'
             },
-            body: '{"args":[1,1]}'
+            body: '{"args":[[1,1]]}'
         });
         expect(res.status).toBe(200);
     });
@@ -260,7 +268,7 @@ describe('createServerFnHandler — onError/timeoutMs forwarding (#349/#350)', (
     const errors: unknown[] = [];
 
     beforeAll(async () => {
-        const never = serverFn(async () => new Promise(() => {}));
+        const never = serverFn({ handler: async () => new Promise(() => {}) });
         const handler = createServerFnHandler({
             functions: { never_fn_00000009: async () => never },
             timeoutMs: 30,
@@ -310,7 +318,7 @@ describe('createServerFnHandler forwards maxResponseBytes (#571)', () => {
     let origin: string;
 
     beforeAll(async () => {
-        const big = serverFn(async () => 'x'.repeat(5_000));
+        const big = serverFn({ handler: async () => 'x'.repeat(5_000) });
         const handler = createServerFnHandler({
             functions: { big_fn_00000009: async () => big },
             maxResponseBytes: 1_000
@@ -372,11 +380,13 @@ describe('createServerFnHandler — disposal through the adapter (#571)', () => 
             onDispose(() => void (streamDisposed = true));
             return 's';
         });
-        const buffered = serverFn(async (rq) => buffedValue(rq));
-        const stream = serverStream(async function* (rq) {
-            streamValue(rq);
-            yield 'a';
-            yield 'b';
+        const buffered = serverFn({ handler: async ({ rq }) => buffedValue(rq) });
+        const stream = serverStream({
+            handler: async function* ({ rq }) {
+                streamValue(rq);
+                yield 'a';
+                yield 'b';
+            }
         });
         const handler = createServerFnHandler({
             functions: {

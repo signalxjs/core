@@ -71,7 +71,7 @@ describe('the pipeline order (rfc-server-v4 §1.3)', () => {
                     }
                 }
             } satisfies StandardSchemaV1<string>,
-            handler: async (_rq, input) => {
+            handler: async ({ input }) => {
                 order.push('handler');
                 return input;
             }
@@ -100,7 +100,7 @@ describe('the pipeline order (rfc-server-v4 §1.3)', () => {
             ],
             authenticate: () => ({ id: 'u1' })
         });
-        const fn = serverFn(async () => 'ok');
+        const fn = serverFn({ handler: async () => 'ok' });
         await expect(fn()).resolves.toBe('ok');
         expect(ran).toEqual(['in-process']);
     });
@@ -116,7 +116,7 @@ describe('the pipeline order (rfc-server-v4 §1.3)', () => {
             new Request('http://localhost/_sigx/fn/x', { method: 'POST' })
         );
         await expect(
-            fn.__sigxFn(ctx, { symbol: 'x_fn_1', name: 'x', transport: 'wire' }, [])
+            fn.__sigx.invoke(ctx, { symbol: 'x_fn_1', name: 'x', transport: 'wire' }, [])
         ).resolves.toBe('ok');
         // The endpoint would have run it before invoke; invoke itself must
         // not, or middleware doubles on every wire call.
@@ -191,7 +191,7 @@ describe('authentication is memoized once per request store (rfc-server-v4 §1.3
     it('two calls sharing one context authenticate once; separate calls, separately', async () => {
         const authenticate = vi.fn(() => ({ id: 'u1' }));
         restore = stubServerApp({ authenticate });
-        const fn = serverFn({ handler: async (rq) => (await principal<{ id: string }>(rq))?.id });
+        const fn = serverFn({ handler: async ({ rq }) => (await principal<{ id: string }>(rq))?.id });
 
         const shared = createTestServerFnContext();
         await expect(fn.with({ context: shared })()).resolves.toBe('u1');
@@ -225,7 +225,7 @@ describe('authentication is memoized once per request store (rfc-server-v4 §1.3
         const authenticate = vi.fn(() => ({ id: 'from-cookie' }));
         restore = stubServerApp({ authenticate });
         const fn = serverFn({
-            handler: async (rq) => (await requirePrincipal<{ id: string }>(rq)).id
+            handler: async ({ rq }) => (await requirePrincipal<{ id: string }>(rq)).id
         });
         const ctx = createTestServerFnContext(undefined, { principal: { id: 'seeded' } });
         await expect(fn.with({ context: ctx })()).resolves.toBe('seeded');
@@ -284,8 +284,10 @@ describe('serverStream rides the same pipeline (rfc-server-v4 §1.3)', () => {
     });
 
     it('a bare stream denies on first pull with no app configured', async () => {
-        const stream = serverStream(async function* () {
-            yield 'never';
+        const stream = serverStream({
+            handler: async function* () {
+                yield 'never';
+            }
         });
         const error = await (async () => {
             for await (const chunk of stream()) void chunk;
@@ -309,7 +311,7 @@ describe('serverStream rides the same pipeline (rfc-server-v4 §1.3)', () => {
                 seen.push(op.input);
                 return true;
             },
-            handler: async function* (_rq, input: string) {
+            handler: async function* ({ input }) {
                 yield input;
             }
         });

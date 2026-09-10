@@ -7,12 +7,15 @@ You will rarely import this directly. It is what makes this work:
 
 ```ts
 // src/orders.server.ts
-export const getOrder = serverFn(async (rq, id: string) => ({
-    id,
-    createdAt: new Date(),          // arrives on the client as a Date
-    tags: new Set(['priority']),    // arrives as a Set
-    total: 1999n,                   // arrives as a BigInt
-}));
+export const getOrder = serverFn({
+    input: z.string(),
+    handler: async ({ input: id }) => ({
+        id,
+        createdAt: new Date(),          // arrives on the client as a Date
+        tags: new Set(['priority']),    // arrives as a Set
+        total: 1999n,                   // arrives as a BigInt
+    })
+});
 ```
 
 …and the same for SSR state, resume boundary props, and the cache seed.

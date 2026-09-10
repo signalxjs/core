@@ -153,21 +153,21 @@ export function stubServerApp(config: ServerAppConfig): () => void {
  * purpose, because identity is load-bearing: `useData` keys on the
  * reference, and a wrapper would break the brand checks and `.with()`.
  *
- * The default key is `test/<name>` (the `<stableId>/<name>` shape); pass an
- * explicit key when a test asserts specific cache keys. Streams are
- * rejected in dev — a stream is not a `useData` target and the transform
- * stamps no key for one.
+ * The key is the `<stableId>/<name>` shape the build would mint
+ * (`'test/getVotes'`) — required, since a wrapper knows no name of its own
+ * (rfc-server-v5). Streams are rejected in dev — a stream is not a
+ * `useData` target and the transform stamps no key for one.
  */
-export function stampServerFnKey<F extends Partial<WrappedServerFn>>(fn: F, key?: string): F {
+export function stampServerFnKey<F extends Partial<WrappedServerFn>>(fn: F, key: string): F {
     if (__DEV__) {
         if (key === '') {
             throw new TypeError(
                 `[sigx server/testing] stampServerFnKey: '' is the UNSTAMPED sentinel — ` +
                 `both readers treat it as absent, so stamping it would change nothing ` +
-                `while the types say otherwise. Pass a non-empty key, or omit it.`
+                `while the types say otherwise. Pass a non-empty key.`
             );
         }
-        if (fn.__sigxStream === true) {
+        if (fn.__sigx?.kind === 'stream') {
             throw new TypeError(
                 `[sigx server/testing] stampServerFnKey: a serverStream is not a useData ` +
                 `target (the build stamps no key for one) — a stamped stream would make ` +
@@ -175,6 +175,6 @@ export function stampServerFnKey<F extends Partial<WrappedServerFn>>(fn: F, key?
             );
         }
     }
-    fn.__sigxKey = key ?? `test/${fn.__sigxName || 'fn'}`;
+    fn.__sigxKey = key;
     return fn;
 }

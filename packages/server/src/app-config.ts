@@ -357,7 +357,6 @@ export function serverFeature<P = unknown>(): ServerFeatureContext<P> {
                 {
                     fn: op.fn,
                     ...(op.input !== undefined ? { input: op.input } : {}),
-                    args: op.args ?? [],
                     ...(op.resource !== undefined ? { resource: op.resource } : {})
                 },
                 op.policies as ServerPolicy | readonly ServerPolicy[] | undefined,

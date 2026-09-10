@@ -26,7 +26,7 @@
  */
 
 import type { App, Plugin } from 'sigx';
-import { provideTypeHandlers } from 'sigx/internals';
+import { provideTypeHandlers } from 'sigx';
 import type { TypeHandler } from '@sigx/serialize';
 import { configureServerFn, type ServerFnTransport } from './client/index.js';
 

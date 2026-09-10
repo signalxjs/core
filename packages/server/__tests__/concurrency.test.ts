@@ -16,7 +16,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { perRequest, serverFn, type ServerFnContext } from '../src/index';
+import { perRequest, serverFn, type ServerFnContext, type ServerFnHandlerArgs } from '../src/index';
 import { handleServerFnRequest, type ServerFnRequestOptions } from '../src/server/index';
 import { stubServerApp } from '../src/testing';
 
@@ -68,7 +68,7 @@ describe('interleaved requests keep per-request state apart', () => {
                 seen.push((input as { id: string }).id);
                 return [['cart', (input as { id: string }).id]];
             },
-            handler: async (_rq, input: { id: string }) => {
+            handler: async ({ input }) => {
                 if ((input as { id: string }).id === 'A') await first.wait;
                 return input;
             }
@@ -97,11 +97,13 @@ describe('interleaved requests keep per-request state apart', () => {
         const first = gate();
         const observed: Array<string | undefined> = [];
 
-        const whoami = serverFn(async (rq: ServerFnContext) => {
-            const user = rq.locals.user as string | undefined;
-            if (user === 'alice') await first.wait;
-            observed.push(rq.locals.user as string | undefined);
-            return rq.locals.user;
+        const whoami = serverFn({
+            handler: async ({ rq }) => {
+                const user = rq.locals.user as string | undefined;
+                if (user === 'alice') await first.wait;
+                observed.push(rq.locals.user as string | undefined);
+                return rq.locals.user;
+            }
         });
 
         restoreApp();
@@ -133,13 +135,15 @@ describe('interleaved requests keep per-request state apart', () => {
             return rq.request.headers.get('x-user');
         });
 
-        const readTwice = serverFn(async (rq: ServerFnContext) => {
-            const a = await session(rq);
-            if (a === 'alice') await first.wait;
-            const b = await session(rq);
-            // Same request ⇒ the memoized value, whatever ran in between.
-            expect(b).toBe(a);
-            return a;
+        const readTwice = serverFn({
+            handler: async ({ rq }) => {
+                const a = await session(rq);
+                if (a === 'alice') await first.wait;
+                const b = await session(rq);
+                // Same request ⇒ the memoized value, whatever ran in between.
+                expect(b).toBe(a);
+                return a;
+            }
         });
 
         const options = { resolve: () => readTwice } as unknown as ServerFnRequestOptions;
@@ -156,10 +160,12 @@ describe('interleaved requests keep per-request state apart', () => {
 
     it('response headers set by one request do not appear on the other', async () => {
         const first = gate();
-        const setsCookie = serverFn(async (rq: ServerFnContext, who: string) => {
-            rq.responseHeaders.set('x-who', who);
-            if (who === 'alice') await first.wait;
-            return who;
+        const setsCookie = serverFn({
+            handler: async ({ input: who, rq }: ServerFnHandlerArgs<string>) => {
+                rq.responseHeaders.set('x-who', who);
+                if (who === 'alice') await first.wait;
+                return who;
+            }
         });
 
         const options = { resolve: () => setsCookie } as unknown as ServerFnRequestOptions;

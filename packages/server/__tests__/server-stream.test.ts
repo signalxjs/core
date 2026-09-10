@@ -1,11 +1,12 @@
 /**
  * @vitest-environment node
  *
- * serverStream() — async-generator server functions (rfc-server §6.1):
- * the wrapper (in-process = the generator itself, live-client guard), the
- * endpoint's NDJSON transport (chunk/done/error lines, header freeze at
- * first yield, §5 masking), and the streaming client stub (AsyncIterable,
- * lazy start, abort on break, truncation detection).
+ * serverStream() — async-generator server functions (rfc-server §6.1; one
+ * `{ handler }` shape since rfc-server-v5 §1.1, #692): the wrapper
+ * (in-process = the generator itself, live-client guard), the endpoint's
+ * NDJSON transport (chunk/done/error lines, header freeze at first yield,
+ * §5 masking), and the streaming client stub (AsyncIterable, lazy start,
+ * abort on break, truncation detection).
  */
 
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
@@ -50,32 +51,44 @@ afterEach(() => {
 /* ------------------------------------------------------------------ */
 
 describe('serverStream — wrapper', () => {
-    it('is marked for transports and in-process calls run the invoke pipeline', async () => {
-        const count = serverStream(async function* count(_rq, upTo: number) {
-            for (let i = 1; i <= upTo; i++) yield i;
+    it('carries a stream descriptor and in-process calls run the invoke pipeline', async () => {
+        const count = serverStream({
+            handler: async function* ({ input: upTo }: { input: number }) {
+                for (let i = 1; i <= upTo; i++) yield i;
+            }
         });
-        expect(count.__sigxStream).toBe(true);
-        expect(typeof count.__sigxFn).toBe('function');
+        expect(count.__sigx.kind).toBe('stream');
+        expect(typeof count.__sigx.invoke).toBe('function');
+        expect(count.__sigx.anon).toBe(false);
+        expect(count.__sigx.form).toBe(false);
+        expect(Object.isFrozen(count.__sigx)).toBe(true);
         await expect(collect(count(3))).resolves.toEqual([1, 2, 3]);
     });
 
     it('rq.request throws the detached-context error in-process', async () => {
-        const leaky = serverStream(async function* (rq) {
-            yield rq.request.url;
+        const leaky = serverStream({
+            handler: async function* ({ rq }) {
+                yield rq.request.url;
+            }
         });
         await expect(collect(leaky())).rejects.toThrow(/in-process server-function call/);
     });
 
     it('throws in a declared live client — stream bodies never run there', () => {
-        const s = serverStream(async function* leakedStream() {
-            yield 'secret';
+        const s = serverStream({
+            handler: async function* () {
+                yield 'secret';
+            }
         });
         (globalThis as { __SIGX_LIVE_CLIENT__?: unknown }).__SIGX_LIVE_CLIENT__ = true;
-        expect(() => s()).toThrow(/"leakedStream" reached a live client unextracted/);
+        // The name in the message comes from the build-stamped key, and the
+        // build stamps none for a stream (`stampServerFnKey` refuses one), so
+        // the guard reads nameless here — the throw is the contract.
+        expect(() => s()).toThrow(/server function reached a live client unextracted/);
         // The .with() path goes through the same guard — a bound-options call
         // is not a way around it (#448).
         expect(() => s.with({ signal: new AbortController().signal })()).toThrow(
-            /"leakedStream" reached a live client unextracted/
+            /server function reached a live client unextracted/
         );
     });
 });
@@ -86,9 +99,11 @@ describe('serverStream — wrapper', () => {
 
 describe('serverStream — .with() in-process (#448)', () => {
     it('.with({ context }) supplies the request an SSR-time stream needs', async () => {
-        const tail = serverStream(async function* (rq) {
-            yield rq.url.pathname;
-            yield rq.request.headers.get('cookie');
+        const tail = serverStream({
+            handler: async function* ({ rq }) {
+                yield rq.url.pathname;
+                yield rq.request.headers.get('cookie');
+            }
         });
         const request = new Request('https://example.com/feed', {
             headers: { cookie: 'session=alice' }
@@ -100,8 +115,10 @@ describe('serverStream — .with() in-process (#448)', () => {
     });
 
     it('accepts a partial context, not just a Request', async () => {
-        const readsLocals = serverStream(async function* (rq) {
-            yield rq.locals.user;
+        const readsLocals = serverStream({
+            handler: async function* ({ rq }) {
+                yield rq.locals.user;
+            }
         });
         await expect(
             collect(readsLocals.with({ context: { locals: { user: 'bob' } } })())
@@ -110,10 +127,12 @@ describe('serverStream — .with() in-process (#448)', () => {
 
     it('.with({ signal }) becomes rq.abortSignal', async () => {
         const controller = new AbortController();
-        const watches = serverStream(async function* (rq) {
-            yield rq.abortSignal.aborted;
-            controller.abort();
-            yield rq.abortSignal.aborted;
+        const watches = serverStream({
+            handler: async function* ({ rq }) {
+                yield rq.abortSignal.aborted;
+                controller.abort();
+                yield rq.abortSignal.aborted;
+            }
         });
         await expect(collect(watches.with({ signal: controller.signal })())).resolves.toEqual([
             false,
@@ -124,8 +143,10 @@ describe('serverStream — .with() in-process (#448)', () => {
     it('a per-call signal still wins over the supplied context request signal', async () => {
         const outer = new AbortController();
         const requestAbort = new AbortController();
-        const reads = serverStream(async function* (rq) {
-            yield rq.abortSignal;
+        const reads = serverStream({
+            handler: async function* ({ rq }) {
+                yield rq.abortSignal;
+            }
         });
         const [signal] = await collect(
             reads.with({
@@ -138,8 +159,10 @@ describe('serverStream — .with() in-process (#448)', () => {
 
     it('.with({ headers }) dev-warns — there is no HTTP request in-process', async () => {
         const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-        const s = serverStream(async function* () {
-            yield 1;
+        const s = serverStream({
+            handler: async function* () {
+                yield 1;
+            }
         });
         await collect(s.with({ headers: { 'x-trace-id': 't1' } })());
         expect(warn).toHaveBeenCalledTimes(1);
@@ -149,22 +172,28 @@ describe('serverStream — .with() in-process (#448)', () => {
     it('is silent in production', async () => {
         vi.stubEnv('NODE_ENV', 'production');
         const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-        const s = serverStream(async function* () {
-            yield 1;
+        const s = serverStream({
+            handler: async function* () {
+                yield 1;
+            }
         });
         await collect(s.with({ headers: { 'x-trace-id': 't1' } })());
         expect(warn).not.toHaveBeenCalled();
     });
 
     it('a bare .with() call behaves exactly like a plain one', async () => {
-        const count = serverStream(async function* (_rq, upTo: number) {
-            for (let i = 1; i <= upTo; i++) yield i;
+        const count = serverStream({
+            handler: async function* ({ input: upTo }: { input: number }) {
+                for (let i = 1; i <= upTo; i++) yield i;
+            }
         });
         await expect(collect(count.with()(2))).resolves.toEqual([1, 2]);
         // …and still throws the detached-context error when nothing supplies
         // a request, exactly as the plain call does.
-        const leaky = serverStream(async function* (rq) {
-            yield rq.request.url;
+        const leaky = serverStream({
+            handler: async function* ({ rq }) {
+                yield rq.request.url;
+            }
         });
         await expect(collect(leaky.with({})())).rejects.toThrow(/in-process server-function call/);
     });
@@ -192,11 +221,13 @@ const lines = async (res: Response): Promise<unknown[]> =>
 
 describe('serverStream — endpoint NDJSON', () => {
     it('streams {"chunk"} lines then {"done":1} as application/x-ndjson', async () => {
-        // Silence the #412 unvalidated-wire-args warning — wire args on a
-        // stream are exactly what it fires on.
+        // Silence the #437 unvalidated-wire-input warning — a wire argument
+        // on a stream with no `input` is exactly what it fires on.
         vi.spyOn(console, 'warn').mockImplementation(() => {});
-        const s = serverStream(async function* (_rq, upTo: number) {
-            for (let i = 1; i <= upTo; i++) yield `part-${i}`;
+        const s = serverStream({
+            handler: async function* ({ input: upTo }: { input: number }) {
+                for (let i = 1; i <= upTo; i++) yield `part-${i}`;
+            }
         });
         const res = await post(s, '{"args":[2]}');
         expect(res.status).toBe(200);
@@ -209,15 +240,17 @@ describe('serverStream — endpoint NDJSON', () => {
     });
 
     it('an empty generator streams just the done line', async () => {
-        const s = serverStream(async function* () {});
+        const s = serverStream({ handler: async function* () {} });
         await expect(lines(await post(s))).resolves.toEqual([{ done: 1 }]);
     });
 
     it('headers and status set BEFORE the first yield apply to the response', async () => {
-        const s = serverStream(async function* (rq) {
-            rq.responseHeaders.set('x-stream', 'yes');
-            rq.status(201);
-            yield 'a';
+        const s = serverStream({
+            handler: async function* ({ rq }) {
+                rq.responseHeaders.set('x-stream', 'yes');
+                rq.status(201);
+                yield 'a';
+            }
         });
         const res = await post(s);
         expect(res.status).toBe(201);
@@ -225,10 +258,12 @@ describe('serverStream — endpoint NDJSON', () => {
     });
 
     it('a throw BEFORE the first yield is an ordinary buffered JSON error', async () => {
-        const s = serverStream(async function* (rq) {
-            void rq;
-            throw new ServerFnError(403, 'not yours');
-            yield 'never';
+        const s = serverStream({
+            handler: async function* ({ rq }) {
+                void rq;
+                throw new ServerFnError(403, 'not yours');
+                yield 'never';
+            }
         });
         const res = await post(s);
         expect(res.status).toBe(403);
@@ -239,9 +274,11 @@ describe('serverStream — endpoint NDJSON', () => {
     });
 
     it('a mid-stream ServerFnError travels in-band verbatim', async () => {
-        const s = serverStream(async function* () {
-            yield 'ok';
-            throw new ServerFnError(410, 'source gone', { at: 2 });
+        const s = serverStream({
+            handler: async function* () {
+                yield 'ok';
+                throw new ServerFnError(410, 'source gone', { at: 2 });
+            }
         });
         await expect(lines(await post(s))).resolves.toEqual([
             { chunk: 'ok' },
@@ -251,9 +288,11 @@ describe('serverStream — endpoint NDJSON', () => {
 
     it('a mid-stream generic throw is masked in production', async () => {
         vi.stubEnv('NODE_ENV', 'production');
-        const s = serverStream(async function* () {
-            yield 'ok';
-            throw new Error('secret internals');
+        const s = serverStream({
+            handler: async function* () {
+                yield 'ok';
+                throw new Error('secret internals');
+            }
         });
         const emitted = await lines(await post(s));
         expect(emitted[0]).toEqual({ chunk: 'ok' });
@@ -264,9 +303,11 @@ describe('serverStream — endpoint NDJSON', () => {
     it('a mid-stream masked throw still reaches the onError seam (#349)', async () => {
         vi.stubEnv('NODE_ENV', 'production');
         const errors: unknown[] = [];
-        const s = serverStream(async function* () {
-            yield 'ok';
-            throw new Error('secret internals');
+        const s = serverStream({
+            handler: async function* () {
+                yield 'ok';
+                throw new Error('secret internals');
+            }
         });
         const res = await handleServerFnRequest(
             new Request(`${ORIGIN}/_sigx/fn/s_fn_00000001`, {
@@ -289,9 +330,11 @@ describe('serverStream — endpoint NDJSON', () => {
 
     it('a mid-stream ServerFnError does NOT fire onError', async () => {
         const errors: unknown[] = [];
-        const s = serverStream(async function* () {
-            yield 'ok';
-            throw new ServerFnError(410, 'source gone');
+        const s = serverStream({
+            handler: async function* () {
+                yield 'ok';
+                throw new ServerFnError(410, 'source gone');
+            }
         });
         const res = await handleServerFnRequest(
             new Request(`${ORIGIN}/_sigx/fn/s_fn_00000001`, {
@@ -320,12 +363,14 @@ describe('serverStream — endpoint NDJSON', () => {
     it('an unserializable FIRST chunk is a buffered error AND the generator is disposed', async () => {
         vi.stubEnv('NODE_ENV', 'production');
         let finallyRan = false;
-        const s = serverStream(async function* () {
-            try {
-                yield cyclic(); // circular — still unencodable
-                yield 'never';
-            } finally {
-                finallyRan = true;
+        const s = serverStream({
+            handler: async function* () {
+                try {
+                    yield cyclic(); // circular — still unencodable
+                    yield 'never';
+                } finally {
+                    finallyRan = true;
+                }
             }
         });
         const res = await post(s);
@@ -340,13 +385,15 @@ describe('serverStream — endpoint NDJSON', () => {
     it('an unserializable MID-STREAM chunk ends the stream in-band and disposes the generator', async () => {
         vi.stubEnv('NODE_ENV', 'production');
         let finallyRan = false;
-        const s = serverStream(async function* () {
-            try {
-                yield 'ok';
-                yield cyclic();
-                yield 'never';
-            } finally {
-                finallyRan = true;
+        const s = serverStream({
+            handler: async function* () {
+                try {
+                    yield 'ok';
+                    yield cyclic();
+                    yield 'never';
+                } finally {
+                    finallyRan = true;
+                }
             }
         });
         const emitted = await lines(await post(s));
@@ -359,9 +406,11 @@ describe('serverStream — endpoint NDJSON', () => {
         // Both of these used to be the failure cases above: BigInt threw in
         // JSON.stringify, so it terminated the stream either buffered or
         // in-band depending on position.
-        const s = serverStream(async function* () {
-            yield { big: 10n };
-            yield { at: new Date(5) };
+        const s = serverStream({
+            handler: async function* () {
+                yield { big: 10n };
+                yield { at: new Date(5) };
+            }
         });
         const emitted = await lines(await post(s));
         expect(emitted[0]).toEqual({ chunk: { big: { $bigint: '10' } } });
@@ -371,11 +420,13 @@ describe('serverStream — endpoint NDJSON', () => {
 
     it('cancelling the response body returns the generator (finally runs)', async () => {
         let finallyRan = false;
-        const s = serverStream(async function* () {
-            try {
-                for (let i = 0; ; i++) yield i;
-            } finally {
-                finallyRan = true;
+        const s = serverStream({
+            handler: async function* () {
+                try {
+                    for (let i = 0; ; i++) yield i;
+                } finally {
+                    finallyRan = true;
+                }
             }
         });
         const res = await post(s);
@@ -386,8 +437,10 @@ describe('serverStream — endpoint NDJSON', () => {
     });
 
     it('app middleware still runs before a stream (a veto is a buffered error)', async () => {
-        const s = serverStream(async function* () {
-            yield 'never';
+        const s = serverStream({
+            handler: async function* () {
+                yield 'never';
+            }
         });
         restoreApp();
         restoreApp = stubServerApp({
@@ -429,14 +482,14 @@ describe('__serverStreamStub', () => {
         const mock = vi.fn(async () => ndjsonResponse('{"chunk":"a"}\n{"chunk":"b"}\n{"done":1}\n'));
         vi.stubGlobal('fetch', mock);
         const stub = __serverStreamStub('s_fn_00000001', 'explain', '/_sigx/fn');
-        const iterable = stub('topic', 2);
+        const iterable = stub({ topic: 'topic', depth: 2 });
         expect(mock).not.toHaveBeenCalled(); // lazy — no request until iterated
         await expect(collect(iterable)).resolves.toEqual(['a', 'b']);
         expect(mock).toHaveBeenCalledTimes(1);
         const [url, init] = mock.mock.calls[0] as unknown as [string, RequestInit];
         expect(url).toBe('/_sigx/fn/s_fn_00000001');
         expect(init.method).toBe('POST');
-        expect(init.body).toBe('{"args":["topic",2]}');
+        expect(init.body).toBe('{"args":[{"topic":"topic","depth":2}]}');
         expect(init.signal).toBeInstanceOf(AbortSignal);
     });
 
@@ -641,44 +694,51 @@ describe('__serverStreamStub', () => {
 describe('serverStream — composition sanity', () => {
     it('a regular serverFn is unaffected by the stream branch', async () => {
         vi.spyOn(console, 'warn').mockImplementation(() => {});
-        const add = serverFn(async (_rq, a: number, b: number) => a + b);
-        const res = await post(add, '{"args":[2,3]}');
+        const add = serverFn({
+            handler: async ({ input: [a, b] }: { input: [number, number] }) => a + b
+        });
+        const res = await post(add, '{"args":[[2,3]]}');
         expect(res.headers.get('content-type')).toBe('application/json');
         await expect(res.json()).resolves.toEqual({ data: 5 });
     });
 });
 
 /* ------------------------------------------------------------------ */
-/* unvalidated wire args (#412)                                       */
+/* unvalidated wire input (#437)                                       */
 /* ------------------------------------------------------------------ */
 
-describe('serverStream — unvalidated wire args (#412)', () => {
-    it('warns once on a wire call with args, pointing at the input form first', async () => {
+describe('serverStream — unvalidated wire input (#437)', () => {
+    it('warns once on a wire call carrying an argument when no `input` is declared', async () => {
         const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-        const s = serverStream(async function* (_rq, upTo: number) {
-            for (let i = 1; i <= upTo; i++) yield i;
+        const s = serverStream({
+            handler: async function* ({ input: upTo }: { input: number }) {
+                for (let i = 1; i <= upTo; i++) yield i;
+            }
         });
         await post(s, '{"args":[2]}');
         expect(warn).toHaveBeenCalledOnce();
         expect(warn).toHaveBeenCalledWith(expect.stringContaining('serverStream'));
-        // The primary remedy is the single-input options form (#572)…
         expect(warn).toHaveBeenCalledWith(
-            expect.stringContaining('serverStream({ input: Schema, handler })')
+            expect.stringContaining('received a wire argument with no `input` validator')
         );
-        // …with generator-top validation kept as the multi-argument remedy.
-        expect(warn).toHaveBeenCalledWith(expect.stringContaining('top of the generator'));
+        // The remedy is the schema, not a hand-rolled check in the generator.
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining('Declare `input`'));
         await post(s, '{"args":[3]}');
         expect(warn).toHaveBeenCalledOnce();
     });
 
     it('does not warn for zero-arg wire calls or in-process iteration', async () => {
         const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-        const zero = serverStream(async function* () {
-            yield 'x';
+        const zero = serverStream({
+            handler: async function* () {
+                yield 'x';
+            }
         });
         await post(zero);
-        const inProc = serverStream(async function* (_rq, upTo: number) {
-            for (let i = 1; i <= upTo; i++) yield i;
+        const inProc = serverStream({
+            handler: async function* ({ input: upTo }: { input: number }) {
+                for (let i = 1; i <= upTo; i++) yield i;
+            }
         });
         await expect(collect(inProc(2))).resolves.toEqual([1, 2]);
         expect(warn).not.toHaveBeenCalled();
@@ -687,8 +747,10 @@ describe('serverStream — unvalidated wire args (#412)', () => {
     it('is silent in production', async () => {
         vi.stubEnv('NODE_ENV', 'production');
         const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-        const s = serverStream(async function* (_rq, upTo: number) {
-            yield upTo;
+        const s = serverStream({
+            handler: async function* ({ input: upTo }: { input: number }) {
+                yield upTo;
+            }
         });
         await post(s, '{"args":[2]}');
         expect(warn).not.toHaveBeenCalled();
@@ -711,10 +773,12 @@ describe('serverStream — the in-process pipeline (F-B)', () => {
             ],
             authenticate: () => ({ id: 'tester' })
         });
-        const feed = serverStream(async function* () {
-            trace.push('body');
-            yield 'a';
-            yield 'b';
+        const feed = serverStream({
+            handler: async function* () {
+                trace.push('body');
+                yield 'a';
+                yield 'b';
+            }
         });
         // Nothing has run yet: an async generator does not execute until it
         // is pulled, which is what keeps the call itself synchronous.
@@ -734,8 +798,10 @@ describe('serverStream — the in-process pipeline (F-B)', () => {
             ],
             authenticate: () => ({ id: 'tester' })
         });
-        const feed = serverStream(async function* () {
-            yield 'secret';
+        const feed = serverStream({
+            handler: async function* () {
+                yield 'secret';
+            }
         });
         // The call does not throw — the wire path's pre-first-yield error
         // surfaces in the same place.
@@ -747,12 +813,14 @@ describe('serverStream — the in-process pipeline (F-B)', () => {
 
     it('forwards consumer cancellation to the impl generator (yield* delegation)', async () => {
         let cleaned = false;
-        const feed = serverStream(async function* () {
-            try {
-                yield 1;
-                yield 2;
-            } finally {
-                cleaned = true;
+        const feed = serverStream({
+            handler: async function* () {
+                try {
+                    yield 1;
+                    yield 2;
+                } finally {
+                    cleaned = true;
+                }
             }
         });
         for await (const value of feed()) {
@@ -772,8 +840,10 @@ describe('serverStream — the in-process pipeline (F-B)', () => {
             ],
             authenticate: () => ({ id: 'tester' })
         });
-        const feed = serverStream(async function* () {
-            yield 'secret';
+        const feed = serverStream({
+            handler: async function* () {
+                yield 'secret';
+            }
         });
         const response = await handleServerFnRequest(
             new Request(`${ORIGIN}/_sigx/fn/feed_fn_1`, {
@@ -790,10 +860,10 @@ describe('serverStream — the in-process pipeline (F-B)', () => {
 });
 
 /* ------------------------------------------------------------------ */
-/* the options form (#489)                                            */
+/* declarations next to the handler (#489)                             */
 /* ------------------------------------------------------------------ */
 
-describe('serverStream — options form', () => {
+describe('serverStream — declarations', () => {
     it('runs its authorize policies before the first yield', async () => {
         const trace: string[] = [];
         const feed = serverStream({
@@ -836,16 +906,26 @@ describe('serverStream — options form', () => {
         expect(trace).toEqual(['middleware', 'policy']);
     });
 
-    it('keeps the wrapper contract — brands, .with(), and multi-arg calls', async () => {
+    it('keeps the wrapper contract — descriptor, .with(), and a tuple input', async () => {
         const range = serverStream({
-            handler: async function* (_rq, from: number, to: number) {
+            handler: async function* ({ input: [from, to] }: { input: [number, number] }) {
                 for (let i = from; i <= to; i++) yield i;
             }
         });
-        expect(range.__sigxStream).toBe(true);
-        expect(typeof range.__sigxFn).toBe('function');
-        await expect(collect(range(1, 3))).resolves.toEqual([1, 2, 3]);
-        await expect(collect(range.with({})(2, 3))).resolves.toEqual([2, 3]);
+        expect(range.__sigx.kind).toBe('stream');
+        expect(typeof range.__sigx.invoke).toBe('function');
+        await expect(collect(range([1, 3]))).resolves.toEqual([1, 2, 3]);
+        await expect(collect(range.with({})([2, 3]))).resolves.toEqual([2, 3]);
+    });
+
+    it('records allowAnonymous on the descriptor', () => {
+        const open = serverStream({
+            allowAnonymous: true,
+            handler: async function* () {
+                yield 1;
+            }
+        });
+        expect(open.__sigx.anon).toBe(true);
     });
 
     it('gives the handler `this` — a method-shorthand declaration works', async () => {
@@ -881,12 +961,14 @@ describe('serverStream — maxResponseBytes (#571)', () => {
         vi.stubEnv('NODE_ENV', 'production');
         let cleaned = false;
         const seen: unknown[] = [];
-        const s = serverStream(async function* () {
-            try {
-                yield 'x'.repeat(2_000);
-                yield 'never';
-            } finally {
-                cleaned = true;
+        const s = serverStream({
+            handler: async function* () {
+                try {
+                    yield 'x'.repeat(2_000);
+                    yield 'never';
+                } finally {
+                    cleaned = true;
+                }
             }
         });
         try {
@@ -907,12 +989,14 @@ describe('serverStream — maxResponseBytes (#571)', () => {
         vi.stubEnv('NODE_ENV', 'production');
         let cleaned = false;
         const seen: unknown[] = [];
-        const s = serverStream(async function* () {
-            try {
-                yield 'small';
-                yield 'y'.repeat(2_000);
-            } finally {
-                cleaned = true;
+        const s = serverStream({
+            handler: async function* () {
+                try {
+                    yield 'small';
+                    yield 'y'.repeat(2_000);
+                } finally {
+                    cleaned = true;
+                }
             }
         });
         try {
@@ -929,8 +1013,10 @@ describe('serverStream — maxResponseBytes (#571)', () => {
     });
 
     it('the cap is CUMULATIVE — chunks individually under it still end the stream', async () => {
-        const s = serverStream(async function* () {
-            for (let i = 0; i < 10; i++) yield 'z'.repeat(100);
+        const s = serverStream({
+            handler: async function* () {
+                for (let i = 0; i < 10; i++) yield 'z'.repeat(100);
+            }
         });
         const res = await capped(s, 450);
         const parsed = await lines(res);
@@ -940,9 +1026,11 @@ describe('serverStream — maxResponseBytes (#571)', () => {
     });
 
     it('a stream under the cap is untouched', async () => {
-        const s = serverStream(async function* () {
-            yield 'a';
-            yield 'b';
+        const s = serverStream({
+            handler: async function* () {
+                yield 'a';
+                yield 'b';
+            }
         });
         const res = await capped(s, 10_000);
         await expect(lines(res)).resolves.toEqual([{ chunk: 'a' }, { chunk: 'b' }, { done: 1 }]);
@@ -950,7 +1038,7 @@ describe('serverStream — maxResponseBytes (#571)', () => {
 });
 
 /* ------------------------------------------------------------------ */
-/* the single-input options form (#572)                               */
+/* the declared `input` (#572)                                         */
 /* ------------------------------------------------------------------ */
 
 /** Coercing schema — proves the VALIDATED value (not the raw arg) reaches
@@ -968,11 +1056,11 @@ const trimmed: StandardSchemaV1<string> = {
     }
 };
 
-describe('serverStream — options form with input (#572)', () => {
+describe('serverStream — declared input (#572)', () => {
     it('in-process: the handler receives the VALIDATED value', async () => {
         const shout = serverStream({
             input: trimmed,
-            handler: async function* (_rq, input) {
+            handler: async function* ({ input }) {
                 yield input.toUpperCase();
             }
         });
@@ -982,7 +1070,7 @@ describe('serverStream — options form with input (#572)', () => {
     it('in-process: invalid input rejects on the first pull, not at the call', async () => {
         const shout = serverStream({
             input: trimmed,
-            handler: async function* (_rq, input) {
+            handler: async function* ({ input }) {
                 yield input;
             }
         });
@@ -1015,7 +1103,7 @@ describe('serverStream — options form with input (#572)', () => {
         });
         const feed = serverStream({
             input: { '~standard': { version: 1, vendor: 'test', validate } },
-            handler: async function* (_rq, input) {
+            handler: async function* ({ input }) {
                 yield input;
             }
         });
@@ -1027,7 +1115,7 @@ describe('serverStream — options form with input (#572)', () => {
     it('over the WIRE, invalid input is a buffered JSON 400, not a stream', async () => {
         const shout = serverStream({
             input: trimmed,
-            handler: async function* (_rq, input) {
+            handler: async function* ({ input }) {
                 yield `secret:${input}`;
             }
         });
@@ -1042,7 +1130,7 @@ describe('serverStream — options form with input (#572)', () => {
     it('over the WIRE, valid input streams NDJSON carrying the validated value', async () => {
         const shout = serverStream({
             input: trimmed,
-            handler: async function* (_rq, input) {
+            handler: async function* ({ input }) {
                 yield input.toUpperCase();
             }
         });
@@ -1052,25 +1140,36 @@ describe('serverStream — options form with input (#572)', () => {
         await expect(lines(res)).resolves.toEqual([{ chunk: 'HI' }, { done: 1 }]);
     });
 
-    it('extra wire args hit the arity gate with the stream-specific message', async () => {
+    it('extra wire args hit the universal arity gate (400, buffered)', async () => {
         const shout = serverStream({
             input: trimmed,
-            handler: async function* (_rq, input) {
+            handler: async function* ({ input }) {
                 yield input;
             }
         });
         const res = await post(shout, '{"args":["a","b"]}');
         expect(res.status).toBe(400);
         const body = (await res.json()) as { error: { message: string } };
-        expect(body.error.message).toBe(
-            'a serverStream with `input` takes a single input argument'
-        );
+        expect(body.error.message).toBe('server functions take a single input argument');
+    });
+
+    it('the arity gate holds without a declared `input` too', async () => {
+        vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const s = serverStream({
+            handler: async function* ({ input }: { input: string }) {
+                yield input;
+            }
+        });
+        const res = await post(s, '{"args":["a","b"]}');
+        expect(res.status).toBe(400);
+        const body = (await res.json()) as { error: { message: string } };
+        expect(body.error.message).toBe('server functions take a single input argument');
     });
 
     it('a zero-arg wire call validates undefined', async () => {
         const shout = serverStream({
             input: trimmed,
-            handler: async function* (_rq, input) {
+            handler: async function* ({ input }) {
                 yield input;
             }
         });
@@ -1090,7 +1189,7 @@ describe('serverStream — options form with input (#572)', () => {
                             : { issues: [{ message: 'not a number' }] }
                 }
             },
-            handler: async function* (_rq, input: number) {
+            handler: async function* ({ input }) {
                 yield input;
             }
         });
@@ -1125,7 +1224,7 @@ describe('serverStream — options form with input (#572)', () => {
                     }
                 }
             },
-            handler: async function* (_rq, input: string) {
+            handler: async function* ({ input }) {
                 trace.push('body');
                 yield input;
             }
@@ -1139,7 +1238,7 @@ describe('serverStream — options form with input (#572)', () => {
         const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
         const shout = serverStream({
             input: trimmed,
-            handler: async function* (_rq, input) {
+            handler: async function* ({ input }) {
                 yield input;
             }
         });
@@ -1147,10 +1246,10 @@ describe('serverStream — options form with input (#572)', () => {
         expect(warn).not.toHaveBeenCalled();
     });
 
-    it('gives the input-form handler `this` — method shorthand works', async () => {
+    it('gives the input-declaring handler `this` — method shorthand works', async () => {
         const feed = serverStream({
             input: trimmed,
-            async *handler(_rq, input) {
+            async *handler({ input }) {
                 yield input;
             }
         });

@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Removed
+
+- **`@sigx/server`: the direct authoring form and the eight loose wrapper
+  stamps (#692, rfc-server-v5 §1.1/§1.5).** `serverFn(async (rq, …) => …)`
+  and the multi-argument `serverStream` shapes are gone — one options form,
+  one `input` (or none), the arity guard universal. `ServerStreamInputOptions`,
+  `ServerPolicyOp.args`, `ServerFeatureOp.args`, and `__sigxFn` /
+  `__sigxName` / `__sigxStream` / `__sigxGet` / `__sigxCacheControl` /
+  `__sigxForm` / `__sigxAnon` / `__sigxInvalidates` are removed; the wrapper
+  carries one frozen `__sigx: ServerFnDescriptor`, and `__sigxKey` is the
+  only cross-package brand. See `packages/server/CHANGELOG.md` and
+  `docs/migrations/1.0-serverfn.md`.
+
 ### Added
 
 - **`@sigx/reactivity` / `@sigx/runtime-core`: a duplicate-copy guard (#633
@@ -79,7 +92,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   components (no symbols) and manifest-less dev renders emit nothing; the
   component (upgrade) chunk is never warmed — upgrade-on-write stays lazy.
 
+- **`provideTypeHandlers` is exported from the `@sigx/runtime-core` and
+  `sigx` roots (#692, rfc-1.0 §1.2's promotion rule, the #449 precedent).**
+  `@sigx/server/plugin` was the last first-party pack importing it from
+  `sigx/internals`; a third-party pack can now register an app's type
+  handlers without `/internals`. `TYPE_HANDLER_TOKEN` stays internal.
+
 ### Changed
+
+- **`@sigx/server`: the handler takes one object, `handler({ input, rq })`
+  (#692, rfc-server-v5 §1.2).** Streams: `async function* ({ input, rq })`.
+  `handler(rq, input)` → `handler({ input, rq })`; `handler(rq)` →
+  `handler({ rq })`; a no-schema typed input annotates the object
+  (`({ input }: { input: Foo })`). Policies, middleware, `perRequest` and
+  `invalidates` keep their positional shapes. Also: in-process
+  `info.symbol` is now the stamped key instead of `''`;
+  `stampServerFnKey(fn, key)` requires the key. Full table in the package
+  changelog.
+- **`@sigx/runtime-core`: the default `useData(fn)` fetcher threads the
+  cell's abort signal (#692, rfc-server-v5 §1.8).** A fn-headed tuple now
+  calls `fn.with({ signal: ctx.signal })(input)` when the ref exposes
+  `.with` (every `@sigx/server` wrapper and stub does), so releasing the
+  sole consumer of a cell aborts the RPC — before, the signal was dropped
+  and the fetch ran to completion. `ServerFnDataRef` gains an optional
+  `with` member; a hand-built ref without one is called directly as before.
 
 - **`@sigx/runtime-core` no longer declares `JSX.IntrinsicElements` (#529,
   rfc-1.0 §4.1).** The `[elemName: string]: any` index signature is gone:
@@ -118,7 +154,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
     breaks; build such elements through `jsx()` or by calling the factory.
   The brand is a module-local symbol, not exported: nothing downstream can
   spell it, and a second copy of the runtime does not recognise it.
-
 
 - **Release tooling hardened for 1.0 (#363).** `scripts/verify-pack.js` now
   packs and smoke-tests all 14 publishable packages — `@sigx/resume`,

@@ -7,11 +7,11 @@ import type { ServerFnContext, ServerFnContextInit } from './context';
 /** Identity of the function being invoked, as the pipeline sees it. */
 export interface ServerFnInfo {
     /**
-     * The content-hashed transport symbol (`<name>_fn_<hash8>`), or the
-     * stable id under `role: 'client'`. Pure IDENTITY — `''` means nothing
-     * stamped one (a unit test importing the source module); it no longer
-     * doubles as the transport discriminator (rfc-server-v4 §1.1), which is
-     * {@link ServerFnInfo.transport}.
+     * The function's identity: the build-stamped stable key
+     * (`<id>/<name>`), identical on the wire and in-process
+     * (rfc-server-v5 §1.3). `''` means nothing stamped one (a unit test
+     * importing the source module). Pure identity — the transport
+     * discriminator is {@link ServerFnInfo.transport}.
      */
     symbol: string;
     /** The export name of the function. */
@@ -67,16 +67,13 @@ export type ServerPolicy<P = unknown> = (
 export interface ServerPolicyOp {
     fn: ServerFnInfo;
     /**
-     * VALIDATED single input (options-form fn / input-form stream) — the
-     * resource for resource-based policies ("may P edit post
-     * `op.input.id`"). `undefined` on the direct form and no-input streams.
+     * The function's single input — VALIDATED when the definition declares
+     * `input` (the resource for resource-based policies: "may P edit post
+     * `op.input.id`"), the RAW wire argument when it does not (unvalidated,
+     * attacker-controlled, dev-warned — treat it as untrusted), and
+     * `undefined` when the call carried no argument at all.
      */
     input?: unknown;
-    /**
-     * The raw argument list — for multi-argument direct/stream forms this
-     * is unvalidated wire data, the same trust level the handler receives.
-     */
-    args: readonly unknown[];
     /**
      * Filled by packs whose operations target an instance — `@sigx/actors`
      * passes `{ kind: 'actor', type, key, method }` (rfc-server-v4 §7).
@@ -129,10 +126,9 @@ export interface ServerFeatureOp<P = unknown> {
      *    so they must handle `null` rather than assume an identity.
      */
     allowAnonymous?: boolean;
-    /** Validated input, where the feature has one. */
+    /** Validated input, where the feature has one. A feature whose
+     *  operation is a method call passes its argument list AS the input. */
     input?: unknown;
-    /** The raw argument list. */
-    args?: readonly unknown[];
     /** The instance an operation targets — `@sigx/actors` fills this. */
     resource?: ServerPolicyOp['resource'];
 }
@@ -157,11 +153,11 @@ export interface ServerFeatureOp<P = unknown> {
  * principal, and therefore a deny for anything not `allowAnonymous`.
  *
  * Anonymity on the wire is read off the WRAPPER, not passed by the feature:
- * `handleServerFnRequest` runs the prelude with
- * `fn.__sigxAnon === true` (`server/index.ts`), the flag `serverFn` /
- * `serverStream` stamp from `allowAnonymous: true` (see
- * {@link WrappedServerFn.__sigxAnon}). A feature that synthesizes its own
- * wrappers and hands them to core's endpoint must stamp it the same way —
+ * `handleServerFnRequest` runs the prelude with `fn.__sigx.anon`
+ * (`server/index.ts`), the flag `serverFn` / `serverStream` record from
+ * `allowAnonymous: true` (see {@link ServerFnDescriptor.anon}). A feature
+ * that synthesizes its own wrappers and hands them to core's endpoint must
+ * carry a descriptor the same way —
  * otherwise its anonymous-allowed operations work in-process (where the
  * feature passes `allowAnonymous` itself) and 401 on the wire (#628).
  */
@@ -223,8 +219,8 @@ export interface ServerFeatureContext<P = unknown> {
 }
 
 /**
- * The full invocation pipeline stamped on every wrapped function as
- * `__sigxFn`: for an in-process call it runs everything — middleware →
+ * The full invocation pipeline carried by every wrapped function as
+ * `__sigx.invoke`: for an in-process call it runs everything — middleware →
  * authenticate → identity gate → arity → `input` validation → authorize →
  * handler; a wire transport owns the first three itself, pre-decode, and
  * `invoke` runs the rest (rfc-server-v4 §1.3's ownership contract). A
@@ -364,67 +360,78 @@ export type ServerStreamCallable<A extends unknown[], T> = ((...args: A) => Asyn
     with(options?: ServerStreamCallOptions): (...args: A) => AsyncIterable<T>;
 } & WrappedServerFn;
 
+/** What a `serverFn` / `serverStream` handler receives — ONE object
+ *  (rfc-server-v5 §1.2). Destructure what you need; a member added later
+ *  (a typed principal, a signal) is a minor, never a positional break. */
+export interface ServerFnHandlerArgs<S> {
+    /**
+     * The VALIDATED input when `input` is declared; otherwise the raw
+     * single wire argument (dev-warned), or `undefined` for an input-less
+     * function.
+     */
+    input: S;
+    /** The request context — the same object policies and middleware see. */
+    rq: ServerFnContext;
+}
+
+/**
+ * Everything a transport or registry reads off a wrapped function
+ * (rfc-server-v5 §1.5) — minted ONCE at definition time and frozen, so a
+ * partial shape (a `read` without its `cacheControl`) cannot exist and the
+ * endpoint needs no combination defence. Streams carry `kind: 'stream'`
+ * and never `read` / `invalidates`.
+ */
+export interface ServerFnDescriptor {
+    readonly kind: 'fn' | 'stream';
+    /** The full pipeline — see {@link ServerFnInvoke}. */
+    readonly invoke: ServerFnInvoke;
+    /**
+     * `allowAnonymous: true` was declared (rfc-server-v4 §1.2) — the
+     * identity gate is waived. Recorded by the RUNTIME wrapper (not the
+     * build), so a wire transport can run the gate before decoding attacker
+     * bytes without the build's help.
+     */
+    readonly anon: boolean;
+    /**
+     * `form: true` was declared (rfc-server §6.4) — the endpoint accepts
+     * form content-types for it (FormData → single input → the same
+     * validator/pipeline → 303 PRG). Always `false` for a stream.
+     */
+    readonly form: boolean;
+    /**
+     * Present iff `cache` was declared (rfc-server §4.1): the function is a
+     * side-effect-free read the endpoint accepts GET for, and
+     * `cacheControl` is the precomputed `Cache-Control` value a 2xx GET
+     * emits (starts with `public` iff the read opted into shared caches;
+     * the endpoint appends `Vary: Cookie` otherwise).
+     */
+    readonly read?: { readonly cacheControl: string };
+    /**
+     * Present iff `invalidates` was declared (rfc-server §6.2): VALIDATED
+     * input (stashed on the request context by the pipeline) + settled
+     * result → patterns the endpoint RESOLVES (fn refs → stable-key tuples)
+     * and attaches to the envelope as `$cache.invalidates`.
+     */
+    readonly invalidates?: (
+        input: unknown,
+        result: unknown
+    ) => ReadonlyArray<InvalidatePattern> | Promise<ReadonlyArray<InvalidatePattern>>;
+}
+
 /** A wrapped server function, as transports and registries see it. */
 export interface WrappedServerFn {
-    __sigxFn: ServerFnInvoke;
-    __sigxName: string;
+    readonly __sigx: ServerFnDescriptor;
     /**
-     * Present (true) on `serverStream` wrappers: `__sigxFn` resolves to an
-     * AsyncGenerator and the endpoint streams NDJSON instead of buffering a
-     * JSON envelope (rfc-server §6.1).
-     */
-    __sigxStream?: boolean;
-    /**
-     * Present (true) when the options form declared `cache` (rfc-server
-     * §4.1) — the function is a side-effect-free idempotent read and the
-     * endpoint accepts GET for it. The build transform reads the same
-     * declaration statically so the stub issues GET.
-     */
-    __sigxGet?: boolean;
-    /**
-     * The precomputed `Cache-Control` value the endpoint emits on a 2xx GET
-     * (rfc-server §4.1) — built once at definition time from the `cache`
-     * declaration, so the per-request cost is one header set. Starts with
-     * `public` iff the read opted into shared caches (the args-only
-     * contract, §5.2a); the endpoint appends `Vary: Cookie` otherwise.
-     */
-    __sigxCacheControl?: string;
-    /**
-     * Present (true) when the options form declared `form: true`
-     * (rfc-server §6.4) — the function is a declared FORM TARGET: the
-     * endpoint accepts form content-types for it (FormData → single
-     * input → the same validator/pipeline → 303 PRG), and the build
-     * stamps `action`/`method` onto forms whose submit handler calls it.
-     */
-    __sigxForm?: boolean;
-    /**
-     * The build-stamped stable data key (`<stableId>/<name>`) — see
+     * The build-stamped stable data key (`<id>/<name>`) — see
      * `ServerFnCallable.__sigxKey`. Optional HERE, and honestly so: this
      * interface describes a FOREIGN object (a registry entry, a hand-built
      * transport shape) where the property may genuinely be absent, unlike a
      * callable this package minted. The intersection in `ServerFnCallable`
-     * collapses the two to the required `string`.
+     * collapses the two to the required `string`. The ONLY cross-package
+     * brand: `@sigx/runtime-core` keys `useData(fn)` on it and never reads
+     * `__sigx`.
      */
     __sigxKey?: string;
-    /**
-     * Present (true) when the definition declared `allowAnonymous: true`
-     * (rfc-server-v4 §1.2) — the identity gate is waived for this function.
-     * Stamped by the RUNTIME wrapper (not the build), so a wire transport
-     * can run the gate before decoding attacker bytes without the build's
-     * help.
-     */
-    __sigxAnon?: boolean;
-    /**
-     * Present when the options form declared `invalidates` (rfc-server
-     * §6.2): VALIDATED input (stashed on the request context by the
-     * pipeline) + settled result → patterns the endpoint RESOLVES (fn refs
-     * → stable-key tuples) and attaches to the envelope as
-     * `$cache.invalidates`.
-     */
-    __sigxInvalidates?(
-        input: unknown,
-        result: unknown
-    ): ReadonlyArray<InvalidatePattern> | Promise<ReadonlyArray<InvalidatePattern>>;
 }
 
 /**

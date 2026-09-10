@@ -48,7 +48,7 @@ describe('serverFn — invalidates (endpoint envelope)', () => {
                     validate: (value) => ({ value: { id: String((value as { id?: unknown })?.id) } })
                 }
             },
-            handler: async (_rq, input: { id: string }) => ({ count: 3, id: input.id }),
+            handler: async ({ input }) => ({ count: 3, id: input.id }),
             // After `handler` in the literal so TS infers `result` (see the
             // ServerFnOptions doc note).
             invalidates: (input, result) => [['cart', input.id], `total:${result.count}`]

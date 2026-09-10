@@ -90,9 +90,11 @@ describe('createTestServerFnContext — status and headers', () => {
         const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
         const ctx = createTestServerFnContext();
         expect(ctx.statusCode).toBeUndefined();
-        const created = serverFn(async (rq) => {
-            rq.status(201);
-            return 'ok';
+        const created = serverFn({
+            handler: async ({ rq }) => {
+                rq.status(201);
+                return 'ok';
+            }
         });
         await expect(created.with({ context: ctx })()).resolves.toBe('ok');
         expect(ctx.statusCode).toBe(201);
@@ -114,9 +116,11 @@ describe('createTestServerFnContext — status and headers', () => {
 
     it('responseHeaders set by a handler are assertable on the context', async () => {
         const ctx = createTestServerFnContext();
-        const setsCookie = serverFn(async (rq) => {
-            rq.responseHeaders.set('set-cookie', 'seen=1');
-            return 'ok';
+        const setsCookie = serverFn({
+            handler: async ({ rq }) => {
+                rq.responseHeaders.set('set-cookie', 'seen=1');
+                return 'ok';
+            }
         });
         await setsCookie.with({ context: ctx })();
         expect(ctx.responseHeaders.get('set-cookie')).toBe('seen=1');
@@ -127,7 +131,7 @@ describe('createTestServerFnContext — the store-identity rule', () => {
     it('one context = one perRequest store across calls; two contexts = two', async () => {
         let computed = 0;
         const counter = perRequest(() => ++computed);
-        const read = serverFn(async (rq) => counter(rq));
+        const read = serverFn({ handler: async ({ rq }) => counter(rq) });
 
         const ctx = createTestServerFnContext();
         await expect(read.with({ context: ctx })()).resolves.toBe(1);
@@ -138,7 +142,7 @@ describe('createTestServerFnContext — the store-identity rule', () => {
     });
 
     it('an explicit factory context wins over an ambient scope', async () => {
-        const whoAmI = serverFn(async (rq) => rq.url.pathname);
+        const whoAmI = serverFn({ handler: async ({ rq }) => rq.url.pathname });
         const ctx = createTestServerFnContext(new Request('http://localhost/explicit'));
         await runWithServerFnContext(new Request('http://localhost/ambient'), async () => {
             await expect(whoAmI.with({ context: ctx })()).resolves.toBe('/explicit');
@@ -169,7 +173,7 @@ describe('the pipeline through the public surface — no invoker needed', () => 
                 seen.push(p);
                 return true;
             },
-            handler: async (rq) => (await principal<{ id: string }>(rq))?.id
+            handler: async ({ rq }) => (await principal<{ id: string }>(rq))?.id
         });
         const ctx = createTestServerFnContext(undefined, { principal: { id: 'seeded' } });
         await expect(whoami.with({ context: ctx })()).resolves.toBe('seeded');
@@ -205,7 +209,7 @@ describe('the pipeline through the public surface — no invoker needed', () => 
                         : { issues: [{ message: 'id must be a string' }] }
             }
         };
-        const load = serverFn({ input: schema, handler: async (_rq, input) => input.id });
+        const load = serverFn({ input: schema, handler: async ({ input }) => input.id });
         const ctx = createTestServerFnContext();
         const error = await load
             .with({ context: ctx })({ id: 42 } as unknown as { id: string })
@@ -218,39 +222,33 @@ describe('the pipeline through the public surface — no invoker needed', () => 
 });
 
 describe('stampServerFnKey', () => {
-    it('returns the SAME fn with a non-empty key', () => {
-        const getVotes = serverFn(async function getVotes() {
-            return 42;
-        });
-        const stamped = stampServerFnKey(getVotes);
+    it('returns the SAME fn, stamped with the given key', () => {
+        const getVotes = serverFn({ handler: async () => 42 });
+        expect(getVotes.__sigxKey).toBe('');
+        const stamped = stampServerFnKey(getVotes, 'test/getVotes');
         expect(stamped).toBe(getVotes);
         expect(stamped.__sigxKey).toBe('test/getVotes');
     });
 
-    it('an explicit key wins verbatim', () => {
-        const fn = serverFn(async () => 1);
+    it('the key is stamped verbatim — a wrapper knows no name of its own (rfc-server-v5)', () => {
+        const fn = serverFn({ handler: async () => 1 });
         expect(stampServerFnKey(fn, 'board/issues').__sigxKey).toBe('board/issues');
+        // Re-stamping replaces, never derives.
+        expect(stampServerFnKey(fn, 'board/issues.v2').__sigxKey).toBe('board/issues.v2');
     });
 
     it('__DEV__: the empty-string sentinel throws', () => {
-        const fn = serverFn(async () => 1);
+        const fn = serverFn({ handler: async () => 1 });
         expect(() => stampServerFnKey(fn, '')).toThrow(/UNSTAMPED sentinel/);
     });
 
     it('__DEV__: a serverStream throws — streams are not useData targets', () => {
-        const feed = serverStream(async function* () {
-            yield 1;
+        const feed = serverStream({
+            handler: async function* () {
+                yield 1;
+            }
         });
-        expect(() => stampServerFnKey(feed)).toThrow(/not a useData\s+target/);
-    });
-
-    it('an anonymous fn falls back to test/fn', () => {
-        const fn = serverFn(async () => 1);
-        // The wrapper mints __sigxName from the impl's .name; an arrow bound
-        // to a const gets that const's name, so blank it to simulate a truly
-        // anonymous impl.
-        (fn as { __sigxName: string }).__sigxName = '';
-        expect(stampServerFnKey(fn).__sigxKey).toBe('test/fn');
+        expect(() => stampServerFnKey(feed, 'test/feed')).toThrow(/not a useData\s+target/);
     });
 });
 

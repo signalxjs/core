@@ -52,7 +52,7 @@ import { preparePattern } from './key-match';
 export interface ServerFnRequestOptions {
     /**
      * Resolve a transport symbol to its wrapped server function (an object
-     * carrying `__sigxFn`). Return null/undefined for unknown symbols —
+     * carrying `__sigx`). Return null/undefined for unknown symbols —
      * a structured 404 the stub surfaces as a version-skew error.
      *
      * A throw or rejection here (a broken lazy import, a missing chunk
@@ -693,7 +693,8 @@ export async function handleServerFnRequest(
                   isGet ? NO_STORE : undefined
               );
     }
-    if (!fn || typeof fn.__sigxFn !== 'function') {
+    const d = fn?.__sigx;
+    if (!d || typeof d.invoke !== 'function') {
         // GET 404s are no-store like every non-2xx: a CDN-cached miss must
         // not shadow a redeploy's fresh symbols (§4.1).
         return isForm
@@ -706,20 +707,17 @@ export async function handleServerFnRequest(
                   isGet ? NO_STORE : undefined
               );
     }
-    if (isForm && (fn.__sigxForm !== true || fn.__sigxStream === true)) {
+    if (isForm && (!d.form || d.kind === 'stream')) {
         // 415, not 405 (§6.4): POST is an allowed method on this resource —
         // the MEDIA TYPE is what a non-form-target refuses. Also keeps the
         // endpoint from ever becoming globally form-accepting (§5.2b).
         return formErrorResponse(415, 'Content-Type must be application/json');
     }
-    if (
-        isGet &&
-        (fn.__sigxGet !== true ||
-            fn.__sigxStream === true ||
-            // A wrapper that kept the mark but dropped the precomputed header
-            // must degrade to POST-only, not throw into a masked 500 later.
-            typeof fn.__sigxCacheControl !== 'string')
-    ) {
+    // A descriptor this package minted is frozen with `read` and its
+    // `cacheControl` together (v5 §1.5); a FOREIGN wrapper through `resolve`
+    // may not be, and a read whose header is not a string must degrade to
+    // POST-only here rather than throw into a masked 500 below.
+    if (isGet && (!d.read || typeof d.read.cacheControl !== 'string' || d.kind === 'stream')) {
         // Resource-precise: THIS function supports only POST (§4.1).
         return errorResponse(405, 'Method not allowed', undefined, undefined, {
             Allow: 'POST',
@@ -727,10 +725,10 @@ export async function handleServerFnRequest(
         });
     }
     // Captured: TS narrowing does not cross into the work closure below.
-    const invoke = fn.__sigxFn;
+    const invoke = d.invoke;
     const info: ServerFnInfo = {
         symbol,
-        name: symbolName(symbol, fn.__sigxName),
+        name: symbolName(symbol),
         transport: 'wire'
     };
 
@@ -871,7 +869,7 @@ export async function handleServerFnRequest(
         // or the validator. `invoke` runs steps 4–7 (arity, validation,
         // authorize, handler); it re-runs the prelude only for in-process
         // calls (`info.transport === 'in-process'`), so nothing doubles.
-        await runServerPrelude(ctx as ServerFnContext, info, fn.__sigxAnon === true);
+        await runServerPrelude(ctx as ServerFnContext, info, d.anon);
         // Rich types on the way IN (rfc-server §4) — decoded AFTER the
         // prototype-pollution reviver, so dangerous keys are already gone,
         // and AFTER the prelude (#559): the codec's revive handlers
@@ -902,11 +900,11 @@ export async function handleServerFnRequest(
         }
         // Installed AFTER the app-wide guard — it may legitimately read the
         // request (it only rejects; it does not shape the body).
-        if (__DEV__ && isGet && fn.__sigxCacheControl?.startsWith('public')) {
+        if (__DEV__ && isGet && d.read?.cacheControl.startsWith('public')) {
             warnPublicRequestTouch(ctx, info.name || symbol);
         }
         const result = await invoke(ctx, info, args);
-        if (fn.__sigxStream === true) {
+        if (d.kind === 'stream') {
             // `await` matters: a pre-first-yield throw must land in THIS
             // catch (buffered JSON error) — a bare `return promise` would
             // bypass it.
@@ -944,7 +942,7 @@ export async function handleServerFnRequest(
                 // with `Vary: Cookie` on private responses so even one
                 // browser profile revalidates across a session switch.
                 if (!headers.has('cache-control')) {
-                    const value = fn.__sigxCacheControl!;
+                    const value = d.read!.cacheControl;
                     headers.set('cache-control', value);
                     if (!value.startsWith('public')) headers.append('vary', 'Cookie');
                 }
@@ -965,9 +963,9 @@ export async function handleServerFnRequest(
         // for a hand-stamped or registry-fabricated function rather than the
         // place the contradiction gets resolved.
         let patterns: ReadonlyArray<string | readonly unknown[]> | undefined;
-        if (!isGet && fn.__sigxInvalidates) {
+        if (!isGet && d.invalidates) {
             patterns = resolveInvalidatePatterns(
-                await fn.__sigxInvalidates(ctx._input, result),
+                await d.invalidates(ctx._input, result),
                 info.name || symbol
             );
             if (patterns.length > 0) {
@@ -1163,14 +1161,13 @@ function warnPublicRequestTouch(
  * stable symbol (`<stableId>/<name>`, checked FIRST: a stable id may itself
  * end in a hashed-looking `_fn_<hex8>` tail), `<name>` of a hashed
  * `<name>_fn_<hash8>`. A hashed symbol never contains '/', so the two cannot
- * be confused. The impl's own name (`__sigxName`, often '' for arrows) is
- * the last resort — absent entirely when the fn never resolved (#555).
+ * be confused; anything else is nameless (`''`).
  */
-function symbolName(symbol: string, implName?: string): string {
+function symbolName(symbol: string): string {
     const lastSlash = symbol.lastIndexOf('/');
     return lastSlash >= 0
         ? symbol.slice(lastSlash + 1)
-        : /^(.+)_fn_[0-9a-f]{8}$/.exec(symbol)?.[1] ?? implName ?? '';
+        : /^(.+)_fn_[0-9a-f]{8}$/.exec(symbol)?.[1] ?? '';
 }
 
 /**
