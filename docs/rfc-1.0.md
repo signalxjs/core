@@ -376,7 +376,7 @@ transform-time problems in a `*.server.*` module as build errors (the §4.5
 posture). Considered and rejected there: batching, `next()`-style middleware,
 a per-request middleware cadence, `useRequest()`, flattening `rq` into the
 handler object. Migration: `docs/migrations/1.0-serverfn.md`. Lands in
-#693/#695/#696 and the two PRs after them, before rc.0.
+the #692 series — #693, #695, #696, #697, #698 — before rc.0.
 
 ---
 
