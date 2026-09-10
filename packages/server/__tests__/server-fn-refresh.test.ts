@@ -504,3 +504,20 @@ describe('endpoint — invalidates tuples with object elements (#694)', () => {
         warn.mockRestore();
     });
 });
+
+describe('endpoint — invalidates tuples: a circular element is dropped, never a stack overflow (#694)', () => {
+    it('drops the circular pattern and answers the mutation', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const loop: Record<string, unknown> = { id: 1 };
+        loop.self = loop;
+        const vote = serverFn({
+            handler: async () => 'ok',
+            invalidates: () => [['cart', loop], ['k']] as never
+        });
+        const res = await post(vote, { args: [{}] });
+        expect(res.status).toBe(200);
+        await expect(res.json()).resolves.toEqual({ data: 'ok', $cache: { invalidates: [['k']] } });
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining('non-JSON-safe'));
+        warn.mockRestore();
+    });
+});

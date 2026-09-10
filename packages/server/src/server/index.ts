@@ -267,17 +267,29 @@ const MAX_INVALIDATE_PATTERNS = 64;
  * under.
  */
 
-/** JSON-safe, recursively: primitives, finite numbers, arrays, PLAIN objects. */
-function isJsonSafe(value: unknown): boolean {
+/** JSON-safe, recursively: primitives, finite numbers, arrays, PLAIN objects.
+ *  A circular structure is NOT safe (`JSON.stringify` would throw on the
+ *  envelope) — tracked with a stack, so it is dropped rather than overflowing. */
+function isJsonSafe(value: unknown, seen?: Set<object>): boolean {
     if (value === null) return true;
     const t = typeof value;
     if (t === 'string' || t === 'boolean') return true;
     if (t === 'number') return Number.isFinite(value as number);
     if (t !== 'object') return false;
-    if (Array.isArray(value)) return value.every(isJsonSafe);
-    const proto = Object.getPrototypeOf(value) as unknown;
-    if (proto !== Object.prototype && proto !== null) return false;
-    return Object.values(value as Record<string, unknown>).every(isJsonSafe);
+    const stack = seen ?? new Set<object>();
+    if (stack.has(value as object)) return false;
+    stack.add(value as object);
+    let safe: boolean;
+    if (Array.isArray(value)) {
+        safe = value.every((el) => isJsonSafe(el, stack));
+    } else {
+        const proto = Object.getPrototypeOf(value) as unknown;
+        safe =
+            (proto === Object.prototype || proto === null) &&
+            Object.values(value as Record<string, unknown>).every((el) => isJsonSafe(el, stack));
+    }
+    stack.delete(value as object);
+    return safe;
 }
 function resolveInvalidatePatterns(
     raw: unknown,

@@ -66,29 +66,42 @@ export function isServerFnDataRef(value: unknown): value is ServerFnDataRef {
  * `@sigx/server` keeps a byte-identical copy, pinned by its parity test.
  * No validation here — `resolveKeyResult` guards in dev; in prod an
  * unrepresentable value falls back to `null` the way `JSON.stringify` does.
+ * A circular structure throws the same `TypeError` `JSON.stringify` would,
+ * never recursing without bound.
  */
 export function canonicalKeyJson(value: unknown): string {
+    return canonicalize(value, undefined);
+}
+
+function canonicalize(value: unknown, seen: Set<object> | undefined): string {
     if (value === null) return 'null';
     if (typeof value !== 'object') {
         if (isServerFnDataRef(value)) return JSON.stringify(value.__sigxKey);
         return JSON.stringify(value) ?? 'null';
     }
+    const stack = seen ?? new Set<object>();
+    if (stack.has(value)) throw new TypeError('[useData] key contains a circular structure');
+    stack.add(value);
+    let out: string;
     if (Array.isArray(value)) {
-        let out = '[';
+        out = '[';
         for (let i = 0; i < value.length; i++) {
             if (i > 0) out += ',';
-            out += canonicalKeyJson(value[i]);
+            out += canonicalize(value[i], stack);
         }
-        return out + ']';
+        out += ']';
+    } else {
+        const record = value as Record<string, unknown>;
+        const keys = Object.keys(record).sort();
+        out = '{';
+        for (let i = 0; i < keys.length; i++) {
+            if (i > 0) out += ',';
+            out += JSON.stringify(keys[i]) + ':' + canonicalize(record[keys[i]], stack);
+        }
+        out += '}';
     }
-    const record = value as Record<string, unknown>;
-    const keys = Object.keys(record).sort();
-    let out = '{';
-    for (let i = 0; i < keys.length; i++) {
-        if (i > 0) out += ',';
-        out += JSON.stringify(keys[i]) + ':' + canonicalKeyJson(record[keys[i]]);
-    }
-    return out + '}';
+    stack.delete(value);
+    return out;
 }
 
 /** A plain object — `Object.prototype` or `null` behind it, nothing else. */
@@ -102,7 +115,7 @@ function isPlainObject(value: object): boolean {
  * finite number, an array, or a plain object of these. `path` names the
  * offending spot in the message.
  */
-function assertKeyElement(el: unknown, path: string, warns?: KeyWarnFlags): void {
+function assertKeyElement(el: unknown, path: string, warns?: KeyWarnFlags, seen?: Set<object>): void {
     const t = typeof el;
     if (el === null || t === 'string' || t === 'boolean') return;
     if (t === 'number') {
@@ -132,8 +145,16 @@ function assertKeyElement(el: unknown, path: string, warns?: KeyWarnFlags): void
             `array | plain object); got ${t} at ${path}.`
         );
     }
+    // Cycle guard: a self-referencing object would recurse without bound
+    // here and throw the JSON.stringify-style TypeError in canonicalization.
+    const stack = seen ?? new Set<object>();
+    if (stack.has(el as object)) {
+        throw new TypeError(`[useData] tuple key contains a circular structure at ${path}.`);
+    }
+    stack.add(el as object);
     if (Array.isArray(el)) {
-        for (let i = 0; i < el.length; i++) assertKeyElement(el[i], `${path}[${i}]`, warns);
+        for (let i = 0; i < el.length; i++) assertKeyElement(el[i], `${path}[${i}]`, warns, stack);
+        stack.delete(el as object);
         return;
     }
     if (!isPlainObject(el as object)) {
@@ -145,8 +166,11 @@ function assertKeyElement(el: unknown, path: string, warns?: KeyWarnFlags): void
         );
     }
     for (const key of Object.keys(el as object)) {
-        assertKeyElement((el as Record<string, unknown>)[key], `${path}.${key}`, warns);
+        // Bracket notation with a quoted key: JSON keys may carry dots,
+        // brackets or spaces, and `path.key` would read ambiguously.
+        assertKeyElement((el as Record<string, unknown>)[key], `${path}[${JSON.stringify(key)}]`, warns, stack);
     }
+    stack.delete(el as object);
 }
 
 /** Per-cell dedup flags for the soft key warnings (warn once per cell). */

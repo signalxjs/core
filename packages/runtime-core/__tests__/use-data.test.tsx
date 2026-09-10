@@ -1182,3 +1182,23 @@ describe('tuple keys with object elements (#694)', () => {
         }
     });
 });
+
+describe('tuple keys — cycle safety and unambiguous dev paths (#694)', () => {
+    it('a circular element dev-throws instead of recursing without bound', () => {
+        const loop: Record<string, unknown> = { id: 1 };
+        loop.self = loop;
+        const App = component(() => {
+            useData(() => ['k', loop] as never, async () => 1);
+            return () => <div />;
+        });
+        expect(() => render(jsx(App, {}), document.createElement('div'))).toThrow(/circular structure/);
+    });
+
+    it('the dev path quotes object keys, so a key with a dot reads unambiguously', () => {
+        const App = component(() => {
+            useData(() => ['k', { 'a.b': { c: undefined } }] as never, async () => 1);
+            return () => <div />;
+        });
+        expect(() => render(jsx(App, {}), document.createElement('div'))).toThrow(/\[1\]\["a\.b"\]\["c"\]/);
+    });
+});

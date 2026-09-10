@@ -76,12 +76,13 @@ describe('preparePattern — server/cache parity (#469)', () => {
         // result-parity test but reintroduce the exact cost this fixes.
         const spy = vi.spyOn(JSON, 'stringify');
         const cacheMatcher = cachePrepare(['posts', 'u1']);
+        const cacheCalls = spy.mock.calls.length;
         const serverMatcher = serverPrepare(['posts', 'u1']);
-        // Each prepare canonicalizes its tuple at prepare time (per element
-        // since #694's key-sorted canonical form — the count is the same on
-        // both sides, which is the parity that matters).
-        expect(spy.mock.calls.length).toBeGreaterThan(0);
-        expect(spy.mock.calls.length % 2).toBe(0);
+        const serverCalls = spy.mock.calls.length - cacheCalls;
+        // Each side canonicalizes at prepare time (per element since #694's
+        // key-sorted canonical form) and does exactly the same amount of it.
+        expect(cacheCalls).toBeGreaterThan(0);
+        expect(serverCalls).toBe(cacheCalls);
 
         const afterPrepare = spy.mock.calls.length;
         for (const [entryKey] of CASES) {
