@@ -150,8 +150,9 @@ pnpm build       # all packages: core + server-renderer + vite plugin
                  # (NODE_ENV-stripped), selected via export conditions
 pnpm build:core  # reactivity + runtime-core + runtime-dom + sigx
 pnpm test        # vitest run (unit tests across packages)
-pnpm test -- packages/reactivity   # single test file/dir (substring match)
-pnpm test -- -t "name of test"     # single test by name (vitest -t)
+pnpm test packages/reactivity      # single test file/dir (substring match) — NO `--`:
+pnpm test -t "name of test"        # pnpm forwards the literal separator to vitest, which
+                                   # then ignores the filter and runs the whole suite (#699)
 pnpm test:watch
 pnpm test:coverage
 pnpm typecheck   # tsc (TypeScript 7 native compiler), config: tsconfig.json
