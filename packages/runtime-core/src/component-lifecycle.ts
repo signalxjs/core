@@ -7,6 +7,17 @@
 
 import type { ComponentSetupContext, MountContext } from './component-types.js';
 import { getDevtoolsHook } from './devtools-hook.js';
+import { assertSingleCopy } from '@sigx/reactivity/internals';
+
+// One copy per realm (rfc-1.0 §3.4): this module owns the current-instance
+// slot, so it carries `@sigx/runtime-core`'s stamp — a top-level call, for the
+// reasons given at the reactivity stamp (`reactivity/src/effect.ts`).
+assertSingleCopy(
+    '__SIGX_RUNTIME_CORE__',
+    '@sigx/runtime-core',
+    typeof __SIGX_VERSION__ === 'string' ? __SIGX_VERSION__ : 'unknown',
+    typeof import.meta.url === 'string' ? import.meta.url : ''
+);
 
 /**
  * The component whose `setup()` is currently running. One module-level slot,

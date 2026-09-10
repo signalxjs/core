@@ -66,6 +66,16 @@ key is quadratic — wrap bulk key changes in `batch()`:
 batch(() => { for (const [k, v] of entries) state[k] = v; });   // one re-run
 ```
 
+## One copy per page
+
+The tracking context lives in this module, so an app must hold exactly one copy of it: signals written through a second copy never reach effects tracked by the first, silently. The package says so — a second copy evaluating in the same realm (two installed versions, a bundler that inlined one) **throws in development** with both versions and both module URLs, and warns once in production:
+
+```
+[sigx] Two copies of @sigx/reactivity are loaded: 0.15.0 at file:///…/.pnpm/…/dist/index.js and 1.0.0 at file:///…/@sigx/reactivity/dist/index.js.
+```
+
+The fix is on the install side: the app installs `sigx` once and every library declares `@sigx/*` as a peer, so there is one copy to resolve to (`docs/rfc-1.0.md` §3). A lockfile with two `@sigx/reactivity` entries is the thing to look for. The stamp itself is `globalThis.__SIGX_REACTIVITY__`, registered in `docs/seams.md`.
+
 ## 📚 Documentation
 
 The complete API reference (`signal`, `isSignal`, `computed`, `effect`, `batch`, `watch`, `untrack`, `effectScope`, `onScopeDispose`, `toSignal`, `toSignals`, and more), guides and live examples → **<https://sigx.dev/core/packages/reactivity/overview/>**

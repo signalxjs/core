@@ -6,7 +6,10 @@
     "globals": {
         // Compile-time dev flag, defined at build time (see packages/vite
         // defineLibConfig and vitest.config.ts).
-        "__DEV__": "readonly"
+        "__DEV__": "readonly",
+        // The package's own version (the rfc-1.0 §3.4 copy stamp), defined
+        // by defineLibConfig from package.json; vitest.setup.ts for tests.
+        "__SIGX_VERSION__": "readonly"
     },
     "rules": {
         // The renderer's internal unmount(vnode, container) signature is part

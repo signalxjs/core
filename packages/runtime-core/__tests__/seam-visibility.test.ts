@@ -15,6 +15,7 @@
 
 import { describe, it, expect, afterEach } from 'vitest';
 import { declareLiveClient, provideTypeHandlers, writeBack } from '@sigx/runtime-core/internals';
+import { readCopyStamp } from '@sigx/reactivity/internals';
 import { defineTypeHandler } from '@sigx/serialize';
 
 type Seams = {
@@ -23,7 +24,13 @@ type Seams = {
     __SIGX_ASYNC__?: Record<string, unknown>;
 };
 
-function descriptor(name: keyof Seams): PropertyDescriptor | undefined {
+// The two copy stamps (rfc-1.0 §3.4) are NOT in `Seams` and NOT deleted in
+// `afterEach`: they are written once at module init, and the worker's
+// globalThis outlives this file — dropping them would leave the next file's
+// import of the package unguarded.
+type CopyStampSeam = '__SIGX_REACTIVITY__' | '__SIGX_RUNTIME_CORE__';
+
+function descriptor(name: keyof Seams | CopyStampSeam): PropertyDescriptor | undefined {
     return Object.getOwnPropertyDescriptor(globalThis, name);
 }
 
@@ -65,6 +72,22 @@ describe('pack-internal seams are hidden', () => {
         declareLiveClient(true);
         expect(descriptor('__SIGX_LIVE_CLIENT__')?.enumerable).toBe(false);
         expect(Object.keys(globalThis)).not.toContain('__SIGX_LIVE_CLIENT__');
+    });
+
+    it('the two copy stamps are non-enumerable and name their stamping module', () => {
+        // Stamped at module init by the module that owns each package's
+        // singleton state (rfc-1.0 §3.4) — the `/internals` accessor is the
+        // one way to read them.
+        for (const [key, file] of [
+            ['__SIGX_REACTIVITY__', /packages\/reactivity\/src\/effect\.ts$/],
+            ['__SIGX_RUNTIME_CORE__', /packages\/runtime-core\/src\/component-lifecycle\.ts$/]
+        ] as const) {
+            expect(descriptor(key)?.enumerable).toBe(false);
+            expect(Object.keys(globalThis)).not.toContain(key);
+            const stamp = readCopyStamp(key)!;
+            expect(stamp.url).toMatch(file);
+            expect(stamp.version).toBe(__SIGX_VERSION__);
+        }
     });
 
     it('__SIGX_TYPE_HANDLERS__ is non-enumerable and still accumulates', () => {

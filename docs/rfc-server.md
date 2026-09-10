@@ -6,6 +6,17 @@ signalxjs/core#318 (rev 2).
 Pre-1.0, no-compat (same stance as `rfc-async.md` and `rfc-ssr-platform.md`):
 one way to do it.
 
+> **v5 lives in `rfc-server-v5.md`** (signalxjs/core#692): the 1.0
+> consolidation. **Breaking**: the direct authoring form (§1.1) is removed —
+> `serverFn(options)` / `serverStream(options)` are the only shapes and the
+> handler takes one object, `handler({ input, rq })`; the stable symbol
+> `<id>/<name>` is the **only** route (§3, N.2/N.3 — there is no hashed twin,
+> the content hash is a version tag the stub sends and a mismatch is 409);
+> the wrapper carries one `__sigx` descriptor; the endpoint takes
+> `functions: serverFns` directly. Every §3 symbol-format claim and every
+> direct-form example below is superseded where v5 says so; v5 §5 is the
+> old→new table and `migrations/1.0-serverfn.md` the migration.
+
 > **v3 lives in `rfc-server-v3.md`** (signalxjs/core#491): guard completeness
 > (#489) and request-scoped context. It **amends §2.1**, and it **replaces
 > §2.2** — the `defineServerService` specification was removed rather than

@@ -75,7 +75,7 @@ describe('external build — sigx-app.js artifacts (real vite)', () => {
         rmSync(root, { recursive: true, force: true });
     });
 
-    it('emits dist/server/sigx-app.js with the five exports, deduped with the entry import', async () => {
+    it('emits dist/server/sigx-app.js with the six exports, deduped with the entry import', async () => {
         const { createBuilder } = await import('vite');
         const builder = await createBuilder({
             root,
@@ -112,6 +112,11 @@ describe('external build — sigx-app.js artifacts (real vite)', () => {
         expect(mod.manifest['index.html']).toBeTruthy();
         expect(mod.islandsManifest).toBeUndefined();
         expect(mod.resumeManifest).toBeUndefined();
+        // assetsFor (#501): the per-route resolver, inlined — the emitted
+        // module imports nothing, so a production server needs no @sigx/vite.
+        expect(typeof mod.assetsFor).toBe('function');
+        expect(mod.assetsFor(['index.html'])).toEqual(mod.assets);
+        expect(readFileSync(appFile, 'utf-8')).not.toMatch(/^\s*import\b/m);
 
         // manualChunks inheritance: the client environment still pins the
         // sigx family into one chunk.

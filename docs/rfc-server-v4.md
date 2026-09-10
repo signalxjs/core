@@ -2,6 +2,12 @@
 
 Status: **implemented** (tracking signalxjs/core#607 closed 2026-08-04; shipped
 in 0.15.x). Frozen at 1.0 — see `rfc-1.0.md`.
+**Amended by `rfc-server-v5.md`** (signalxjs/core#692): §1.2's direct-form
+paragraph is void (there is no direct form; every definition can declare
+`authorize` / `allowAnonymous`), §1.3 step 4's arity gate is universal,
+`ServerPolicyOp.args` / `ServerFeatureOp.args` are removed (`op.input` is the
+validated input), and the handler signature is `handler({ input, rq })`.
+
 Amends `rfc-server-v3.md` §1 (guard completeness), §2.8 (one naming paragraph)
 and §3 (two non-goals), and `rfc-server.md` §2.1 (the guard block and
 `serverFnPreset`). Pre-1.0, no-compat, same stance as the parent RFC: one way

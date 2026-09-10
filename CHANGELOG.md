@@ -19,6 +19,85 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   only cross-package brand. See `packages/server/CHANGELOG.md` and
   `docs/migrations/1.0-serverfn.md`.
 
+### Added
+
+- **`@sigx/reactivity` / `@sigx/runtime-core`: a duplicate-copy guard (#633
+  phase 1, rfc-1.0 §3.4).** Each of the two singleton packages now stamps a
+  hidden control seam at module init — `__SIGX_REACTIVITY__` and
+  `__SIGX_RUNTIME_CORE__`, `{ version, url }`, registered in `docs/seams.md`
+  with `readCopyStamp` on `@sigx/reactivity/internals` as the one accessor.
+  A second copy evaluating from a different file (two installed versions, a
+  bundler that inlined one) **throws in dev**, naming both versions and both
+  module URLs, and **warns once in prod** and continues. The same file
+  re-evaluating (an in-process Vite restart, an HMR `?t=` re-import,
+  `vi.resetModules()`) restamps silently; one file loaded twice into one realm
+  (the #425 shape) is not something the guard can see and stays
+  `hasForeignToken`'s job. Until now two copies were a silent install and an
+  incomprehensible runtime — signals written through one copy never reached
+  effects tracked by the other, with no message at all.
+- **`@sigx/vite/lib`: `defineLibConfig` defines `__SIGX_VERSION__`** — the
+  `version` of the root's `package.json`, in both the dev and the prod pass,
+  omitted when the root has no versioned manifest. The copy stamps read it;
+  a package built with `defineLibConfig` may too. Sources read it through
+  `typeof __SIGX_VERSION__ === 'string' ? … : 'unknown'` so an unbundled
+  evaluation never throws.
+- **`virtual:sigx-app` / `dist/server/sigx-app.js` export
+  `assetsFor(entries, base?)` (#501).** Per-route asset resolution —
+  `collectAssets` over the inlined client manifest with the resolver body
+  baked into the module — so the emitted module still imports nothing on any
+  platform and a production server never needs `@sigx/vite`. That package is
+  a devDependency and a build tool: `examples/spa-ssr` and
+  `examples/ssr-islands` did `await import('@sigx/vite/ssr')` in production
+  and booted only while dev dependencies happened to be installed
+  (`npm ci --omit=dev` broke them); both now read `template` and `assetsFor`
+  from `sigx-app.js`. Typed on the `virtual:sigx-app` ambient in
+  `@sigx/vite/client` (whose type import now points at the edge-clean
+  `/assets` entry). `@sigx/vite/assets` is unchanged as the lower-level
+  escape hatch.
+
+- **`@sigx/runtime-core`: `peekRestored` / `invalidateRestored` are public
+  (#449).** The `__SIGX_ASYNC__` page blob's read and invalidate half is now
+  exported from the root entry (and so from `sigx`), not only from
+  `@sigx/runtime-core/internals`, completing the blob's public contract: `ctx.registerSerializedState` writes
+  on the server (#407), `reviveFromServer` decodes on the client (#434), and a
+  state-owning pack now seeds through a covered surface — `@sigx/store`
+  reached both from `/internals`, which the 1.0 contract (#677 §1.2) does not
+  cover. The same functions, not copies; `/internals` keeps exporting them
+  alongside `writeBack`/`restoredKeys`, which stay engine-and-cache-only. The
+  JSDoc now spells out the contract: reads do not consume (instance scope is
+  the peek-then-invalidate opt-in), presence is own-key membership, servers
+  always miss, and **the value is shared with the blob, not a private copy** —
+  copy before handing it to reactive state.
+- **`@sigx/runtime-core`: `CombinedOf<F>`, `PropsOf<F>`, `RefOf<F>`,
+  `SlotsOf<F>` (#535).** Public type aliases that take a `ComponentFactory`
+  apart — the declaration it was built from, the stripped props view, the
+  exposed ref, the slot table — so a factory-transforming type
+  (`@sigx/zero`'s `Adapted`, which swaps events while keeping ref and slots)
+  is written as `ComponentFactory<Omit<CombinedOf<F>, X> & Y, RefOf<F>,
+  SlotsOf<F>>` instead of reading the `@internal` `__events`/`__ref`/`__slots`
+  brands by name. `RefOf` is the same read as the existing `Exposed`; the
+  brands may now be renamed without breaking downstream types.
+
+- **`@sigx/resume`: `ResumeManifest.handlers` does what it says — handler
+  chunks are modulepreloaded (#410, rfc-1.0 §4.8).** The field was documented
+  as "modulepreload hints" and emitted by the build, but nothing consumed it:
+  `resumePlugin` had no `assets()` hook, so a resumable page's first
+  interaction paid a cold fetch for its handler chunk. The pack now implements
+  the same `assets()` hook `islandsPlugin` uses: the transform stamps each
+  component's handler symbols on its factory (`__resumeQrls`, next to
+  `__resumeId`), the plugin maps the symbols of every boundary the request
+  actually claimed through `manifest.handlers`, and the document gets one
+  `<link rel="modulepreload">` per distinct handlers chunk in its first shell
+  flush. A page without a resume boundary emits nothing; hydrate-mode
+  components (no symbols) and manifest-less dev renders emit nothing; the
+  component (upgrade) chunk is never warmed — upgrade-on-write stays lazy.
+
+- **`provideTypeHandlers` is exported from the `@sigx/runtime-core` and
+  `sigx` roots (#692, rfc-1.0 §1.2's promotion rule, the #449 precedent).**
+  `@sigx/server/plugin` was the last first-party pack importing it from
+  `sigx/internals`; a third-party pack can now register an app's type
+  handlers without `/internals`. `TYPE_HANDLER_TOKEN` stays internal.
+
 ### Changed
 
 - **`@sigx/server` + `@sigx/vite`: one route per function; version skew is
@@ -59,14 +138,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   and the fetch ran to completion. `ServerFnDataRef` gains an optional
   `with` member; a hand-built ref without one is called directly as before.
 
-### Added
-
-- **`provideTypeHandlers` is exported from the `@sigx/runtime-core` and
-  `sigx` roots (#692, rfc-1.0 §1.2's promotion rule, the #449 precedent).**
-  `@sigx/server/plugin` was the last first-party pack importing it from
-  `sigx/internals`; a third-party pack can now register an app's type
-  handlers without `/internals`. `TYPE_HANDLER_TOKEN` stays internal.
-
 - **`@sigx/runtime-core` no longer declares `JSX.IntrinsicElements` (#529,
   rfc-1.0 §4.1).** The `[elemName: string]: any` index signature is gone:
   runtime-core has no elements of its own, and a platform package declares
@@ -104,47 +175,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
     breaks; build such elements through `jsx()` or by calling the factory.
   The brand is a module-local symbol, not exported: nothing downstream can
   spell it, and a second copy of the runtime does not recognise it.
-
-### Added
-
-- **`@sigx/runtime-core`: `peekRestored` / `invalidateRestored` are public
-  (#449).** The `__SIGX_ASYNC__` page blob's read and invalidate half is now
-  exported from the root entry (and so from `sigx`), not only from
-  `@sigx/runtime-core/internals`, completing the blob's public contract: `ctx.registerSerializedState` writes
-  on the server (#407), `reviveFromServer` decodes on the client (#434), and a
-  state-owning pack now seeds through a covered surface — `@sigx/store`
-  reached both from `/internals`, which the 1.0 contract (#677 §1.2) does not
-  cover. The same functions, not copies; `/internals` keeps exporting them
-  alongside `writeBack`/`restoredKeys`, which stay engine-and-cache-only. The
-  JSDoc now spells out the contract: reads do not consume (instance scope is
-  the peek-then-invalidate opt-in), presence is own-key membership, servers
-  always miss, and **the value is shared with the blob, not a private copy** —
-  copy before handing it to reactive state.
-- **`@sigx/runtime-core`: `CombinedOf<F>`, `PropsOf<F>`, `RefOf<F>`,
-  `SlotsOf<F>` (#535).** Public type aliases that take a `ComponentFactory`
-  apart — the declaration it was built from, the stripped props view, the
-  exposed ref, the slot table — so a factory-transforming type
-  (`@sigx/zero`'s `Adapted`, which swaps events while keeping ref and slots)
-  is written as `ComponentFactory<Omit<CombinedOf<F>, X> & Y, RefOf<F>,
-  SlotsOf<F>>` instead of reading the `@internal` `__events`/`__ref`/`__slots`
-  brands by name. `RefOf` is the same read as the existing `Exposed`; the
-  brands may now be renamed without breaking downstream types.
-
-- **`@sigx/resume`: `ResumeManifest.handlers` does what it says — handler
-  chunks are modulepreloaded (#410, rfc-1.0 §4.8).** The field was documented
-  as "modulepreload hints" and emitted by the build, but nothing consumed it:
-  `resumePlugin` had no `assets()` hook, so a resumable page's first
-  interaction paid a cold fetch for its handler chunk. The pack now implements
-  the same `assets()` hook `islandsPlugin` uses: the transform stamps each
-  component's handler symbols on its factory (`__resumeQrls`, next to
-  `__resumeId`), the plugin maps the symbols of every boundary the request
-  actually claimed through `manifest.handlers`, and the document gets one
-  `<link rel="modulepreload">` per distinct handlers chunk in its first shell
-  flush. A page without a resume boundary emits nothing; hydrate-mode
-  components (no symbols) and manifest-less dev renders emit nothing; the
-  component (upgrade) chunk is never warmed — upgrade-on-write stays lazy.
-
-### Changed
 
 - **Release tooling hardened for 1.0 (#363).** `scripts/verify-pack.js` now
   packs and smoke-tests all 14 publishable packages — `@sigx/resume`,
@@ -288,7 +318,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   bare name (#655).** Such a manifest used to yield no pin at all — the
   subpath filter found no `.` keys and never fell back to the root entry —
   so a second copy of that package could load unnoticed.
-
 
 ## [0.15.6] — 2026-08-17
 
