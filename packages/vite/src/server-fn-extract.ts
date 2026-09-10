@@ -298,6 +298,31 @@ export function hasServerFnOptionsSpread(call: Node): boolean {
     return ((literal.properties as Node[]) ?? []).some((prop) => prop.type === 'SpreadElement');
 }
 
+/**
+ * A computed key (`['form']: true`, `[name]: …`) in the options literal — the
+ * spread rule's twin (rfc-server-v5 §1.7): every static reader skips computed
+ * keys, so one would silently hide `id` / `cache` / `invalidates` / `form` /
+ * `authorize` / `allowAnonymous` from the build, or dodge the literal-`true`
+ * check. A build error, whatever the key turns out to be.
+ */
+export function hasServerFnComputedOptionKey(call: Node): boolean {
+    const literal = optionsLiteralOf(call);
+    if (!literal) return false;
+    return ((literal.properties as Node[]) ?? []).some(
+        (prop) => prop.type === 'Property' && prop.computed === true
+    );
+}
+
+/** The message for {@link hasServerFnComputedOptionKey}, shared by both extractors. */
+export function computedOptionKeyError(name: string, stream = false): string {
+    const wrapper = stream ? 'serverStream' : 'serverFn';
+    return (
+        `${wrapper} "${name}": a computed key (\`[…]: …\`) in the options literal is invisible to ` +
+        `the build — the declarations it reads statically (${stream ? '`authorize`, `allowAnonymous`' : '`id`, `cache`, `invalidates`, `form`, `authorize`, `allowAnonymous`'}) ` +
+        `must be plain keys written literally at the call site (rfc-server-v5 §1.7).`
+    );
+}
+
 /** The message for {@link hasServerFnOptionsSpread}, shared by both extractors. */
 export function optionsSpreadError(name: string, stream = false): string {
     if (stream) {
@@ -781,6 +806,9 @@ export function extractServerFns(
             if (idOption.id !== undefined) warnIfIdRewritten(warnings, local, idOption.id);
             if (hasServerFnOptionsSpread(init)) {
                 errors.push({ offset: init.start, message: optionsSpreadError(local, call.kind === 'stream') });
+            }
+            if (hasServerFnComputedOptionKey(init)) {
+                errors.push({ offset: init.start, message: computedOptionKeyError(local, call.kind === 'stream') });
             }
             for (const key of call.kind === 'fn' ? ['form', 'allowAnonymous'] : ['allowAnonymous']) {
                 if (invalidLiteralTrueOption(init, key)) {

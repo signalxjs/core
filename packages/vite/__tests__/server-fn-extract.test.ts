@@ -1357,3 +1357,25 @@ describe('the options-literal error shows the removed form in the right shape', 
         expect(msg(`export const f = serverFn(async () => 1);\n`)).toContain('serverFn(async (rq, …) => …) was removed');
     });
 });
+
+describe('a computed key in the options literal is a build error (the spread rule\'s twin)', () => {
+    const opts = { stableId: 'src/x.server.ts', endpoint: '/_sigx/fn', requireAuthorization: false as const };
+    it('`[\'form\']: true`, `[\'allowAnonymous\']: true` and a dynamic key cannot dodge the static readers', () => {
+        for (const literal of [`{ ['form']: true, input: S, handler: async () => 1 }`, `{ ['allowAnonymous']: true, handler: async () => 1 }`, `{ [key]: true, handler: async () => 1 }`]) {
+            const out = extractServerFns(
+                `import { serverFn } from '@sigx/server';\nimport { S, key } from './s';\nexport const f = serverFn(${literal});\n`,
+                '/app/src/x.server.ts',
+                opts
+            );
+            expect(out.errors.map((e) => e.message), literal).toContainEqual(expect.stringMatching(/^serverFn "f": a computed key/));
+        }
+    });
+    it('a stream gets the stream wording', () => {
+        const out = extractServerFns(
+            `import { serverStream } from '@sigx/server';\nexport const s = serverStream({ ['allowAnonymous']: true, handler: async function* () { yield 1; } });\n`,
+            '/app/src/x.server.ts',
+            opts
+        );
+        expect(out.errors.map((e) => e.message)).toContainEqual(expect.stringMatching(/^serverStream "s": a computed key .*`authorize`, `allowAnonymous`/));
+    });
+});

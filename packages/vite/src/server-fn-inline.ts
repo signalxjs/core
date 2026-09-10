@@ -42,6 +42,8 @@ import {
     mintIdentity,
     optionsSpreadError,
     hasOptionsLiteralArgument,
+    hasServerFnComputedOptionKey,
+    computedOptionKeyError,
     optionsLiteralError,
     nonLiteralIdError,
     nonLiteralTrueError,
@@ -522,6 +524,9 @@ export function extractInlineServerFns(
             if (idOption.id !== undefined) warnIfIdRewritten(warnings, name, idOption.id);
             if (hasServerFnOptionsSpread(call)) {
                 errors.push({ offset: call.start, message: optionsSpreadError(name, stream) });
+            }
+            if (hasServerFnComputedOptionKey(call)) {
+                errors.push({ offset: call.start, message: computedOptionKeyError(name, stream) });
             }
             for (const key of stream ? ['allowAnonymous'] : ['form', 'allowAnonymous']) {
                 if (invalidLiteralTrueOption(call, key)) {
