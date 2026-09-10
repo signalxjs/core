@@ -471,21 +471,24 @@ export function hasOptionsLiteralArgument(call: Node): boolean {
 /** The message for {@link hasOptionsLiteralArgument} failing, shared by both extractors. */
 export function optionsLiteralError(name: string, stream: boolean): string {
     const wrapper = stream ? 'serverStream' : 'serverFn';
+    const keys = stream
+        ? '`authorize`, `allowAnonymous`'
+        : '`id`, `cache`, `form`, `invalidates`, `authorize`, `allowAnonymous`';
     return (
         `${wrapper} "${name}": the only authoring form is ${wrapper}({ input?, handler, … }) ` +
         `with ONE object-literal argument (rfc-server-v5 §1.1). The direct form ` +
         `${wrapper}(async ${stream ? 'function* ' : ''}(rq, …) => …) was removed — it cannot ` +
         `declare validation or access and would throw on first call — and a non-literal ` +
-        `options object hides the statically-read declarations (\`id\`, \`cache\`, \`form\`, ` +
-        `\`invalidates\`, \`authorize\`, \`allowAnonymous\`) from the build. Write the ` +
-        `options object literally at the call site.`
+        `options object hides the statically-read declarations (${keys}) from the build. ` +
+        `Write the options object literally at the call site.`
     );
 }
 
 /** The message for a `serverFn()` call that is not an exported module-scope `const`. */
-export function misplacedServerFnError(): string {
+export function misplacedServerFnError(stream = false): string {
+    const wrapper = stream ? 'serverStream' : 'serverFn';
     return (
-        'serverFn() must be an exported module-scope `const name = serverFn(...)` in a ' +
+        `${wrapper}() must be an exported module-scope \`const name = ${wrapper}(...)\` in a ` +
         'server module — not created inside a function or expression (component state ' +
         'crosses the boundary as arguments, never as captures; rfc-server §1.2), not a ' +
         'let/var binding (the stub swap needs a fixed binding), and not left unexported ' +
@@ -755,7 +758,10 @@ export function extractServerFns(
             // precise error, not also the misplaced-call error below.
             accepted.add(init);
             if (decl.kind !== 'const') {
-                errors.push({ offset: (declarator.id as Node).start, message: misplacedServerFnError() });
+                errors.push({
+                    offset: (declarator.id as Node).start,
+                    message: misplacedServerFnError(call.kind === 'stream')
+                });
                 continue;
             }
             const local = (declarator.id as Node).name as string;
@@ -977,14 +983,17 @@ export function extractServerFns(
     // After pass 2, so a default-exported call is claimed by its own error.
     forEachNode(program, (node) => {
         if (node.type === 'CallExpression' && isServerFnCall(node) && !accepted.has(node)) {
-            errors.push({ offset: node.start, message: misplacedServerFnError() });
+            errors.push({
+                offset: node.start,
+                message: misplacedServerFnError(wrapperKind(node)?.kind === 'stream')
+            });
         }
     });
     // A module-scope server function that never reached an export has no
     // route: it used to be silently omitted from the stub (v5 §1.7).
     for (const [local, record] of localFnSources) {
         if (!exportedLocals.has(local)) {
-            errors.push({ offset: record.node.start, message: misplacedServerFnError() });
+            errors.push({ offset: record.node.start, message: misplacedServerFnError(record.stream) });
         }
     }
 

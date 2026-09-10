@@ -1323,3 +1323,27 @@ describe('the spread rule sees through TypeScript wrappers too', () => {
         }
     });
 });
+
+describe('build-error messages name the wrapper they are about', () => {
+    const opts = { stableId: 'src/x.server.ts', endpoint: '/_sigx/fn', requireAuthorization: false as const };
+    const messages = (code: string): string[] =>
+        extractServerFns(`import { serverFn, serverStream } from '@sigx/server';\n${code}`, '/app/src/x.server.ts', opts).errors.map((e) => e.message);
+
+    it('a stream in the direct form is told about serverStream and the keys a stream reads', () => {
+        const m = messages(`export const s = serverStream(async function* () { yield 1; });\n`);
+        expect(m).toHaveLength(1);
+        expect(m[0]).toMatch(/^serverStream "s": the only authoring form is serverStream\(/);
+        expect(m[0]).toMatch(/\(`authorize`, `allowAnonymous`\)/);
+        expect(m[0]).not.toMatch(/`cache`/);
+    });
+
+    it('an unexported or let-bound stream is told about serverStream', () => {
+        expect(messages(`const s = serverStream({ handler: async function* () { yield 1; } });\n`)[0]).toMatch(/^serverStream\(\) must be an exported module-scope `const name = serverStream\(/);
+        expect(messages(`export let s = serverStream({ handler: async function* () { yield 1; } });\n`)[0]).toMatch(/^serverStream\(\) must be/);
+    });
+
+    it('a nested stream call names serverStream; a nested fn call names serverFn', () => {
+        expect(messages(`export function make() { return serverStream({ handler: async function* () { yield 1; } }); }\n`)[0]).toMatch(/^serverStream\(\) must be/);
+        expect(messages(`export function make() { return serverFn({ handler: async () => 1 }); }\n`)[0]).toMatch(/^serverFn\(\) must be/);
+    });
+});
