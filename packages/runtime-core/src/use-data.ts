@@ -66,15 +66,19 @@ const handledReadOptionKeys: ReadonlySet<string> = new Set(['server']);
 
 /**
  * Default fetcher for server-fn keys (#452): a fn-headed tuple
- * `[fn, ...args]` calls `fn(...args)` — the RPC stub on the client, the
- * real wrapper in-process during SSR. Any other key shape without an
- * explicit fetcher is an authoring error (type-blocked; this throw is the
- * runtime backstop).
+ * `[fn, input?]` calls `fn(input?)` — the RPC stub on the client, the
+ * real wrapper in-process during SSR — bound to the cell's abort signal
+ * through the ref's `.with({ signal })` channel when it has one
+ * (rfc-server-v5 §1.8), so releasing the cell aborts the fetch. Any other
+ * key shape without an explicit fetcher is an authoring error
+ * (type-blocked; this throw is the runtime backstop).
  */
-const refTupleFetcher = (raw: KeyValue, _ctx: AsyncFetcherContext): Promise<unknown> => {
+const refTupleFetcher = (raw: KeyValue, ctx: AsyncFetcherContext): Promise<unknown> => {
     if (Array.isArray(raw) && isServerFnDataRef(raw[0])) {
+        const ref = raw[0] as unknown as ServerFnDataRef;
         const args = raw.slice(1) as unknown as KeyTuple;
-        return Promise.resolve((raw[0] as unknown as ServerFnDataRef)(...args));
+        const call = typeof ref.with === 'function' ? ref.with({ signal: ctx.signal }) : ref;
+        return Promise.resolve(call(...args));
     }
     throw new TypeError(
         '[useData] no fetcher given and the key is not a server-fn reference — only ' +
@@ -85,8 +89,9 @@ const refTupleFetcher = (raw: KeyValue, _ctx: AsyncFetcherContext): Promise<unkn
 /** Server-fn key (#452): data identity IS the fn — canonical key
  *  `'["<stableId>/<name>"]'`, default fetcher `() => fn()`. */
 export function useData<R>(fn: ServerFnDataRef<[], R>, opts?: AsyncOptions): AsyncState<Awaited<R>>;
-/** Reactive server-fn tuple key: `() => [fn, ...args]`; falsy ⇒ idle.
- *  Default fetcher `fn(...args)`; args are the fn's own parameters. */
+/** Reactive server-fn tuple key: `() => [fn, input]`; falsy ⇒ idle.
+ *  Default fetcher `fn(input)`; the tuple is `[fn]` or `[fn, input]`
+ *  (a server function takes one input, rfc-server-v5 §1.1). */
 export function useData<A extends KeyTuple, R>(
     key: () => readonly [ServerFnDataRef<A, R>, ...A] | Falsy,
     opts?: AsyncOptions
@@ -125,7 +130,7 @@ export function useData<T>(
         if (
             __DEV__ &&
             typeof keyArg === 'function' &&
-            ('__sigxFn' in keyArg || '__sigxKey' in keyArg)
+            ('__sigx' in keyArg || '__sigxKey' in keyArg)
         ) {
             // A server fn/stub reached here WITHOUT a usable stamped key —
             // treating it as a key getter would fire the RPC to name a key.

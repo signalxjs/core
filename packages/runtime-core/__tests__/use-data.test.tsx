@@ -1023,9 +1023,37 @@ describe('useData', () => {
         expect(cell.value).toBe('custom-7');
     });
 
+    it("the default fetcher threads the cell's abort signal through fn.with({ signal })", async () => {
+        // rfc-server-v5 §1.8: a wrapped fn carries `.with(options)`; the
+        // default fetcher binds the cell's signal through it so releasing
+        // the cell aborts the in-flight call. A ref WITHOUT `.with` (the
+        // other tests here) is called directly — this one has it and must
+        // see an AbortSignal, never `undefined` and never the raw call.
+        let seen: unknown = 'never-bound';
+        const impl = async () => 3;
+        const getVotes = Object.assign(impl, {
+            __sigxKey: 'test/thing',
+            with: (o: { signal?: AbortSignal }) => (...a: []) => {
+                seen = o.signal;
+                return impl(...a);
+            }
+        });
+        let cell!: AsyncState<number>;
+        const App = component(() => {
+            cell = useData(getVotes);
+            return () => <div>{String(cell.value ?? '')}</div>;
+        });
+        mount(jsx(App, {}));
+        await settle();
+        expect(cell.value).toBe(3);
+        expect(seen).toBeInstanceOf(AbortSignal);
+    });
+
     it('a server fn WITHOUT a build-stamped key dev-throws instead of firing the RPC as a key getter', () => {
         const rpc = vi.fn(async () => 1);
-        const bare = Object.assign(rpc, { __sigxFn: () => {} });
+        const bare = Object.assign(rpc, {
+            __sigx: { kind: 'fn', invoke: async () => {}, anon: true, form: false }
+        });
         const App = component(() => {
             expect(() => (useData as any)(bare)).toThrow(/__sigxKey/);
             return () => null;
@@ -1039,7 +1067,10 @@ describe('useData', () => {
         // it declares is true everywhere. `''` must read as ABSENT here, or
         // every unstamped fn would key as `'[""]'` and collide.
         const rpc = vi.fn(async () => 1);
-        const unstamped = Object.assign(rpc, { __sigxFn: () => {}, __sigxKey: '' });
+        const unstamped = Object.assign(rpc, {
+            __sigx: { kind: 'fn', invoke: async () => {}, anon: true, form: false },
+            __sigxKey: ''
+        });
         const App = component(() => {
             expect(() => (useData as any)(unstamped)).toThrow(/__sigxKey/);
             return () => null;

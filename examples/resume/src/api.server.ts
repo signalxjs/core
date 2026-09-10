@@ -1,4 +1,4 @@
-import { serverFn, ServerFnError } from '@sigx/server';
+import { serverFn, ServerFnError, type StandardSchemaV1 } from '@sigx/server';
 
 /**
  * A server module (rfc-server §1.1): this whole file only ever runs on the
@@ -18,8 +18,9 @@ import { serverFn, ServerFnError } from '@sigx/server';
  * `createServerApp({ authenticate })` once and writes `authorize:` only
  * where a function needs more than "any signed-in user".
  *
- * It is also why these use the OPTIONS form even for a one-line handler:
- * the direct form has nowhere to declare.
+ * Even a one-line handler declares it next to its implementation: the
+ * options object is the only authoring form (rfc-server-v5 §1.1), so there
+ * is no shorter spelling that could leave access silently undeclared.
  */
 const QUOTES = [
     'The server thinks, the client patches pixels.',
@@ -38,7 +39,7 @@ const QUOTES = [
  */
 export const requestSummary = serverFn({
     allowAnonymous: true,
-    handler: async (rq) => `SSR request: ${rq.request.method} ${rq.url.pathname}`
+    handler: async ({ rq }) => `SSR request: ${rq.request.method} ${rq.url.pathname}`
 });
 
 /**
@@ -51,7 +52,7 @@ export const requestSummary = serverFn({
 export const getCatalog = serverFn({
     allowAnonymous: true,
     cache: { maxAge: 60, staleWhileRevalidate: 300 },
-    handler: async (_rq, section: string) => ({
+    handler: async ({ input: section }: { input: string }) => ({
         section,
         total: 3n,
         tags: new Set(['resumable', 'zero-js']),
@@ -85,7 +86,7 @@ export const vote = serverFn({
 
 /** Minimal Standard Schema — the validator IS the boundary (§5.2b): form
  *  fields arrive as attacker-typable strings on the no-JS transport. */
-const FeedbackInput = {
+const FeedbackInput: StandardSchemaV1<{ message: string }> = {
     '~standard': {
         version: 1 as const,
         vendor: 'sigx-example',
@@ -110,7 +111,7 @@ export const submitFeedback = serverFn({
     allowAnonymous: true,
     form: true,
     input: FeedbackInput,
-    handler: async (_rq, input: { message: string }) => {
+    handler: async ({ input }) => {
         console.log(`[resume-example] feedback: ${input.message}`);
         return { received: input.message };
     }
@@ -118,7 +119,7 @@ export const submitFeedback = serverFn({
 
 export const getQuote = serverFn({
     allowAnonymous: true,
-    handler: async (rq, index: number) => {
+    handler: async ({ input: index }: { input: number }) => {
         if (!Number.isInteger(index)) {
             throw new ServerFnError(400, 'index must be an integer');
         }

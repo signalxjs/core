@@ -51,7 +51,7 @@ function disposablePage(key: string) {
         onDispose(() => void (disposed = true));
         return 'session-data';
     });
-    const fetchIt = serverFn(async (rq) => value(rq));
+    const fetchIt = serverFn({ handler: async ({ rq }) => value(rq) });
     const Page = component(() => {
         const data = useData(key, async () => {
             await new Promise((r) => setTimeout(r, 5)); // after the shell
@@ -99,7 +99,7 @@ describe('createFetchHandler — disposal waits for the body (F-A)', () => {
             onDispose(() => void (disposed = true));
             return 'v';
         });
-        const probe = serverFn(async (rq) => value(rq));
+        const probe = serverFn({ handler: async ({ rq }) => value(rq) });
         const handler = createFetchHandler({
             template: TEMPLATE,
             app: async () => {

@@ -4,7 +4,11 @@ Server functions (RPC) for SignalX — typed client↔server calls, extracted at
 build time by `@sigx/vite/server`. The design RFC is
 [`docs/rfc-server.md`](../../docs/rfc-server.md); the access model
 (middleware / authentication / authorization, `createServerApp`) is
-[`docs/rfc-server-v4.md`](../../docs/rfc-server-v4.md).
+[`docs/rfc-server-v4.md`](../../docs/rfc-server-v4.md); the 1.0
+consolidation (one authoring form, `handler({ input, rq })`, one route, one
+descriptor) is [`docs/rfc-server-v5.md`](../../docs/rfc-server-v5.md), with
+[`docs/migrations/1.0-serverfn.md`](../../docs/migrations/1.0-serverfn.md)
+as the migration.
 
 Not to be confused with `@sigx/server-renderer`, which renders documents —
 this package is how your app **talks to** the server.
@@ -22,12 +26,19 @@ invocation. Same import, both sides, types flow through untouched.
 import { serverFn, requirePrincipal } from '@sigx/server';
 import { db } from './db';
 
-// productId/qty arrive from the wire — see "Validation and the two forms"
-export const addToCart = serverFn(async (rq, productId: string, qty: number) => {
-    const user = await requirePrincipal<User>(rq);   // resolved by the app's authenticate
-    return db.cart.add(user.id, productId, qty);
+export const addToCart = serverFn({
+    input: AddToCart,     // Standard Schema — the wire input is validated on every transport
+    handler: async ({ input: { productId, qty }, rq }) => {
+        const user = await requirePrincipal<User>(rq);   // resolved by the app's authenticate
+        return db.cart.add(user.id, productId, qty);
+    }
 });
 ```
+
+One authoring form, one input: `serverFn({ input?, handler, … })`. The
+handler receives **one object** — destructure `input` and/or `rq` (the
+request context) and nothing else. Every declaration (validation, access,
+cache, form, invalidation, a pinned id) sits next to the implementation.
 
 No hand-rolled session check: the runtime is **fail-closed** — an anonymous
 caller was already refused with a 401 before this body ran (see *The server
@@ -62,7 +73,10 @@ import { component, useData } from 'sigx';
 import { serverFn } from '@sigx/server';
 import { searchIndex } from './search-index';   // server-only dep
 
-const search = serverFn(async (rq, q: string) => searchIndex.query(q));
+const search = serverFn({
+    input: z.string(),
+    handler: async ({ input: q }) => searchIndex.query(q)
+});
 
 export const Search = component((ctx) => {
     const q = ctx.signal('');
@@ -83,10 +97,10 @@ from `*.server.ts` modules instead (a module-scope const is not a legal
 capture for extracted QRL handlers).
 
 There is **no closure serialization** — data crosses the boundary only as
-typed arguments (I consider Qwik's captured-value round-trip an injection
-surface, not a convenience). Validate them: the options form takes a
+the typed input (I consider Qwik's captured-value round-trip an injection
+surface, not a convenience). Validate it: `input` takes a
 [Standard Schema](https://standardschema.dev) validator that always runs
-server-side, plus a per-function authorization requirement no transport can
+server-side, and `authorize` is a per-function requirement no transport can
 skip:
 
 ```ts
@@ -95,47 +109,30 @@ export const quote = serverFn({
     // Runs AFTER validation, so op.input is the trusted resource; only the
     // literal `true` allows (strict, fail-closed). Replaces the app default.
     authorize: (principal, rq, op) => canQuote(principal, op.input),
-    async handler(rq, input) {
+    async handler({ input, rq }) {
         return priceQuote(await requirePrincipal(rq), input);
     }
 });
 ```
 
-### Validation and the two forms
+### Validation
 
-The two authoring forms trade ceremony against enforcement, and the
-asymmetry is deliberate — know which side of it you're on:
+A server function takes **exactly one input** (or none), and the input is
+what `input` validates — on every transport, before `authorize` and the
+handler, with extra wire arguments rejected as a 400. `input` is also the
+inference source for the input type: omit it and the type falls back to the
+handler's destructured annotation (`handler: async ({ input }: { input: Foo })
+=> …`) — with neither the input is undeclared, and the callable takes **no
+argument at all** (`fn()`, not `fn(undefined)`). That is a typing
+statement, not a guarantee: the wire can still carry an input, it just
+reaches the handler unvalidated, which is what the dev warning is for — a
+function that receives wire input it has no validator for logs once per
+function. Declaring `input` resolves it. Several parameters are one input
+object (or tuple) with one schema; there is no multi-argument form.
 
-- **Direct form** — `serverFn(async (rq, id: string) => …)` — multi-argument,
-  zero ceremony. The parameter types are **compile-time only**: a hostile
-  client ignores them, wire arguments reach the body unvalidated, and the
-  argument count is unenforced (the declared shape isn't knowable at
-  runtime).
-- **Options form** — `serverFn({ input, handler })` — exactly one input,
-  validated by the Standard Schema on every transport, extra wire arguments
-  rejected with a 400. The arity guard exists here precisely because the
-  shape *is* declared. `input` is also the inference source for the input
-  type: omit it and the type falls back to the handler's parameter
-  annotation — with neither the input is undeclared, and the callable takes
-  **no argument at all** (`fn()`, not `fn(undefined)`). That is a typing
-  statement, not a guarantee: the wire can still carry an input, it just
-  reaches the handler unvalidated, which is what the warning below is for.
-
-My rule of thumb: a function whose body checks everything it uses (loads by
-id and authorizes, like `addToCart` above) is fine in the direct form;
-anything whose arguments shape a query, a write, or a price belongs in the
-options form with an `input` schema. In dev, a function that receives wire
-input it has no validator for logs a once-per-function warning — the
-direct form always (its types are compile-time only), the options form
-when `input` is omitted. Declaring `input` is what resolves both.
-`serverStream` has an options form too, in two shapes: declaring `input`
-selects the single-input shape — `serverFn`'s semantics exactly, validated
-after the pipeline's prelude and before the first chunk on every transport
-(a wire rejection is a buffered JSON 400, never a streamed byte) — while
-omitting it keeps the multi-argument shape (`authorize` and `allowAnonymous`
-only), where many arguments have no single-input schema and validation
-belongs at the top of the generator (any Standard Schema validates
-standalone).
+`serverStream` follows the same rule: `input` is validated after the
+pipeline's prelude and before the first chunk on every transport (a wire
+rejection is a buffered JSON 400, never a streamed byte).
 
 ### The server app — `createServerApp`
 
@@ -230,11 +227,11 @@ export const submitPat = serverFn({
     allowAnonymous: true,     // deliberate: this IS the sign-in
     form: true,
     input: PatSchema,
-    handler: async (rq, pat) => …
+    handler: async ({ input: pat, rq }) => …
 });
 ```
 
-A bare `serverFn(async (rq) => …)` with no `serverApp` configured is a build
+A bare `serverFn({ handler })` with no `serverApp` configured is a build
 error naming every remedy, with its file and line. `allowAnonymous` is a
 word rather than an omission because "I meant this to be open" and "I
 forgot" must not look identical — and it makes the open surface greppable:
@@ -266,7 +263,7 @@ them to `invalidate()` on arrival, with zero wiring:
 ```ts
 export const addToCart = serverFn({
     input: AddInput,
-    async handler(rq, input) {
+    async handler({ input }) {
         return db.cart.add(input);
     },
     // Runs after the handler, on the VALIDATED input + the result.
@@ -301,11 +298,11 @@ their component chunk ever loading** — upgraded ones get live-signal
 writes instead:
 
 ```ts
-export const getTracker = serverFn(async () => db.tracker());
+export const getTracker = serverFn({ handler: async () => db.tracker() });
 
 export const track = serverFn({
     input: TrackInput,
-    async handler(rq, input) {
+    async handler({ input }) {
         return db.track(input);
     },
     invalidates: () => [getTracker]   // fn refs, strings, or tuple prefixes
@@ -346,7 +343,7 @@ real `action="/_sigx/fn/<symbol>" method="post"` onto the form:
 export const submitFeedback = serverFn({
     form: true,
     input: FeedbackSchema,          // REQUIRED for form targets — see below
-    handler: async (rq, input) => save(input)
+    handler: async ({ input }) => save(input)
 });
 ```
 
@@ -389,7 +386,7 @@ absorb repeats without touching the origin:
 export const getProduct = serverFn({
     input: ProductQuery,
     cache: { maxAge: 60, staleWhileRevalidate: 300 },
-    handler: async (rq, { id }) => db.products.get(id)
+    handler: async ({ input: { id } }) => db.products.get(id)
 });
 ```
 
@@ -440,8 +437,11 @@ client concept:
 
 ```ts
 // src/ai.server.ts
-export const explain = serverStream(async function* (rq, id: string) {
-    for await (const token of llm.explain(id)) yield token;
+export const explain = serverStream({
+    input: z.string(),
+    handler: async function* ({ input: id }) {
+        for await (const token of llm.explain(id)) yield token;
+    }
 });
 ```
 
@@ -457,27 +457,13 @@ iteration with the branded wire error (masked in prod unless it's a
 `ServerFnError`). One caveat vs `serverFn`'s buffered JSON: response
 headers and status freeze at the **first yield** — set them before it.
 
-A stream whose argument shapes a query belongs in the single-input options
-form (#572) — `serverFn`'s `input` semantics exactly:
-
-```ts
-export const explain = serverStream({
-    input: ExplainKey,        // Standard Schema — Zod/Valibot/ArkType
-    handler: async function* (rq, key) {
-        // `key` is the VALIDATED value
-        for await (const token of llm.explain(key)) yield token;
-    }
-});
-```
-
-Validation runs after the pipeline's prelude and **before the first
-chunk**, on every transport: over the wire a rejection is a buffered JSON
-`400 { issues }` — headers still writable, no stream byte sent — and
-in-process it rejects on the first pull, exactly where a middleware or
-policy veto does. With `input` declared the stream takes one argument
-(extras are a 400). Multi-argument streams keep the
-`authorize`/`allowAnonymous`-only options form and validate at the top of
-the generator.
+`input` is `serverFn`'s `input` exactly: validation runs after the
+pipeline's prelude and **before the first chunk**, on every transport —
+over the wire a rejection is a buffered JSON `400 { issues }` (headers
+still writable, no stream byte sent), and in-process it rejects on the
+first pull, exactly where a middleware or policy veto does. A stream takes
+one input (extras are a 400); `authorize` and `allowAnonymous` declare as
+on a `serverFn`.
 
 A stream carries the same `.with()` per-call channel as a `serverFn`
 (minus `fresh` — a stream is never HTTP-cached), so an SSR-time stream can
@@ -494,17 +480,19 @@ for await (const token of explain.with({ headers: { 'x-trace-id': traceId } })(i
 
 ## Context
 
-Every server function receives the request context as its **first
-parameter** — no `this`, no ambient globals:
+Every handler receives the request context as `rq` on its one object
+parameter — no `this`, no ambient globals; destructure it when you need it:
 
 ```ts
-serverFn(async (rq, ...args) => {
-    rq.request;          // WinterCG Request (headers, cookies via headers)
-    rq.url;              // parsed URL
-    rq.abortSignal;      // fires on client disconnect (never a reactive signal)
-    rq.responseHeaders;  // mutable response headers
-    rq.status(201);      // success status override
-    rq.locals;           // middleware/policy hand-off — ONE bag per request (see below)
+serverFn({
+    handler: async ({ input, rq }) => {
+        rq.request;          // WinterCG Request (headers, cookies via headers)
+        rq.url;              // parsed URL
+        rq.abortSignal;      // fires on client disconnect (never a reactive signal)
+        rq.responseHeaders;  // mutable response headers
+        rq.status(201);      // success status override
+        rq.locals;           // middleware/policy hand-off — ONE bag per request (see below)
+    }
 });
 ```
 
@@ -600,7 +588,7 @@ export const app = createServerApp({ authenticate: (rq) => session(rq) });
 // src/board.server.ts — nothing to repeat: the app default protects it.
 export const boardIssues = serverFn({
     input: BoardKey,
-    handler: async (rq, key) => (await github(rq)).issues(key),   // no decode, no cast
+    handler: async ({ input: key, rq }) => (await github(rq)).issues(key),   // no decode, no cast
 });
 ```
 
@@ -699,9 +687,9 @@ codecs, form parsing, status codes) is tested the way this repo tests it —
 hand a `Request` to `handleServerFnRequest` with a `resolve` that returns
 your function.
 
-`stampServerFnKey(fn, key?)` mints the build stamp `useData(fn)` requires
-(`__sigxKey`, defaulting to `test/<name>`) on the SAME function — identity
-is load-bearing, so it mutates rather than wraps. Without it, `useData(fn)`
+`stampServerFnKey(fn, key)` mints the build stamp `useData(fn)` requires
+(`__sigxKey`, in the `<stableId>/<name>` shape — `'test/getVotes'`) on the
+SAME function — identity is load-bearing, so it mutates rather than wraps. Without it, `useData(fn)`
 dev-throws in unit tests because the key is stamped by the Vite transform,
 which a test run does not have. Streams are rejected: a stream is not a
 `useData` target.
@@ -998,12 +986,15 @@ runtime-configurable through that same handler registry, so a
 and could not see a missing `await` or a cycle anyway.
 
 ```ts
-export const getOrder = serverFn(async (rq, id: string) => ({
-    id,
-    createdAt: new Date(),          // arrives as a Date
-    tags: new Set(['priority']),    // arrives as a Set
-    total: 1999n                    // arrives as a BigInt
-}));
+export const getOrder = serverFn({
+    input: z.string(),
+    handler: async ({ input: id }) => ({
+        id,
+        createdAt: new Date(),          // arrives as a Date
+        tags: new Set(['priority']),    // arrives as a Set
+        total: 1999n                    // arrives as a BigInt
+    })
+});
 ```
 
 Class instances lose their prototype unless a handler is registered for
@@ -1160,11 +1151,12 @@ Every server function is a public HTTP endpoint; the defaults assume that:
   text provably cannot spell one — no literal and no `\u` escape — which is
   a pure speed-up, not a relaxation: the parsed value is identical either
   way, escape-spelled keys included (#544).
-- **Argument validation is opt-in** — the options form's `input` is the
-  validation seam; direct-form arguments are not validated at runtime (a
-  `__DEV__` warning fires once per function when one receives wire
-  arguments). The exception is `form: true`, which requires `input` at
-  definition time — the no-JS transport's validator is load-bearing.
+- **Input validation is opt-in** — `input` is the validation seam; without
+  it the single wire argument reaches the handler as-is (a `__DEV__`
+  warning fires once per function when one receives wire input). More than
+  one wire argument is always a 400. The exception is `form: true`, which
+  requires `input` at definition time — the no-JS transport's validator is
+  load-bearing.
 
 ## Entry points
 

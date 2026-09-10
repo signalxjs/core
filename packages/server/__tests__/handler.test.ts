@@ -29,18 +29,28 @@ afterEach(() => {
 
 const ORIGIN = 'http://localhost';
 
-const add = serverFn(async (_rq, a: number, b: number) => a + b);
-const boom = serverFn(async () => {
-    throw new Error('secret internals');
+// One tuple input — a server function takes a single input (rfc-server-v5
+// §1.2), so the wire body is `{"args":[[a, b]]}`.
+const add = serverFn({
+    handler: async ({ input: [a, b] }: { input: [number, number] }) => a + b
 });
-const politeBoom = serverFn(async () => {
-    throw new ServerFnError(418, 'teapot', { hint: 'short and stout' });
+const boom = serverFn({
+    handler: async () => {
+        throw new Error('secret internals');
+    }
 });
-const echo = serverFn(async (_rq, value: unknown) => value);
-const withHeaders = serverFn(async (rq) => {
-    rq.responseHeaders.set('x-custom', 'yes');
-    rq.status(201);
-    return 'created';
+const politeBoom = serverFn({
+    handler: async () => {
+        throw new ServerFnError(418, 'teapot', { hint: 'short and stout' });
+    }
+});
+const echo = serverFn({ handler: async ({ input: value }: { input: unknown }) => value });
+const withHeaders = serverFn({
+    handler: async ({ rq }) => {
+        rq.responseHeaders.set('x-custom', 'yes');
+        rq.status(201);
+        return 'created';
+    }
 });
 
 const FNS: Record<string, unknown> = {
@@ -113,7 +123,7 @@ describe('base agreement (#563)', () => {
             const request = new Request(`${ORIGIN}/rpc/add_fn_00000001`, {
                 method: 'POST',
                 headers: { 'content-type': 'application/json', origin: ORIGIN },
-                body: JSON.stringify({ args: [2, 3] })
+                body: JSON.stringify({ args: [[2, 3]] })
             });
             const res = await handleServerFnRequest(request, {
                 resolve: (sym) => FNS[sym] ?? null,
@@ -129,7 +139,7 @@ describe('base agreement (#563)', () => {
         new Request(`${ORIGIN}/_sigx/fn/add_fn_00000001`, {
             method: 'POST',
             headers: { 'content-type': 'application/json', origin: ORIGIN },
-            body: JSON.stringify({ args: [2, 3] })
+            body: JSON.stringify({ args: [[2, 3]] })
         });
 
     it('a request under a base the handler does not describe is a 404 — and says so in dev', async () => {
@@ -170,14 +180,14 @@ describe('base agreement (#563)', () => {
 
 describe('handleServerFnRequest — happy path', () => {
     it('invokes the function and returns {data}', async () => {
-        const res = await call('add_fn_00000001', { args: [2, 3] });
+        const res = await call('add_fn_00000001', { args: [[2, 3]] });
         expect(res.status).toBe(200);
         expect(res.headers.get('content-type')).toBe('application/json');
         await expect(res.json()).resolves.toEqual({ data: 5 });
     });
 
     it('an undefined result returns an empty envelope', async () => {
-        const noop = serverFn(async () => undefined);
+        const noop = serverFn({ handler: async () => undefined });
         const res = await handleServerFnRequest(
             new Request(`${ORIGIN}/_sigx/fn/noop`, {
                 method: 'POST',
@@ -198,7 +208,7 @@ describe('handleServerFnRequest — happy path', () => {
     });
 
     it('tolerates content-type parameters', async () => {
-        const res = await call('add_fn_00000001', { args: [1, 1] }, {
+        const res = await call('add_fn_00000001', { args: [[1, 1]] }, {
             headers: { 'content-type': 'application/json; charset=utf-8' }
         });
         expect(res.status).toBe(200);
@@ -217,7 +227,7 @@ describe('handleServerFnRequest — status matrix', () => {
             new Request(`${ORIGIN}/_sigx/fn/add_fn_00000001`, {
                 method: 'POST',
                 headers: { 'content-type': 'text/plain', origin: ORIGIN },
-                body: '{"args":[1,2]}'
+                body: '{"args":[[1,2]]}'
             }),
             { resolve: (sym) => FNS[sym] }
         );
@@ -229,20 +239,20 @@ describe('handleServerFnRequest — status matrix', () => {
             new Request(`${ORIGIN}/_sigx/fn/add_fn_00000001`, {
                 method: 'POST',
                 headers: { 'content-type': 'application/json' },
-                body: '{"args":[1,2]}'
+                body: '{"args":[[1,2]]}'
             }),
             { resolve: (sym) => FNS[sym] }
         );
         expect(missing.status).toBe(403);
 
-        const cross = await call('add_fn_00000001', { args: [1, 2] }, {
+        const cross = await call('add_fn_00000001', { args: [[1, 2]] }, {
             headers: { origin: 'https://evil.example' }
         });
         expect(cross.status).toBe(403);
     });
 
     it('origin allowlist and origin:false override the default', async () => {
-        const listed = await call('add_fn_00000001', { args: [1, 2] }, {
+        const listed = await call('add_fn_00000001', { args: [[1, 2]] }, {
             headers: { origin: 'https://app.example' }
         }, { origin: ['https://app.example'] });
         expect(listed.status).toBe(200);
@@ -251,7 +261,7 @@ describe('handleServerFnRequest — status matrix', () => {
             new Request(`${ORIGIN}/_sigx/fn/add_fn_00000001`, {
                 method: 'POST',
                 headers: { 'content-type': 'application/json' },
-                body: '{"args":[1,2]}'
+                body: '{"args":[[1,2]]}'
             }),
             { resolve: (sym) => FNS[sym], origin: false }
         );
@@ -299,7 +309,7 @@ describe('handleServerFnRequest — stable symbols (rfc-server rev 2, N.3)', () 
             new Request(url, {
                 method: 'POST',
                 headers: { 'content-type': 'application/json', origin: ORIGIN },
-                body: '{"args":[2,3]}'
+                body: '{"args":[[2,3]]}'
             }),
             { resolve: (sym) => (sym === stable ? add : null) }
         );
@@ -363,7 +373,7 @@ describe('handleServerFnRequest — stable symbols (rfc-server rev 2, N.3)', () 
             new Request(`${ORIGIN}/_sigx/fn/%40acme%2Fapi%2Fsrc%2Fcart.server.ts%23addToCart`, {
                 method: 'POST',
                 headers: { 'content-type': 'application/json', origin: ORIGIN },
-                body: '{"args":[2,3]}'
+                body: '{"args":[[2,3]]}'
             }),
             { resolve: (sym) => (sym === '@acme/api/src/cart.server.ts/addToCart' ? add : null) }
         );
@@ -387,7 +397,7 @@ describe('handleServerFnRequest — stable symbols (rfc-server rev 2, N.3)', () 
             new Request(`${ORIGIN}/elsewhere/add_fn_00000001`, {
                 method: 'POST',
                 headers: { 'content-type': 'application/json', origin: ORIGIN },
-                body: '{"args":[1,2]}'
+                body: '{"args":[[1,2]]}'
             }),
             { resolve: () => add }
         );
@@ -425,7 +435,7 @@ describe('handleServerFnRequest — stable symbols (rfc-server rev 2, N.3)', () 
             ],
             authenticate: () => ({ id: 'tester' })
         });
-        await call('add_fn_00000001', { args: [1, 2] });
+        await call('add_fn_00000001', { args: [[1, 2]] });
         expect(seen).toEqual(['add']);
     });
 });
@@ -436,7 +446,7 @@ describe('handleServerFnRequest — origin: verify-when-present (rfc-server rev 
             new Request(`${ORIGIN}/_sigx/fn/add_fn_00000001`, {
                 method: 'POST',
                 headers: { 'content-type': 'application/json' },
-                body: '{"args":[1,2]}'
+                body: '{"args":[[1,2]]}'
             }),
             { resolve: (sym) => FNS[sym], ...options }
         );
@@ -448,19 +458,19 @@ describe('handleServerFnRequest — origin: verify-when-present (rfc-server rev 
     });
 
     it('still verifies a PRESENT Origin — match passes, mismatch 403s', async () => {
-        const match = await call('add_fn_00000001', { args: [1, 2] }, {}, {
+        const match = await call('add_fn_00000001', { args: [[1, 2]] }, {}, {
             origin: 'verify-when-present'
         });
         expect(match.status).toBe(200);
 
-        const cross = await call('add_fn_00000001', { args: [1, 2] }, {
+        const cross = await call('add_fn_00000001', { args: [[1, 2]] }, {
             headers: { origin: 'https://evil.example' }
         }, { origin: 'verify-when-present' });
         expect(cross.status).toBe(403);
     });
 
     it('rejects "Origin: null" — a PRESENT header, not an absent one', async () => {
-        const res = await call('add_fn_00000001', { args: [1, 2] }, {
+        const res = await call('add_fn_00000001', { args: [[1, 2]] }, {
             headers: { origin: 'null' }
         }, { origin: 'verify-when-present' });
         expect(res.status).toBe(403);
@@ -604,7 +614,7 @@ describe('handleServerFnRequest — throwing resolve (#555)', () => {
 
     it('a prototype-key symbol against a plain-object registry is a clean 404', async () => {
         // FNS['__proto__'] is Object.prototype — truthy but carrying no
-        // __sigxFn, so the unknown-symbol check must catch it.
+        // __sigx descriptor, so the unknown-symbol check must catch it.
         const res = await call('__proto__', { args: [] });
         expect(res.status).toBe(404);
         const body = await res.json();
@@ -640,7 +650,7 @@ describe('handleServerFnRequest — throwing resolve (#555)', () => {
 describe('handleServerFnRequest — app middleware at the endpoint', () => {
     it('runs before the function with the symbol info and shares locals', async () => {
         const seen: unknown[] = [];
-        const whoami = serverFn(async (rq) => rq.locals.user);
+        const whoami = serverFn({ handler: async ({ rq }) => rq.locals.user });
         restoreApp();
         restoreApp = stubServerApp({
             middleware: [
@@ -674,7 +684,7 @@ describe('handleServerFnRequest — app middleware at the endpoint', () => {
             ],
             authenticate: () => ({ id: 'tester' })
         });
-        const res = await call('add_fn_00000001', { args: [1, 2] });
+        const res = await call('add_fn_00000001', { args: [[1, 2]] });
         expect(res.status).toBe(401);
         expect(res.headers.get('set-cookie')).toBe('challenge=1');
         await expect(res.json()).resolves.toEqual({
@@ -701,7 +711,7 @@ describe('handleServerFnRequest — app middleware at the endpoint', () => {
             ],
             authenticate: () => ({ id: 'tester' })
         });
-        const secret = serverFn(async () => 'data');
+        const secret = serverFn({ handler: async () => 'data' });
 
         // In-process, exactly as `useData` does during SSR: covered.
         await expect(secret()).resolves.toBe('data');
@@ -762,9 +772,11 @@ describe('handleServerFnRequest — pollution reviver', () => {
     const captor = (): { fn: unknown; seen: () => Record<string, unknown> } => {
         let captured: Record<string, unknown> = {};
         return {
-            fn: serverFn(async (_rq, value: Record<string, unknown>) => {
-                captured = value;
-                return 'ok';
+            fn: serverFn({
+                handler: async ({ input: value }: { input: Record<string, unknown> }) => {
+                    captured = value;
+                    return 'ok';
+                }
             }),
             seen: () => captured
         };
@@ -896,21 +908,23 @@ describe('handleServerFnRequest — onError observability seam (#349)', () => {
             ],
             authenticate: () => ({ id: 'tester' })
         });
-        const res = await call('add_fn_00000001', { args: [1, 2] }, {}, { onError });
+        const res = await call('add_fn_00000001', { args: [[1, 2]] }, {}, { onError });
         expect(res.status).toBe(500);
         expect(onError).toHaveBeenCalledTimes(1);
     });
 });
 
 describe('handleServerFnRequest — timeoutMs (#350)', () => {
-    const hang = serverFn(async (rq) => {
-        await new Promise<void>((resolve) => {
-            // Resolves only via abort — a cooperative hung handler.
-            rq.abortSignal.addEventListener('abort', () => resolve(), { once: true });
-        });
-        return 'aborted-cleanly';
+    const hang = serverFn({
+        handler: async ({ rq }) => {
+            await new Promise<void>((resolve) => {
+                // Resolves only via abort — a cooperative hung handler.
+                rq.abortSignal.addEventListener('abort', () => resolve(), { once: true });
+            });
+            return 'aborted-cleanly';
+        }
     });
-    const never = serverFn(async () => new Promise(() => {}));
+    const never = serverFn({ handler: async () => new Promise(() => {}) });
     FNS['hang_fn_00000006'] = hang;
     FNS['never_fn_00000007'] = never;
 
@@ -932,13 +946,13 @@ describe('handleServerFnRequest — timeoutMs (#350)', () => {
     });
 
     it('a fast handler under a generous timeout is unaffected', async () => {
-        const res = await call('add_fn_00000001', { args: [2, 3] }, {}, { timeoutMs: 5000 });
+        const res = await call('add_fn_00000001', { args: [[2, 3]] }, {}, { timeoutMs: 5000 });
         expect(res.status).toBe(200);
         await expect(res.json()).resolves.toEqual({ data: 5 });
     });
 
     it('absent timeoutMs keeps the exact current behavior', async () => {
-        const res = await call('add_fn_00000001', { args: [2, 3] });
+        const res = await call('add_fn_00000001', { args: [[2, 3]] });
         expect(res.status).toBe(200);
     });
 });
@@ -947,25 +961,29 @@ describe('handleServerFnRequest — rich wire serialization (rfc-server §4)', (
     class Basket {
         items = 3;
     }
-    const returnsDate = serverFn(async () => ({ createdAt: new Date(1_700_000_000_000) }));
-    const returnsMap = serverFn(async () => new Map([['a', 1]]));
-    const returnsNestedUndefined = serverFn(async () => ({ a: { b: undefined } }));
-    const returnsInstance = serverFn(async () => new Basket());
-    const returnsToJson = serverFn(async () => ({ range: { toJSON: () => [1, 2] } }));
-    const returnsPlain = serverFn(async () => ({ ok: [1, 2, { deep: true }] }));
-    const returnsRich = serverFn(async () => ({
-        at: new Date(5),
-        tags: new Set(['a']),
-        total: 42n,
-        home: new URL('https://example.com/'),
-        pattern: /ab+c/gi
-    }));
-    const returnsTagLike = serverFn(async () => ({ $date: 'just a string' }));
-    const echoes = serverFn(async (_rq, value: unknown) => value);
-    const returnsCircular = serverFn(async () => {
-        const c: Record<string, unknown> = { a: 1 };
-        c.self = c;
-        return c;
+    const returnsDate = serverFn({ handler: async () => ({ createdAt: new Date(1_700_000_000_000) }) });
+    const returnsMap = serverFn({ handler: async () => new Map([['a', 1]]) });
+    const returnsNestedUndefined = serverFn({ handler: async () => ({ a: { b: undefined } }) });
+    const returnsInstance = serverFn({ handler: async () => new Basket() });
+    const returnsToJson = serverFn({ handler: async () => ({ range: { toJSON: () => [1, 2] } }) });
+    const returnsPlain = serverFn({ handler: async () => ({ ok: [1, 2, { deep: true }] }) });
+    const returnsRich = serverFn({
+        handler: async () => ({
+            at: new Date(5),
+            tags: new Set(['a']),
+            total: 42n,
+            home: new URL('https://example.com/'),
+            pattern: /ab+c/gi
+        })
+    });
+    const returnsTagLike = serverFn({ handler: async () => ({ $date: 'just a string' }) });
+    const echoes = serverFn({ handler: async ({ input: value }: { input: unknown }) => value });
+    const returnsCircular = serverFn({
+        handler: async () => {
+            const c: Record<string, unknown> = { a: 1 };
+            c.self = c;
+            return c;
+        }
     });
     Object.assign(FNS, {
         date_fn_00000008: returnsDate,
@@ -1033,9 +1051,11 @@ describe('handleServerFnRequest — rich wire serialization (rfc-server §4)', (
     it('revives an argument into a live instance for the handler', async () => {
         let seen: unknown;
         Object.assign(FNS, {
-            seen_fn_00000012: serverFn(async (_rq, v: unknown) => {
-                seen = v;
-                return null;
+            seen_fn_00000012: serverFn({
+                handler: async ({ input: v }: { input: unknown }) => {
+                    seen = v;
+                    return null;
+                }
             })
         });
         await call('seen_fn_00000012', { args: [{ $map: [['k', { $date: 1 }]] }] });
@@ -1093,16 +1113,16 @@ describe('handleServerFnRequest — rich wire serialization (rfc-server §4)', (
     });
 });
 
-describe('handleServerFnRequest — direct-form wire-args warning (#412)', () => {
-    it('a direct-form fn behind the endpoint warns once across repeated POSTs', async () => {
+describe('handleServerFnRequest — unvalidated wire-arg warning (#412/#437)', () => {
+    it('a fn with no `input` schema behind the endpoint warns once across repeated POSTs', async () => {
         const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
         try {
-            const fn = serverFn(async (_rq, id: string) => id);
+            const fn = serverFn({ handler: async ({ input: id }: { input: string }) => id });
             await call('direct_fn_00000013', { args: ['a'] }, {}, { resolve: () => fn });
             await call('direct_fn_00000013', { args: ['b'] }, {}, { resolve: () => fn });
             expect(warn).toHaveBeenCalledOnce();
             expect(warn).toHaveBeenCalledWith(expect.stringContaining('"direct"'));
-            expect(warn).toHaveBeenCalledWith(expect.stringContaining('no declared input validator'));
+            expect(warn).toHaveBeenCalledWith(expect.stringContaining('no `input` validator'));
         } finally {
             warn.mockRestore();
         }
@@ -1170,8 +1190,10 @@ describe('response cap — maxResponseBytes (#571)', () => {
     it('oversized ServerFnError.data is dropped — error kept, onError NOT fired', async () => {
         const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
         const seen: unknown[] = [];
-        const bigData = serverFn(async () => {
-            throw new ServerFnError(422, 'too big to explain', { detail: 'x'.repeat(5_000) });
+        const bigData = serverFn({
+            handler: async () => {
+                throw new ServerFnError(422, 'too big to explain', { detail: 'x'.repeat(5_000) });
+            }
         });
         try {
             const res = await call(

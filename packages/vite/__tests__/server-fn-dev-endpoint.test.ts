@@ -39,7 +39,7 @@ import { serverFn } from '@sigx/server';
 export const read = serverFn({
     allowAnonymous: true,
     cache: { maxAge: 60 },
-    handler: async (rq, id) => 'read:' + id
+    handler: async ({ input: id }: { input: string }) => 'read:' + id
 });
 
 export const never = serverFn({
@@ -53,7 +53,7 @@ const liveModule = {
     read: serverFn({
         allowAnonymous: true,
         cache: { maxAge: 60 },
-        handler: async (_rq: unknown, id: string) => `read:${id}`
+        handler: async ({ input: id }: { input: string }) => `read:${id}`
     }),
     never: serverFn({
         allowAnonymous: true,

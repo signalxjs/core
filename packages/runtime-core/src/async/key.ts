@@ -28,6 +28,13 @@ export interface ServerFnDataRef<A extends KeyTuple = KeyTuple, R = unknown> {
     (...args: A): R | Promise<R>;
     /** Build-stamped stable key (`<stableId>/<name>`). */
     __sigxKey: string;
+    /**
+     * The per-call options channel a wrapped server function carries
+     * (`fn.with({ signal })`); the default fetcher threads the cell's abort
+     * signal through it when present. Optional: a hand-built ref without
+     * one is called directly.
+     */
+    with?(options: { signal?: AbortSignal }): (...args: A) => R | Promise<R>;
 }
 
 /** Brand check — a function whose `__sigxKey` is a non-empty string. */

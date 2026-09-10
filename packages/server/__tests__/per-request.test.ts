@@ -49,9 +49,9 @@ describe('perRequest — one value per request', () => {
         });
 
         // Three cells, as a page with three useData reads would have.
-        const a = serverFn(async (rq) => session(rq));
-        const b = serverFn(async (rq) => session(rq));
-        const c = serverFn(async (rq) => session(rq));
+        const a = serverFn({ handler: async ({ rq }) => session(rq) });
+        const b = serverFn({ handler: async ({ rq }) => session(rq) });
+        const c = serverFn({ handler: async ({ rq }) => session(rq) });
 
         const seen = await runInScope(nodeRequest(), async () =>
             Promise.all([a(), b(), c()])
@@ -66,7 +66,7 @@ describe('perRequest — one value per request', () => {
             decodes += 1;
             return rq.url.pathname;
         });
-        const read = serverFn(async (rq) => who(rq));
+        const read = serverFn({ handler: async ({ rq }) => who(rq) });
 
         const [one, two] = await Promise.all([
             runInScope(nodeRequest('/one'), () => read()),
@@ -92,7 +92,7 @@ describe('perRequest — one value per request', () => {
                 promises.push(session(rq));
                 return true;
             },
-            handler: async (rq) => {
+            handler: async ({ rq }) => {
                 promises.push(session(rq));
                 return 'ok';
             }
@@ -116,7 +116,7 @@ describe('perRequest — one value per request', () => {
                 await session(rq);
                 return true;
             },
-            handler: async (rq) => session(rq)
+            handler: async ({ rq }) => session(rq)
         });
 
         const first = await handleServerFnRequest(post('s_fn_1'), { resolve: () => fn });
@@ -135,7 +135,7 @@ describe('perRequest — one value per request', () => {
         });
         const client = perRequest(async (rq) => `client(${(await session(rq)).token})`);
 
-        const fn = serverFn(async (rq) => [await client(rq), (await session(rq)).token]);
+        const fn = serverFn({ handler: async ({ rq }) => [await client(rq), (await session(rq)).token] });
         await expect(runInScope(nodeRequest(), () => fn())).resolves.toEqual([
             'client(sid=alice)',
             'sid=alice'
@@ -249,7 +249,7 @@ describe('perRequest — .with({ context }) (the locked §2.4 rule)', () => {
             decodes += 1;
             return 'decoded';
         });
-        const fn = serverFn(async (rq) => session(rq));
+        const fn = serverFn({ handler: async ({ rq }) => session(rq) });
 
         const shared = { request: new Request('https://x.test/'), locals: {} };
         await fn.with({ context: shared })();
@@ -289,7 +289,7 @@ describe('perRequest — no AsyncLocalStorage (workerd without nodejs_compat)', 
                     fromGuard = await session(rq);
                     return true;
                 },
-                handler: async (rq: ServerFnContext) => session(rq)
+                handler: async ({ rq }: { rq: ServerFnContext }) => session(rq)
             });
 
             // Runs UNSCOPED — that is a supported state, not an error.
@@ -328,7 +328,7 @@ describe('perRequest — across a nested scope (#495)', () => {
             decodes += 1;
             return 'decoded';
         });
-        const read = serverFn(async (rq) => session(rq));
+        const read = serverFn({ handler: async ({ rq }) => session(rq) });
 
         const seeded = { request: new Request('http://app.test/board'), locals: {} };
         await expect(
@@ -349,7 +349,7 @@ describe('perRequest — across a nested scope (#495)', () => {
                 decodes += 1;
                 return decodes;
             });
-            const read = serverFn(async (rq) => session(rq));
+            const read = serverFn({ handler: async ({ rq }) => session(rq) });
 
             const outer = { request: new Request('http://app.test/board'), locals: {} };
             await expect(

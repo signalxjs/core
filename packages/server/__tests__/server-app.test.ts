@@ -45,7 +45,7 @@ describe('createServerApp — the seam stamp', () => {
     it('stamps at creation; the pipeline applies to a plain in-process call', async () => {
         app({ authenticate: () => ({ id: 'u1' }) });
         const whoami = serverFn({
-            handler: async (rq) => (await principal<{ id: string }>(rq))?.id
+            handler: async ({ rq }) => (await principal<{ id: string }>(rq))?.id
         });
         await expect(whoami()).resolves.toBe('u1');
     });
@@ -67,7 +67,7 @@ describe('createServerApp — the seam stamp', () => {
         // Disposing the superseded app is a no-op: the live stamp is not its.
         first.dispose();
         const whoami = serverFn({
-            handler: async (rq) => (await principal<{ id: string }>(rq))?.id
+            handler: async ({ rq }) => (await principal<{ id: string }>(rq))?.id
         });
         await expect(whoami()).resolves.toBe('second');
         // Disposing the live one clears the seam → fail-closed again.
@@ -99,7 +99,7 @@ describe('posture inheritance (rfc-server-v4 §3.1)', () => {
             authenticate: () => ({ id: 'u1' }),
             maxBodyBytes: 10 // tiny app-wide cap
         });
-        const echo = serverFn({ handler: async (_rq, v: unknown) => v });
+        const echo = serverFn({ handler: async ({ input: v }: { input: unknown }) => v });
         const resolve = (): unknown => echo;
 
         // Inherited: an 11-byte body trips the app's cap through the mount.
@@ -161,12 +161,14 @@ describe('serverFns mounts and claimBase', () => {
 
     it('a mount handler serves requests bound to its own base and options', async () => {
         const created = app({ authenticate: () => ({ id: 'u1' }) });
-        const add = serverFn(async (_rq, a: number, b: number) => a + b);
+        const add = serverFn({
+            handler: async ({ input: [a, b] }: { input: [number, number] }) => a + b
+        });
         const fns = created.serverFns({
             resolve: (s) => (s === 'add_fn_1' ? add : null),
             base: '/api/fns'
         });
-        const res = await fns(post('/api/fns/add_fn_1', { args: [2, 3] }));
+        const res = await fns(post('/api/fns/add_fn_1', { args: [[2, 3]] }));
         await expect(res.json()).resolves.toEqual({ data: 5 });
     });
 });

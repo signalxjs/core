@@ -118,12 +118,12 @@ function assert(cond, message) {
 {
     const app = createServerApp({ authenticate: () => ({ id: 'edge-smoke' }) });
     void app;
-    const add = serverFn(async (_rq, a, b) => a + b);
+    const add = serverFn({ handler: async ({ input: [a, b] }) => a + b });
     const res = await handleServerFnRequest(
         new Request('https://edge.test/_sigx/fn/add_fn_00000001', {
             method: 'POST',
             headers: { 'content-type': 'application/json', origin: 'https://edge.test' },
-            body: '{"args":[2,3]}'
+            body: '{"args":[[2,3]]}'
         }),
         { resolve: () => add }
     );
@@ -138,13 +138,13 @@ function assert(cond, message) {
         new Request('https://edge.test/_sigx/fn/add_fn_00000001', {
             method: 'POST',
             headers: { 'content-type': 'application/json', origin: 'https://edge.test' },
-            body: '{"args":[4,5]}'
+            body: '{"args":[[4,5]]}'
         }),
         { resolve: () => add, timeoutMs: 1000 }
     );
     assert(fast.status === 200 && (await fast.json()).data === 9, 'timeoutMs leaves a fast fn unaffected');
 
-    const never = serverFn(async () => new Promise(() => {}));
+    const never = serverFn({ handler: async () => new Promise(() => {}) });
     const masked = [];
     const hung = await handleServerFnRequest(
         new Request('https://edge.test/_sigx/fn/never_fn_00000002', {

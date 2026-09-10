@@ -102,7 +102,7 @@ describe('endpoint — $boundaries envelope (rfc-server §6.3)', () => {
     });
 
     it('a bare fn-ref pattern prefix-matches useData(fn) AND useData(() => [fn, args]) deps', async () => {
-        const getVotes = Object.assign(serverFn(async () => 3), {
+        const getVotes = Object.assign(serverFn({ handler: async () => 3 }), {
             __sigxKey: 'src/api.server.ts/getVotes'
         });
         const vote = serverFn({ handler: async () => 'ok', invalidates: () => [getVotes] });
@@ -386,7 +386,7 @@ describe('stub — collect/apply through __SIGX_SERVERFN_BOUNDARIES__', () => {
 
 describe('endpoint — fn-ref invalidates patterns (#452)', () => {
     it('resolves bare refs and tuple-embedded refs to stable-key patterns on the wire', async () => {
-        const getVotes = Object.assign(serverFn(async () => 3), {
+        const getVotes = Object.assign(serverFn({ handler: async () => 3 }), {
             __sigxKey: 'src/api.server.ts/getVotes'
         });
         const vote = serverFn({
@@ -409,7 +409,7 @@ describe('endpoint — fn-ref invalidates patterns (#452)', () => {
 
     it('drops a pattern containing an unstamped fn ref, with a dev warning', async () => {
         const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-        const bare = serverFn(async () => 1);
+        const bare = serverFn({ handler: async () => 1 });
         const vote = serverFn({
             handler: async () => 'ok',
             invalidates: () => [bare, ['k']]
@@ -425,7 +425,7 @@ describe('endpoint — fn-ref invalidates patterns (#452)', () => {
 
     it('all patterns dropped ⇒ no $cache on the envelope', async () => {
         vi.spyOn(console, 'warn').mockImplementation(() => {});
-        const bare = serverFn(async () => 1);
+        const bare = serverFn({ handler: async () => 1 });
         const vote = serverFn({
             handler: async () => 'ok',
             invalidates: () => [bare]

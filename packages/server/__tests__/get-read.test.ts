@@ -9,7 +9,7 @@
 
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { handleServerFnRequest, type ServerFnRequestOptions } from '../src/server/index';
-import { serverFn, serverStream, ServerFnError } from '../src/index';
+import { serverFn, serverStream, ServerFnError, type StandardSchemaV1 } from '../src/index';
 import { encodeWire } from '../src/wire-codec';
 import { stubServerApp } from '../src/testing';
 
@@ -27,7 +27,7 @@ const ORIGIN = 'http://localhost';
 
 const read = serverFn({
     cache: { maxAge: 60 },
-    handler: async (_rq, input: { id: string }) => ({ id: input.id, hit: true })
+    handler: async ({ input }: { input: { id: string } }) => ({ id: input.id, hit: true })
 });
 const readSwr = serverFn({
     cache: { maxAge: 60, staleWhileRevalidate: 300 },
@@ -43,18 +43,18 @@ const readPublic = serverFn({
 });
 const readEcho = serverFn({
     cache: { maxAge: 60 },
-    handler: async (_rq, input: unknown) => input
+    handler: async ({ input }: { input: unknown }) => input
 });
 const readOwnHeader = serverFn({
     cache: { maxAge: 60 },
-    handler: async (rq) => {
+    handler: async ({ rq }) => {
         rq.responseHeaders.set('cache-control', 'private, max-age=5');
         return 'dynamic';
     }
 });
 const readNotFound = serverFn({
     cache: { maxAge: 60 },
-    handler: async (rq) => {
+    handler: async ({ rq }) => {
         rq.status(404);
         return null;
     }
@@ -65,9 +65,13 @@ const readBoom = serverFn({
         throw new ServerFnError(418, 'teapot');
     }
 });
-const postOnly = serverFn(async (_rq, a: number, b: number) => a + b);
-const stream = serverStream(async function* (): AsyncGenerator<string> {
-    yield 'chunk';
+const postOnly = serverFn({
+    handler: async ({ input: [a, b] }: { input: [number, number] }) => a + b
+});
+const stream = serverStream({
+    handler: async function* (): AsyncGenerator<string> {
+        yield 'chunk';
+    }
 });
 
 const FNS: Record<string, unknown> = {
@@ -121,17 +125,35 @@ describe('method gating (§4.1)', () => {
     });
 
     it('GET to an unmarked fn is a resource-precise 405 (Allow: POST) + no-store', async () => {
-        const res = await get('add_fn_00000008', [1, 2]);
+        const res = await get('add_fn_00000008', [[1, 2]]);
         expect(res.status).toBe(405);
         expect(res.headers.get('allow')).toBe('POST');
         expect(res.headers.get('cache-control')).toBe('no-store');
     });
 
-    it('a __sigxGet mark WITHOUT __sigxCacheControl degrades to POST-only (405), not a 500', async () => {
-        const wrapped = { ...(read as object), __sigxCacheControl: undefined };
-        const res = await get('w', [{ id: 'p1' }], {}, { resolve: () => wrapped });
-        expect(res.status).toBe(405);
-        expect(res.headers.get('allow')).toBe('POST');
+    it('a resolve() value whose `__sigx` is missing or has no `invoke` is a 404, not a 500', async () => {
+        // The descriptor is minted whole and frozen (rfc-server-v5 §1.5), so
+        // the endpoint's only structural check is "is there a descriptor with
+        // an `invoke`" — anything else a registry hands back is unknown. The
+        // pre-v5 stamp set (`__sigxFn`/`__sigxGet`/`__sigxCacheControl`) is
+        // one such shape: it must not be silently honored.
+        const shapes: Record<string, unknown> = {
+            noDescriptor: { ...(read as object), __sigx: undefined },
+            noInvoke: { __sigx: { kind: 'fn', anon: true, form: false, read: { cacheControl: 'private, max-age=60' } } },
+            oldStamps: {
+                __sigxFn: async () => 'stale',
+                __sigxGet: true,
+                __sigxCacheControl: 'private, max-age=60'
+            }
+        };
+        for (const [label, wrapped] of Object.entries(shapes)) {
+            const res = await get('w', [{ id: 'p1' }], {}, { resolve: () => wrapped });
+            expect(res.status, label).toBe(404);
+            expect(res.headers.get('cache-control'), label).toBe('no-store');
+            await expect(res.json(), label).resolves.toMatchObject({
+                error: { message: 'Unknown server function "w"' }
+            });
+        }
     });
 
     it('GET to a serverStream is 405 even though streams carry no cache mark', async () => {
@@ -243,7 +265,7 @@ describe('query-string arguments (§4.1)', () => {
         let seen: Record<string, unknown> = {};
         const capture = serverFn({
             cache: { maxAge: 60 },
-            handler: async (_rq, value: Record<string, unknown>) => {
+            handler: async ({ input: value }: { input: Record<string, unknown> }) => {
                 seen = value;
                 return 'ok';
             }
@@ -297,18 +319,18 @@ describe('query-string arguments (§4.1)', () => {
         }
     });
 
-    it('several named params still hit the options form’s single-input rule', async () => {
-        // `cache` is an OPTIONS-form field and the options form takes exactly
-        // one input, so a real cache-marked read is single-argument by
-        // construction — `a0` is the whole story in practice. The named-param
-        // grammar is positional anyway (see fn-url.test.ts), and the arity
-        // rule is what rejects the extra one — not a parse failure.
+    it('several named params still hit the single-input arity rule', async () => {
+        // A server function takes exactly one input (rfc-server-v5 §1.2), so
+        // a real cache-marked read is single-argument by construction — `a0`
+        // is the whole story in practice. The named-param grammar is
+        // positional anyway (see fn-url.test.ts), and the arity rule is what
+        // rejects the extra one — not a parse failure.
         const res = await get('read_fn_00000001', undefined, {
             url: `${ORIGIN}/_sigx/fn/read_fn_00000001?a0=1&a1=2`
         });
         expect(res.status).toBe(400);
         await expect(res.json()).resolves.toMatchObject({
-            error: { message: 'options-form server functions take a single input argument' }
+            error: { message: 'server functions take a single input argument' }
         });
     });
 
@@ -442,19 +464,20 @@ describe('pipeline parity on GET', () => {
     });
 
     it('the input validator rejects with a 400 on GET', async () => {
+        const StringSchema: StandardSchemaV1<string> = {
+            '~standard': {
+                version: 1,
+                vendor: 'test',
+                validate: (value: unknown) =>
+                    typeof value === 'string'
+                        ? { value }
+                        : { issues: [{ message: 'expected a string' }] }
+            }
+        };
         const validated = serverFn({
             cache: { maxAge: 60 },
-            input: {
-                '~standard': {
-                    version: 1 as const,
-                    vendor: 'test',
-                    validate: (value: unknown) =>
-                        typeof value === 'string'
-                            ? { value }
-                            : { issues: [{ message: 'expected a string' }] }
-                }
-            },
-            handler: async (_rq, input: string) => input.toUpperCase()
+            input: StringSchema,
+            handler: async ({ input }) => input.toUpperCase()
         });
         const ok = await get('v', ['hi'], {}, { resolve: () => validated });
         await expect(ok.json()).resolves.toEqual({ data: 'HI' });
@@ -477,13 +500,22 @@ describe('pipeline parity on GET', () => {
 
     it('$cache.invalidates is never attached on the GET path', async () => {
         // The pair is a definition-time throw since #567, so this shape can
-        // no longer be built through `serverFn`. Hand-stamped here on purpose:
-        // what is pinned is the endpoint's own belt — a fabricated registry
-        // entry still never leaks `$cache` on a GET.
-        const conflicted = Object.assign(
-            serverFn({ cache: { maxAge: 60 }, handler: async () => 'both' }),
-            { __sigxInvalidates: () => [['cart']] }
-        );
+        // no longer be built through `serverFn` (and its descriptor is frozen,
+        // so it cannot be patched in after the fact). Hand-built here on
+        // purpose: what is pinned is the endpoint's own belt — a fabricated
+        // registry entry carrying BOTH `read` and `invalidates` still never
+        // leaks `$cache` on a GET.
+        const real = serverFn({ cache: { maxAge: 60 }, handler: async () => 'both' });
+        const conflicted = {
+            __sigx: {
+                kind: 'fn',
+                invoke: real.__sigx.invoke,
+                anon: false,
+                form: false,
+                read: { cacheControl: 'private, max-age=60' },
+                invalidates: () => [['cart']]
+            }
+        };
         const res = await get('c', [], {}, { resolve: () => conflicted });
         const body = (await res.json()) as Record<string, unknown>;
         expect(body).toEqual({ data: 'both' });
@@ -533,7 +565,7 @@ describe('__DEV__ warnings', () => {
         const nosy = serverFn({
             allowAnonymous: true,
             cache: { maxAge: 30, public: true },
-            handler: async (rq) => {
+            handler: async ({ rq }) => {
                 void rq.request.headers.get('cookie');
                 void rq.request.url;
                 return 'peeked';
@@ -551,7 +583,7 @@ describe('__DEV__ warnings', () => {
         const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
         const personal = serverFn({
             cache: { maxAge: 30 },
-            handler: async (rq) => rq.request.headers.get('x-user') ?? 'anon'
+            handler: async ({ rq }) => rq.request.headers.get('x-user') ?? 'anon'
         });
         const res = await get('p', [], { headers: { 'x-user': 'andii' } }, { resolve: () => personal });
         await expect(res.json()).resolves.toEqual({ data: 'andii' });

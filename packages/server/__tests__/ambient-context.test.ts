@@ -18,8 +18,8 @@ import { stubServerApp } from '../src/testing';
 const REQ = (url = 'https://example.com/cart', init?: RequestInit) => new Request(url, init);
 
 /** The canonical shape: reads the request, like any auth helper would. */
-const whoAmI = serverFn(async (rq) => rq.request.headers.get('cookie') ?? null);
-const whereAmI = serverFn(async (rq) => rq.url.pathname);
+const whoAmI = serverFn({ handler: async ({ rq }) => rq.request.headers.get('cookie') ?? null });
+const whereAmI = serverFn({ handler: async ({ rq }) => rq.url.pathname });
 
 // The pipeline is fail-closed (rfc-server-v4 §2.1): stub an authenticated
 // app so the ambient-context semantics under test stay the subject.
@@ -66,13 +66,13 @@ describe('explicit context — fn.with({ context }) (#352)', () => {
 
     it('accepts a partial context, not just a Request', async () => {
         const locals = { user: 'bob' };
-        const readsLocals = serverFn(async (rq) => rq.locals.user);
+        const readsLocals = serverFn({ handler: async ({ rq }) => rq.locals.user });
         await expect(readsLocals.with({ context: { locals } })()).resolves.toBe('bob');
     });
 
     it('still honors the signal option alongside context', async () => {
         const controller = new AbortController();
-        const readsSignal = serverFn(async (rq) => rq.abortSignal.aborted);
+        const readsSignal = serverFn({ handler: async ({ rq }) => rq.abortSignal.aborted });
         controller.abort();
         await expect(
             readsSignal.with({ context: REQ(), signal: controller.signal })()
@@ -81,9 +81,11 @@ describe('explicit context — fn.with({ context }) (#352)', () => {
 
     it('leaves rq.status() inert — there is no HTTP response to affect', async () => {
         const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-        const setsStatus = serverFn(async (rq) => {
-            rq.status(418);
-            return 'ok';
+        const setsStatus = serverFn({
+            handler: async ({ rq }) => {
+                rq.status(418);
+                return 'ok';
+            }
         });
         await expect(setsStatus.with({ context: REQ() })()).resolves.toBe('ok');
         expect(warn).toHaveBeenCalledWith(expect.stringContaining('inert'));
@@ -124,8 +126,10 @@ describe('ambient context — runWithServerFnContext (#309)', () => {
     });
 
     it('reaches serverStream too', async () => {
-        const tail = serverStream(async function* (rq) {
-            yield rq.url.pathname;
+        const tail = serverStream({
+            handler: async function* ({ rq }) {
+                yield rq.url.pathname;
+            }
         });
         const out = await runWithServerFnContext(REQ('https://example.com/feed'), async () => {
             const chunks: unknown[] = [];
@@ -136,8 +140,10 @@ describe('ambient context — runWithServerFnContext (#309)', () => {
     });
 
     it("a stream's .with({ context }) still beats the ambient scope (#448)", async () => {
-        const tail = serverStream(async function* (rq) {
-            yield rq.url.pathname;
+        const tail = serverStream({
+            handler: async function* ({ rq }) {
+                yield rq.url.pathname;
+            }
         });
         const out = await runWithServerFnContext(REQ('https://example.com/feed'), async () => {
             const chunks: unknown[] = [];
@@ -153,7 +159,7 @@ describe('ambient context — runWithServerFnContext (#309)', () => {
 describe('cancellation follows the supplied request', () => {
     it('adopts request.signal, so a disconnect reaches SSR-time work', async () => {
         const controller = new AbortController();
-        const readsSignal = serverFn(async (rq) => rq.abortSignal);
+        const readsSignal = serverFn({ handler: async ({ rq }) => rq.abortSignal });
         const signal = await readsSignal.with({
             context: REQ('https://example.com/cart', { signal: controller.signal })
         })();
@@ -166,7 +172,7 @@ describe('cancellation follows the supplied request', () => {
 
     it('does the same for the ambient scope', async () => {
         const controller = new AbortController();
-        const readsSignal = serverFn(async (rq) => rq.abortSignal);
+        const readsSignal = serverFn({ handler: async ({ rq }) => rq.abortSignal });
         const signal = await runWithServerFnContext(
             REQ('https://example.com/cart', { signal: controller.signal }),
             () => readsSignal()
@@ -178,7 +184,7 @@ describe('cancellation follows the supplied request', () => {
     it('still lets an explicit per-call signal win', async () => {
         const perCall = new AbortController();
         const request = new AbortController();
-        const readsSignal = serverFn(async (rq) => rq.abortSignal);
+        const readsSignal = serverFn({ handler: async ({ rq }) => rq.abortSignal });
         const signal = await readsSignal.with({
             signal: perCall.signal,
             context: REQ('https://example.com/cart', { signal: request.signal })

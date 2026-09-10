@@ -66,18 +66,20 @@ async function mount(options: { throwAfter?: number } = {}): Promise<Mounted> {
     let markFinished!: () => void;
     const finished = new Promise<void>((resolve) => (markFinished = resolve));
 
-    const big = serverStream(async function* () {
-        try {
-            for (let i = 0; i < CHUNKS; i++) {
-                if (options.throwAfter !== undefined && i === options.throwAfter) {
-                    throw new Error('mid-stream failure');
+    const big = serverStream({
+        handler: async function* () {
+            try {
+                for (let i = 0; i < CHUNKS; i++) {
+                    if (options.throwAfter !== undefined && i === options.throwAfter) {
+                        throw new Error('mid-stream failure');
+                    }
+                    yield `${i}:${CHUNK}`;
                 }
-                yield `${i}:${CHUNK}`;
+            } finally {
+                // Runs on normal completion AND on `reader.cancel()` — which is
+                // exactly what the adapter must trigger when the client goes away.
+                markFinished();
             }
-        } finally {
-            // Runs on normal completion AND on `reader.cancel()` — which is
-            // exactly what the adapter must trigger when the client goes away.
-            markFinished();
         }
     });
 

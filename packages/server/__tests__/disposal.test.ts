@@ -140,7 +140,7 @@ describe('disposeRequestValues', () => {
             onDispose(() => void (disposed = true));
             return ++computed;
         });
-        const fn = serverFn(async (rq) => value(rq));
+        const fn = serverFn({ handler: async ({ rq }) => value(rq) });
         const locals: Record<string, unknown> = {};
         const request = new Request(`${ORIGIN}/page`);
         const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -229,7 +229,7 @@ describe('runInScope — ownership and keepAlive', () => {
             onDispose(() => void (disposed = true));
             return 'v';
         });
-        const fn = serverFn(async (rq) => value(rq));
+        const fn = serverFn({ handler: async ({ rq }) => value(rq) });
         await runInScope(new Request(`${ORIGIN}/page`), async () => {
             await fn();
             expect(disposed).toBe(false); // mid-request
@@ -243,7 +243,7 @@ describe('runInScope — ownership and keepAlive', () => {
             onDispose(() => void (disposed = true));
             return 'v';
         });
-        const fn = serverFn(async (rq) => value(rq));
+        const fn = serverFn({ handler: async ({ rq }) => value(rq) });
         let releaseA!: () => void;
         let releaseB!: () => void;
         const scope = (globalThis as {
@@ -271,7 +271,7 @@ describe('runInScope — ownership and keepAlive', () => {
             onDispose(() => void (disposed = true));
             return 'v';
         });
-        const fn = serverFn(async (rq) => value(rq));
+        const fn = serverFn({ handler: async ({ rq }) => value(rq) });
         const scope = (globalThis as {
             __SIGX_SERVERFN_SCOPE__?: { keepAlive(until: Promise<unknown>): void };
         }).__SIGX_SERVERFN_SCOPE__!;
@@ -313,7 +313,7 @@ describe('runInScope — ownership and keepAlive', () => {
             onDispose(() => void (disposed = true));
             return 'v';
         });
-        const fn = serverFn(async (rq) => value(rq));
+        const fn = serverFn({ handler: async ({ rq }) => value(rq) });
         const request = new Request(`${ORIGIN}/page`);
         await runInScope(request, async () => {
             await runInScope(request, async () => {
@@ -332,7 +332,7 @@ describe('runInScope — ownership and keepAlive', () => {
             onDispose(() => void (disposed = true));
             return 'v';
         });
-        const fn = serverFn(async (rq) => value(rq));
+        const fn = serverFn({ handler: async ({ rq }) => value(rq) });
         const locals: Record<string, unknown> = { user: 'alice' };
         await runInScope({ request: new Request(`${ORIGIN}/page`), locals }, async () => {
             await fn();
@@ -358,7 +358,7 @@ describe('handleServerFnRequest — disposal at settle', () => {
 
     it('after a buffered 200', async () => {
         const d = disposable();
-        const fn = serverFn(async (rq) => d.value(rq));
+        const fn = serverFn({ handler: async ({ rq }) => d.value(rq) });
         const res = await post(fn);
         expect(res.status).toBe(200);
         await eventually(d.isDisposed);
@@ -379,9 +379,11 @@ describe('handleServerFnRequest — disposal at settle', () => {
         await eventually(d.isDisposed);
 
         const e = disposable();
-        const boom = serverFn(async (rq) => {
-            e.value(rq);
-            throw new Error('secret');
+        const boom = serverFn({
+            handler: async ({ rq }) => {
+                e.value(rq);
+                throw new Error('secret');
+            }
         });
         vi.spyOn(console, 'error').mockImplementation(() => {});
         expect((await post(boom)).status).toBe(500);
@@ -399,7 +401,7 @@ describe('handleServerFnRequest — disposal at settle', () => {
                     validate: (value: unknown) => ({ value: value as Record<string, string> })
                 }
             },
-            handler: async (rq, _input: Record<string, string>) => {
+            handler: async ({ rq }) => {
                 d.value(rq);
                 return 'ok';
             }
@@ -425,10 +427,12 @@ describe('handleServerFnRequest — disposal at settle', () => {
         const d = disposable();
         let releaseHandler!: () => void;
         const gate = new Promise<void>((r) => (releaseHandler = r));
-        const slow = serverFn(async (rq) => {
-            d.value(rq);
-            await gate;
-            return 'late';
+        const slow = serverFn({
+            handler: async ({ rq }) => {
+                d.value(rq);
+                await gate;
+                return 'late';
+            }
         });
         const res = await post(slow, { timeoutMs: 20 });
         expect(res.status).toBe(504);
@@ -445,13 +449,15 @@ describe('handleServerFnRequest — disposal at settle', () => {
         let cleaned = false;
         let release!: () => void;
         const gate = new Promise<void>((r) => (release = r));
-        const s = serverStream(async function* (rq) {
-            d.value(rq);
-            try {
-                await gate; // never yields before the timeout
-                yield 'late';
-            } finally {
-                cleaned = true;
+        const s = serverStream({
+            handler: async function* ({ rq }) {
+                d.value(rq);
+                try {
+                    await gate; // never yields before the timeout
+                    yield 'late';
+                } finally {
+                    cleaned = true;
+                }
             }
         });
         const res = await post(s, { timeoutMs: 20 });
@@ -486,13 +492,15 @@ describe('handleServerFnRequest — stream terminal disposal', () => {
             });
             return 'v';
         });
-        const s = serverStream(async function* (rq) {
-            value(rq);
-            try {
-                yield 'a';
-                yield 'b';
-            } finally {
-                order.push('finally');
+        const s = serverStream({
+            handler: async function* ({ rq }) {
+                value(rq);
+                try {
+                    yield 'a';
+                    yield 'b';
+                } finally {
+                    order.push('finally');
+                }
             }
         });
         const res = await post(s);
@@ -503,8 +511,10 @@ describe('handleServerFnRequest — stream terminal disposal', () => {
 
     it('empty generator', async () => {
         const d = disposable();
-        const s = serverStream(async function* (rq) {
-            d.value(rq);
+        const s = serverStream({
+            handler: async function* ({ rq }) {
+                d.value(rq);
+            }
         });
         const res = await post(s);
         await expect(res.text()).resolves.toBe('{"done":1}\n');
@@ -513,10 +523,12 @@ describe('handleServerFnRequest — stream terminal disposal', () => {
 
     it('mid-stream throw', async () => {
         const d = disposable();
-        const s = serverStream(async function* (rq) {
-            d.value(rq);
-            yield 'a';
-            throw new Error('mid');
+        const s = serverStream({
+            handler: async function* ({ rq }) {
+                d.value(rq);
+                yield 'a';
+                throw new Error('mid');
+            }
         });
         vi.stubEnv('NODE_ENV', 'production');
         const res = await post(s, {});
@@ -528,14 +540,16 @@ describe('handleServerFnRequest — stream terminal disposal', () => {
     it('client cancel', async () => {
         const d = disposable();
         let cleaned = false;
-        const s = serverStream(async function* (rq) {
-            d.value(rq);
-            try {
-                yield 'a';
-                yield 'b';
-                yield 'c';
-            } finally {
-                cleaned = true;
+        const s = serverStream({
+            handler: async function* ({ rq }) {
+                d.value(rq);
+                try {
+                    yield 'a';
+                    yield 'b';
+                    yield 'c';
+                } finally {
+                    cleaned = true;
+                }
             }
         });
         const res = await post(s);
@@ -552,14 +566,16 @@ describe('handleServerFnRequest — stream terminal disposal', () => {
             onDispose(() => void order.push('disposer'));
             return 'v';
         });
-        const s = serverStream(async function* (rq) {
-            value(rq);
-            try {
-                throw new Error('before any yield');
-            } finally {
-                order.push('finally');
+        const s = serverStream({
+            handler: async function* ({ rq }) {
+                value(rq);
+                try {
+                    throw new Error('before any yield');
+                } finally {
+                    order.push('finally');
+                }
+                yield 'never';
             }
-            yield 'never';
         });
         vi.stubEnv('NODE_ENV', 'production');
         const res = await post(s);

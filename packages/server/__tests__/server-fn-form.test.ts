@@ -55,13 +55,13 @@ const PassThrough: StandardSchemaV1<Record<string, unknown>> = {
 const submit = serverFn({
     form: true,
     input: MessageSchema,
-    handler: async (_rq, input) => ({ saved: input.message })
+    handler: async ({ input }) => ({ saved: input.message })
 });
-const jsonOnly = serverFn(async (_rq, a: number) => a);
+const jsonOnly = serverFn({ handler: async ({ input: a }: { input: number }) => a });
 const withRedirect = serverFn({
     form: true,
     input: PassThrough,
-    handler: async (rq) => {
+    handler: async ({ rq }) => {
         rq.responseHeaders.set('location', '/thanks');
         return null;
     }
@@ -69,7 +69,7 @@ const withRedirect = serverFn({
 const ownStatus = serverFn({
     form: true,
     input: PassThrough,
-    handler: async (rq) => {
+    handler: async ({ rq }) => {
         rq.status(200);
         return 'owned';
     }
@@ -80,8 +80,10 @@ const mutating = serverFn({
     invalidates: () => [['cart']],
     handler: async () => 'done'
 });
-const stream = serverStream(async function* (): AsyncGenerator<string> {
-    yield 'x';
+const stream = serverStream({
+    handler: async function* (): AsyncGenerator<string> {
+        yield 'x';
+    }
 });
 
 const FNS: Record<string, unknown> = {
@@ -172,7 +174,7 @@ describe('form-mode success — 303 PRG (§6.4)', () => {
         const catcher = serverFn({
             form: true,
             input: PassThrough,
-            handler: async (_rq, input: Record<string, unknown>) => {
+            handler: async ({ input }) => {
                 seen = input;
                 return null;
             }
@@ -192,7 +194,7 @@ describe('form-mode success — 303 PRG (§6.4)', () => {
             const catcher = serverFn({
                 form: true,
                 input: PassThrough,
-                handler: async (_rq, input: Record<string, unknown>) => {
+                handler: async ({ input }) => {
                     seen = input;
                     return null;
                 }
@@ -571,7 +573,7 @@ describe('definition-time checks (§6.4, #412)', () => {
         serverFn({
             form: true,
             input: MessageSchema,
-            handler: async (_rq, input) => input
+            handler: async ({ input }) => input
         });
         expect(warn).not.toHaveBeenCalled();
     });
@@ -581,7 +583,7 @@ describe('definition-time checks (§6.4, #412)', () => {
         const raw = serverFn({
             form: true,
             input: PassThrough,
-            handler: async (_rq, input) => {
+            handler: async ({ input }) => {
                 seen = input;
                 return null;
             }
@@ -599,7 +601,7 @@ describe('form is the literal true (#437) — compile-time contract', () => {
         const ok = serverFn({
             form: true,
             input: PassThrough,
-            handler: async (_rq, fields) => fields
+            handler: async ({ input: fields }) => fields
         });
 
         () =>
@@ -608,7 +610,7 @@ describe('form is the literal true (#437) — compile-time contract', () => {
                 // build reads the literal `true` statically
                 form: false,
                 input: PassThrough,
-                handler: async (_rq, fields: Record<string, unknown>) => fields
+                handler: async ({ input: fields }) => fields
             });
 
         const dynamic = Math.random() > 2;
@@ -618,9 +620,10 @@ describe('form is the literal true (#437) — compile-time contract', () => {
                 // extractor — write the literal `true`
                 form: dynamic,
                 input: PassThrough,
-                handler: async (_rq, fields: Record<string, unknown>) => fields
+                handler: async ({ input: fields }) => fields
             });
 
-        expect(typeof ok.__sigxFn).toBe('function');
+        expect(typeof ok.__sigx.invoke).toBe('function');
+        expect(ok.__sigx.form).toBe(true);
     });
 });

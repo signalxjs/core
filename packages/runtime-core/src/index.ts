@@ -120,6 +120,12 @@ export { useStream } from './use-stream.js';
 // `writeBack`/`restoredKeys` stay on /internals: they are the engine's and the
 // cache pack's, not a seed reader's.
 export { peekRestored, invalidateRestored } from './async/restore.js';
+// The per-app type-handler registry (rfc-async §7, docs/seams.md
+// `__SIGX_TYPE_HANDLERS__`) — public since rfc-server-v5 (#692), the #449
+// precedent: `@sigx/server`'s app-plugin face installs an app's handlers
+// through it, and a third-party pack must be able to do the same without
+// `/internals`. `TYPE_HANDLER_TOKEN` itself stays internal.
+export { provideTypeHandlers } from './ssr-serialize.js';
 
 // Model (two-way binding)
 export { createModel, createModelFromBinding, isModel } from './model.js';

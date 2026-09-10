@@ -2,7 +2,72 @@
 
 ## [Unreleased]
 
+### Removed
+
+- **The direct authoring form (#692, rfc-server-v5 §1.1).**
+  `serverFn(async (rq, ...args) => …)` and
+  `serverStream(async function* (rq, ...args) { … })` are gone;
+  `serverFn(options)` / `serverStream(options)` are the only shapes, and a
+  function takes exactly one `input` (or none). With it go the
+  multi-argument `ServerStreamOptions<A, T>` and `ServerStreamInputOptions`
+  (one `ServerStreamOptions<S, T>` remains), `ServerPolicyOp.args` and
+  `ServerFeatureOp.args` (a policy reads `op.input`; a feature whose
+  operation is a method call passes its argument list AS the input), and
+  the direct-form "N wire argument(s) with no declared input validator"
+  dev warning. Migration: `docs/migrations/1.0-serverfn.md` rows 1–7.
+- **The eight loose wrapper stamps (#692, rfc-server-v5 §1.5).**
+  `__sigxFn`, `__sigxName`, `__sigxStream`, `__sigxGet`,
+  `__sigxCacheControl`, `__sigxForm`, `__sigxAnon` and `__sigxInvalidates`
+  are replaced by ONE frozen descriptor, `fn.__sigx: ServerFnDescriptor`
+  (`{ kind, invoke, anon, form, read?, invalidates? }`). `__sigxKey` is
+  unchanged and is now the only cross-package brand. A hand-built wrapper
+  carrying only the old stamps resolves to a 404 "Unknown server function".
+  `__sigxName` has no replacement — under the options form it was always
+  `"handler"`.
+
 ### Changed
+
+- **The handler takes one object: `handler({ input, rq })` (#692,
+  rfc-server-v5 §1.2).** Chosen for DX (no placeholder parameter in any of
+  the four usage cases) and for extensibility (a typed principal or a signal
+  can be added as a member in a minor). Streams: `async function* ({ input, rq })`.
+  Policies `(principal, rq, op)`, middleware `(rq, fn)`, `perRequest((rq,
+  onDispose))` and `invalidates(input, result)` are unchanged.
+
+  | You had | You write now |
+  |---|---|
+  | `serverFn({ handler: async (rq, input) => … })` | `serverFn({ handler: async ({ input, rq }) => … })` |
+  | `serverFn({ handler: async (rq) => … })` | `serverFn({ handler: async ({ rq }) => … })` |
+  | `serverFn({ handler: async (_rq, input) => … })` | `serverFn({ handler: async ({ input }) => … })` |
+  | no schema, annotated `handler: async (_rq, x: number) => …` | `handler: async ({ input: x }: { input: number }) => …` |
+  | `serverStream({ input, handler: async function* (rq, input) {…} })` | `serverStream({ input, handler: async function* ({ input, rq }) {…} })` |
+
+  `ServerFnHandlerArgs<S>` (`{ input: S; rq: ServerFnContext }`) is the
+  exported parameter type. Inference is unchanged: `S` from `input`, else
+  from the handler's annotation, else `void` (zero-argument callable, #454).
+- **The arity guard is universal (#692).** More than one wire argument is a
+  400 (`server functions take a single input argument`) for every function
+  and stream, not only the options form.
+- **In-process `info.symbol` is the stamped key (#692, rfc-server-v5 §1.3).**
+  The wrapper reads its build-stamped `__sigxKey` at call time, so
+  middleware, `authenticate` and policies see the same `info.symbol`
+  (`<id>/<name>`) and `info.name` on an SSR-time call as on the wire. It
+  was `''` / `''` before. An unstamped function (a unit test importing the
+  source module) still reports `''`.
+- **`stampServerFnKey(fn, key)` — `key` is required (#692).** The
+  `test/<name>` default read `__sigxName`, which is gone.
+- **Definition-time throw messages no longer name the function (#692).**
+  They begin `[sigx server] serverFn declares both …`; the name they carried
+  was `"handler"`.
+- **`@sigx/server/plugin` imports `provideTypeHandlers` from `sigx`, not
+  `sigx/internals` (#692).** The package now carries a #416-style
+  pack-contract test: no `/internals` import anywhere in `src`, and the
+  size-limited client entry imports nothing from the runtime.
+
+### Added
+
+- **`ServerFnHandlerArgs<S>` and `ServerFnDescriptor` (#692).** The handler's
+  parameter type and the frozen per-function record transports read.
 
 - **The middleware cadence and the feature seam are documented (#628).**
   Docs only; behaviour is unchanged and frozen for 1.0 (RFC #677 §4.2).
@@ -21,6 +86,8 @@
   (the only public path from a `Request` to a context); `prelude()` for
   one that already holds a context. The additive members #628 proposes
   (`configured`, `wrap()`, the identity gate alone) are deferred to 1.x.
+  (The `__sigxAnon` stamp this entry refers to became `__sigx.anon` in
+  #692, above.)
 
 ## [0.15.3] - 2026-08-07
 

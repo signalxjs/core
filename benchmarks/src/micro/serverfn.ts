@@ -37,29 +37,37 @@ const BASE = `${ORIGIN}/_sigx/fn`;
 
 // --- the functions under test ------------------------------------------------
 
-const readRows = serverFn(async () => plainList);
-const readRich = serverFn(async () => richPayload);
-const mutate = serverFn(async (_rq, input: { id: number; qty: number }) => ({
-    ok: true,
-    id: input.id,
-    qty: input.qty
-}));
+const readRows = serverFn({ handler: async () => plainList });
+const readRich = serverFn({ handler: async () => richPayload });
+const mutate = serverFn({
+    handler: async ({ input }: { input: { id: number; qty: number } }) => ({
+        ok: true,
+        id: input.id,
+        qty: input.qty
+    })
+});
 const cachedRead = serverFn({
     cache: { maxAge: 60 },
     handler: async () => plainList.slice(0, 50)
 });
-const failing = serverFn(async () => {
-    throw new ServerFnError(422, 'nope', { field: 'qty' });
+const failing = serverFn({
+    handler: async () => {
+        throw new ServerFnError(422, 'nope', { field: 'qty' });
+    }
 });
 /** No arguments, no payload — the call is nothing but request plumbing. */
-const noop = serverFn(async () => ({ ok: true }));
+const noop = serverFn({ handler: async () => ({ ok: true }) });
 /** Echoes a COUNT, not the object: the response stays tiny, so the bench
  *  measures the request half, and a body that lost keys fails the guard. */
-const countKeys = serverFn(async (_rq, input: Record<string, number>) => ({
-    keys: Object.keys(input).length
-}));
-const streamRows = serverStream(async function* () {
-    for (let i = 0; i < 1000; i++) yield { i, name: plainList[i % plainList.length].name };
+const countKeys = serverFn({
+    handler: async ({ input }: { input: Record<string, number> }) => ({
+        keys: Object.keys(input).length
+    })
+});
+const streamRows = serverStream({
+    handler: async function* () {
+        for (let i = 0; i < 1000; i++) yield { i, name: plainList[i % plainList.length].name };
+    }
 });
 
 const REGISTRY: Record<string, unknown> = {

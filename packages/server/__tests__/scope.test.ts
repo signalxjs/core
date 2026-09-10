@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { serverFn } from '../src/index';
+import { serverFn, type ServerFnHandlerArgs } from '../src/index';
 import { createDetachedContext } from '../src/context';
 import { handleServerFnRequest } from '../src/server/index';
 import { runInScope, toContextInit, toScopeInit, type ServerFnScope } from '../src/scope';
@@ -51,11 +51,13 @@ describe('the seam', () => {
 
 describe('node requests', () => {
     it('normalizes an IncomingMessage into the request a call reads', async () => {
-        const fn = serverFn(async (rq) => ({
-            href: rq.url.href,
-            cookie: rq.request.headers.get('cookie'),
-            method: rq.request.method
-        }));
+        const fn = serverFn({
+            handler: async ({ rq }) => ({
+                href: rq.url.href,
+                cookie: rq.request.headers.get('cookie'),
+                method: rq.request.method
+            })
+        });
 
         await expect(
             runInScope(nodeRequest({ host: 'shop.test', cookie: 'sid=1' }), () => fn())
@@ -67,7 +69,7 @@ describe('node requests', () => {
     });
 
     it('honors x-forwarded-proto/host behind a TLS-terminating proxy', async () => {
-        const fn = serverFn(async (rq) => rq.url.origin);
+        const fn = serverFn({ handler: async ({ rq }) => rq.url.origin });
         await expect(
             runInScope(
                 nodeRequest({
@@ -100,9 +102,11 @@ describe('node requests', () => {
 
 describe('scoping', () => {
     it('isolates concurrent scopes — the point of AsyncLocalStorage', async () => {
-        const fn = serverFn(async (rq, delay: number) => {
-            await new Promise((resolve) => setTimeout(resolve, delay));
-            return rq.url.pathname;
+        const fn = serverFn({
+            handler: async ({ input: delay, rq }: ServerFnHandlerArgs<number>) => {
+                await new Promise((resolve) => setTimeout(resolve, delay));
+                return rq.url.pathname;
+            }
         });
 
         // The slow request enters first and leaves last: a module-level
@@ -116,10 +120,12 @@ describe('scoping', () => {
     });
 
     it('survives awaits inside the scope, including nested calls', async () => {
-        const inner = serverFn(async (rq) => rq.url.pathname);
-        const outer = serverFn(async () => {
-            await Promise.resolve();
-            return inner();
+        const inner = serverFn({ handler: async ({ rq }) => rq.url.pathname });
+        const outer = serverFn({
+            handler: async () => {
+                await Promise.resolve();
+                return inner();
+            }
         });
         await expect(
             runInScope(new Request('https://shop.test/deep'), () => outer())
@@ -129,8 +135,8 @@ describe('scoping', () => {
 
 describe('the endpoint scopes its own invocation', () => {
     it('hands the live request to a nested in-process call', async () => {
-        const inner = serverFn(async (rq) => rq.url.pathname);
-        const outer = serverFn(async () => inner());
+        const inner = serverFn({ handler: async ({ rq }) => rq.url.pathname });
+        const outer = serverFn({ handler: async () => inner() });
 
         const response = await handleServerFnRequest(post('outer_fn_00000000'), {
             resolve: () => outer
@@ -143,8 +149,8 @@ describe('the endpoint scopes its own invocation', () => {
     });
 
     it('still isolates one request from another', async () => {
-        const inner = serverFn(async (rq) => rq.url.search);
-        const outer = serverFn(async () => inner());
+        const inner = serverFn({ handler: async ({ rq }) => rq.url.search });
+        const outer = serverFn({ handler: async () => inner() });
         const [a, b] = await Promise.all([
             handleServerFnRequest(
                 new Request('http://localhost/_sigx/fn/outer_fn_00000000?who=a', {
@@ -175,9 +181,11 @@ describe('the endpoint scopes its own invocation', () => {
 describe('the per-request store', () => {
     it('gives every in-process call in one scope the SAME locals bag', async () => {
         const bags: unknown[] = [];
-        const capture = serverFn(async (rq) => {
-            bags.push(rq.locals);
-            return null;
+        const capture = serverFn({
+            handler: async ({ rq }) => {
+                bags.push(rq.locals);
+                return null;
+            }
         });
 
         await runInScope(nodeRequest({ host: 'app.test' }), async () => {
@@ -191,11 +199,13 @@ describe('the per-request store', () => {
     });
 
     it('lets a guard hand a value to a LATER call in the same render', async () => {
-        const seed = serverFn(async (rq) => {
-            rq.locals.user = 'alice';
-            return null;
+        const seed = serverFn({
+            handler: async ({ rq }) => {
+                rq.locals.user = 'alice';
+                return null;
+            }
         });
-        const read = serverFn(async (rq) => rq.locals.user);
+        const read = serverFn({ handler: async ({ rq }) => rq.locals.user });
 
         await expect(
             runInScope(nodeRequest({ host: 'app.test' }), async () => {
@@ -206,11 +216,13 @@ describe('the per-request store', () => {
     });
 
     it('keeps two concurrent renders apart', async () => {
-        const seed = serverFn(async (rq, value: string) => {
-            rq.locals.user = value;
-            return null;
+        const seed = serverFn({
+            handler: async ({ input: value, rq }: ServerFnHandlerArgs<string>) => {
+                rq.locals.user = value;
+                return null;
+            }
         });
-        const read = serverFn(async (rq) => rq.locals.user);
+        const read = serverFn({ handler: async ({ rq }) => rq.locals.user });
 
         const render = async (value: string): Promise<unknown> =>
             runInScope(nodeRequest({ host: 'app.test' }), async () => {
@@ -227,7 +239,7 @@ describe('the per-request store', () => {
 
     it('preserves the caller’s own bag by IDENTITY — the documented pre-seed', async () => {
         const seeded = { user: 'alice' };
-        const read = serverFn(async (rq) => rq.locals);
+        const read = serverFn({ handler: async ({ rq }) => rq.locals });
 
         const seen = await runInScope({ request: new Request('https://app.test/'), locals: seeded }, () =>
             read()
@@ -238,7 +250,7 @@ describe('the per-request store', () => {
     it('a bare Request still carries its abort signal after the wrap', async () => {
         const controller = new AbortController();
         controller.abort();
-        const read = serverFn(async (rq) => rq.abortSignal.aborted);
+        const read = serverFn({ handler: async ({ rq }) => rq.abortSignal.aborted });
 
         await expect(
             runInScope(new Request('https://app.test/', { signal: controller.signal }), () => read())
@@ -246,7 +258,7 @@ describe('the per-request store', () => {
     });
 
     it('the endpoint’s own context stays the store — middleware writes reach the handler', async () => {
-        const whoami = serverFn(async (rq) => rq.locals.user);
+        const whoami = serverFn({ handler: async ({ rq }) => rq.locals.user });
         restoreApp();
         restoreApp = stubServerApp({
             middleware: [
@@ -296,7 +308,7 @@ describe('nested scopes', () => {
     };
 
     it('the documented pre-seed survives the renderer’s inner scope', async () => {
-        const read = serverFn(async (rq) => rq.locals.user);
+        const read = serverFn({ handler: async ({ rq }) => rq.locals.user });
         // Before #495 the inner scope REPLACED the store and this was
         // undefined — silently, which is what made it the first thing an app
         // reached for and the first thing that failed.
@@ -304,9 +316,11 @@ describe('nested scopes', () => {
     });
 
     it('shares one store — a value written inside reaches the outer bag', async () => {
-        const write = serverFn(async (rq) => {
-            rq.locals.seen = true;
-            return null;
+        const write = serverFn({
+            handler: async ({ rq }) => {
+                rq.locals.seen = true;
+                return null;
+            }
         });
         await runInScope(preSeed, () => render(() => write()));
         expect(preSeed.locals.seen).toBe(true);
@@ -314,7 +328,7 @@ describe('nested scopes', () => {
     });
 
     it('the inner source’s fields win where supplied', async () => {
-        const read = serverFn(async (rq) => [rq.url.pathname, rq.request.headers.get('cookie')]);
+        const read = serverFn({ handler: async ({ rq }) => [rq.url.pathname, rq.request.headers.get('cookie')] });
         const seen = await runInScope(preSeed, () =>
             runInScope(nodeRequest({ host: 'app.test', cookie: 'sid=1' }, '/board'), () => read())
         );
@@ -323,7 +337,7 @@ describe('nested scopes', () => {
     });
 
     it('a DIFFERENT url opens a fresh store', async () => {
-        const read = serverFn(async (rq) => rq.locals.user);
+        const read = serverFn({ handler: async ({ rq }) => rq.locals.user });
         await expect(
             runInScope(preSeed, () =>
                 runInScope(nodeRequest({ host: 'app.test' }, '/other'), () => read())
@@ -332,7 +346,7 @@ describe('nested scopes', () => {
     });
 
     it('a DIFFERENT method opens a fresh store', async () => {
-        const read = serverFn(async (rq) => rq.locals.user);
+        const read = serverFn({ handler: async ({ rq }) => rq.locals.user });
         const inner = { ...nodeRequest({ host: 'app.test' }, '/board'), method: 'POST' };
         await expect(
             runInScope(preSeed, () => runInScope(inner, () => read()))
@@ -342,7 +356,7 @@ describe('nested scopes', () => {
     it('a protocol-only difference does NOT split — the proxy case', async () => {
         // The outer key is built from a hand-rolled http:// Request; the inner
         // from a node request behind a TLS-terminating proxy. Same request.
-        const read = serverFn(async (rq) => rq.locals.user);
+        const read = serverFn({ handler: async ({ rq }) => rq.locals.user });
         await expect(
             runInScope(preSeed, () =>
                 runInScope(
@@ -354,7 +368,7 @@ describe('nested scopes', () => {
     });
 
     it('an enclosing init with no request always merges — the {locals}-only pre-seed', async () => {
-        const read = serverFn(async (rq) => rq.locals.user);
+        const read = serverFn({ handler: async ({ rq }) => rq.locals.user });
         // Makes no claim about which request it is, so merging is unambiguous.
         await expect(
             runInScope({ locals: { user: 'bob' } }, () => render(() => read()))
@@ -362,7 +376,7 @@ describe('nested scopes', () => {
     });
 
     it('an inner source carrying its OWN locals keeps them — the isolation hatch', async () => {
-        const read = serverFn(async (rq) => rq.locals.user);
+        const read = serverFn({ handler: async ({ rq }) => rq.locals.user });
         await expect(
             runInScope(preSeed, () =>
                 runInScope({ request: new Request('http://app.test/board'), locals: {} }, () =>
@@ -380,7 +394,7 @@ describe('nested scopes', () => {
         const detached = createDetachedContext();
         expect(() => detached.request).toThrow();
 
-        const read = serverFn(async (rq) => [rq.locals.user, rq.url.pathname]);
+        const read = serverFn({ handler: async ({ rq }) => [rq.locals.user, rq.url.pathname] });
         // The enclosing request is carried through — proof the throwing getter
         // was skipped rather than blowing up the merge. `locals` is undefined
         // because a detached context brings its OWN empty bag, which is the
@@ -391,11 +405,13 @@ describe('nested scopes', () => {
     });
 
     it('sibling (non-nested) scopes still isolate', async () => {
-        const seed = serverFn(async (rq, value: string) => {
-            rq.locals.user = value;
-            return null;
+        const seed = serverFn({
+            handler: async ({ input: value, rq }: ServerFnHandlerArgs<string>) => {
+                rq.locals.user = value;
+                return null;
+            }
         });
-        const read = serverFn(async (rq) => rq.locals.user);
+        const read = serverFn({ handler: async ({ rq }) => rq.locals.user });
         const one = async (value: string): Promise<unknown> =>
             runInScope(nodeRequest({ host: 'app.test' }, '/board'), async () => {
                 await seed(value);
