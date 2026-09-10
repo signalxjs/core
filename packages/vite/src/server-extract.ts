@@ -9,6 +9,11 @@
  * Everything re-exported here is pure (no I/O) EXCEPT `computeStableId`,
  * the one fs-touching helper: bundler integrations either call it or pass
  * their own `stableId` into the extractors' options.
+ *
+ * Identity contract (rfc-server-v5 §1.3/§4): every extracted fn carries a
+ * `key` (`<stableId>/<name>` — the only route) and a `version` (hash8 of
+ * the normalized call, the tag the stub sends); `stubCall` writes the
+ * `__serverFnStub(key, name, endpoint, version, flags?)` call.
  */
 
 import * as fs from 'node:fs';
@@ -16,7 +21,9 @@ import * as path from 'node:path';
 
 export {
     extractServerFns,
-    mintSymbols,
+    mintIdentity,
+    normalizeServerFnCall,
+    stubCall,
     readServerFnIdOption,
     routeSafeId,
     type ExtractedServerFn,
@@ -45,7 +52,7 @@ export type PackageProbe = { name: string; dir: string } | null;
  * `../` segments for out-of-root files — so shared modules should live in
  * named packages).
  *
- * The result is raw: `mintSymbols` runs it through `routeSafeId`, which is
+ * The result is raw: `mintIdentity` runs it through `routeSafeId`, which is
  * what turns those `../` segments into something a URL path can carry (#355).
  *
  * `cache` maps directory → probe result, hits AND misses, so sibling files

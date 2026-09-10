@@ -21,6 +21,7 @@
 import { Readable } from 'node:stream';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { handleServerFnRequest, type ServerFnRequestOptions } from './server/index';
+import { createServerFnResolver } from './server/registry';
 import { DEFAULT_FN_BASE, fnPathPrefix } from './fn-url-decode';
 import type { ServerFnContextInit } from './context';
 import { runInScope } from './scope';
@@ -31,18 +32,13 @@ export type NodeRequestHandler = (
     next?: (err?: unknown) => void
 ) => Promise<void>;
 
-export interface ServerFnHandlerOptions extends Omit<ServerFnRequestOptions, 'resolve'> {
-    /**
-     * The prod registry: symbol → lazy import of the wrapped function —
-     * the `serverFns` export of the build's `dist/server/sigx-server-fns.js`
-     * (explicitly passed, never ambient — the resume-manifest posture).
-     */
-    functions?: Record<string, () => Promise<unknown>>;
-    /** Custom resolution (the dev middleware passes ssrLoadModule here). */
-    resolve?(symbol: string): unknown | Promise<unknown>;
-    /** URL prefix the handler owns. Default `/_sigx/fn`. */
-    base?: string;
-}
+/**
+ * The WinterCG handler's options, verbatim: `functions` (the `serverFns`
+ * export of the build's `dist/server/sigx-server-fns.js`, explicitly passed,
+ * never ambient) or the `resolve` escape hatch, plus `base` — the URL prefix
+ * this handler owns (default `/_sigx/fn`).
+ */
+export type ServerFnHandlerOptions = ServerFnRequestOptions;
 
 /**
  * Create the connect-style server-function endpoint. Non-matching URLs call
@@ -52,22 +48,10 @@ export interface ServerFnHandlerOptions extends Omit<ServerFnRequestOptions, 're
 export function createServerFnHandler(options: ServerFnHandlerOptions): NodeRequestHandler {
     const base = options.base ?? DEFAULT_FN_BASE;
     const prefix = fnPathPrefix(base);
-    const resolve =
-        options.resolve ??
-        (async (symbol: string) => {
-            // Own-property + callable checks (#555): `functions` is a
-            // plain-object registry in the wild, and an inherited lookup
-            // ("__proto__", "constructor") must be an unknown symbol — a
-            // structured 404 — not a TypeError out of Object.prototype.
-            // (hasOwnProperty.call, not Object.hasOwn: the package builds
-            // against the ES2020 lib.)
-            const fns = options.functions;
-            const load =
-                fns !== undefined && Object.prototype.hasOwnProperty.call(fns, symbol)
-                    ? fns[symbol]
-                    : undefined;
-            return typeof load === 'function' ? await load() : null;
-        });
+    // Exactly one of `functions` / `resolve` — a boot throw here, never a
+    // first-request 500. The endpoint owns the resolver itself (the #555
+    // own-property guard and the version read live in `server/registry`).
+    createServerFnResolver(options);
 
     return async function handleFnRequest(req, res, next) {
         if (!req.url?.startsWith(prefix)) {
@@ -84,12 +68,10 @@ export function createServerFnHandler(options: ServerFnHandlerOptions): NodeRequ
             // ServerFnRequestOptions, so a hand-written allow-list has to be
             // kept in sync with an interface it inherits from and nothing
             // enforces that. `maxUrlBytes` was dropped that way and sat inert
-            // from #354 to #545 — it type-checked and did nothing. `resolve`
-            // and `base` are overridden with the resolved/normalized values;
-            // `functions` rides along inert (the endpoint reads only `resolve`).
+            // from #354 to #545 — it type-checked and did nothing. `base` is
+            // overridden with the normalized value;
             const response = await handleServerFnRequest(request, {
                 ...options,
-                resolve,
                 base
             });
             // Accumulate duplicates (set-cookie!) into arrays — a plain

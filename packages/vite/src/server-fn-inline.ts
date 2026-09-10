@@ -39,13 +39,13 @@ import {
     missingAuthorizationError,
     readServerFnAllowAnonymousOption,
     readServerFnAuthorizeOption,
-    mintSymbols,
+    mintIdentity,
     optionsSpreadWarning,
     readServerFnCacheOption,
     readServerFnFormOption,
     readServerFnIdOption,
     readServerFnInvalidatesOption,
-    stubFlags,
+    stubCall,
     warnIfIdRewritten,
     type ServerFnExtractOptions
 } from './server-fn-extract.js';
@@ -64,10 +64,10 @@ function isNode(value: unknown): value is Node {
 export interface InlineServerFn {
     /** The declared const name (the registry name). */
     name: string;
-    /** Content-hashed transport symbol: `<name>_fn_<hash8>`. */
-    symbol: string;
-    /** Hash-free stable symbol: `<stableId>/<name>` (decoded form). */
-    stableSymbol: string;
+    /** The stable key `<stableId>/<name>` — route, registry key, `__sigxKey`. */
+    key: string;
+    /** This build's version tag (hash8 of the normalized call). */
+    version: string;
     /** True for `serverStream` (NDJSON transport, AsyncIterable stub). */
     stream: boolean;
     /** True for a cache-marked read (rfc-server §4.1) — the stub issues GET. */
@@ -503,7 +503,6 @@ export function extractInlineServerFns(
             }
             if (bad) continue;
 
-            const callSource = code.slice(call.start, call.end);
             const stream = calleeKind(call.callee as Node) === 'stream';
             // Explicit `id` is the OPTIONS form's field — serverStream is
             // direct-form only, so only serverFn calls are probed.
@@ -534,9 +533,9 @@ export function extractInlineServerFns(
             const isGet = !stream && readServerFnCacheOption(call);
             const declaresInvalidates = !stream && readServerFnInvalidatesOption(call);
             const isFormTarget = !stream && readServerFnFormOption(call);
-            const minted = mintSymbols(
+            const minted = mintIdentity(
                 name,
-                callSource,
+                call,
                 idOption.id,
                 options.stableId,
                 stream,
@@ -553,15 +552,10 @@ export function extractInlineServerFns(
                 continue;
             }
             fns.push({ ...minted, mangled });
-            const wireSymbol = options.stubSymbols === 'stable' ? minted.stableSymbol : minted.symbol;
-            const factory = stream ? '__serverStreamStub' : '__serverFnStub';
-            // 4th positional: the stable data key (fn stubs only). Flags
-            // after it: 5th = GET read (§4.1), 6th = invalidates (§6.2/§6.3).
-            const keyArg = stream ? '' : `, ${JSON.stringify(minted.stableSymbol)}`;
             clientSplices.push({
                 start: call.start,
                 end: call.end,
-                text: `${factory}(${JSON.stringify(wireSymbol)}, ${JSON.stringify(name)}, ${JSON.stringify(options.endpoint)}${keyArg}${stubFlags(minted)})`
+                text: stubCall(minted, options.endpoint)
             });
         }
     }
@@ -624,7 +618,7 @@ export function extractInlineServerFns(
         '\n' +
         fns
             .filter((fn) => !fn.stream)
-            .map((fn) => `${fn.name}.__sigxKey = ${JSON.stringify(fn.stableSymbol)};`)
+            .map((fn) => `${fn.name}.__sigxKey = ${JSON.stringify(fn.key)};`)
             .join('\n') +
         '\n';
 

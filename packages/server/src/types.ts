@@ -67,10 +67,11 @@ export type ServerPolicy<P = unknown> = (
 export interface ServerPolicyOp {
     fn: ServerFnInfo;
     /**
-     * The VALIDATED input — the resource for resource-based policies ("may
-     * P edit post `op.input.id`"). `undefined` when the definition
-     * declares no `input` (the value then reached the handler unvalidated,
-     * dev-warned) or the call carried none.
+     * The function's single input — VALIDATED when the definition declares
+     * `input` (the resource for resource-based policies: "may P edit post
+     * `op.input.id`"), the RAW wire argument when it does not (unvalidated,
+     * attacker-controlled, dev-warned — treat it as untrusted), and
+     * `undefined` when the call carried no argument at all.
      */
     input?: unknown;
     /**
@@ -432,6 +433,28 @@ export interface WrappedServerFn {
      */
     __sigxKey?: string;
 }
+
+/**
+ * One registry record — what `virtual:sigx-server-fns` emits per function
+ * (rfc-server-v5 §4.3), keyed by the stable key `<id>/<name>`.
+ */
+export interface ServerFnRegistryEntry {
+    /** Lazy import of the wrapped function. */
+    load(): Promise<unknown>;
+    /**
+     * This build's version tag for the function — hash8 of its normalized
+     * definition (rfc-server-v5 §4.2). The stub sends it with every call;
+     * the endpoint answers 409 `version-skew` when a client's differs.
+     */
+    readonly version: string;
+}
+
+/**
+ * Key (`<id>/<name>`) → entry. Null-prototype when emitted by the build, so
+ * a wire key named `__proto__` never resolves to an inherited member; the
+ * endpoint's resolver applies its own own-property check regardless.
+ */
+export type ServerFnRegistry = Record<string, ServerFnRegistryEntry>;
 
 /**
  * Minimal structural typing of the Standard Schema spec

@@ -109,7 +109,7 @@ export function sigxResume(options: SigxResumeOptions = {}): Plugin {
             importer: string,
             specifier: string,
             exportName: string
-        ): { stableSymbol: string; form: boolean } | null;
+        ): { key: string; form: boolean } | null;
     } | null = null;
 
     const relPath = (file: string): string => path.relative(root, file).replace(/\\/g, '/');

@@ -4,6 +4,17 @@
 
 ### Removed
 
+- **The hashed wire symbol and dual registration (#692, rfc-server-v5 §1.3).**
+  A function had two wire identities — the content-hashed
+  `<name>_fn_<hash8>` (the default route) and the stable `<id>/<name>` (the
+  `useData` key, the `invalidates` identity, the route under
+  `stubSymbols: 'stable'`). The stable key is now the ONLY route and
+  registry key; the hash survives as a version tag (below). Gone with it:
+  the stub factory's old positional shape
+  `__serverFnStub(symbol, name, endpoint, key, get, boundaries)` and the
+  404 "stale build" hint. Migration: `docs/migrations/1.0-serverfn.md`
+  rows 10–19.
+
 - **The direct authoring form (#692, rfc-server-v5 §1.1).**
   `serverFn(async (rq, ...args) => …)` and
   `serverStream(async function* (rq, ...args) { … })` are gone;
@@ -26,6 +37,38 @@
   `"handler"`.
 
 ### Changed
+
+- **One route per function; version skew is a 409 (#692, rfc-server-v5
+  §1.3/§3).** The stub sends the build's version tag with every call —
+  `"v"` in the POST envelope (fn and stream), `?v=` on a GET read (a new
+  deploy is a new HTTP cache key for free), nothing on a form post — and
+  the endpoint answers `409 { error: { message: 'version skew', status:
+  409, code: 'version-skew' } }` when it differs from the registry's. The
+  branded client error carries `code`; the stub's message says "version
+  skew … reload". Not checked when the client sent no tag or the function
+  came through `resolve`.
+
+  | You had | You write now |
+  |---|---|
+  | `POST /_sigx/fn/addToCart_fn_9f3a01cc` (web) / `POST /_sigx/fn/<id>/addToCart` (native) | `POST /_sigx/fn/<id>/addToCart` for every client, body `{"args":[input],"v":"9f3a01cc"}` |
+  | `GET /_sigx/fn/<sym>?a0=…` | `GET /_sigx/fn/<id>/getCart?a0=…&v=<hex>` |
+  | a 404 meaning "stale build" | `404` = unknown function; `409` + `code: 'version-skew'` = stale build |
+  | `error.status === 404` as the skew signal | `error.status === 409 && error.code === 'version-skew'` |
+  | `__serverFnStub(symbol, name, endpoint, key, get, boundaries)` | `__serverFnStub(key, name, endpoint, version, flags)` — `flags`: 1 = GET read, 2 = invalidates |
+  | `__serverStreamStub(symbol, name, endpoint)` | `__serverStreamStub(key, name, endpoint, version)` |
+  | `info.symbol` = hashed on the wire | `info.symbol` = the key; `info.name` = its last segment |
+
+- **`functions` is the primary endpoint option; `resolve` is the escape
+  hatch (#692, rfc-server-v5 §1.6).** `ServerFnRequestOptions`,
+  `ServerFnMount` and `createServerFnHandler` take
+  `functions: ServerFnRegistry` (the `serverFns` export of
+  `'virtual:sigx-server-fns'`, key → `{ version, load }`) or
+  `resolve(key)`. Exactly one: both or neither throws when the handler /
+  mount is built (or on the first `handleServerFnRequest` call). One shared
+  resolver owns the `__proto__`/own-property guard (#555) and the version
+  read. `resolve: (symbol) => serverFns[symbol]?.() ?? null` in an entry
+  becomes `functions: serverFns`; the Node adapter's `functions` keeps its
+  spelling, its entries are `{ version, load }` now.
 
 - **The handler takes one object: `handler({ input, rq })` (#692,
   rfc-server-v5 §1.2).** Chosen for DX (no placeholder parameter in any of
@@ -66,6 +109,11 @@
 
 ### Added
 
+- **`ServerFnRegistry` / `ServerFnRegistryEntry` (#692).** The registry
+  shape every endpoint entry accepts as `functions`.
+- **`ServerFnTransport.credentials` (#692, rfc-server-v5 §1.8).** Passed to
+  `fetch` as `RequestInit.credentials`; a cross-origin `endpoint` can opt
+  into cookie auth with `'include'`.
 - **`ServerFnHandlerArgs<S>` and `ServerFnDescriptor` (#692).** The handler's
   parameter type and the frozen per-function record transports read.
 

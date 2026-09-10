@@ -40,7 +40,7 @@ export default {
         // if (matchesServerFn(request, serverFnBase)) {
         //     return handleServerFnRequest(request, {
         //         base: serverFnBase,          // the build's own mount path
-        //         resolve: (symbol) => serverFns[symbol]?.() ?? null,
+        //         functions: serverFns,
         //         // Using @sigx/resume? Single-flight boundary refresh
         //         // (rfc-server §6.3) needs this option; without it a
         //         // mutation's response carries no fresh HTML and the

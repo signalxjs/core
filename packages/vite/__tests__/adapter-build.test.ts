@@ -283,9 +283,10 @@ describe('bundled build + server functions — registry inlined, no chunk (real 
             { exports: { '.': './index.js', './client': './client.js' } },
             {
                 'index.js':
-                    `export const serverFn = (impl) => Object.assign((...a) => impl({}, ...a), ` +
-                    `{ __sigxFn: impl, __sigxName: impl.name || '' });\n`,
-                'client.js': `export function __serverFnStub() { return async () => {}; }\n` +
+                    `export const serverFn = (opts) => Object.assign((...a) => opts.handler({ input: a[0], rq: {} }), ` +
+                    `{ __sigx: { kind: 'fn', invoke: (rq, args) => opts.handler({ input: args[0], rq }), anon: true, form: false } });\n`,
+                // rfc-server-v5 §1.4 positionals: key, name, endpoint, version, flags?.
+                'client.js': `export function __serverFnStub(key, name, endpoint, version, flags) { return async () => {}; }\n` +
                     `export function __serverOnly(n) { return () => { throw new Error(n); }; }\n`
             }
         );
@@ -321,7 +322,10 @@ describe('bundled build + server functions — registry inlined, no chunk (real 
             .filter((f) => f.endsWith('.js'))
             .map((f) => readFileSync(join(serverDir, f), 'utf-8'))
             .join('\n');
-        // Dual registration inlined: the deterministic stable symbol.
+        // The registry inlined: the deterministic stable key, with its
+        // { version, load } record (rfc-server-v5 §4.3) — no hashed twin.
         expect(code).toContain('fixture-fns/src/api.server.ts/ping');
+        expect(code).toMatch(/version:\s*[`"'][0-9a-f]{8}[`"']/);
+        expect(code).not.toMatch(/_fn_[0-9a-f]{8}/);
     }, 120_000);
 });

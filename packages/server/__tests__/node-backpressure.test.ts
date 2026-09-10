@@ -86,7 +86,9 @@ async function mount(options: { throwAfter?: number } = {}): Promise<Mounted> {
     let markSettled!: () => void;
     const handlerSettled = new Promise<void>((resolve) => (markSettled = resolve));
 
-    const handler = createServerFnHandler({ functions: { big_fn_00000001: async () => big } });
+    const handler = createServerFnHandler({
+        functions: { 'api/big': { version: 'v1', load: async () => big } }
+    });
     const server = createServer((req, res) => {
         void handler(req, res, () => {
             res.statusCode = 404;
@@ -105,7 +107,7 @@ function post(port: number): ReturnType<typeof httpRequest> {
         host: '127.0.0.1',
         port,
         method: 'POST',
-        path: '/_sigx/fn/big_fn_00000001',
+        path: '/_sigx/fn/api/big',
         headers: { 'content-type': 'application/json', origin: `http://127.0.0.1:${port}` }
     });
     req.end(JSON.stringify({ args: [] }));

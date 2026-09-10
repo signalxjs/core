@@ -2,8 +2,9 @@
  * @vitest-environment node
  *
  * createServerFnHandler() — the connect-style adapter, exercised over a real
- * node:http round trip: request bridging, prefix routing, and duplicate
- * response headers (multiple set-cookie values must all survive).
+ * node:http round trip: request bridging, prefix routing, duplicate
+ * response headers (multiple set-cookie values must all survive), and the
+ * `functions` / `resolve` construction contract (rfc-server-v5 §1.6).
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
@@ -52,19 +53,39 @@ const ticks = serverStream({
     }
 });
 
+describe('createServerFnHandler — construction (rfc-server-v5 §1.6)', () => {
+    it('both `functions` and `resolve` is a boot throw, not a first-request 500', () => {
+        expect(() =>
+            createServerFnHandler({
+                functions: { 'api/add': { version: 'v1', load: async () => add } },
+                resolve: () => add
+            })
+        ).toThrow(/EITHER `functions` OR `resolve`/);
+    });
+
+    it('neither is a boot throw too', () => {
+        expect(() => createServerFnHandler({})).toThrow(/pass `functions`/);
+    });
+});
+
 describe('createServerFnHandler over node:http', () => {
     let server: Server;
     let origin: string;
 
     beforeAll(async () => {
+        // The registry shape `virtual:sigx-server-fns` emits: key
+        // `<id>/<name>` → `{ version, load }`.
         const handler = createServerFnHandler({
             functions: {
-                cookies_fn_00000001: async () => twoCookies,
-                add_fn_00000002: async () => add,
-                ticks_fn_00000003: async () => ticks,
-                read_fn_00000004: async () => cachedRead,
-                broken_fn_00000005: async () => {
-                    throw new Error('chunk missing after partial deploy');
+                'api/cookies': { version: 'v1', load: async () => twoCookies },
+                'api/add': { version: 'v1', load: async () => add },
+                'api/ticks': { version: 'v1', load: async () => ticks },
+                'api/read': { version: 'v1', load: async () => cachedRead },
+                'api/broken': {
+                    version: 'v1',
+                    load: async () => {
+                        throw new Error('chunk missing after partial deploy');
+                    }
                 }
             }
         });
@@ -88,7 +109,7 @@ describe('createServerFnHandler over node:http', () => {
     });
 
     it('bridges the request and returns the envelope', async () => {
-        const res = await fetch(`${origin}/_sigx/fn/add_fn_00000002`, {
+        const res = await fetch(`${origin}/_sigx/fn/api/add`, {
             method: 'POST',
             headers: { 'content-type': 'application/json', origin },
             body: '{"args":[[20,22]]}'
@@ -99,7 +120,7 @@ describe('createServerFnHandler over node:http', () => {
 
     it('serves a cache-marked read over GET with its Cache-Control (rfc-server §4.1)', async () => {
         const args = encodeURIComponent(JSON.stringify([{ id: 'p1' }]));
-        const res = await fetch(`${origin}/_sigx/fn/read_fn_00000004?args=${args}`);
+        const res = await fetch(`${origin}/_sigx/fn/api/read?args=${args}`);
         expect(res.status).toBe(200);
         expect(res.headers.get('cache-control')).toBe('private, max-age=60');
         expect(res.headers.get('vary')).toBe('Cookie');
@@ -107,7 +128,7 @@ describe('createServerFnHandler over node:http', () => {
     });
 
     it('preserves MULTIPLE set-cookie headers end to end', async () => {
-        const res = await fetch(`${origin}/_sigx/fn/cookies_fn_00000001`, {
+        const res = await fetch(`${origin}/_sigx/fn/api/cookies`, {
             method: 'POST',
             headers: { 'content-type': 'application/json', origin },
             body: '{"args":[]}'
@@ -119,7 +140,7 @@ describe('createServerFnHandler over node:http', () => {
 
     it('honors x-forwarded-proto for the same-origin check (TLS proxy)', async () => {
         const httpsOrigin = origin.replace('http://', 'https://');
-        const res = await fetch(`${origin}/_sigx/fn/add_fn_00000002`, {
+        const res = await fetch(`${origin}/_sigx/fn/api/add`, {
             method: 'POST',
             headers: {
                 'content-type': 'application/json',
@@ -132,7 +153,7 @@ describe('createServerFnHandler over node:http', () => {
     });
 
     it('honors x-forwarded-host for the same-origin check (host-rewriting proxy)', async () => {
-        const res = await fetch(`${origin}/_sigx/fn/add_fn_00000002`, {
+        const res = await fetch(`${origin}/_sigx/fn/api/add`, {
             method: 'POST',
             headers: {
                 'content-type': 'application/json',
@@ -154,7 +175,7 @@ describe('createServerFnHandler over node:http', () => {
     it('a rejecting registry loader is the structured masked envelope, not next(err) (#555)', async () => {
         const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
         try {
-            const res = await fetch(`${origin}/_sigx/fn/broken_fn_00000005`, {
+            const res = await fetch(`${origin}/_sigx/fn/api/broken`, {
                 method: 'POST',
                 headers: { 'content-type': 'application/json', origin },
                 body: '{"args":[]}'
@@ -169,6 +190,18 @@ describe('createServerFnHandler over node:http', () => {
         } finally {
             spy.mockRestore();
         }
+    });
+
+    it('a stale client tag is a 409 version-skew through the adapter (rfc-server-v5 §3.2)', async () => {
+        const res = await fetch(`${origin}/_sigx/fn/api/add`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', origin },
+            body: '{"args":[[20,22]],"v":"stale"}'
+        });
+        expect(res.status).toBe(409);
+        await expect(res.json()).resolves.toEqual({
+            error: { message: 'version skew', status: 409, code: 'version-skew' }
+        });
     });
 
     it('prototype-key symbols against the functions record are clean 404s (#555)', async () => {
@@ -195,7 +228,7 @@ describe('createServerFnHandler over node:http', () => {
      */
     it('forwards maxUrlBytes to the endpoint (414 on an oversized GET query)', async () => {
         const capped = createServerFnHandler({
-            functions: { read_fn_00000004: async () => cachedRead },
+            functions: { 'api/read': { version: 'v1', load: async () => cachedRead } },
             maxUrlBytes: 64
         });
         const cappedServer = createServer((req, res) => {
@@ -211,13 +244,13 @@ describe('createServerFnHandler over node:http', () => {
         const cappedOrigin = `http://127.0.0.1:${address.port}`;
         try {
             const long = encodeURIComponent(JSON.stringify([{ id: 'x'.repeat(200) }]));
-            const over = await fetch(`${cappedOrigin}/_sigx/fn/read_fn_00000004?args=${long}`);
+            const over = await fetch(`${cappedOrigin}/_sigx/fn/api/read?args=${long}`);
             expect(over.status).toBe(414);
             // The control case differs ONLY in length: same encoding, same
             // argument shape, under the cap. Asserting the payload too proves
             // the request really ran rather than 200-ing on a degenerate input.
             const short = encodeURIComponent(JSON.stringify([{ id: 'p1' }]));
-            const under = await fetch(`${cappedOrigin}/_sigx/fn/read_fn_00000004?args=${short}`);
+            const under = await fetch(`${cappedOrigin}/_sigx/fn/api/read?args=${short}`);
             expect(under.status).toBe(200);
             await expect(under.json()).resolves.toEqual({ data: { id: 'p1' } });
         } finally {
@@ -228,7 +261,7 @@ describe('createServerFnHandler over node:http', () => {
     });
 
     it('streams serverStream NDJSON progressively — chunks arrive BEFORE the generator ends', async () => {
-        const res = await fetch(`${origin}/_sigx/fn/ticks_fn_00000003`, {
+        const res = await fetch(`${origin}/_sigx/fn/api/ticks`, {
             method: 'POST',
             headers: { 'content-type': 'application/json', origin },
             body: '{"args":[]}'
@@ -270,7 +303,7 @@ describe('createServerFnHandler — onError/timeoutMs forwarding (#349/#350)', (
     beforeAll(async () => {
         const never = serverFn({ handler: async () => new Promise(() => {}) });
         const handler = createServerFnHandler({
-            functions: { never_fn_00000009: async () => never },
+            functions: { 'api/never': { version: 'v1', load: async () => never } },
             timeoutMs: 30,
             onError: (error) => {
                 errors.push(error);
@@ -296,7 +329,7 @@ describe('createServerFnHandler — onError/timeoutMs forwarding (#349/#350)', (
     });
 
     it('a hung fn 504s over real http and the onError hook captured the timeout', async () => {
-        const res = await fetch(`${origin}/_sigx/fn/never_fn_00000009`, {
+        const res = await fetch(`${origin}/_sigx/fn/api/never`, {
             method: 'POST',
             headers: { 'content-type': 'application/json', origin },
             body: '{"args":[]}'
@@ -320,7 +353,7 @@ describe('createServerFnHandler forwards maxResponseBytes (#571)', () => {
     beforeAll(async () => {
         const big = serverFn({ handler: async () => 'x'.repeat(5_000) });
         const handler = createServerFnHandler({
-            functions: { big_fn_00000009: async () => big },
+            functions: { 'api/big': { version: 'v1', load: async () => big } },
             maxResponseBytes: 1_000
         });
         server = createServer((req, res) => {
@@ -345,7 +378,7 @@ describe('createServerFnHandler forwards maxResponseBytes (#571)', () => {
     it('an over-cap response is a 500 through the adapter', async () => {
         vi.stubEnv('NODE_ENV', 'production');
         try {
-            const res = await fetch(`${origin}/_sigx/fn/big_fn_00000009`, {
+            const res = await fetch(`${origin}/_sigx/fn/api/big`, {
                 method: 'POST',
                 headers: { 'content-type': 'application/json', origin },
                 body: '{"args":[]}'
@@ -390,8 +423,8 @@ describe('createServerFnHandler — disposal through the adapter (#571)', () => 
         });
         const handler = createServerFnHandler({
             functions: {
-                dbuf_fn_00000010: async () => buffered,
-                dstr_fn_00000011: async () => stream
+                'api/dbuf': { version: 'v1', load: async () => buffered },
+                'api/dstr': { version: 'v1', load: async () => stream }
             }
         });
         server = createServer((req, res) => {
@@ -414,7 +447,7 @@ describe('createServerFnHandler — disposal through the adapter (#571)', () => 
     });
 
     it('disposes after a buffered call over real node:http', async () => {
-        const res = await fetch(`${origin}/_sigx/fn/dbuf_fn_00000010`, {
+        const res = await fetch(`${origin}/_sigx/fn/api/dbuf`, {
             method: 'POST',
             headers: { 'content-type': 'application/json', origin },
             body: '{"args":[]}'
@@ -424,7 +457,7 @@ describe('createServerFnHandler — disposal through the adapter (#571)', () => 
     });
 
     it('disposes after a stream ends over real node:http', async () => {
-        const res = await fetch(`${origin}/_sigx/fn/dstr_fn_00000011`, {
+        const res = await fetch(`${origin}/_sigx/fn/api/dstr`, {
             method: 'POST',
             headers: { 'content-type': 'application/json', origin },
             body: '{"args":[]}'

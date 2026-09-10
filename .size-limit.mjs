@@ -250,7 +250,12 @@ export default [
     // depth guards (encode AND revive refuse >256 levels — stack safety on
     // attacker-typable wire data) plus the shared-subtree encode memo are
     // ~10 B of real semantics, plus a little headroom.
-    limit: '2.45 KB',
+    // 2.45 → 2.6 KB with #692 (rfc-server-v5, 2026-09-10): the version tag
+    // rides every call (`v` in the envelope / `?v=` on reads), the branded
+    // error carries the endpoint's `code` and the 409 skew hint, and the
+    // transport gained `credentials` — ~100 B of real semantics, plus a
+    // little headroom.
+    limit: '2.6 KB',
   },
   {
     // The app-plugin face (#413): serverPlugin (transport + one-registration

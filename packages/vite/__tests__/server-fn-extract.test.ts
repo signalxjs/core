@@ -2,17 +2,24 @@
  * @vitest-environment node
  *
  * extractServerFns() — the analysis half of sigxServer() (rfc-server §3,
- * #305): stub-module generation, content-hashed symbol determinism,
- * server-only stubbing, and type-only pass-through.
+ * #305): stub-module generation, the one wire identity (key + version,
+ * rfc-server-v5 §1.3/§4.2), server-only stubbing, and type-only
+ * pass-through.
  */
 
 import { describe, it, expect } from 'vitest';
+import { parseAst } from 'vite';
 import {
     extractServerFns,
+    mintIdentity,
+    normalizeServerFnCall,
     serverFnKeyStamps,
+    stubCall,
     KEY_STAMP_MARKER,
     type ServerFnExtractOptions
 } from '../src/server-fn-extract';
+
+const HEX8 = /^[0-9a-f]{8}$/;
 
 const BASE = '/_sigx/fn';
 // Gate OFF by default: this file's non-gate suites use bare fixtures on
@@ -43,7 +50,8 @@ describe('extractServerFns — basics', () => {
         expect(result.fns).toHaveLength(1);
         const fn = result.fns[0];
         expect(fn.name).toBe('addToCart');
-        expect(fn.symbol).toMatch(/^addToCart_fn_[0-9a-f]{8}$/);
+        expect(fn.key).toBe('src/cart.server.ts/addToCart');
+        expect(fn.version).toMatch(HEX8);
         expect(result.serverOnly).toEqual(['auditLog']);
         expect(result.warnings).toHaveLength(0);
 
@@ -51,7 +59,7 @@ describe('extractServerFns — basics', () => {
             `import { __serverFnStub, __serverOnly } from '@sigx/server/client';`
         );
         expect(result.stubModule).toContain(
-            `export const addToCart = __serverFnStub("${fn.symbol}", "addToCart", "${BASE}", "${fn.stableSymbol}");`
+            `export const addToCart = __serverFnStub("${fn.key}", "addToCart", "${BASE}", "${fn.version}");`
         );
         expect(result.stubModule).toContain(
             `export const auditLog = __serverOnly("auditLog", "src/cart.server.ts");`
@@ -60,30 +68,35 @@ describe('extractServerFns — basics', () => {
         expect(result.stubModule).not.toContain('db.cart.add');
     });
 
-    it('mints deterministic symbols that change with the implementation', () => {
+    it('mints a deterministic version that changes with the implementation', () => {
         const a = extractServerFns(CART, '/src/cart.server.ts', opts('src/cart.server.ts'));
         const b = extractServerFns(CART, '/src/cart.server.ts', opts('src/cart.server.ts'));
-        expect(a.fns[0].symbol).toBe(b.fns[0].symbol);
+        expect(a.fns[0].version).toBe(b.fns[0].version);
+        expect(a.fns[0].key).toBe(b.fns[0].key);
 
+        // A semantic edit bumps the version — and ONLY the version: the key
+        // is the route, and a body edit must not move the route.
         const edited = CART.replace('db.cart.add(id, qty)', 'db.cart.add(id, qty + 1)');
         const c = extractServerFns(edited, '/src/cart.server.ts', opts('src/cart.server.ts'));
-        expect(c.fns[0].symbol).not.toBe(a.fns[0].symbol);
+        expect(c.fns[0].version).not.toBe(a.fns[0].version);
+        expect(c.fns[0].key).toBe(a.fns[0].key);
 
-        // …and with the file path (two files may hold an identical fn).
+        // …and the file path changes both (two files may hold an identical fn).
         const d = extractServerFns(CART, '/src/other.server.ts', opts('src/other.server.ts'));
-        expect(d.fns[0].symbol).not.toBe(a.fns[0].symbol);
+        expect(d.fns[0].key).not.toBe(a.fns[0].key);
+        expect(d.fns[0].version).not.toBe(a.fns[0].version);
     });
 
-    // The wire contract, pinned to a LITERAL. A hashed symbol is what an
-    // installed client calls, so any change to the seed silently 404s every
-    // deployed stub until the client is rebuilt. This literal has survived
-    // both the preset seed-mixing era (#398) and its removal (rfc-server-v4
-    // §1.5): a plain function's seed was always just the call source, and
-    // this test is the proof nothing else ever leaked in.
-    it('pins a plain function’s hashed symbol byte-for-byte', () => {
+    // The wire contract, pinned to LITERALS. The key is what an installed
+    // client calls and the version is what it sends with every call, so any
+    // change to either seed silently 409s (version) or 404s (key) every
+    // deployed stub until the client is rebuilt. The version literal is the
+    // proof that a plain function's seed is exactly `id\0name\0normalizedCall`
+    // and nothing else leaks in (rfc-server-v5 §4.2).
+    it('pins a plain function’s key and version byte-for-byte', () => {
         const result = extractServerFns(CART, '/src/cart.server.ts', opts('src/cart.server.ts'));
-        expect(result.fns[0].symbol).toBe('addToCart_fn_5b3c4824');
-        expect(result.fns[0].stableSymbol).toBe('src/cart.server.ts/addToCart');
+        expect(result.fns[0].key).toBe('src/cart.server.ts/addToCart');
+        expect(result.fns[0].version).toBe('83037bb4');
     });
 
     it('recognizes aliased serverFn imports and export { x } forms', () => {
@@ -181,10 +194,11 @@ export const addToCart = serverFn(async (rq, id) => id);
         expect(byName.getProduct.get).toBe(true);
         expect(byName.addToCart.get).toBe(false);
         expect(result.stubModule).toContain(
-            `export const getProduct = __serverFnStub("${byName.getProduct.symbol}", "getProduct", "${BASE}", "${byName.getProduct.stableSymbol}", 1);`
+            `export const getProduct = __serverFnStub("${byName.getProduct.key}", "getProduct", "${BASE}", "${byName.getProduct.version}", 1);`
         );
+        // Flags are omitted entirely when zero.
         expect(result.stubModule).toContain(
-            `export const addToCart = __serverFnStub("${byName.addToCart.symbol}", "addToCart", "${BASE}", "${byName.addToCart.stableSymbol}");`
+            `export const addToCart = __serverFnStub("${byName.addToCart.key}", "addToCart", "${BASE}", "${byName.addToCart.version}");`
         );
     });
 
@@ -199,7 +213,9 @@ export const read = serverFn({ cache: policy(), handler: async (rq) => 1 });
         expect(result.warnings).toHaveLength(0);
     });
 
-    it('toggling cache re-mints the symbol (version-skew safety)', () => {
+    it('toggling cache bumps the version but keeps the key (version-skew safety)', () => {
+        // A stale client must never GET a function whose server half no
+        // longer accepts GET: the endpoint 409s on the version first.
         const marked = extractServerFns(READ, '/src/api.server.ts', opts('src/api.server.ts'));
         const unmarked = extractServerFns(
             READ.replace('cache: { maxAge: 60 },\n', ''),
@@ -208,7 +224,8 @@ export const read = serverFn({ cache: policy(), handler: async (rq) => 1 });
         );
         const a = marked.fns.find((f) => f.name === 'getProduct')!;
         const b = unmarked.fns.find((f) => f.name === 'getProduct')!;
-        expect(a.symbol).not.toBe(b.symbol);
+        expect(a.version).not.toBe(b.version);
+        expect(a.key).toBe(b.key);
     });
 
     it('survives export { x } indirection', () => {
@@ -224,7 +241,7 @@ export { read };
 });
 
 describe('extractServerFns — invalidates-declaring mutations (rfc-server §6.2/§6.3, #452)', () => {
-    it('stamps the sidecar flag (6th positional) on declaring fns only', () => {
+    it('sets the invalidates bit (flags = 2) on declaring fns only', () => {
         const code = `
 import { serverFn } from '@sigx/server';
 export const track = serverFn({
@@ -238,23 +255,23 @@ export const plain = serverFn(async (rq, id) => id);
         expect(byName.track.invalidates).toBe(true);
         expect(byName.plain.invalidates).toBe(false);
         expect(result.stubModule).toContain(
-            `export const track = __serverFnStub("${byName.track.symbol}", "track", "${BASE}", "${byName.track.stableSymbol}", 0, 1);`
+            `export const track = __serverFnStub("${byName.track.key}", "track", "${BASE}", "${byName.track.version}", 2);`
         );
         expect(result.stubModule).toContain(
-            `export const plain = __serverFnStub("${byName.plain.symbol}", "plain", "${BASE}", "${byName.plain.stableSymbol}");`
+            `export const plain = __serverFnStub("${byName.plain.key}", "plain", "${BASE}", "${byName.plain.version}");`
         );
     });
 
-    it('emits both flags when cache and invalidates coexist (dev-warned at runtime)', () => {
+    it('ORs both bits (flags = 3) when cache and invalidates coexist (dev-warned at runtime)', () => {
         const code = `
 import { serverFn } from '@sigx/server';
 export const odd = serverFn({ cache: { maxAge: 5 }, invalidates: () => ['x'], handler: async (rq) => 1 });
 `;
         const result = extractServerFns(code, '/src/api.server.ts', opts('src/api.server.ts'));
-        expect(result.stubModule).toContain(', 1, 1);');
+        expect(result.stubModule).toContain(`"${result.fns[0].version}", 3);`);
     });
 
-    it('toggling invalidates re-mints the symbol (version-skew safety)', () => {
+    it('toggling invalidates bumps the version but keeps the key (version-skew safety)', () => {
         const code = `
 import { serverFn } from '@sigx/server';
 export const track = serverFn({
@@ -268,7 +285,8 @@ export const track = serverFn({
             '/src/api.server.ts',
             opts('src/api.server.ts')
         );
-        expect(marked.fns[0].symbol).not.toBe(unmarked.fns[0].symbol);
+        expect(marked.fns[0].version).not.toBe(unmarked.fns[0].version);
+        expect(marked.fns[0].key).toBe(unmarked.fns[0].key);
     });
 });
 
@@ -289,14 +307,15 @@ export const explain = serverStream(async function* (rq, id: string) {
             ['addToCart', false],
             ['explain', true]
         ]);
-        expect(result.fns[1].symbol).toMatch(/^explain_fn_[0-9a-f]{8}$/);
-        expect(result.fns[1].stableSymbol).toBe('src/cart.server.ts/explain');
+        expect(result.fns[1].key).toBe('src/cart.server.ts/explain');
+        expect(result.fns[1].version).toMatch(HEX8);
         // Mixed module imports BOTH stub factories, each used for its kind.
         expect(result.stubModule).toContain(
             `import { __serverFnStub, __serverStreamStub } from '@sigx/server/client';`
         );
-        expect(result.stubModule).toMatch(
-            /export const explain = __serverStreamStub\("explain_fn_[0-9a-f]{8}", "explain", "\/_sigx\/fn"\);/
+        // A stream stub carries key, name, endpoint and version — never flags.
+        expect(result.stubModule).toContain(
+            `export const explain = __serverStreamStub("src/cart.server.ts/explain", "explain", "${BASE}", "${result.fns[1].version}");`
         );
         expect(result.stubModule).not.toContain('db.explain');
     });
@@ -345,38 +364,50 @@ export const nope = serverStream(async function* () { yield 1; });
     });
 });
 
-describe('extractServerFns — rev 2 (stable ids, stable symbols, endpoint)', () => {
-    it('mints identical symbols for the same stableId regardless of build root', () => {
+describe('extractServerFns — rev 2 (stable ids, keys, endpoint)', () => {
+    it('mints an identical key and version for the same stableId regardless of build root', () => {
         // Two app builds of one solution see the same shared module under
         // different absolute paths but the SAME package-qualified stable id.
         const a = extractServerFns(CART, '/appA/node_modules/@acme/api/src/cart.server.ts',
             opts('@acme/api/src/cart.server.ts'));
         const b = extractServerFns(CART, '/appB/packages/api/src/cart.server.ts',
             opts('@acme/api/src/cart.server.ts'));
-        expect(a.fns[0].symbol).toBe(b.fns[0].symbol);
-        expect(a.fns[0].stableSymbol).toBe(b.fns[0].stableSymbol);
+        expect(a.fns[0].key).toBe(b.fns[0].key);
+        expect(a.fns[0].version).toBe(b.fns[0].version);
         // …and a different stable id changes both.
         const c = extractServerFns(CART, '/appA/src/cart.server.ts', opts('src/cart.server.ts'));
-        expect(c.fns[0].symbol).not.toBe(a.fns[0].symbol);
+        expect(c.fns[0].key).not.toBe(a.fns[0].key);
+        expect(c.fns[0].version).not.toBe(a.fns[0].version);
     });
 
-    it('shapes the stable symbol as <stableId>/<name> (decoded form)', () => {
+    it('shapes the key as <stableId>/<name> (decoded form)', () => {
         const result = extractServerFns(CART, '/x.ts', opts('@acme/api/src/cart.server.ts'));
-        expect(result.fns[0].stableSymbol).toBe('@acme/api/src/cart.server.ts/addToCart');
+        expect(result.fns[0].key).toBe('@acme/api/src/cart.server.ts/addToCart');
     });
 
-    it('an explicit string-literal `id` replaces the stableId in BOTH symbols', () => {
+    it('an explicit string-literal `id` pins the key and seeds the version', () => {
         const code = `
 import { serverFn } from '@sigx/server';
-export const add = serverFn({ id: 'cart/add', handler: async (rq, input) => input });
+export const add = serverFn({ id: 'cart/add', handler: async ({ input }) => input });
 `;
         const here = extractServerFns(code, '/a/x.server.ts', opts('@acme/api/src/x.server.ts'));
         const moved = extractServerFns(code, '/b/y.server.ts', opts('@acme/api/lib/y.server.ts'));
-        expect(here.fns[0].stableSymbol).toBe('cart/add/add');
-        // File moves don't touch an id'd function's routes — hashed included.
-        expect(moved.fns[0].symbol).toBe(here.fns[0].symbol);
-        expect(moved.fns[0].stableSymbol).toBe(here.fns[0].stableSymbol);
+        expect(here.fns[0].key).toBe('cart/add/add');
+        // File moves don't touch an id'd function's key — nor its version,
+        // since the id replaces the file-derived stable id in the seed too.
+        expect(moved.fns[0].key).toBe(here.fns[0].key);
+        expect(moved.fns[0].version).toBe(here.fns[0].version);
         expect(here.warnings).toHaveLength(0);
+
+        // The id is part of the version seed: the same handler with no `id`
+        // mints a different key AND a different version.
+        const bare = extractServerFns(
+            code.replace(`id: 'cart/add', `, ''),
+            '/a/x.server.ts',
+            opts('@acme/api/src/x.server.ts')
+        );
+        expect(bare.fns[0].key).toBe('@acme/api/src/x.server.ts/add');
+        expect(bare.fns[0].version).not.toBe(here.fns[0].version);
     });
 
     it('normalizes a stable id into something a URL PATH can carry (#355)', () => {
@@ -384,19 +415,19 @@ export const add = serverFn({ id: 'cart/add', handler: async (rq, input) => inpu
         // Left alone, `new URL()` would resolve those away and the route
         // would silently point somewhere else.
         const up = extractServerFns(CART, '/x.ts', opts('../shared/src/cart.server.ts'));
-        expect(up.fns[0].stableSymbol).toBe('_up/shared/src/cart.server.ts/addToCart');
+        expect(up.fns[0].key).toBe('_up/shared/src/cart.server.ts/addToCart');
 
         // A scoped package name survives literally — that is the whole point.
         const scoped = extractServerFns(CART, '/x.ts', opts('@acme/api/src/cart.server.ts'));
-        expect(scoped.fns[0].stableSymbol).not.toContain('%');
+        expect(scoped.fns[0].key).not.toContain('%');
 
         // Anything outside `pchar` still escapes, per segment.
         const odd = extractServerFns(CART, '/x.ts', opts('a b/c?d/cart.server.ts'));
-        expect(odd.fns[0].stableSymbol).toBe('a%20b/c%3Fd/cart.server.ts/addToCart');
+        expect(odd.fns[0].key).toBe('a%20b/c%3Fd/cart.server.ts/addToCart');
 
         // Empty segments collapse rather than becoming `//` in the path.
         const empty = extractServerFns(CART, '/x.ts', opts('pkg//src/cart.server.ts'));
-        expect(empty.fns[0].stableSymbol).toBe('pkg/src/cart.server.ts/addToCart');
+        expect(empty.fns[0].key).toBe('pkg/src/cart.server.ts/addToCart');
     });
 
     it('warns when an explicit `id` is not URL-path-safe, naming the route it gets', () => {
@@ -405,7 +436,7 @@ import { serverFn } from '@sigx/server';
 export const add = serverFn({ id: 'cart/../add item', handler: async (rq, input) => input });
 `;
         const result = extractServerFns(code, '/x.server.ts', opts('src/x.server.ts'));
-        expect(result.fns[0].stableSymbol).toBe('cart/_up/add%20item/add');
+        expect(result.fns[0].key).toBe('cart/_up/add%20item/add');
         expect(result.warnings).toHaveLength(1);
         expect(result.warnings[0]).toContain('not URL-path-safe');
         expect(result.warnings[0]).toContain('cart/_up/add%20item');
@@ -420,22 +451,151 @@ export const add = serverFn({ id: routeId, handler: async (rq, input) => input }
         const result = extractServerFns(code, '/x.server.ts', opts('src/x.server.ts'));
         expect(result.warnings).toHaveLength(1);
         expect(result.warnings[0]).toContain('string literal');
-        expect(result.fns[0].stableSymbol).toBe('src/x.server.ts/add');
+        expect(result.fns[0].key).toBe('src/x.server.ts/add');
     });
 
-    it("stubSymbols: 'stable' bakes stable symbols and `endpoint` bakes the fetch target", () => {
+    it('`endpoint` bakes the fetch target into the stub; the key is the only route', () => {
         const result = extractServerFns(CART, '/x.ts', opts('@acme/api/src/cart.server.ts', {
-            stubSymbols: 'stable',
             endpoint: 'https://api.example.com/_sigx/fn'
         }));
         expect(result.stubModule).toContain(
             `export const addToCart = __serverFnStub("@acme/api/src/cart.server.ts/addToCart", ` +
-            `"addToCart", "https://api.example.com/_sigx/fn", ` +
-            `"@acme/api/src/cart.server.ts/addToCart");`
+            `"addToCart", "https://api.example.com/_sigx/fn", "${result.fns[0].version}");`
         );
-        // Hashed mode (the default) keeps the hashed symbol in stubs.
-        const hashed = extractServerFns(CART, '/x.ts', opts('@acme/api/src/cart.server.ts'));
-        expect(hashed.stubModule).toContain(`__serverFnStub("${hashed.fns[0].symbol}"`);
+    });
+});
+
+/* ------------------------------------------------------------------ */
+/* The version seed (rfc-server-v5 §4.2)                              */
+/* ------------------------------------------------------------------ */
+
+describe('extractServerFns — the version is seeded from the AST, not the text', () => {
+    const version = (code: string, stableId = 'src/x.server.ts'): string =>
+        extractServerFns(code, '/src/x.server.ts', opts(stableId)).fns[0].version;
+    /** The version of a handler that returns one literal, spelled `lit`. */
+    const lit = (lit: string): string =>
+        version(`import { serverFn } from '@sigx/server';\nexport const f = serverFn({ handler: async () => ${lit} });`);
+
+    it('survives a reformat, added comments, and literal respellings', () => {
+        const compact = `
+import { serverFn, ServerFnError } from '@sigx/server';
+import { db } from './db';
+export const addToCart = serverFn(async (rq, id: string, qty: number) => { return db.cart.add(id, qty); });
+`;
+        const sprawling = `
+import { serverFn, ServerFnError } from '@sigx/server';
+import { db } from './db';
+
+export const addToCart = serverFn(
+    // the cart mutation
+    async (rq, id: string, qty: number) => {
+        /* one line, many spaces */
+        return db.cart.add(
+            id,
+            qty
+        );
+    }
+);
+`;
+        expect(version(sprawling)).toBe(version(compact));
+        // Both are the pinned CART fixture, semantically.
+        expect(version(compact, 'src/cart.server.ts')).toBe('83037bb4');
+
+        // `1` vs `1.0` vs `0x1`, and `'a'` vs `"a"`: the same value, spelled
+        // differently — `raw` is not part of the seed.
+        expect(lit('1.0')).toBe(lit('1'));
+        expect(lit('0x1')).toBe(lit('1'));
+        expect(lit('"a"')).toBe(lit("'a'"));
+    });
+
+    it('bumps on a handler-body edit, an `input` expression edit, or an added option', () => {
+        const base = `
+import { serverFn } from '@sigx/server';
+import { z } from 'zod';
+export const add = serverFn({
+    input: z.object({ id: z.string() }),
+    handler: async ({ input }) => input.id
+});
+`;
+        const v = version(base);
+        expect(v).toMatch(HEX8);
+        expect(version(base.replace('=> input.id', '=> input.id.trim()'))).not.toBe(v);
+        expect(version(base.replace('z.string()', 'z.number()'))).not.toBe(v);
+        expect(version(base.replace('    input:', '    cache: { maxAge: 60 },\n    input:'))).not.toBe(v);
+        expect(version(base.replace('    input:', '    authorize: [admin],\n    input:'))).not.toBe(v);
+        // Literal VALUES are semantic, whatever their spelling.
+        expect(lit('1')).not.toBe(lit('2'));
+        expect(lit('"a"')).not.toBe(lit('"b"'));
+        expect(lit('`a`')).not.toBe(lit('`b`'));
+        expect(lit('/a/g')).not.toBe(lit('/b/g'));
+        // BigInt literals hash too (JSON.stringify alone would throw on
+        // them), and do not collide with a string of the same digits.
+        expect(lit('10n')).toMatch(HEX8);
+        expect(lit('10n')).not.toBe(lit('11n'));
+        expect(lit('10n')).not.toBe(lit('"10"'));
+    });
+});
+
+describe('mintIdentity / normalizeServerFnCall / stubCall (the pure primitives)', () => {
+    /** The `serverFn(...)` call node of a one-declaration module. */
+    const callOf = (code: string): Parameters<typeof normalizeServerFnCall>[0] => {
+        const program = parseAst(code, { lang: 'ts' }) as unknown as {
+            body: Array<{ declaration: { declarations: Array<{ init: Parameters<typeof normalizeServerFnCall>[0] }> } }>;
+        };
+        return program.body[1].declaration.declarations[0].init;
+    };
+    const MOD = `import { serverFn } from '@sigx/server';\nexport const f = serverFn({ handler: async () => 1 });`;
+
+    it('normalizeServerFnCall drops positions and raw spellings, keeps everything semantic', () => {
+        const normalized = normalizeServerFnCall(callOf(MOD));
+        expect(normalized).not.toMatch(/"(start|end|range|loc|raw)":/);
+        expect(normalized).toContain('"type":"CallExpression"');
+        expect(normalized).toContain('"name":"serverFn"');
+        expect(normalized).toContain('"value":1');
+        // Same source, shifted by leading whitespace and a comment: byte-identical.
+        expect(normalizeServerFnCall(callOf(`// header\n${MOD.replace('serverFn({', 'serverFn( {')}`))).toBe(normalized);
+    });
+
+    it('mintIdentity agrees with extractServerFns, and routeSafe-normalizes the id first', () => {
+        const viaExtractor = extractServerFns(MOD, '/x.server.ts', opts('src/x.server.ts')).fns[0];
+        const direct = mintIdentity('f', callOf(MOD), undefined, 'src/x.server.ts');
+        expect(direct).toEqual({
+            name: 'f',
+            key: viaExtractor.key,
+            version: viaExtractor.version,
+            stream: false,
+            get: false,
+            invalidates: false,
+            form: false
+        });
+        // An explicit id replaces the stable id in BOTH key and seed…
+        const withId = mintIdentity('f', callOf(MOD), 'cart/add', 'src/x.server.ts');
+        expect(withId.key).toBe('cart/add/f');
+        expect(withId.version).not.toBe(direct.version);
+        // …and is made route-safe before either is minted, so `cart/../add`
+        // and `cart/_up/add` are ONE identity.
+        expect(mintIdentity('f', callOf(MOD), 'cart/../add', 'x')).toEqual(
+            mintIdentity('f', callOf(MOD), 'cart/_up/add', 'x')
+        );
+    });
+
+    it('stubCall writes the positional shape, flags only when non-zero, no flags for a stream', () => {
+        const fn = mintIdentity('f', callOf(MOD), undefined, 'src/x.server.ts');
+        expect(stubCall(fn, BASE)).toBe(
+            `__serverFnStub("src/x.server.ts/f", "f", "${BASE}", "${fn.version}")`
+        );
+        expect(stubCall({ ...fn, get: true }, BASE)).toBe(
+            `__serverFnStub("src/x.server.ts/f", "f", "${BASE}", "${fn.version}", 1)`
+        );
+        expect(stubCall({ ...fn, invalidates: true }, BASE)).toBe(
+            `__serverFnStub("src/x.server.ts/f", "f", "${BASE}", "${fn.version}", 2)`
+        );
+        expect(stubCall({ ...fn, get: true, invalidates: true }, BASE)).toBe(
+            `__serverFnStub("src/x.server.ts/f", "f", "${BASE}", "${fn.version}", 3)`
+        );
+        expect(stubCall({ ...fn, stream: true, get: true, invalidates: true }, BASE)).toBe(
+            `__serverStreamStub("src/x.server.ts/f", "f", "${BASE}", "${fn.version}")`
+        );
     });
 });
 
@@ -456,7 +616,7 @@ export const addToCart = serverFn(async (rq, id) => id);
         expect(byName.addToCart.form).toBe(false);
         // The form bit is build/runtime-side only — stubs are plain RPC.
         expect(result.stubModule).toContain(
-            `export const submitFeedback = __serverFnStub("${byName.submitFeedback.symbol}", "submitFeedback", "${BASE}", "${byName.submitFeedback.stableSymbol}");`
+            `export const submitFeedback = __serverFnStub("${byName.submitFeedback.key}", "submitFeedback", "${BASE}", "${byName.submitFeedback.version}");`
         );
     });
 
@@ -484,7 +644,7 @@ export { submit };
 });
 
 describe('serverFnKeyStamps — SSR-side __sigxKey stamps (#452)', () => {
-    it('stamps each extracted fn LOCAL with its stable symbol, marker-guarded', () => {
+    it('stamps each extracted fn LOCAL with its key, marker-guarded', () => {
         const result = extractServerFns(CART, '/src/cart.server.ts', opts('src/cart.server.ts'));
         const stamps = serverFnKeyStamps(result.fns);
         expect(stamps).toContain(KEY_STAMP_MARKER);

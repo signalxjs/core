@@ -213,6 +213,30 @@ describe('form-mode success — 303 PRG (§6.4)', () => {
         }
     });
 
+    it('a form POST never carries a version tag — a registry entry with one never 409s it (rfc-server-v5 §3.2)', async () => {
+        // The skew check reads `v` from the JSON envelope or the GET query;
+        // a form body has neither, and a FIELD named `v` is data for the
+        // schema, not a wire tag.
+        const res = await handleServerFnRequest(
+            new Request(`${ORIGIN}/_sigx/fn/app/contact.server.ts/submit`, {
+                method: 'POST',
+                headers: {
+                    'content-type': 'application/x-www-form-urlencoded',
+                    origin: ORIGIN,
+                    referer: PAGE
+                },
+                body: new URLSearchParams({ message: 'hi', v: 'other' }).toString()
+            }),
+            {
+                functions: {
+                    'app/contact.server.ts/submit': { version: 'v1', load: async () => submit }
+                }
+            }
+        );
+        expect(res.status).toBe(303);
+        expect(res.headers.get('location')).toBe('/contact?tab=support');
+    });
+
     it('invalidates never runs on the form branch, but still runs for JSON callers', async () => {
         const keys = vi.fn(() => [['cart']]);
         const fn = serverFn({

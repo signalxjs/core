@@ -35,6 +35,7 @@ import type {
     EndpointPosture,
     ServerFeatureContext,
     ServerFnInfo,
+    ServerFnRegistry,
     ServerMiddleware,
     ServerPolicy,
     WrappedServerFn
@@ -48,19 +49,32 @@ import {
     type ReadQueryError
 } from '../fn-url-decode';
 import { preparePattern } from './key-match';
+import { createServerFnResolver, type ResolvedServerFn } from './registry';
+import { fnNameOf } from '../fn-name';
 
 export interface ServerFnRequestOptions {
     /**
-     * Resolve a transport symbol to its wrapped server function (an object
-     * carrying `__sigx`). Return null/undefined for unknown symbols —
-     * a structured 404 the stub surfaces as a version-skew error.
+     * The build's registry — the `serverFns` export of
+     * `'virtual:sigx-server-fns'` (key `<id>/<name>` → `{ version, load }`,
+     * rfc-server-v5 §1.6). Explicitly passed, never ambient. Exactly one of
+     * `functions` / `resolve` is required; both or neither throws when the
+     * handler is built. A registry answer carries the build's version tag,
+     * so a stale client's call is a 409 `version-skew` rather than a wrong
+     * function.
+     */
+    functions?: ServerFnRegistry;
+    /**
+     * The escape hatch: resolve a key to its wrapped server function (an
+     * object carrying `__sigx`) yourself. Return null/undefined for unknown
+     * keys — a structured 404. No version is known through this path, so it
+     * is never skew-checked.
      *
      * A throw or rejection here (a broken lazy import, a missing chunk
      * after a partial deploy) is treated as a function failure: masked per
      * §5 and reported to `onError`. A thrown `ServerFnError` passes through
      * verbatim, so a custom resolve can speak the wire language (#555).
      */
-    resolve(symbol: string): unknown | Promise<unknown>;
+    resolve?(key: string): unknown | Promise<unknown>;
     /**
      * The URL prefix this handler is mounted at — how much of the pathname to
      * strip before the rest IS the symbol. Default `/_sigx/fn`, matching
@@ -381,18 +395,22 @@ const READ_QUERY_ERRORS: Record<ReadQueryError, string> = {
  *  would shadow a redeploy's fresh symbols. */
 const NO_STORE = { 'cache-control': 'no-store' } as const;
 
-/** JSON error response; headers merge on top of the content-type. */
+/** JSON error response; headers merge on top of the content-type. `code`
+ *  is the machine-readable discriminator a stub can branch on
+ *  (`'version-skew'`, rfc-server-v5 §3.2). */
 function errorResponse(
     status: number,
     message: string,
     data?: unknown,
     headers?: Headers,
-    extra?: Record<string, string>
+    extra?: Record<string, string>,
+    code?: string
 ): Response {
     const merged = new Headers(headers);
     merged.set('content-type', 'application/json');
     for (const [key, value] of Object.entries(extra ?? {})) merged.set(key, value);
     const error: Record<string, unknown> = { message, status };
+    if (code !== undefined) error.code = code;
     if (data !== undefined) error.data = data;
     return new Response(JSON.stringify({ error }), { status, headers: merged });
 }
@@ -575,6 +593,10 @@ export async function handleServerFnRequest(
     request: Request,
     options: ServerFnRequestOptions
 ): Promise<Response> {
+    // Exactly one of `functions` / `resolve` — validated up front, so a
+    // misconfigured entry fails loudly on its first request rather than
+    // answering a masked 500 (rfc-server-v5 §1.6).
+    const resolver = createServerFnResolver(options);
     // Posture inheritance (rfc-server-v4 §3.1): any wire knob this call's
     // options leave undefined falls back to the app's posture — stated once
     // on `createServerApp`, consulted lazily per request so the handler
@@ -669,9 +691,9 @@ export async function handleServerFnRequest(
                   isGet ? NO_STORE : undefined
               );
     }
-    let fn: Partial<WrappedServerFn> | null | undefined;
+    let hit: ResolvedServerFn | null;
     try {
-        fn = (await options.resolve(symbol)) as Partial<WrappedServerFn> | null | undefined;
+        hit = await resolver(symbol);
     } catch (error) {
         // A throwing resolve is a server-side infrastructure failure (a
         // broken lazy import, a missing chunk after a partial deploy) — it
@@ -679,7 +701,7 @@ export async function handleServerFnRequest(
         // onError, no envelope. Masked per §5 like any fn failure; a thrown
         // ServerFnError passes through so a custom resolve can speak the
         // wire language. The real info/ctx don't exist yet — built fresh.
-        const info: ServerFnInfo = { symbol, name: symbolName(symbol), transport: 'wire' };
+        const info: ServerFnInfo = { symbol, name: fnNameOf(symbol), transport: 'wire' };
         const ctx = createRequestContext(request);
         if (!isServerFnError(error)) await reportMasked(options, error, info, ctx);
         const shape = wireErrorShape(error, info.name || symbol, options.maxResponseBytes);
@@ -693,6 +715,8 @@ export async function handleServerFnRequest(
                   isGet ? NO_STORE : undefined
               );
     }
+    const fn = hit?.fn as Partial<WrappedServerFn> | undefined;
+    const registryVersion = hit?.version;
     const d = fn?.__sigx;
     if (!d || typeof d.invoke !== 'function') {
         // GET 404s are no-store like every non-2xx: a CDN-cached miss must
@@ -726,12 +750,15 @@ export async function handleServerFnRequest(
     const invoke = d.invoke;
     const info: ServerFnInfo = {
         symbol,
-        name: symbolName(symbol),
+        name: fnNameOf(symbol),
         transport: 'wire'
     };
 
     let parsed: unknown;
     let boundarySidecar: unknown;
+    /** The version tag the client sent (rfc-server-v5 §3.2): `?v=` on a
+     *  GET read, `v` in the JSON envelope on POST; a form post carries none. */
+    let sentVersion: unknown;
     if (isGet) {
         // §4.1: the arguments ride the query string. All-scalar calls carry
         // readable named params (`?a0=shoes&a1=42`, #355); anything richer
@@ -741,6 +768,7 @@ export async function handleServerFnRequest(
         if (url.search.length > (options.maxUrlBytes ?? DEFAULT_MAX_URL)) {
             return errorResponse(414, 'Query string too large', undefined, undefined, NO_STORE);
         }
+        sentVersion = url.searchParams.get('v') ?? undefined;
         const named = decodeReadQuery(url.searchParams);
         if (typeof named === 'string') {
             return errorResponse(400, READ_QUERY_ERRORS[named], undefined, undefined, NO_STORE);
@@ -819,9 +847,10 @@ export async function handleServerFnRequest(
         }
         try {
             const parsedBody = body
-                ? (parseGuarded(body) as { args?: unknown; $boundaries?: unknown })
+                ? (parseGuarded(body) as { args?: unknown; v?: unknown; $boundaries?: unknown })
                 : undefined;
             parsed = parsedBody?.args;
+            sentVersion = parsedBody?.v;
             boundarySidecar = parsedBody?.$boundaries;
         } catch {
             return errorResponse(400, 'Malformed JSON body');
@@ -834,6 +863,22 @@ export async function handleServerFnRequest(
             undefined,
             undefined,
             isGet ? NO_STORE : undefined
+        );
+    }
+    // Version skew (rfc-server-v5 §3.2): the client sent the build's tag
+    // for this function and the registry knows a different one — a stale
+    // tab after a deploy. 409 before the prelude: cheaper than middleware,
+    // and the tag is public in the client bundle anyway. No tag (a native
+    // client, curl) or no registry version (the `resolve` escape hatch) is
+    // never checked; a non-string `v` is ignored, not a 400.
+    if (typeof sentVersion === 'string' && registryVersion !== undefined && sentVersion !== registryVersion) {
+        return errorResponse(
+            409,
+            'version skew',
+            undefined,
+            undefined,
+            isGet ? NO_STORE : undefined,
+            'version-skew'
         );
     }
     const ctx = createRequestContext(request);
@@ -1155,20 +1200,6 @@ function warnPublicRequestTouch(
 }
 
 /**
- * The export name encoded in the symbol (#355) — the last segment of a
- * stable symbol (`<stableId>/<name>`, checked FIRST: a stable id may itself
- * end in a hashed-looking `_fn_<hex8>` tail), `<name>` of a hashed
- * `<name>_fn_<hash8>`. A hashed symbol never contains '/', so the two cannot
- * be confused; anything else is nameless (`''`).
- */
-function symbolName(symbol: string): string {
-    const lastSlash = symbol.lastIndexOf('/');
-    return lastSlash >= 0
-        ? symbol.slice(lastSlash + 1)
-        : /^(.+)_fn_[0-9a-f]{8}$/.exec(symbol)?.[1] ?? '';
-}
-
-/**
  * The #349 observability seam: deliver a masked failure to `onError`,
  * awaited, with the hook's own throws swallowed — telemetry must never
  * affect the response.
@@ -1435,7 +1466,7 @@ function withAppPosture(options: ServerFnRequestOptions): ServerFnRequestOptions
  * });
  *
  * // entry — routing stays visible
- * const fns = app.serverFns({ resolve, base: serverFnBase });
+ * const fns = app.serverFns({ functions: serverFns, base: serverFnBase });
  * if (matchesServerFn(request, serverFnBase)) return fns(request);
  * ```
  */
@@ -1462,9 +1493,13 @@ export interface ServerAppOptions<P = unknown> extends EndpointPosture {
     codec?: { encode(principal: P): string; decode(encoded: string): P | null };
 }
 
-/** One server-fn endpoint mount, bound to the app's pipeline + posture. */
+/** One server-fn endpoint mount, bound to the app's pipeline + posture.
+ *  Exactly one of `functions` / `resolve` (rfc-server-v5 §1.6). */
 export interface ServerFnMount extends EndpointPosture {
-    resolve(symbol: string): unknown | Promise<unknown>;
+    /** The build's registry (`serverFns` from `'virtual:sigx-server-fns'`). */
+    functions?: ServerFnRegistry;
+    /** The escape hatch — see `ServerFnRequestOptions.resolve`. */
+    resolve?(key: string): unknown | Promise<unknown>;
     /** The mount path — claims its namespace on the app (boot throw on overlap). */
     base?: string;
     renderBoundaries?: ServerFnRequestOptions['renderBoundaries'];
@@ -1547,13 +1582,20 @@ export function createServerApp<P = unknown>(options: ServerAppOptions<P>): Serv
             // handle (dev HMR having since stamped a newer app) must claim
             // where its own siblings live, or it would invent an overlap
             // against a different app's bases — or miss its own.
+            const { functions, resolve, base, renderBoundaries, authorizeBoundary, ...overrides } = mount;
+            // Validate the functions/resolve pair FIRST — a boot throw, not a
+            // first-request 500 (the endpoint re-derives its resolver per
+            // request from the same two fields) — and before the base is
+            // claimed, so a corrected retry on the same base is not an
+            // "overlap" with its own failed attempt.
+            createServerFnResolver({ functions, resolve });
             claimAppBase(mount.base ?? DEFAULT_FN_BASE, config);
             // Mount-level posture overrides ride the options object
             // directly: `withAppPosture` inherits only what is undefined,
             // so an explicit mount value wins over the app's.
-            const { resolve, base, renderBoundaries, authorizeBoundary, ...overrides } = mount;
             const requestOptions: ServerFnRequestOptions = {
-                resolve,
+                ...(functions !== undefined ? { functions } : {}),
+                ...(resolve !== undefined ? { resolve } : {}),
                 ...(base !== undefined ? { base } : {}),
                 ...(renderBoundaries ? { renderBoundaries } : {}),
                 ...(authorizeBoundary ? { authorizeBoundary } : {}),

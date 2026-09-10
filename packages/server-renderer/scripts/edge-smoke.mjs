@@ -120,7 +120,7 @@ function assert(cond, message) {
     void app;
     const add = serverFn({ handler: async ({ input: [a, b] }) => a + b });
     const res = await handleServerFnRequest(
-        new Request('https://edge.test/_sigx/fn/add_fn_00000001', {
+        new Request('https://edge.test/_sigx/fn/edge/add', {
             method: 'POST',
             headers: { 'content-type': 'application/json', origin: 'https://edge.test' },
             body: '{"args":[[2,3]]}'
@@ -135,7 +135,7 @@ function assert(cond, message) {
     // + AbortSignal.any + setTimeout must all be WinterCG-clean, and a fast
     // fn must be unaffected while a hung fn 504s with onError fired.
     const fast = await handleServerFnRequest(
-        new Request('https://edge.test/_sigx/fn/add_fn_00000001', {
+        new Request('https://edge.test/_sigx/fn/edge/add', {
             method: 'POST',
             headers: { 'content-type': 'application/json', origin: 'https://edge.test' },
             body: '{"args":[[4,5]]}'
@@ -147,7 +147,7 @@ function assert(cond, message) {
     const never = serverFn({ handler: async () => new Promise(() => {}) });
     const masked = [];
     const hung = await handleServerFnRequest(
-        new Request('https://edge.test/_sigx/fn/never_fn_00000002', {
+        new Request('https://edge.test/_sigx/fn/edge/never', {
             method: 'POST',
             headers: { 'content-type': 'application/json', origin: 'https://edge.test' },
             body: '{"args":[]}'

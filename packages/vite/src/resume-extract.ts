@@ -113,14 +113,14 @@ export interface ResumeExtraction {
 export interface ResumeExtractOptions {
     /**
      * Resolve a handler's captured serverFn import — (specifier as written,
-     * export name; `default` for default imports) — to its stable transport
-     * symbol and form mark. The sigx:server plugin's `api.resolveServerFn`,
+     * export name; `default` for default imports) — to its stable key and
+     * form mark. The sigx:server plugin's `api.resolveServerFn`,
      * pre-bound with the importing file. Null = not a known serverFn.
      */
     resolveServerFn?(
         specifier: string,
         exportName: string
-    ): { stableSymbol: string; form: boolean } | null;
+    ): { key: string; form: boolean } | null;
     /** The endpoint base baked into stamped actions (sigx:server's `api.endpoint`). */
     endpoint?: string;
 }
@@ -945,7 +945,7 @@ export function extractResumeHandlers(
             // and stubs them serverOnly) — neither can be a stamp target.
             if (imp.typeOnly || imp.kind === 'namespace' || imp.kind === 'default') continue;
             const hit = opts.resolveServerFn(imp.source, imp.imported ?? imp.local);
-            if (hit?.form) seen.add(hit.stableSymbol);
+            if (hit?.form) seen.add(hit.key);
         }
         return seen;
     };

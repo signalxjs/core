@@ -3,8 +3,10 @@
  *
  * createServerApp() — the server platform value (rfc-server-v4 §3): the
  * seam stamp (last-wins, HMR-safe), `dispose()`'s identity rule, posture
- * inheritance (app → mount → built-in default), the `serverFns` mount,
- * `claimBase`'s boot throw, and `authorizeBoundary` (the §6.3 gap).
+ * inheritance (app → mount → built-in default), the `serverFns` mount
+ * (`functions` registry or `resolve` escape hatch — exactly one,
+ * rfc-server-v5 §1.6), `claimBase`'s boot throw, and `authorizeBoundary`
+ * (the §6.3 gap).
  * Pipeline ORDER pins live in app-pipeline.test.ts.
  */
 
@@ -170,6 +172,36 @@ describe('serverFns mounts and claimBase', () => {
         });
         const res = await fns(post('/api/fns/add_fn_1', { args: [[2, 3]] }));
         await expect(res.json()).resolves.toEqual({ data: 5 });
+    });
+
+    it("a mount takes the build's `functions` registry and skew-checks through it (rfc-server-v5 §1.6/§3.2)", async () => {
+        const created = app({ authenticate: () => ({ id: 'u1' }) });
+        const add = serverFn({
+            handler: async ({ input: [a, b] }: { input: [number, number] }) => a + b
+        });
+        const fns = created.serverFns({
+            functions: { 'api/add': { version: 'v1', load: async () => add } }
+        });
+        const res = await fns(post('/_sigx/fn/api/add', { args: [[2, 3]] }));
+        expect(res.status).toBe(200);
+        await expect(res.json()).resolves.toEqual({ data: 5 });
+        // The registry's version gates the wire tag — the `resolve` mount
+        // above has no version to compare, this one does.
+        const stale = await fns(post('/_sigx/fn/api/add', { args: [[2, 3]], v: 'other' }));
+        expect(stale.status).toBe(409);
+        await expect(stale.json()).resolves.toEqual({
+            error: { message: 'version skew', status: 409, code: 'version-skew' }
+        });
+    });
+
+    it('both or neither of `functions` / `resolve` throws at MOUNT time, not on the first request', () => {
+        const created = app({ authenticate: () => ({ id: 'u1' }) });
+        // Distinct bases: the mount claims its base before validating the
+        // pair, so a retry on the same base would report the overlap instead.
+        expect(() => created.serverFns({})).toThrow(/pass `functions`/);
+        expect(() =>
+            created.serverFns({ functions: {}, resolve: () => null, base: '/rpc' })
+        ).toThrow(/EITHER `functions` OR `resolve`/);
     });
 });
 

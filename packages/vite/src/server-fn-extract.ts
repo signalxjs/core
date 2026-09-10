@@ -18,33 +18,31 @@
  * ```js
  * import { __serverFnStub, __serverOnly } from '@sigx/server/client';
  * export const addToCart = __serverFnStub(
- *     "addToCart_fn_9f3a01cc",                   // wire symbol (content-hashed)
+ *     "@acme/api/src/cart.server.ts/addToCart",  // key: the route AND __sigxKey
  *     "addToCart",                               // export name, for error text
  *     "/_sigx/fn",                               // endpoint
- *     "@acme/api/src/cart.server.ts/addToCart",  // stable key → __sigxKey
- *     0,                                         // 1 = cache-marked GET read (§4.1)
- *     1                                          // 1 = declares invalidates (§6.2/§6.3)
+ *     "9f3a01cc",                                // version: this build's tag
+ *     2                                          // flags: 1 = GET read, 2 = invalidates
  * );
  * export const auditLog = __serverOnly("auditLog", "@acme/api/src/cart.server.ts");
  * ```
  *
- * The two positional flags are omitted when unset (`stubFlags`), so an
- * unmarked function's stub is byte-identical to what shipped before either
- * feature existed; a `serverStream` gets `__serverStreamStub` with no key and
- * no flags. `__serverOnly`'s second argument is the module's STABLE ID, not a
- * raw relative path.
+ * The flags argument is omitted when zero (`stubCall`); a `serverStream` gets
+ * `__serverStreamStub` with no flags. `__serverOnly`'s second argument is
+ * the module's STABLE ID, not a raw relative path.
  *
- * Symbols are content-hashed (`<name>_fn_<hash8(stableId\0name\0implSource)>`,
- * the resume discipline) so version skew is a detectable 404 — a stale client
- * posts an old symbol and the stub surfaces a typed "stale build" error,
- * never a silent wrong-function call. The seed's path component is a
- * ROOT-INDEPENDENT stable id (rfc-server rev 2, §3/N.4) — package-qualified
- * (`@acme/api/src/cart.server.ts`), so every app build of one solution mints
- * the SAME symbol for a shared server module. Alongside it every function
- * gets a hash-free STABLE symbol (`<stableId>/<name>`, N.3) so backend
- * redeploys never break installed native clients; the options form's
- * `id: 'cart/add'` (string literal, read statically) replaces the file-derived
- * id for published APIs that must survive file moves.
+ * One identity per function (rfc-server-v5 §1.3): the KEY `<stableId>/<name>`
+ * is the only route, the registry key and the `useData(fn)` identity. Its
+ * stable-id component is ROOT-INDEPENDENT (rfc-server rev 2, §3/N.4) —
+ * package-qualified (`@acme/api/src/cart.server.ts`), so every app build of
+ * one solution mints the SAME key for a shared server module — and the
+ * options form's `id: 'cart/add'` (string literal, read statically) replaces
+ * the file-derived id for published APIs that must survive file moves. The
+ * VERSION (`hash8(id\0name\0normalizedCall)`, v5 §4.2) is the deploy-coupling
+ * tag the stub sends with every call: the endpoint answers 409 version-skew
+ * when a stale client's differs, never a silent wrong-function call. It is
+ * seeded from the parsed AST, not the source text, so a reformat or a
+ * comment edit keeps it while any semantic change bumps it.
  *
  * Type-only exports pass through untouched at runtime (they erase), so
  * "types + fns in one file" stays a supported layout. Re-exports cannot be
@@ -76,20 +74,27 @@ export interface ExtractedServerFn {
      * emit their own SSR module.
      */
     local?: string;
-    /** Content-hashed transport symbol: `<name>_fn_<hash8>`. */
-    symbol: string;
-    /** Hash-free stable symbol: `<stableId>/<name>` (decoded form). */
-    stableSymbol: string;
+    /**
+     * The stable key `<stableId>/<name>` (decoded form) — the route, the
+     * registry key and the `__sigxKey` data identity (rfc-server-v5 §1.3).
+     */
+    key: string;
+    /**
+     * This build's version tag for the function — hash8 over the normalized
+     * definition (rfc-server-v5 §4.2). Sent by the stub, checked by the
+     * endpoint; never a route.
+     */
+    version: string;
     /** True for `serverStream` (NDJSON transport, AsyncIterable stub). */
     stream: boolean;
     /**
      * True when the options form declares `cache` (rfc-server §4.1) — the
      * stub issues GET with the arguments in the query string. Presence-only
      * detection: the VALUES are runtime data the endpoint reads off the
-     * wrapper; the stub needs just this one bit. No hash-seed change is
-     * needed — the symbol already covers the call source, so toggling
-     * `cache` re-mints it and a stale client can never GET a symbol whose
-     * server half does not accept GET.
+     * wrapper; the stub needs just this one bit. No extra version input is
+     * needed — the version already covers the whole call, so toggling
+     * `cache` bumps it and a stale client can never GET a function whose
+     * server half does not accept GET (it 409s first).
      */
     get: boolean;
     /**
@@ -120,8 +125,6 @@ export interface ServerFnExtractOptions {
     stableId: string;
     /** Fetch target baked into stubs (the plugin's `endpoint`, default = `base`). */
     endpoint: string;
-    /** Which symbol stubs carry: hashed (web, default) or stable (`role: 'client'`). */
-    stubSymbols?: 'hashed' | 'stable';
     /**
      * The access gate (rfc-server-v4 §5, #489/#611). Every extracted
      * `serverFn` and `serverStream` must have a DECIDED access policy:
@@ -424,21 +427,40 @@ export function warnIfIdRewritten(warnings: string[], local: string, id: string)
 }
 
 /**
- * Mint both transport symbols for one function (rfc-server rev 2, §3/N.3):
- * hashed — `<name>_fn_<hash8(id\0name\0implSource)>` (`\0` is only ever a
- * hash-seed FIELD separator; never part of the id) — and stable —
- * `<id>/<name>`, stored DECODED (per-segment URL-encoding is the stub's
- * request-time job; the endpoint decodes the same way). An explicit
- * options-form `id` replaces the file-derived stable id in BOTH, so id'd
- * functions survive file moves with hashed and stable routes alike.
- *
- * The id is `routeSafeId`-normalized FIRST, so the hash seed and the stable
- * symbol agree on one spelling — an id that normalizes cannot mint a symbol
- * pair the endpoint would resolve differently.
+ * The version seed (rfc-server-v5 §4.2): the parsed `serverFn(...)` /
+ * `serverStream(...)` call, serialized WITHOUT positions (`start`/`end`/
+ * `range`/`loc`) or literal spellings (`raw`), so a reformat, a comment
+ * edit or `1.0` vs `1` keeps the version while any identifier, literal or
+ * structural change — the handler body, the `input` schema expression, the
+ * `authorize` list — bumps it. BigInt literal values are mapped to strings
+ * (`JSON.stringify` throws on them). Comments are absent from the ESTree
+ * body already. A parser upgrade that reorders node properties bumps every
+ * version once — harmless, both ends ship from one build.
  */
-export function mintSymbols(
+export function normalizeServerFnCall(call: Node): string {
+    return JSON.stringify(call, (key, value) =>
+        key === 'start' || key === 'end' || key === 'range' || key === 'loc' || key === 'raw'
+            ? undefined
+            : typeof value === 'bigint'
+              ? String(value)
+              : value
+    );
+}
+
+/**
+ * Mint one function's identity (rfc-server-v5 §1.3/§4.1): the KEY
+ * `<id>/<name>`, stored DECODED (per-segment URL-encoding is the stub's
+ * request-time job; the endpoint decodes the same way), and the VERSION
+ * `hash8(id\0name\0normalizedCall)` (`\0` is only ever a seed FIELD
+ * separator; never part of the id). An explicit options-form `id` replaces
+ * the file-derived stable id, so id'd functions survive file moves.
+ *
+ * The id is `routeSafeId`-normalized FIRST, so the version seed and the key
+ * agree on one spelling.
+ */
+export function mintIdentity(
     name: string,
-    implSource: string,
+    call: Node,
     explicitId: string | undefined,
     stableId: string,
     stream = false,
@@ -449,8 +471,8 @@ export function mintSymbols(
     const fnStableId = routeSafeId(explicitId ?? stableId);
     return {
         name,
-        symbol: `${name}_fn_${hash8(`${fnStableId}\0${name}\0${implSource}`)}`,
-        stableSymbol: `${fnStableId}/${name}`,
+        key: `${fnStableId}/${name}`,
+        version: hash8(`${fnStableId}\0${name}\0${normalizeServerFnCall(call)}`),
         stream,
         get,
         invalidates,
@@ -458,15 +480,30 @@ export function mintSymbols(
     };
 }
 
+/** Bit 0 of a fn stub's `flags`: a cache-marked GET read (rfc-server §4.1). */
+export const STUB_FLAG_GET = 1;
+/** Bit 1: an `invalidates`-declaring mutation (§6.2/§6.3). */
+export const STUB_FLAG_INVALIDATES = 2;
+
+/** The bitmask a fn stub call carries (rfc-server-v5 §1.4); `0` for a stream. */
+export function stubFlags(fn: { stream: boolean; get: boolean; invalidates: boolean }): number {
+    if (fn.stream) return 0;
+    return (fn.get ? STUB_FLAG_GET : 0) | (fn.invalidates ? STUB_FLAG_INVALIDATES : 0);
+}
+
 /**
- * The positional flags a fn stub call carries after the stable-key argument
- * (5th: GET read §4.1; 6th: invalidates-declaring mutation §6.2/§6.3). Unflagged
- * output stays byte-identical to before either feature existed.
+ * The ONE stub call both emitters (file form and inline) write, so the two
+ * cannot drift: `__serverFnStub(key, name, endpoint, version, flags?)` —
+ * flags omitted when zero — or `__serverStreamStub(key, name, endpoint,
+ * version)`.
  */
-export function stubFlags(fn: { stream: boolean; get: boolean; invalidates: boolean }): string {
-    if (fn.stream) return '';
-    if (fn.invalidates) return fn.get ? ', 1, 1' : ', 0, 1';
-    return fn.get ? ', 1' : '';
+export function stubCall(fn: ExtractedServerFn, endpoint: string): string {
+    const factory = fn.stream ? '__serverStreamStub' : '__serverFnStub';
+    const flags = stubFlags(fn);
+    return (
+        `${factory}(${JSON.stringify(fn.key)}, ${JSON.stringify(fn.name)}, ` +
+        `${JSON.stringify(endpoint)}, ${JSON.stringify(fn.version)}${flags ? `, ${flags}` : ''})`
+    );
 }
 
 /**
@@ -495,7 +532,7 @@ export function serverFnKeyStamps(fns: ExtractedServerFn[]): string {
         if (!fn.local || seen.has(fn.local) || fn.stream) continue;
         seen.add(fn.local);
         // Streams are not `useData` targets, so they get no key.
-        lines.push(`${fn.local}.__sigxKey = ${JSON.stringify(fn.stableSymbol)};`);
+        lines.push(`${fn.local}.__sigxKey = ${JSON.stringify(fn.key)};`);
     }
     if (lines.length === 0) return '';
     return `\n${KEY_STAMP_MARKER}\n${lines.join('\n')}\n`;
@@ -504,7 +541,7 @@ export function serverFnKeyStamps(fns: ExtractedServerFn[]): string {
 /**
  * @param code    - module source
  * @param id      - absolute module path (parse lang from its extension)
- * @param options - stable id, baked endpoint, and stub symbol mode
+ * @param options - stable id and baked endpoint
  */
 export function extractServerFns(
     code: string,
@@ -545,12 +582,12 @@ export function extractServerFns(
     // is a word you type once in the function it applies to (§5).
     const requireAuthorization = options.requireAuthorization ?? true;
 
-    /** local name → wrapped call source + kind + explicit stable id + GET
+    /** local name → wrapped call node + kind + explicit stable id + GET
      *  mark, for `export { x }` resolution. */
     const localFnSources = new Map<
         string,
         {
-            source: string;
+            node: Node;
             stream: boolean;
             explicitId?: string;
             get: boolean;
@@ -629,9 +666,8 @@ export function extractServerFns(
                 if (requireAuthorization === 'warn') warnings.push(message);
                 else errors.push({ offset: init.start, message });
             }
-            const callSource = code.slice(init.start, init.end);
             localFnSources.set(local, {
-                source: callSource,
+                node: init,
                 stream: call.kind === 'stream',
                 explicitId: idOption.id,
                 get: call.kind === 'fn' && readServerFnCacheOption(init),
@@ -682,9 +718,9 @@ export function extractServerFns(
         const record = localFnSources.get(localName);
         if (record !== undefined) {
             fns.push({
-                ...mintSymbols(
+                ...mintIdentity(
                     exportedName,
-                    record.source,
+                    record.node,
                     record.explicitId,
                     options.stableId,
                     record.stream,
@@ -788,16 +824,7 @@ export function extractServerFns(
         lines.push(`import { ${used.join(', ')} } from '@sigx/server/client';`);
     }
     for (const fn of fns) {
-        const wireSymbol = options.stubSymbols === 'stable' ? fn.stableSymbol : fn.symbol;
-        const factory = fn.stream ? '__serverStreamStub' : '__serverFnStub';
-        // 4th positional: the stable data key (`useData(fn)` identity, fn
-        // stubs only). Positional flags after it (§4.1 GET, §6.2 invalidates)
-        // — absent flags keep unmarked output byte-identical to before.
-        const keyArg = fn.stream ? '' : `, ${JSON.stringify(fn.stableSymbol)}`;
-        lines.push(
-            `export const ${fn.name} = ${factory}(${JSON.stringify(wireSymbol)}, ` +
-            `${JSON.stringify(fn.name)}, ${JSON.stringify(options.endpoint)}${keyArg}${stubFlags(fn)});`
-        );
+        lines.push(`export const ${fn.name} = ${stubCall(fn, options.endpoint)};`);
     }
     for (const name of serverOnly) {
         lines.push(

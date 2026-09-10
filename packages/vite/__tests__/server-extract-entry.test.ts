@@ -11,12 +11,16 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import * as entry from '../src/server-extract';
 import {
     computeStableId,
     extractServerFns,
     extractInlineServerFns,
     hash8,
+    mintIdentity,
+    normalizeServerFnCall,
     offsetToLoc,
+    stubCall,
     type PackageProbe
 } from '../src/server-extract';
 
@@ -99,5 +103,15 @@ describe('export surface', () => {
         expect(typeof extractInlineServerFns).toBe('function');
         expect(typeof hash8).toBe('function');
         expect(typeof offsetToLoc).toBe('function');
+    });
+
+    it('re-exports the identity primitives a bundler integration needs (rfc-server-v5 §1.3)', () => {
+        // key + version minting, the version seed, and the ONE stub-call
+        // writer — so a non-Vite loader emits exactly what the Vite plugin does.
+        expect(typeof mintIdentity).toBe('function');
+        expect(typeof normalizeServerFnCall).toBe('function');
+        expect(typeof stubCall).toBe('function');
+        // The hashed-symbol minter is gone with the hashed symbol.
+        expect('mintSymbols' in entry).toBe(false);
     });
 });
