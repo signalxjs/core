@@ -153,8 +153,8 @@ function assertFamilyPeersCaret(packed) {
             .map(([name, range]) => `peerDependencies.${name} = ${JSON.stringify(range)} (expected "^${versions.get(name)}")`);
         if (bad.length > 0) {
             throw new Error(
-                `${p.name}@${p.version} peers on the sigx family with a range that is not the ` +
-                `packed caret:\n     ${bad.join('\n     ')}`
+                `${p.name}@${p.version} peers on the sigx family with a range that is not the packed caret:\n` +
+                `     ${bad.join('\n     ')}`
             );
         }
     }

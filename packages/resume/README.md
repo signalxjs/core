@@ -9,7 +9,7 @@ Event handlers are extracted at build time by `sigxResume()`
 resumed scope of named signals — component setup never re-runs on load, and
 the component chunk itself loads only when a handler writes state
 (**upgrade-on-write**). It peers on `sigx` and `@sigx/server-renderer`
-(`^1.0.0`) — the app installs those once and owns the copy (`docs/rfc-1.0.md`
+(a caret on the published version, `^1.0.0` from 1.0) — the app installs those once and owns the copy (`docs/rfc-1.0.md`
 §3); `@sigx/serialize` is its only dependency:
 
 1. **0 JS on load** — the page's only script is the generated loader entry.

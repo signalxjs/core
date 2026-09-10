@@ -12,7 +12,7 @@ as the migration.
 
 Not to be confused with `@sigx/server-renderer`, which renders documents —
 this package is how your app **talks to** the server. It peers on `sigx`
-(`^1.0.0`) — the app installs the runtime once and owns the copy
+(a caret on the published version, `^1.0.0` from 1.0) — the app installs the runtime once and owns the copy
 (`docs/rfc-1.0.md` §3); `@sigx/serialize` is its only dependency.
 
 ## The model

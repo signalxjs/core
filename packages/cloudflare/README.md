@@ -12,7 +12,7 @@ seam with no privileged access. The runtime story is `createFetchHandler`
 pnpm add -D @sigx/cloudflare
 ```
 
-It peers on `@sigx/vite` (`^1.0.0`) — install that alongside, as the
+It peers on `@sigx/vite` (a caret on the published version, `^1.0.0` from 1.0) — install that alongside, as the
 `sigx()` plugin already requires.
 
 ## Usage

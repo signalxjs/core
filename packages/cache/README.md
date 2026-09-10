@@ -7,7 +7,7 @@ carries mechanism only; this pack is a drop-in equal of any third-party pack,
 with zero privileged access.
 
 Installing it changes one line, not your call sites — it peers on
-`@sigx/reactivity` and `@sigx/runtime-core` (`^1.0.0`), so the app's one copy
+`@sigx/reactivity` and `@sigx/runtime-core` (a caret on the published version, `^1.0.0` from 1.0), so the app's one copy
 of the runtime is the one it rides (`docs/rfc-1.0.md` §3):
 
 ```ts
