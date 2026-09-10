@@ -52,6 +52,15 @@ const tagIndex = args.indexOf('--tag');
 const explicitTag = tagIndex !== -1 ? args[tagIndex + 1] : null;
 const provenance = args.includes('--provenance');
 
+// A bare `--tag` (nothing after it, or another flag after it) would otherwise
+// become an `undefined` dist-tag: `pnpm publish` falls back to `latest`, and the
+// post-wave check reads `dist-tags.undefined` — a prerelease on `latest` with a
+// verification that can only mismatch. Fail before anything is built.
+if (tagIndex !== -1 && (!explicitTag || explicitTag.startsWith('-'))) {
+    console.error('❌ --tag needs a dist-tag name, e.g. --tag next');
+    process.exit(2);
+}
+
 /**
  * The dist-tag this wave targets. Every package is on one version line
  * (bump-version.js), so the first manifest decides for all — the wave itself
