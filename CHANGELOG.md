@@ -25,6 +25,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- **`useData` tuple keys accept JSON-object elements (#694).** A tuple
+  element may now be an array or a plain object of JSON values, not only a
+  primitive, so `useData(() => [getCart, { userId }])` keys directly — the
+  norm now that a server function takes one input object (rfc-server-v5).
+  Identity is key-SORTED canonical JSON (`canonicalKeyJson` on
+  `@sigx/runtime-core/internals`, used by `@sigx/cache`'s store and mirrored
+  byte-for-byte in `@sigx/server`'s boundary-refresh matcher), so
+  `{ a, b }` and `{ b, a }` are one key and a tuple-prefix pattern with an
+  object element matches a read spelled in another order. Primitive-only
+  tuples canonicalize exactly as before — no existing key string changes.
+  Class instances, `Date`, `Map`, `undefined` and `bigint` anywhere in a
+  tuple still dev-throw; the `KeyJson` type is exported. Server-declared
+  `invalidates` tuples accept the same shapes.
+
 - **`@sigx/reactivity` / `@sigx/runtime-core`: a duplicate-copy guard (#633
   phase 1, rfc-1.0 §3.4).** Each of the two singleton packages now stamps a
   hidden control seam at module init — `__SIGX_REACTIVITY__` and

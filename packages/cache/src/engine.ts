@@ -20,6 +20,7 @@ import {
     type AsyncEngine,
     type AsyncReadHandle,
     type AsyncStateImpl,
+    canonicalKeyJson,
 } from '@sigx/runtime-core/internals';
 import { CacheStore, type CacheEntry, type EntrySubscriber } from './store.js';
 import type { CacheOptions, CacheActionOptions } from './options.js';
@@ -234,7 +235,7 @@ function snapshotOf(store: CacheStore, canon: string): { hasValue: boolean; valu
 }
 
 function canonOf(key: string | readonly unknown[]): string {
-    return typeof key === 'string' ? key : JSON.stringify(key);
+    return typeof key === 'string' ? key : canonicalKeyJson(key);
 }
 
 export function createCacheEngine(store: CacheStore): AsyncEngine {

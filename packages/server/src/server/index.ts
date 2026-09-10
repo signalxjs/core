@@ -258,13 +258,39 @@ const MAX_INVALIDATE_PATTERNS = 64;
  * bare server-fn reference becomes its stable-key TUPLE (`[__sigxKey]` —
  * `useData(fn)`'s identity, and a prefix of every `[fn, ...args]` key);
  * fn references INSIDE a tuple resolve to their key string in place;
- * strings and JSON-primitive tuples pass through. Everything else is
- * dropped with a dev warning: a reference without a build-stamped key can
- * never match anything, and a non-JSON-safe tuple element (a `bigint`,
- * say) would make `JSON.stringify(envelope)` throw and fail the whole
- * MUTATION response — the same "JSON primitives + finite numbers"
- * contract `useData` keys live under.
+ * strings and JSON tuples (primitives, arrays, plain objects — #694) pass
+ * through. Everything else is dropped with a dev warning: a reference
+ * without a build-stamped key can never match anything, and a non-JSON
+ * tuple element (a `bigint`, a `Date`, say) would make
+ * `JSON.stringify(envelope)` throw and fail the whole MUTATION response —
+ * the same "JSON values + finite numbers" contract `useData` keys live
+ * under.
  */
+
+/** JSON-safe, recursively: primitives, finite numbers, arrays, PLAIN objects.
+ *  A circular structure is NOT safe (`JSON.stringify` would throw on the
+ *  envelope) — tracked with a stack, so it is dropped rather than overflowing. */
+function isJsonSafe(value: unknown, seen?: Set<object>): boolean {
+    if (value === null) return true;
+    const t = typeof value;
+    if (t === 'string' || t === 'boolean') return true;
+    if (t === 'number') return Number.isFinite(value as number);
+    if (t !== 'object') return false;
+    const stack = seen ?? new Set<object>();
+    if (stack.has(value as object)) return false;
+    stack.add(value as object);
+    let safe: boolean;
+    if (Array.isArray(value)) {
+        safe = value.every((el) => isJsonSafe(el, stack));
+    } else {
+        const proto = Object.getPrototypeOf(value) as unknown;
+        safe =
+            (proto === Object.prototype || proto === null) &&
+            Object.values(value as Record<string, unknown>).every((el) => isJsonSafe(el, stack));
+    }
+    stack.delete(value as object);
+    return safe;
+}
 function resolveInvalidatePatterns(
     raw: unknown,
     fnName: string
@@ -275,7 +301,7 @@ function resolveInvalidatePatterns(
         if (__DEV__) {
             console.warn(
                 `[sigx server] "${fnName}" \`invalidates\` ${reason} — pattern dropped. ` +
-                `Patterns are canonical strings, JSON-primitive tuples, or build-stamped ` +
+                `Patterns are canonical strings, JSON tuples, or build-stamped ` +
                 `server-fn references.`
             );
         }
@@ -307,10 +333,8 @@ function resolveInvalidatePatterns(
                     dropped = 'contains a server-fn reference with no build-stamped key (__sigxKey)';
                     break;
                 }
-                const t = typeof el;
-                if (el === null || t === 'string' || t === 'boolean') continue;
-                if (t === 'number' && Number.isFinite(el as number)) continue;
-                dropped = `contains a non-JSON-safe tuple element (${t})`;
+                if (isJsonSafe(el)) continue;
+                dropped = `contains a non-JSON-safe tuple element (${typeof el})`;
                 break;
             }
             if (dropped !== undefined) {

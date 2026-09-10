@@ -193,7 +193,8 @@ reactive key, the fetcher's argument, and conditional fetching:**
 
 ```ts
 type Falsy = null | undefined | false | '';   // '' included so `str && tuple` getters infer cleanly
-type KeyTuple = readonly (string | number | boolean | null)[];  // primitives only (open question 2)
+type KeyJson = string | number | boolean | null | readonly KeyJson[] | { readonly [k: string]: KeyJson };
+type KeyTuple = readonly KeyJson[];   // JSON values; object elements key-sorted for identity (#694)
 type KeyValue = string | KeyTuple;
 type KeyResult = KeyValue | Falsy;                              // falsy ⇒ 'idle', don't fetch
 
@@ -234,8 +235,11 @@ const posts = useData(
 ```
 
 Core canonicalizes a tuple to its JSON string for identity (dedupe map,
-`__SIGX_ASYNC__` blob key) — element order is meaningful and elements are
-restricted to JSON primitives, so canonicalization is trivial and stable.
+`__SIGX_ASYNC__` blob key) — element order is meaningful; elements are JSON
+values, and an object element's keys are emitted sorted (#694), so
+canonicalization is stable and `{ a, b }` / `{ b, a }` are one key. The same
+`canonicalKeyJson` drives the cache pack and (as a pinned copy) the server's
+boundary-refresh matcher.
 Dev-mode guards keep the canonical form honest (rev 7): **non-finite numbers
 are rejected** (`JSON.stringify(NaN)` → `"null"`, silently colliding with an
 actual `null` element; same for `±Infinity`; `-0` canonicalizes to `0`).
@@ -778,9 +782,9 @@ Each phase = its own issue → worktree → PR → Copilot review → merge.
   (rev 6). No `isReady`/`isError`.
 - `idle` via a falsy **getter** key only (`null`/`undefined`/`false`/`''`,
   dev warning on `''` and on empty tuples) — no `enabled`/`skip` option.
-- **Structured tuple keys** (rev 6): `readonly (string|number|boolean|null)[]`,
-  canonical-JSON identity, tuple passed to the fetcher; the fetcher runs
-  **untracked**.
+- **Structured tuple keys** (rev 6, widened in #694): `readonly KeyJson[]` —
+  primitives, arrays and plain objects, key-sorted canonical-JSON identity,
+  tuple passed to the fetcher; the fetcher runs **untracked**.
 - **Key change ⇒ value cleared ⇒ `pending`** (rev 6); SWR keep applies to
   same-key `refresh()` only; `keepPreviousData` is pack policy.
 - **Errored keeps content, structurally (rev 10; revises rev 6)**:

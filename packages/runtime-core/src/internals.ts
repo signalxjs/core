@@ -94,6 +94,7 @@ export { peekRestored, invalidateRestored, writeBack, reviveFromServer, restored
 // `invalidates` declaration.
 export { invalidateKeys } from './async/cell.js';
 export { preparePattern, keyMatches, type PatternMatcher } from './async/key-match.js';
+export { canonicalKeyJson } from './async/key.js';
 // Live-client declaration (for non-web platform-identity modules — lynx/terminal;
 // NOT for @sigx/runtime-dom/platform, which SSR also evaluates)
 export { declareLiveClient, isLiveClient } from './async/environment.js';

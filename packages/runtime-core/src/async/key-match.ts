@@ -14,8 +14,12 @@
  *
  * Every call site matches ONE pattern set against MANY keys, so the canonical
  * form of a tuple pattern is computed once with {@link preparePattern} and
- * reused — never re-`JSON.stringify`'d per key tested (#469).
+ * reused — never re-stringified per key tested (#469). The canonical form is
+ * `canonicalKeyJson` (#694): object elements are key-sorted on both sides,
+ * so a pattern and a key spelled with different property orders still meet.
  */
+
+import { canonicalKeyJson } from './key.js';
 
 /** A pattern with its canonical form precomputed, ready to test many keys. */
 export interface PatternMatcher {
@@ -33,7 +37,7 @@ export function preparePattern(pattern: string | readonly unknown[]): PatternMat
     if (typeof pattern === 'string') {
         return { match: (entryKey) => entryKey === pattern };
     }
-    const canon = JSON.stringify(pattern); // '["posts","u1"]'
+    const canon = canonicalKeyJson(pattern); // '["posts","u1"]'
     const prefix = canon.slice(0, -1); // '["posts","u1"'
     const boundary = prefix.length;
     return {
