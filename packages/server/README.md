@@ -1175,6 +1175,11 @@ Every server function is a public HTTP endpoint; the defaults assume that:
 - **`maxBodyBytes`** (1 MiB default) enforced while reading.
 - **`maxUrlBytes`** (8 KiB default) caps a cache-marked GET read's query
   string — the URL analog of `maxBodyBytes`, answered with a 414.
+- **Version skew is a 409, never a wrong call**: every stub call carries its
+  build's version tag for the function, and a mismatch against the registry
+  is refused with `code: 'version-skew'` before the prelude runs (a stale tab
+  after a deploy). Clients that send no tag — native clients, curl, form
+  posts — and hand-built `resolve` tables are simply served.
 - **Error masking**: only `ServerFnError` crosses the wire verbatim; other
   throws become a generic 500 in production.
 - **Prototype-pollution keys dropped** from parsed values on both parse

@@ -275,7 +275,7 @@ colliding. `serverPlugin({ types })` stamps this AND calls
 
 | | |
 |---|---|
-| **Stamped by** | `provideTypeHandlers` (`runtime-core/src/ssr-serialize.ts`), browser only |
+| **Stamped by** | `provideTypeHandlers` (`runtime-core/src/ssr-serialize.ts`; public on the `@sigx/runtime-core` and `sigx` roots since #692), browser only |
 | **Read by** | `runtime-core/src/async/restore.ts` (`peekRestored`), the boundary decode sites |
 | **Contract** | `TypeHandler[]` (see `@sigx/serialize`) — consulted **before** the built-ins |
 

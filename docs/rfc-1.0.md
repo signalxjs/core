@@ -74,9 +74,10 @@ wide ranges, which `^1.0.0` gives every package.
 - The compile-time surface: the `sigx` / `@sigx/runtime-core` JSX runtime
   and the `JSX` namespace contribution each package makes (§4.1); the
   `virtual:sigx-*` modules `@sigx/vite` provides (`packages/vite/client.d.ts`);
-  the `client:*` island directives; the `*.server.ts` file convention and
-  the `serverFn` / `serverStream` option forms; the `data-sigx-*`
-  attribute names resume stamps (an app's CSP and tooling see them).
+  the `client:*` island directives; the `*.server.*` file convention and
+  the `serverFn` / `serverStream` options form — the only authoring form
+  since rfc-server-v5 (§4.9); the `data-sigx-*` attribute names resume
+  stamps (an app's CSP and tooling see them).
 - Documented behaviour: what a public function does with an input it
   already accepted. A change to what an existing accessor returns is
   `Changed`, not `Added` (AGENTS.md conventions — #476/#534 is the
@@ -113,10 +114,10 @@ when they do.**
 - Wire formats between server and client: the SSR state blob
   (`__SIGX_ASYNC__`, `__SIGX_BOUNDARIES__` payloads), resume's
   `data-sigx-on:*` handler descriptors and the `$sigxB` boundary props, the
-  server-fn envelope and its `$cache`/`$boundaries` fields, the stable
-  symbol encoding. Both ends ship from the same build; a page rendered by
-  1.2 is hydrated by 1.2. The *names* are Tier A (an app sees them); the
-  *bytes* are not.
+  server-fn envelope and its `v`/`$cache`/`$boundaries` fields, the key
+  encoding and the version tag (rfc-server-v5 §3). Both ends ship from the
+  same build; a page rendered by 1.2 is hydrated by 1.2. The *names* are
+  Tier A (an app sees them); the *bytes* are not.
 - `__DEV__`-only warning text, the devtools hook payloads
   (`__SIGX_DEVTOOLS_HOOK__` carries its own `version: 1` field and
   versions itself), bundle sizes, benchmark numbers, `dist/` file layout,
@@ -362,6 +363,21 @@ hints" is wired (the pack implements `assets()` like
 `ssr-islands/src/plugin.ts:211-223`, gated on a recorded resume boundary)
 rather than dropped. Lands in PR-4.
 
+### 4.9 Server functions: one form, one route, one descriptor (#692)
+
+`docs/rfc-server-v5.md` is the record. What 1.0 freezes: `serverFn(options)`
+/ `serverStream(options)` as the only authoring form, with
+`handler({ input, rq })`; the stable key `<id>/<name>` as the only route and
+the `useData(fn)` identity, with the content hash as a version tag the stub
+sends and the endpoint 409s on; one frozen `__sigx` descriptor on the
+wrapper, `__sigxKey` the only cross-package brand; `functions: serverFns` as
+the primary endpoint option with `resolve` as the escape hatch; and
+transform-time problems in a `*.server.*` module as build errors (the §4.5
+posture). Considered and rejected there: batching, `next()`-style middleware,
+a per-request middleware cadence, `useRequest()`, flattening `rq` into the
+handler object. Migration: `docs/migrations/1.0-serverfn.md`. Lands in
+#693/#695/#696 and the two PRs after them, before rc.0.
+
 ---
 
 ## §5 Release plan
@@ -369,7 +385,8 @@ rather than dropped. Lands in PR-4.
 1. **Phase 1 PRs** (parallel, tracked in #676): this RFC; #655; #552; #363;
    #410 + #409; #449 + #472 + #535; #606 + #628 docs.
 2. **Phase 2 PRs** (after this RFC merges): #274; #529 per §4.1; #501;
-   §3.4 guard; §3.2 peer shape + `verify-pack` + repo-template.
+   §3.4 guard; §3.2 peer shape + `verify-pack` + repo-template; the
+   rfc-server-v5 series per §4.9 (#692).
 3. **`v1.0.0-rc.0`**, published under the `next` dist-tag: README banner,
    `CHANGELOG.md:5` replaced by §2's policy, `release.yml` passes
    `--tag next` for prerelease tags. The ecosystem-release workflow runs
