@@ -10,7 +10,10 @@
  * import { serverFn } from '@sigx/server';
  * import { searchIndex } from './search-index';   // server-only dep
  *
- * const search = serverFn(async (rq, q: string) => searchIndex.query(q));
+ * const search = serverFn({
+ *     input: z.string(),
+ *     handler: async ({ input: q }) => searchIndex.query(q)
+ * });
  * ```
  *
  * - CLIENT build: the initializer becomes `__serverFnStub(...)`, and imports
