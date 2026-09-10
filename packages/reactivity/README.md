@@ -68,7 +68,7 @@ batch(() => { for (const [k, v] of entries) state[k] = v; });   // one re-run
 
 ## One copy per page
 
-The tracking context lives in this module, so an app must hold exactly one copy of it: signals written through a second copy never reach effects tracked by the first, silently. Since 1.0 the package says so — a second copy evaluating in the same realm (two installed versions, a bundler that inlined one) **throws in development** with both versions and both module URLs, and warns once in production:
+The tracking context lives in this module, so an app must hold exactly one copy of it: signals written through a second copy never reach effects tracked by the first, silently. The package says so — a second copy evaluating in the same realm (two installed versions, a bundler that inlined one) **throws in development** with both versions and both module URLs, and warns once in production:
 
 ```
 [sigx] Two copies of @sigx/reactivity are loaded: 0.15.0 at file:///…/.pnpm/…/dist/index.js and 1.0.0 at file:///…/@sigx/reactivity/dist/index.js.

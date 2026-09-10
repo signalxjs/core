@@ -64,14 +64,18 @@ export function assertSingleCopy(key: CopyStampKey, version: string, url: string
     const prev = host[key];
     let warned = prev?.warned;
     if (prev && moduleFile(prev.url) !== moduleFile(url)) {
-        const pkg = key === '__SIGX_REACTIVITY__' ? '@sigx/reactivity' : '@sigx/runtime-core';
+        const reactivity = key === '__SIGX_REACTIVITY__';
+        const pkg = reactivity ? '@sigx/reactivity' : '@sigx/runtime-core';
         const detail =
             `${prev.version} at ${prev.url || '<unknown url>'} and ` +
             `${version} at ${url || '<unknown url>'}`;
         if (__DEV__) {
+            // Name the symptom the split actually produces for THIS package.
+            const symptom = reactivity
+                ? 'Signals created by one copy are invisible to effects tracked by the other.'
+                : 'Components, app contexts and DI tokens of one copy are invisible to the other.';
             throw new Error(
-                `[sigx] Two copies of ${pkg} are loaded: ${detail}. ` +
-                'Signals created by one copy are invisible to effects tracked by the other. ' +
+                `[sigx] Two copies of ${pkg} are loaded: ${detail}. ${symptom} ` +
                 'Install `sigx` once in the app and keep every `@sigx/*` package a peer of it ' +
                 '(docs/rfc-1.0.md §3, docs/seams.md).'
             );
