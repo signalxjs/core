@@ -57,7 +57,10 @@ export function createServerFnResolver(options: ServerFnResolverOptions): Server
             `got ${typeof functions}.`
         );
     }
-    if (typeof resolve === 'function') {
+    if (resolve !== undefined && typeof resolve !== 'function') {
+        throw new TypeError(`[sigx server] \`resolve\` must be a function; got ${typeof resolve}.`);
+    }
+    if (resolve !== undefined) {
         return async (key) => {
             const fn = await resolve(key);
             return fn === null || fn === undefined ? null : { fn };
