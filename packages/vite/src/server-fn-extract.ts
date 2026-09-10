@@ -293,9 +293,9 @@ export function readServerFnInvalidatesOption(call: Node): boolean {
  * keys it carries is undecidable here.
  */
 export function hasServerFnOptionsSpread(call: Node): boolean {
-    const args = (call.arguments as Node[]) ?? [];
-    if (args.length !== 1 || args[0]?.type !== 'ObjectExpression') return false;
-    return ((args[0].properties as Node[]) ?? []).some((prop) => prop.type === 'SpreadElement');
+    const literal = optionsLiteralOf(call);
+    if (!literal) return false;
+    return ((literal.properties as Node[]) ?? []).some((prop) => prop.type === 'SpreadElement');
 }
 
 /** The message for {@link hasServerFnOptionsSpread}, shared by both extractors. */
