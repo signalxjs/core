@@ -63,10 +63,10 @@
     "devDependencies": {
         "@size-limit/preset-small-lib": "^11",
         "@vitest/coverage-v8": "^4.1.11",
-        "happy-dom": "^20.10.6",
+        "happy-dom": "^20.14.0",
         "miniflare": "^4.20260730.0",
-        "oxlint": "^1.80.0",
-        "playwright": "^1.62.1",
+        "oxlint": "^1.82.0",
+        "playwright": "^1.63.0",
         "size-limit": "^11",
         "typescript": "^7.0.2",
         "vite": "^8.2.2",

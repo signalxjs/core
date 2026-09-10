@@ -76,7 +76,7 @@
     },
     "devDependencies": {
         "@sigx/vite": "workspace:^",
-        "@types/node": "^26.4.0",
+        "@types/node": "^26.5.0",
         "typescript": "^7.0.2",
         "vite": "^8.2.2",
         "@sigx/reactivity": "workspace:^",
