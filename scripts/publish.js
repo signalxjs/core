@@ -8,16 +8,24 @@
  * Usage:
  *   node scripts/publish.js [--dry-run] [--tag <tag>] [--provenance]
  *
- * After the wave, every package's registry dist-tag (`latest`, or `--tag`)
- * is read back with `npm view` and compared to the local version; any
- * mismatch fails the run (#363). A step that shows green while `npm view`
- * disagrees is how a partial 1.0.0 would slip out unnoticed — and a broken
- * publish cannot be unpublished after 72 h.
+ * The dist-tag follows the VERSION, not the trigger: a prerelease version
+ * (`1.0.0-rc.0`, anything with a `-`) publishes under `next`, a stable one
+ * under `latest`, unless `--tag` says otherwise — and `--tag latest` on a
+ * prerelease is refused outright. Deciding it from the tag name in
+ * release.yml would leave the manual re-publish path (workflow_dispatch from
+ * main, no tag) free to move `latest` onto an rc (#676).
+ *
+ * After the wave, every package's registry dist-tag is read back with
+ * `npm view` and compared to the local version; any mismatch fails the run
+ * (#363). A step that shows green while `npm view` disagrees is how a
+ * partial 1.0.0 would slip out unnoticed — and a broken publish cannot be
+ * unpublished after 72 h.
  *
  * Options:
  *   --dry-run     Show what would be published without actually publishing
  *                 (skips the post-wave registry verification too)
- *   --tag         Publish with a specific tag (e.g., beta, next)
+ *   --tag         Publish under a specific dist-tag (e.g., beta, next).
+ *                 Default: `next` for a prerelease version, else `latest`.
  *   --provenance  Attach an npm provenance attestation. Requires running in a
  *                 GitHub Actions workflow with `permissions: id-token: write`.
  *
@@ -41,8 +49,27 @@ import { PACKAGES, rootDir, assertPackagesComplete } from './packages.js';
 const args = process.argv.slice(2);
 const dryRun = args.includes('--dry-run');
 const tagIndex = args.indexOf('--tag');
-const tag = tagIndex !== -1 ? args[tagIndex + 1] : null;
+const explicitTag = tagIndex !== -1 ? args[tagIndex + 1] : null;
 const provenance = args.includes('--provenance');
+
+/**
+ * The dist-tag this wave targets. Every package is on one version line
+ * (bump-version.js), so the first manifest decides for all — the wave itself
+ * verifies every package against the result afterwards.
+ */
+function resolveDistTag(version) {
+    const prerelease = version.includes('-');
+    if (explicitTag === null) return prerelease ? 'next' : 'latest';
+    if (prerelease && explicitTag === 'latest') {
+        throw new Error(
+            `Refusing to publish prerelease ${version} under the "latest" dist-tag — ` +
+            'every consumer on a caret range would resolve to it. Drop --tag (defaults ' +
+            'to "next" for a prerelease) or name a different tag.'
+        );
+    }
+    return explicitTag;
+}
+let tag = explicitTag;
 
 // NPM token support for CI/CD (avoids 2FA prompts)
 const NPM_TOKEN = process.env.NPM_TOKEN;
@@ -262,6 +289,11 @@ async function main() {
     // missing from the list would silently never publish.
     assertPackagesComplete();
 
+    const first = getPackageInfo(PACKAGES[0]);
+    if (!first) throw new Error(`${PACKAGES[0]}/package.json not found`);
+    tag = resolveDistTag(first.version);
+    console.log(`🏷️  Version ${first.version} → dist-tag "${tag}"${explicitTag ? ' (from --tag)' : ''}\n`);
+
     // Build all packages first
     console.log('🔨 Building all packages...');
     try {
@@ -331,7 +363,7 @@ async function main() {
         console.log('\n🔍 DRY RUN — skipping post-wave registry verification');
         return;
     }
-    const distTag = tag ?? 'latest';
+    const distTag = tag;
     console.log(`\n🔎 Verifying the registry serves every package at its local version (dist-tag: ${distTag})...`);
     const mismatches = await verifyPublishedVersions(distTag);
     if (mismatches.length > 0) {
