@@ -64,8 +64,8 @@ export function isServerFnDataRef(value: unknown): value is ServerFnDataRef {
  * emitted in sorted order and a server-fn reference element canonicalizes
  * to its stamped key string. Shared with `@sigx/cache` (via internals);
  * `@sigx/server` keeps a byte-identical copy, pinned by its parity test.
- * No validation here — `resolveKeyResult` guards in dev; in prod an
- * unrepresentable value falls back to `null` the way `JSON.stringify` does.
+ * No validation here — `resolveKeyResult` guards in dev; the input is
+ * assumed JSON-safe (a `bigint` throws exactly as `JSON.stringify` would).
  * A circular structure throws the same `TypeError` `JSON.stringify` would,
  * never recursing without bound.
  */

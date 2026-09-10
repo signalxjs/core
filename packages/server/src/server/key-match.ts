@@ -26,7 +26,7 @@ export interface PatternMatcher {
  * Prepare a pattern for matching against many keys: exact string equality, or
  * — for a tuple prefix — every key whose canonical tuple starts with those
  * elements (`['posts']` matches `'["posts","u1",2]'`). The tuple's
- * `JSON.stringify` runs ONCE here, not once per key tested — the whole point
+ * canonical form (`canonicalJson`) is computed ONCE here, not once per key tested — the whole point
  * of the split (#469).
  */
 /**
