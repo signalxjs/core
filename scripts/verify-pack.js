@@ -334,6 +334,18 @@ function main() {
         {
             marker: 'sigx.show.originalDisplay',
             what: 'the @sigx/runtime-dom platform side-effect chunk (model processor + built-in directives)'
+        },
+        // The duplicate-copy stamps (rfc-1.0 §3.4) are top-level calls in the
+        // modules that own each singleton's state, under `sideEffects: false`.
+        // This is the only place a CONSUMER's production tree-shake is proven
+        // to keep them — unit tests import sources and never bundle.
+        {
+            marker: '__SIGX_REACTIVITY__',
+            what: 'the @sigx/reactivity duplicate-copy stamp (the top-level assertSingleCopy call in effect.ts)'
+        },
+        {
+            marker: '__SIGX_RUNTIME_CORE__',
+            what: 'the @sigx/runtime-core duplicate-copy stamp (the top-level assertSingleCopy call in component-lifecycle.ts)'
         }
     ];
     const allContent = bundles.map((f) => readFileSync(join(assetsDir, f), 'utf-8'));

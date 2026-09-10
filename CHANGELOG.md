@@ -8,6 +8,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- **`@sigx/reactivity` / `@sigx/runtime-core`: a duplicate-copy guard (#633
+  phase 1, rfc-1.0 §3.4).** Each of the two singleton packages now stamps a
+  hidden control seam at module init — `__SIGX_REACTIVITY__` and
+  `__SIGX_RUNTIME_CORE__`, `{ version, url }`, registered in `docs/seams.md`
+  with `readCopyStamp` on `@sigx/reactivity/internals` as the one accessor.
+  A second copy evaluating from a different file (two installed versions, a
+  bundler that inlined one) **throws in dev**, naming both versions and both
+  module URLs, and **warns once in prod** and continues. The same file
+  re-evaluating (an in-process Vite restart, an HMR `?t=` re-import,
+  `vi.resetModules()`) restamps silently; one file loaded twice into one realm
+  (the #425 shape) is not something the guard can see and stays
+  `hasForeignToken`'s job. Until now two copies were a silent install and an
+  incomprehensible runtime — signals written through one copy never reached
+  effects tracked by the other, with no message at all.
+- **`@sigx/vite/lib`: `defineLibConfig` defines `__SIGX_VERSION__`** — the
+  `version` of the root's `package.json`, in both the dev and the prod pass,
+  omitted when the root has no versioned manifest. The copy stamps read it;
+  a package built with `defineLibConfig` may too. Sources read it through
+  `typeof __SIGX_VERSION__ === 'string' ? … : 'unknown'` so an unbundled
+  evaluation never throws.
 - **`virtual:sigx-app` / `dist/server/sigx-app.js` export
   `assetsFor(entries, base?)` (#501).** Per-route asset resolution —
   `collectAssets` over the inlined client manifest with the resolver body

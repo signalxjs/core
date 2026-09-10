@@ -323,6 +323,10 @@ Never call this from code a server render can evaluate (that would defeat the SS
 
 A declaration also stamps `globalThis.__SIGX_LIVE_CLIENT__`, which `@sigx/server`'s live-client guard reads (rfc-server rev 2): a server function invoked in a declared live client throws instead of executing its body locally. The `window` fallback never stamps.
 
+### One copy per page
+
+The current-instance slot, the app contexts and the DI tokens live in this package, so a realm must hold exactly one copy of it — as of `@sigx/reactivity`. Since 1.0 a second copy evaluating in the same realm **throws in development** (`[sigx] Two copies of @sigx/runtime-core are loaded: <version> at <url> and <version> at <url>.`) and warns once in production. The cause is always an install with two resolutions — two versions in the lockfile, or a library that bundled its own copy — and the fix is the 1.0 install shape: the app installs `sigx` once, libraries peer on it (`docs/rfc-1.0.md` §3). The stamp is `globalThis.__SIGX_RUNTIME_CORE__` (`docs/seams.md`).
+
 > **Note:** Most users should install [`sigx`](https://www.npmjs.com/package/sigx) instead, which bundles this package with a DOM renderer and the reactivity system.
 
 ## 📚 Documentation

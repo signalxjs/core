@@ -4,6 +4,7 @@
 
 import type { Dep, EffectFn, EffectOptions, EffectRunner, EffectScheduler, Link, Subscriber } from './types';
 import { getDevtoolsHook } from './devtools-hook';
+import { assertSingleCopy } from './copy-guard';
 
 /** Create a dependency slot (see {@link Dep}). */
 export function createDep(): Dep {
@@ -53,6 +54,18 @@ let batchDepth = 0;
 // Deduplicated via the QUEUED subscriber flag — cheaper than a Set on
 // the per-write hot path.
 const pendingEffects: Subscriber[] = [];
+
+// One copy per realm (rfc-1.0 §3.4): this module owns the tracking context
+// and the batch queue, so it is the one whose duplication splits reactivity
+// in two — it carries the stamp. A top-level CALL of a used import, not a
+// bare side-effect import: `"sideEffects": false` licenses a bundler to drop
+// the latter. `__SIGX_VERSION__` is read through `typeof` because the
+// source-bundling tests evaluate this file without the define.
+assertSingleCopy(
+    '__SIGX_REACTIVITY__',
+    typeof __SIGX_VERSION__ === 'string' ? __SIGX_VERSION__ : 'unknown',
+    typeof import.meta.url === 'string' ? import.meta.url : ''
+);
 
 export function setCurrentSubscriber(effect: Subscriber | null): void {
     currentSubscriber = effect;
