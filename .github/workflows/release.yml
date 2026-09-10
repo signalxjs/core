@@ -66,6 +66,10 @@ jobs:
       - name: Verify pack
         run: pnpm verify:pack
 
+      # No --tag: publish.js derives the dist-tag from the version itself
+      # (a prerelease such as 1.0.0-rc.0 goes to `next`, a stable version to
+      # `latest`), so a workflow_dispatch re-publish from main can never move
+      # `latest` onto an rc.
       - name: Publish to npm
         env:
           NPM_CONFIG_PROVENANCE: 'true'
@@ -85,15 +89,21 @@ jobs:
         with:
           fetch-depth: 0
 
+      # A prerelease tag (v1.0.0-rc.0 — anything with a `-`) is marked as such
+      # and must NOT become the repo's "latest" release; a stable tag is.
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}
         run: |
+          case "$TAG" in
+            *-*) FLAGS="--prerelease --latest=false" ;;
+            *)   FLAGS="--latest" ;;
+          esac
           if gh release view "$TAG" --json isDraft --jq '.isDraft' 2>/dev/null | grep -q true; then
-            gh release edit "$TAG" --draft=false --latest
+            gh release edit "$TAG" --draft=false $FLAGS
           else
-            gh release create "$TAG" --generate-notes --latest
+            gh release create "$TAG" --generate-notes $FLAGS
           fi
 
   # After a successful publish, ping every consumer repo's core-sync.yml so each
@@ -103,9 +113,13 @@ jobs:
   # docs/MAINTAINERS.md → "Notifying consumer repos" for the token setup.
   notify-consumers:
     needs: publish-npm
-    # Tag releases only — a manual workflow_dispatch re-publish has no version tag
-    # to broadcast (github.ref_name would be a branch name like `main`).
-    if: startsWith(github.ref, 'refs/tags/')
+    # Stable tag releases only — a manual workflow_dispatch re-publish has no
+    # version tag to broadcast (github.ref_name would be a branch name like
+    # `main`), and a PRERELEASE tag (v1.0.0-rc.0) must not fan out either:
+    # consumers align their catalog to a `^X.Y.0` minor (repo-template's
+    # sync-core.mjs), which an rc is not, and the rc's ecosystem pass is
+    # driven deliberately, in dry-run, from docs/ecosystem-release.md.
+    if: startsWith(github.ref, 'refs/tags/') && !contains(github.ref_name, '-')
     runs-on: ubuntu-latest
     # The DISPATCH authenticates with a PAT (ECOSYSTEM_DISPATCH_TOKEN), never
     # GITHUB_TOKEN — which cannot dispatch to other repos anyway. `contents: read`
