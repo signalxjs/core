@@ -369,7 +369,7 @@ rather than dropped. Lands in PR-4.
 / `serverStream(options)` as the only authoring form, with
 `handler({ input, rq })`; the stable key `<id>/<name>` as the only route and
 the `useData(fn)` identity, with the content hash as a version tag the stub
-sends and the endpoint 409s on; one frozen `__sigx` descriptor on the
+sends and the endpoint answers 409 on a mismatch; one frozen `__sigx` descriptor on the
 wrapper, `__sigxKey` the only cross-package brand; `functions: serverFns` as
 the primary endpoint option with `resolve` as the escape hatch; and
 transform-time problems in a `*.server.*` module as build errors (the §4.5
