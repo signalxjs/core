@@ -270,6 +270,11 @@ function matchesServerFnDefaulted(code: string): boolean {
 
 export function sigxServer(options: SigxServerOptions = {}): Plugin {
     const filter = createFilter(options.include ?? DEFAULT_INCLUDE, options.exclude ?? DEFAULT_EXCLUDE);
+    /** Everything the dev endpoint forwards — minus the registry fields the plugin owns. */
+    const { resolve: _resolve, functions: _functions, ...forwardedOptions } = options as SigxServerOptions & {
+        resolve?: unknown;
+        functions?: unknown;
+    };
     const base = options.base ?? DEFAULT_BASE;
     const endpoint = options.endpoint ?? base;
     const role = options.role ?? 'auto';
@@ -887,8 +892,12 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
                     // became unreachable in dev (#561). The plugin's own keys
                     // (include/exclude/endpoint/role/scan/requireAuthorization) ride
                     // along inert: the endpoint reads only what it declares.
-                    // The three below are overridden with the resolved values.
-                    ...options,
+                    // The plugin IS the registry: a caller's `resolve` /
+                    // `functions` (unspellable in the TS type, but a JS config
+                    // can carry them) must not ride along and trip the
+                    // endpoint's exactly-one gate. The three below are
+                    // overridden with the resolved values.
+                    ...forwardedOptions,
                     base,
                     renderBoundaries,
                     functions: devRegistry(devServer)
