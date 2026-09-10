@@ -477,7 +477,7 @@ export function optionsLiteralError(name: string, stream: boolean): string {
     return (
         `${wrapper} "${name}": the only authoring form is ${wrapper}({ input?, handler, … }) ` +
         `with ONE object-literal argument (rfc-server-v5 §1.1). The direct form ` +
-        `${wrapper}(async ${stream ? 'function* ' : ''}(rq, …) => …) was removed — it cannot ` +
+        `${stream ? 'serverStream(async function* (rq, …) { … })' : 'serverFn(async (rq, …) => …)'} was removed — it cannot ` +
         `declare validation or access and would throw on first call — and a non-literal ` +
         `options object hides the statically-read declarations (${keys}) from the build. ` +
         `Write the options object literally at the call site.`
