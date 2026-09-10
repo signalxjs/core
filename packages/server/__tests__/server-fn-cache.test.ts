@@ -124,7 +124,7 @@ describe('__serverFnStub — $cache delivery', () => {
     it('delivers $cache to the global seam and still resolves the data', async () => {
         const hook = installSeam();
         stubFetch({ data: 7, $cache: { invalidates: [['cart']] } });
-        const fn = __serverFnStub('m_fn_00000001', 'add', '/_sigx/fn');
+        const fn = __serverFnStub('api/add', 'add', '/_sigx/fn', 'deadbeef');
         await expect(fn()).resolves.toBe(7);
         expect(hook).toHaveBeenCalledExactlyOnceWith({
             invalidates: [['cart']]
@@ -134,7 +134,7 @@ describe('__serverFnStub — $cache delivery', () => {
     it('no $cache in the envelope ⇒ the seam is not called', async () => {
         const hook = installSeam();
         stubFetch({ data: 7 });
-        const fn = __serverFnStub('m_fn_00000001', 'add', '/_sigx/fn');
+        const fn = __serverFnStub('api/add', 'add', '/_sigx/fn', 'deadbeef');
         await expect(fn()).resolves.toBe(7);
         expect(hook).not.toHaveBeenCalled();
     });
@@ -145,7 +145,7 @@ describe('__serverFnStub — $cache delivery', () => {
             throw new Error('cache pack bug');
         };
         stubFetch({ data: 7, $cache: { invalidates: [['cart']] } });
-        const fn = __serverFnStub('m_fn_00000001', 'add', '/_sigx/fn');
+        const fn = __serverFnStub('api/add', 'add', '/_sigx/fn', 'deadbeef');
         await expect(fn()).resolves.toBe(7);
         expect(spy).toHaveBeenCalledOnce();
         spy.mockRestore();
@@ -153,14 +153,14 @@ describe('__serverFnStub — $cache delivery', () => {
 
     it('no seam installed ⇒ directives are dropped silently', async () => {
         stubFetch({ data: 7, $cache: { invalidates: [['cart']] } });
-        const fn = __serverFnStub('m_fn_00000001', 'add', '/_sigx/fn');
+        const fn = __serverFnStub('api/add', 'add', '/_sigx/fn', 'deadbeef');
         await expect(fn()).resolves.toBe(7);
     });
 
     it('error envelopes never reach the seam', async () => {
         const hook = installSeam();
         stubFetch({ error: { message: 'nope', status: 403 } }, 403);
-        const fn = __serverFnStub('m_fn_00000001', 'add', '/_sigx/fn');
+        const fn = __serverFnStub('api/add', 'add', '/_sigx/fn', 'deadbeef');
         await expect(fn()).rejects.toMatchObject({ status: 403 });
         expect(hook).not.toHaveBeenCalled();
     });

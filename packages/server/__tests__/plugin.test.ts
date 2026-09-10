@@ -65,10 +65,10 @@ describe('serverPlugin — transport', () => {
             transport: { endpoint: '/custom/fn', fetch: fetchMock as unknown as typeof fetch }
         }));
 
-        const stub = __serverFnStub('sym_1', 'fnOne', '/_sigx/fn');
+        const stub = __serverFnStub('api/fnOne', 'fnOne', '/_sigx/fn', 'deadbeef');
         await expect(stub()).resolves.toBe('ok');
         expect(fetchMock).toHaveBeenCalledTimes(1);
-        expect(fetchMock.mock.calls[0][0]).toBe('/custom/fn/sym_1');
+        expect(fetchMock.mock.calls[0][0]).toBe('/custom/fn/api/fnOne');
     });
 
     it('dispose clears the transport only if it is still the active one', async () => {
@@ -84,7 +84,7 @@ describe('serverPlugin — transport', () => {
 
         // Disposing the OLD app must not clobber the successor's transport.
         runDisposables(app1);
-        const stub = __serverFnStub('sym_2', 'fnTwo', '/_sigx/fn');
+        const stub = __serverFnStub('api/fnTwo', 'fnTwo', '/_sigx/fn', 'deadbeef');
         await stub();
         expect(fetch2).toHaveBeenCalledTimes(1);
         expect(fetch1).not.toHaveBeenCalled();
@@ -115,7 +115,7 @@ describe('serverPlugin — transport', () => {
         // never written (no cross-request bleed).
         const globalFetch = okFetch();
         vi.stubGlobal('fetch', globalFetch);
-        await __serverFnStub('sym_srv', 'fnSrv', '/_sigx/fn')();
+        await __serverFnStub('api/fnSrv', 'fnSrv', '/_sigx/fn', 'deadbeef')();
         expect(globalFetch).toHaveBeenCalledTimes(1);
         expect(serverTransportFetch).not.toHaveBeenCalled();
         vi.unstubAllGlobals();
@@ -130,7 +130,7 @@ describe('serverPlugin — transport', () => {
             defineApp(jsx('div', {})).use(serverPlugin({
                 transport: { fetch: nativeFetch as unknown as typeof fetch }
             }));
-            await __serverFnStub('sym_native', 'fnNative', '/_sigx/fn')();
+            await __serverFnStub('api/fnNative', 'fnNative', '/_sigx/fn', 'deadbeef')();
             expect(nativeFetch).toHaveBeenCalledTimes(1);
         } finally {
             delete (globalThis as Record<string, unknown>).__SIGX_LIVE_CLIENT__;

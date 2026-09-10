@@ -12,6 +12,7 @@ import { extractInlineServerFns } from '../src/server-fn-inline';
 import type { ServerFnExtractOptions } from '../src/server-fn-extract';
 
 const BASE = '/_sigx/fn';
+const HEX8 = /^[0-9a-f]{8}$/;
 
 const SEARCH = `
 import { component } from 'sigx';
@@ -48,13 +49,14 @@ describe('extractInlineServerFns — happy path', () => {
         expect(result.fns).toHaveLength(1);
         const fn = result.fns[0];
         expect(fn.name).toBe('search');
-        expect(fn.symbol).toMatch(/^search_fn_[0-9a-f]{8}$/);
+        expect(fn.key).toBe('src/Search.tsx/search');
+        expect(fn.version).toMatch(HEX8);
         expect(fn.mangled).toBe('__sigxSrvFn_search');
 
         const client = result.clientModule!;
         expect(client).toContain(`import { __serverFnStub } from '@sigx/server/client';`);
         expect(client).toContain(
-            `const search = __serverFnStub("${fn.symbol}", "search", "${BASE}", "${fn.stableSymbol}")`
+            `const search = __serverFnStub("${fn.key}", "search", "${BASE}", "${fn.version}")`
         );
         // The body and its server-only import are gone from the client.
         expect(client).not.toContain('searchIndex');
@@ -70,17 +72,28 @@ describe('extractInlineServerFns — happy path', () => {
         expect(ssr).toContain('searchIndex.query(q, { limit: 20 })');
         expect(ssr).toContain('export const __sigxSrvFn_search = search;');
         // The SSR wrapper carries the same stable key the stub does (#452).
-        expect(ssr).toContain(`search.__sigxKey = "${result.fns[0].stableSymbol}";`);
+        expect(ssr).toContain(`search.__sigxKey = "${result.fns[0].key}";`);
+        expect(ssr).toContain(`search.__sigxKey = "src/Search.tsx/search";`);
         // Untouched otherwise — one module instance, no state split.
         expect(ssr.startsWith(SEARCH)).toBe(true);
     });
 
-    it('symbols are deterministic and content-sensitive', () => {
+    it('the version is deterministic and content-sensitive; the key is not', () => {
         const a = extract(SEARCH);
         const b = extract(SEARCH);
-        expect(a.fns[0].symbol).toBe(b.fns[0].symbol);
+        expect(a.fns[0].version).toBe(b.fns[0].version);
         const edited = SEARCH.replace('{ limit: 20 }', '{ limit: 10 }');
-        expect(extract(edited).fns[0].symbol).not.toBe(a.fns[0].symbol);
+        expect(extract(edited).fns[0].version).not.toBe(a.fns[0].version);
+        expect(extract(edited).fns[0].key).toBe(a.fns[0].key);
+    });
+
+    it('the version is seeded from the AST — a reformat with comments keeps it', () => {
+        const reformatted = SEARCH.replace(
+            'const search = serverFn(async (rq, q: string) => searchIndex.query(q, { limit: 20 }));',
+            'const search = serverFn(\n    // the index lookup\n    async (rq, q: string) =>\n        searchIndex.query(q, {\n            limit: 20 /* page size */\n        })\n);'
+        );
+        expect(reformatted).not.toBe(SEARCH);
+        expect(extract(reformatted).fns[0].version).toBe(extract(SEARCH).fns[0].version);
     });
 
     it('exported declarations and aliased serverFn imports work', () => {
@@ -400,20 +413,20 @@ export const Product = component((ctx) => {
         expect(result.errors).toHaveLength(0);
         expect(result.fns[0].get).toBe(true);
         expect(result.clientModule).toContain(
-            `, "${BASE}", "${result.fns[0].stableSymbol}", 1)`
+            `const getProduct = __serverFnStub("src/Product.tsx/getProduct", "getProduct", "${BASE}", "${result.fns[0].version}", 1)`
         );
     });
 
-    it('an unmarked inline fn stays POST (no GET flag)', () => {
+    it('an unmarked inline fn stays POST (no flags argument at all)', () => {
         const result = extract(SEARCH);
         expect(result.fns[0].get).toBe(false);
-        expect(result.clientModule).toContain(`, "${BASE}", "${result.fns[0].stableSymbol}")`);
+        expect(result.clientModule).toContain(`, "${BASE}", "${result.fns[0].version}")`);
         expect(result.clientModule).not.toContain(`", 1)`);
     });
 });
 
 describe('extractInlineServerFns — invalidates-declaring mutations (rfc-server §6.2/§6.3, #452)', () => {
-    it('stamps the sidecar flag (6th positional) on an inline declaring fn', () => {
+    it('sets the invalidates bit (flags = 2) on an inline declaring fn', () => {
         const code = `
 import { component } from 'sigx';
 import { serverFn } from '@sigx/server';
@@ -432,7 +445,7 @@ export const Tracker = component((ctx) => {
         expect(result.errors).toHaveLength(0);
         expect(result.fns[0].invalidates).toBe(true);
         expect(result.clientModule).toContain(
-            `, "${BASE}", "${result.fns[0].stableSymbol}", 0, 1)`
+            `const track = __serverFnStub("src/Tracker.tsx/track", "track", "${BASE}", "${result.fns[0].version}", 2)`
         );
     });
 });
@@ -452,7 +465,11 @@ export const use = () => ticks('x');
         expect(result.clientModule).toContain(
             `import { __serverStreamStub } from '@sigx/server/client';`
         );
-        expect(result.clientModule).toMatch(/const ticks = __serverStreamStub\("ticks_fn_[0-9a-f]{8}"/);
+        // Key, name, endpoint, version — and never a flags argument.
+        expect(result.clientModule).toContain(
+            `const ticks = __serverStreamStub("src/Ticks.tsx/ticks", "ticks", "${BASE}", "${result.fns[0].version}")`
+        );
+        expect(result.fns[0].version).toMatch(HEX8);
         expect(result.clientModule).not.toContain('ticker(');
         expect(result.ssrModule).toContain('export const __sigxSrvFn_ticks = ticks;');
     });
@@ -469,12 +486,14 @@ export const leak = serverStream(async function* () { yield SECRETS[0]; });
     });
 });
 
-describe('extractInlineServerFns — rev 2 (stable symbols, id, endpoint)', () => {
-    it('mints hashed + stable symbols off the stableId, in parity with the file form', () => {
+describe('extractInlineServerFns — rev 2 (keys, id, endpoint)', () => {
+    it('mints key + version off the stableId, in parity with the file form', () => {
         const a = extract(SEARCH, '/appA/Search.tsx', { stableId: '@acme/web/src/Search.tsx' });
         const b = extract(SEARCH, '/appB/Search.tsx', { stableId: '@acme/web/src/Search.tsx' });
-        expect(a.fns[0].symbol).toBe(b.fns[0].symbol);
-        expect(a.fns[0].stableSymbol).toBe('@acme/web/src/Search.tsx/search');
+        expect(a.fns[0].key).toBe('@acme/web/src/Search.tsx/search');
+        expect(a.fns[0].version).toMatch(HEX8);
+        expect(a.fns[0].key).toBe(b.fns[0].key);
+        expect(a.fns[0].version).toBe(b.fns[0].version);
     });
 
     it('honors an explicit string-literal `id` and warns on a non-literal one', () => {
@@ -486,24 +505,23 @@ export const use = () => search('x');
         const result = extract(withId, '/src/api.ts');
         expect(result.errors).toHaveLength(0);
         expect(result.warnings).toHaveLength(0);
-        expect(result.fns[0].stableSymbol).toBe('search/query/search');
+        expect(result.fns[0].key).toBe('search/query/search');
 
         const dynamic = withId.replace(`'search/query'`, '`search/query`');
         const warned = extract(dynamic, '/src/api.ts');
         expect(warned.warnings).toHaveLength(1);
         expect(warned.warnings[0]).toContain('string literal');
-        expect(warned.fns[0].stableSymbol).toBe('src/api.ts/search');
+        expect(warned.fns[0].key).toBe('src/api.ts/search');
     });
 
-    it("stubSymbols: 'stable' + endpoint bake into the client splice", () => {
+    it('`endpoint` bakes into the client splice; the key is the only route', () => {
         const result = extract(SEARCH, '/src/Search.tsx', {
             stableId: '@acme/web/src/Search.tsx',
-            stubSymbols: 'stable',
             endpoint: 'https://api.example.com/_sigx/fn'
         });
         expect(result.clientModule).toContain(
             `__serverFnStub("@acme/web/src/Search.tsx/search", "search", ` +
-            `"https://api.example.com/_sigx/fn", "@acme/web/src/Search.tsx/search")`
+            `"https://api.example.com/_sigx/fn", "${result.fns[0].version}")`
         );
     });
 });
@@ -519,7 +537,7 @@ export const Widget = () => submit;
         expect(result.errors).toHaveLength(0);
         expect(result.fns[0].form).toBe(true);
         // No extra stub flag for form (only get/invalidates ride the stub).
-        expect(result.clientModule).toContain(`"${BASE}", "${result.fns[0].stableSymbol}")`);
+        expect(result.clientModule).toContain(`"${BASE}", "${result.fns[0].version}")`);
     });
 
     it('an unmarked inline fn stays form: false', () => {

@@ -81,7 +81,7 @@ Deno.serve(
                 // handler here cannot disagree (#563).
                 base: serverFnBase,
                 // The registry is explicitly passed, never ambient.
-                resolve: (symbol) => serverFns[symbol]?.() ?? null,
+                functions: serverFns,
                 renderBoundaries
             });
         }

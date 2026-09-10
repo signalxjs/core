@@ -46,15 +46,19 @@ type SigxIslandsManifest = SigxPackManifests extends { islands: infer T } ? T : 
 type SigxResumeManifest = SigxPackManifests extends { resume: infer T } ? T : unknown;
 
 /**
- * The server-function registry (rfc-server §3) — emitted by `sigxServer()` as
- * `dist/server/sigx-server-fns.js` beside the server entry, or inlined into the
- * one bundle in a bundled build. Pass it to the endpoint EXPLICITLY; it is
- * never ambient.
+ * The server-function registry (rfc-server §3, rfc-server-v5 §4.3) — emitted
+ * by `sigxServer()` as `dist/server/sigx-server-fns.js` beside the server
+ * entry, or inlined into the one bundle in a bundled build. Pass it to the
+ * endpoint EXPLICITLY as `functions`; it is never ambient.
  *
- * Resolves in the SSR environment only.
+ * Server environments only — a client import is a build error.
  */
 declare module 'virtual:sigx-server-fns' {
-    export const serverFns: Record<string, () => Promise<unknown>>;
+    /**
+     * Key (`<id>/<name>`) → `{ version, load }`; structurally
+     * `ServerFnRegistry` from `@sigx/server/server`. Null-prototype.
+     */
+    export const serverFns: Record<string, { readonly version: string; load(): Promise<unknown> }>;
     /**
      * The server mount path this build baked (`sigxServer({ base })`, default
      * `/_sigx/fn`). Pass it to BOTH `matchesServerFn` and the handler so all

@@ -316,13 +316,14 @@ describe('stub — collect/apply through __SIGX_SERVERFN_BOUNDARIES__', () => {
         });
         vi.stubGlobal('fetch', fetchMock);
 
-        const stub = __serverFnStub('t_fn_00000001', 't', '/_sigx/fn', undefined, 0, 1);
+        const stub = __serverFnStub('api/t', 't', '/_sigx/fn', 'deadbeef', 2);
         await expect(stub('a')).resolves.toBe(1);
         await expect(stub('b')).resolves.toBe(1);
         vi.unstubAllGlobals();
 
         expect(bodies[0]).toEqual({
             args: ['a'],
+            v: 'deadbeef',
             $boundaries: {
                 base: BASE,
                 refresh: [{ id: 3, component: 'Tracker', deps: ['["tracker",1]'] }]
@@ -346,20 +347,24 @@ describe('stub — collect/apply through __SIGX_SERVERFN_BOUNDARIES__', () => {
         const collect = vi.fn(() => ({ base: BASE, refresh: [{ id: 3, component: 'T' }] }));
         (globalThis as { __SIGX_SERVERFN_BOUNDARIES__?: BoundaryRefreshSeam })
             .__SIGX_SERVERFN_BOUNDARIES__ = { collect, apply: () => {} };
-        await __serverFnStub('a_fn_00000001', 'a', '/_sigx/fn')('x');
+        await __serverFnStub('api/a', 'a', '/_sigx/fn', 'deadbeef')('x');
         expect(collect).not.toHaveBeenCalled();
 
         // Flagged stub with an empty inventory: no sidecar on the wire.
         (globalThis as { __SIGX_SERVERFN_BOUNDARIES__?: BoundaryRefreshSeam })
             .__SIGX_SERVERFN_BOUNDARIES__ = { collect: () => ({ base: BASE, refresh: [] }), apply: () => {} };
-        await __serverFnStub('b_fn_00000001', 'b', '/_sigx/fn', undefined, 0, 1)('x');
+        await __serverFnStub('api/b', 'b', '/_sigx/fn', 'deadbeef', 2)('x');
 
         // Flagged stub, seam absent.
         delete (globalThis as { __SIGX_SERVERFN_BOUNDARIES__?: unknown }).__SIGX_SERVERFN_BOUNDARIES__;
-        await __serverFnStub('c_fn_00000001', 'c', '/_sigx/fn', undefined, 0, 1)('x');
+        await __serverFnStub('api/c', 'c', '/_sigx/fn', 'deadbeef', 2)('x');
         vi.unstubAllGlobals();
 
-        expect(bodies).toEqual([{ args: ['x'] }, { args: ['x'] }, { args: ['x'] }]);
+        expect(bodies).toEqual([
+            { args: ['x'], v: 'deadbeef' },
+            { args: ['x'], v: 'deadbeef' },
+            { args: ['x'], v: 'deadbeef' }
+        ]);
     });
 
     it('swallows collect/apply throws — the RPC result is untouched', async () => {
@@ -377,7 +382,7 @@ describe('stub — collect/apply through __SIGX_SERVERFN_BOUNDARIES__', () => {
             'fetch',
             vi.fn(async () => okResponse({ data: 'fine', $boundaries: [{ for: 3 }] }))
         );
-        const stub = __serverFnStub('t_fn_00000001', 't', '/_sigx/fn', undefined, 0, 1);
+        const stub = __serverFnStub('api/t', 't', '/_sigx/fn', 'deadbeef', 2);
         await expect(stub()).resolves.toBe('fine');
         vi.unstubAllGlobals();
         vi.restoreAllMocks();

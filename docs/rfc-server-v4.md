@@ -480,7 +480,7 @@ export const app = createServerApp<User>({
 });
 
 // src/entry.cloudflare.ts — routing stays HERE, visibly (rfc-deploy §1.2)
-const fns = app.serverFns({ resolve: (s) => serverFns[s]?.() ?? null,
+const fns = app.serverFns({ functions: serverFns,
                             base: serverFnBase, renderBoundaries });
 const doc = createFetchHandler({ template, app: (url) => createApp(url), document: { assets } });
 

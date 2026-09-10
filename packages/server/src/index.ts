@@ -68,6 +68,8 @@ export type {
     ServerFnInfo,
     ServerFnInvoke,
     ServerFnKeyRef,
+    ServerFnRegistry,
+    ServerFnRegistryEntry,
     ServerMiddleware,
     ServerPolicy,
     ServerPolicyOp,

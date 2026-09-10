@@ -63,8 +63,12 @@ const liveModule = {
 
 interface Mounted {
     origin: string;
-    /** Hashed wire symbol for an export of the fixture module. */
-    symbol(name: 'read' | 'never'): string;
+    /** The stable key (`<stableId>/<name>`) the registry minted for an
+     *  export of the fixture module — the one route (rfc-server-v5 §1.3). */
+    key(name: 'read' | 'never'): string;
+    /** The version tag the registry carries for that export — what a
+     *  same-build stub sends with every call; any other value is skew. */
+    version(name: 'read' | 'never'): string;
     /** Everything the plugin sent to the dev logger's `error` — assertable,
      *  never swallowed (a no-op logger hid unexpected logs when debugging). */
     loggerErrors: string[];
@@ -79,18 +83,29 @@ const mounted: Mounted[] = [];
  */
 async function mount(
     options: SigxServerOptions = {},
-    modules: Record<string, unknown> = {}
+    modules: Record<string, unknown> = {},
+    /** Extra fixture files (root-relative path → source), written before discovery. */
+    extraFiles: Record<string, string> = {}
 ): Promise<Mounted> {
     const root = mkdtempSync(join(tmpdir(), 'sigx-dev-endpoint-'));
     mkdirSync(join(root, 'src'), { recursive: true });
     writeFileSync(join(root, 'src/api.server.ts'), API);
+    for (const [rel, source] of Object.entries(extraFiles)) writeFileSync(join(root, rel), source);
 
     // requireAuthorization off: this file is about option forwarding, not the
     // access gate (which has its own coverage in server-fn-plugin.test.ts).
     const plugin = sigxServer({ requireAuthorization: false, ...options }) as any;
     plugin.configResolved({ root, command: 'serve' });
 
-    const registry = plugin.load(plugin.resolveId('virtual:sigx-server-fns')) as string;
+    // The prod registry fails the build on a duplicate key (`this.error`,
+    // which this bare plugin object lacks) — tolerate that here so the DEV
+    // path's own duplicate handling can be exercised below.
+    let registry = '';
+    try {
+        registry = plugin.load(plugin.resolveId('virtual:sigx-server-fns')) as string;
+    } catch {
+        registry = '';
+    }
 
     let middleware:
         | ((req: unknown, res: unknown, next: (err?: unknown) => void) => void)
@@ -128,9 +143,16 @@ async function mount(
     const handle: Mounted = {
         origin: `http://127.0.0.1:${port}`,
         loggerErrors,
-        symbol(name) {
-            const match = new RegExp(`\\["(${name}_fn_[0-9a-f]{8})"\\]`).exec(registry);
-            if (!match) throw new Error(`no symbol for ${name} in the registry`);
+        key(name) {
+            const match = new RegExp(`\\["([^"]+/${name})"\\]`).exec(registry);
+            if (!match) throw new Error(`no key for ${name} in the registry`);
+            return match[1];
+        },
+        version(name) {
+            const match = new RegExp(
+                `\\["[^"]+/${name}"\\]: \\{ version: "([0-9a-f]{8})"`
+            ).exec(registry);
+            if (!match) throw new Error(`no version for ${name} in the registry`);
             return match[1];
         },
         close: async () => {
@@ -147,10 +169,45 @@ afterEach(async () => {
     for (const handle of mounted.splice(0)) await handle.close();
 });
 
+describe('sigxServer — the plugin owns the registry (rfc-server-v5 §1.6)', () => {
+    it("a JS caller's resolve/functions in the plugin options never reach the endpoint", async () => {
+        // Unspellable in the TS type, but a JS config can carry them; if
+        // they rode the spread they would trip the exactly-one gate against
+        // the plugin's own `functions` and 500 every dev request.
+        const dev = await mount({ resolve: () => null, functions: {} } as unknown as SigxServerOptions);
+        const res = await fetch(`${dev.origin}/_sigx/fn/${dev.key('read')}`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', origin: dev.origin },
+            body: JSON.stringify({ args: ['p1'] })
+        });
+        expect(res.status).toBe(200);
+        await expect(res.json()).resolves.toEqual({ data: 'read:p1' });
+    });
+});
+
+describe('sigxServer — the dev registry refuses two functions on one route (rfc-server-v5 §1.7)', () => {
+    it('a duplicate key across two files is an error on the request, never a silent last-wins', async () => {
+        const dup = (n: number) => `
+import { serverFn } from '@sigx/server';
+export const dup = serverFn({ id: 'dup', allowAnonymous: true, handler: async () => ${n} });
+`;
+        const dev = await mount({}, {}, { 'src/one.server.ts': dup(1), 'src/two.server.ts': dup(2) });
+        const res = await fetch(`${dev.origin}/_sigx/fn/dup/dup`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', origin: dev.origin },
+            body: JSON.stringify({ args: [] })
+        });
+        // The middleware threw into `next(err)` (this harness answers 500
+        // 'error' there) instead of routing to whichever file won.
+        expect(res.status).toBe(500);
+        await expect(res.text()).resolves.toBe('error');
+    });
+});
+
 describe('sigxServer — the dev endpoint forwards every endpoint option (#561)', () => {
     it('serves a server function (the control — a later 414 must not pass for the wrong reason)', async () => {
         const dev = await mount();
-        const res = await fetch(`${dev.origin}/_sigx/fn/${dev.symbol('read')}`, {
+        const res = await fetch(`${dev.origin}/_sigx/fn/${dev.key('read')}`, {
             method: 'POST',
             headers: { 'content-type': 'application/json', origin: dev.origin },
             body: JSON.stringify({ args: ['p1'] })
@@ -162,7 +219,7 @@ describe('sigxServer — the dev endpoint forwards every endpoint option (#561)'
     it('forwards maxUrlBytes — a GET read over the cap is a 414, not the 8 KiB default', async () => {
         const dev = await mount({ maxUrlBytes: 64 });
         const res = await fetch(
-            `${dev.origin}/_sigx/fn/${dev.symbol('read')}?a0=${'x'.repeat(300)}`
+            `${dev.origin}/_sigx/fn/${dev.key('read')}?a0=${'x'.repeat(300)}`
         );
         expect(res.status).toBe(414);
         await expect(res.json()).resolves.toEqual({
@@ -173,7 +230,7 @@ describe('sigxServer — the dev endpoint forwards every endpoint option (#561)'
     it('forwards maxResponseBytes — an over-cap response is a 500, not delivered (#571)', async () => {
         const onError = vi.fn();
         const dev = await mount({ maxResponseBytes: 16, onError });
-        const res = await fetch(`${dev.origin}/_sigx/fn/${dev.symbol('read')}`, {
+        const res = await fetch(`${dev.origin}/_sigx/fn/${dev.key('read')}`, {
             method: 'POST',
             headers: { 'content-type': 'application/json', origin: dev.origin },
             body: JSON.stringify({ args: ['a-long-enough-input-to-cross-sixteen-bytes'] })
@@ -186,7 +243,7 @@ describe('sigxServer — the dev endpoint forwards every endpoint option (#561)'
     it('forwards timeoutMs and onError — a hung handler 504s and reports once', async () => {
         const onError = vi.fn();
         const dev = await mount({ timeoutMs: 25, onError });
-        const res = await fetch(`${dev.origin}/_sigx/fn/${dev.symbol('never')}`, {
+        const res = await fetch(`${dev.origin}/_sigx/fn/${dev.key('never')}`, {
             method: 'POST',
             headers: { 'content-type': 'application/json', origin: dev.origin },
             body: JSON.stringify({ args: [] })
@@ -199,7 +256,7 @@ describe('sigxServer — the dev endpoint forwards every endpoint option (#561)'
 
     it('still forwards the options that already worked — a cross-origin POST is 403', async () => {
         const dev = await mount();
-        const res = await fetch(`${dev.origin}/_sigx/fn/${dev.symbol('read')}`, {
+        const res = await fetch(`${dev.origin}/_sigx/fn/${dev.key('read')}`, {
             method: 'POST',
             headers: { 'content-type': 'application/json', origin: 'https://evil.test' },
             body: JSON.stringify({ args: ['p1'] })
@@ -241,7 +298,7 @@ describe('sigxServer — the dev endpoint forwards every endpoint option (#561)'
                 { serverApp: '/src/server-app.ts' },
                 { '/src/server-app.ts': serverAppModule }
             );
-            const res = await fetch(`${dev.origin}/_sigx/fn/${dev.symbol('read')}`, {
+            const res = await fetch(`${dev.origin}/_sigx/fn/${dev.key('read')}`, {
                 method: 'POST',
                 headers: { 'content-type': 'application/json', origin: dev.origin },
                 body: JSON.stringify({ args: ['p1'] })
@@ -266,7 +323,7 @@ describe('sigxServer — the dev endpoint forwards every endpoint option (#561)'
             { serverApp: '/src/server-app.ts' },
             { '/src/server-app.ts': new Error('mid-edit syntax error') }
         );
-        const res = await fetch(`${dev.origin}/_sigx/fn/${dev.symbol('read')}`, {
+        const res = await fetch(`${dev.origin}/_sigx/fn/${dev.key('read')}`, {
             method: 'POST',
             headers: { 'content-type': 'application/json', origin: dev.origin },
             body: JSON.stringify({ args: ['p1'] })
@@ -287,5 +344,54 @@ describe('sigxServer — the dev endpoint forwards every endpoint option (#561)'
             expect(entry).toContain('/src/server-app.ts');
             expect(entry).toContain('mid-edit syntax error');
         }
+    });
+});
+
+describe('sigxServer — the dev endpoint checks the version tag (rfc-server-v5 §3.2, #692)', () => {
+    // The dev middleware hands the endpoint `functions: devRegistry(...)` —
+    // the same `key → { version, load }` shape the prod chunk emits — so the
+    // skew check reaches a `vite dev` session too. A stale tab after an edit
+    // gets a 409 it can act on, not the new function under the old call.
+
+    it('a POST carrying the registry version is served', async () => {
+        const dev = await mount();
+        const res = await fetch(`${dev.origin}/_sigx/fn/${dev.key('read')}`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', origin: dev.origin },
+            body: JSON.stringify({ args: ['p1'], v: dev.version('read') })
+        });
+        expect(res.status).toBe(200);
+        await expect(res.json()).resolves.toEqual({ data: 'read:p1' });
+    });
+
+    it('a POST carrying a different version is a 409 version-skew, never a call', async () => {
+        const dev = await mount();
+        expect(dev.version('read')).not.toBe('00000000');
+        const res = await fetch(`${dev.origin}/_sigx/fn/${dev.key('read')}`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', origin: dev.origin },
+            body: JSON.stringify({ args: ['p1'], v: '00000000' })
+        });
+        expect(res.status).toBe(409);
+        await expect(res.json()).resolves.toEqual({
+            error: { message: 'version skew', status: 409, code: 'version-skew' }
+        });
+    });
+
+    it('a GET read with a wrong `v` is a 409 that no cache may keep', async () => {
+        const dev = await mount();
+        const res = await fetch(`${dev.origin}/_sigx/fn/${dev.key('read')}?a0=p1&v=00000000`);
+        expect(res.status).toBe(409);
+        expect(res.headers.get('cache-control')).toBe('no-store');
+        await expect(res.json()).resolves.toEqual({
+            error: { message: 'version skew', status: 409, code: 'version-skew' }
+        });
+    });
+
+    it('a call with no `v` at all is served — a native client or curl is never skew-checked', async () => {
+        const dev = await mount();
+        const res = await fetch(`${dev.origin}/_sigx/fn/${dev.key('read')}?a0=p1`);
+        expect(res.status).toBe(200);
+        await expect(res.json()).resolves.toEqual({ data: 'read:p1' });
     });
 });

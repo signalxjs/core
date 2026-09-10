@@ -6,12 +6,14 @@
  *
  * 1. **Stub swap** — in the CLIENT environment, every matching module is
  *    replaced wholesale by `extractServerFns`'s stub module (typed fetch
- *    stubs keyed by content-hashed symbol). The SSR environment sees the
- *    real module untouched — `serverFn` is pure runtime there.
- * 2. **Prod registry** — `virtual:sigx-server-fns` maps symbol → lazy import
- *    of the real module; the SSR build emits it as `sigx-server-fns.js` next
- *    to the server entry. Pass its `serverFns` export EXPLICITLY to
- *    `createServerFnHandler` (the resume-manifest posture, never ambient).
+ *    stubs keyed by the stable key `<stableId>/<name>`, carrying the build's
+ *    version tag). The SSR environment sees the real module untouched —
+ *    `serverFn` is pure runtime there.
+ * 2. **Prod registry** — `virtual:sigx-server-fns` maps key → `{ version,
+ *    load }` (rfc-server-v5 §4.3); the SSR build emits it as
+ *    `sigx-server-fns.js` next to the server entry. Pass its `serverFns`
+ *    export EXPLICITLY as the endpoint's `functions` (the resume-manifest
+ *    posture, never ambient).
  * 3. **Inline extraction** — a module-scope `const x = serverFn(...)` in ANY
  *    other client-reachable file is extracted in place (rfc-server §1.1(b)):
  *    client build gets the stub + orphaned-import stripping, SSR build keeps
@@ -25,16 +27,17 @@
  *    loaded through `ssrLoadModule('@sigx/server/node')` for module-graph
  *    identity (the concern documented in `./ssr.ts`).
  *
- * Symbols change when a function's body changes (content-hashed), so
- * `hotUpdate` re-extracts and invalidates the registry virtual module.
+ * A function's version changes when its definition changes, so `hotUpdate`
+ * re-extracts and invalidates the registry virtual module.
  *
- * rev 2 (native clients, #320): hash seeds use ROOT-INDEPENDENT stable ids
- * (package-qualified — every app build of one solution mints identical
- * symbols for shared server modules); the registry dual-registers hashed +
- * hash-free STABLE symbols (`<stableId>/<name>`) so backend redeploys never
- * break installed apps; `endpoint` (stub fetch target) splits from `base`
- * (server mount path); `role: 'client'` stubs EVERY environment and emits
- * no registry; `scan` discovers shared packages outside the Vite root.
+ * rev 2 (native clients, #320): keys use ROOT-INDEPENDENT stable ids
+ * (package-qualified — every app build of one solution mints identical keys
+ * for shared server modules), so backend redeploys never break installed
+ * apps; `endpoint` (stub fetch target) splits from `base` (server mount
+ * path); `role: 'client'` stubs EVERY environment and emits no registry;
+ * `scan` discovers shared packages outside the Vite root. rfc-server-v5
+ * §1.3 made the key the ONLY route: the former content-hashed twin survives
+ * as the version tag the stub sends and the endpoint 409s on.
  */
 
 import type { Plugin, ViteDevServer } from 'vite';
@@ -70,8 +73,8 @@ import type { ServerFnRequestOptions } from '@sigx/server/server';
  *
  * Four names are the PLUGIN's, so they are omitted above and redeclared below:
  *
- * - `resolve` — the plugin IS the resolver (extraction maps + `ssrLoadModule`);
- *   a user-supplied one would bypass HMR.
+ * - `resolve` / `functions` — the plugin IS the registry (extraction maps +
+ *   `ssrLoadModule`); a user-supplied one would bypass HMR.
  * - `base` — here it is the SERVER MOUNT path, split from `endpoint` (the fetch
  *   target baked into stubs) since rev 2.
  * - `serverApp` / `renderBoundaries` — module SPECIFIERS, not functions. A
@@ -85,7 +88,7 @@ import type { ServerFnRequestOptions } from '@sigx/server/server';
  * unusable without it. `@sigx/vite`'s other entries stay free of it.
  */
 export interface SigxServerOptions
-    extends Omit<ServerFnRequestOptions, 'resolve' | 'base' | 'renderBoundaries'> {
+    extends Omit<ServerFnRequestOptions, 'resolve' | 'functions' | 'base' | 'renderBoundaries'> {
     /** Which modules are server modules. Default: `**` + `/*.server.{ts,tsx}`. */
     include?: string | string[];
     /** Excluded from matching. Default: node_modules and dist. */
@@ -102,9 +105,9 @@ export interface SigxServerOptions
     /**
      * `'auto'` (default): stub swap in the Vite `client` environment only —
      * the v1 web posture. `'client'`: this WHOLE build is a remote-server
-     * client (lynx, terminal) — every environment gets stubs (baked with
-     * STABLE symbols, deploy-durable for installed apps) and no registry
-     * chunk is emitted; there is no server in this build.
+     * client (lynx, terminal) — every environment gets stubs and no registry
+     * chunk is emitted; there is no server in this build. (Stub identity is
+     * the same stable key under every role since rfc-server-v5 §1.3.)
      */
     role?: 'auto' | 'client';
     /**
@@ -165,6 +168,10 @@ export interface SigxServerOptions
      */
     renderBoundaries?: string;
 }
+
+/** The registry shape (`ServerFnRegistry` in `@sigx/server`), structural so
+ *  this module stays free of a runtime import from the optional peer. */
+type DevRegistry = Record<string, { readonly version: string; load(): Promise<unknown> }>;
 
 const VIRTUAL_ID = 'virtual:sigx-server-fns';
 const RESOLVED_VIRTUAL_ID = '\0' + VIRTUAL_ID;
@@ -263,6 +270,11 @@ function matchesServerFnDefaulted(code: string): boolean {
 
 export function sigxServer(options: SigxServerOptions = {}): Plugin {
     const filter = createFilter(options.include ?? DEFAULT_INCLUDE, options.exclude ?? DEFAULT_EXCLUDE);
+    /** Everything the dev endpoint forwards — minus the registry fields the plugin owns. */
+    const { resolve: _resolve, functions: _functions, ...forwardedOptions } = options as SigxServerOptions & {
+        resolve?: unknown;
+        functions?: unknown;
+    };
     const base = options.base ?? DEFAULT_BASE;
     const endpoint = options.endpoint ?? base;
     const role = options.role ?? 'auto';
@@ -285,7 +297,6 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
     const extractOptions = (file: string): ServerFnExtractOptions => ({
         stableId: computeStableId(file, root, pkgCache),
         endpoint,
-        stubSymbols: role === 'client' ? 'stable' : 'hashed',
         requireAuthorization: options.requireAuthorization,
         // The app default decides undeclared fns (rfc-server-v4 §5's third
         // rung) — the gate's question is answered by configuration. TRUTHY,
@@ -329,9 +340,9 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
 
     /**
      * The §6.4 cross-plugin seam: map a handler's captured serverFn import
-     * — (importer, specifier, exportName) — to its stable transport symbol
-     * and form mark, so the resume transform can stamp
-     * `action="{endpoint}/{symbol}"` on a `<form>` at build time. Public
+     * — (importer, specifier, exportName) — to its stable key and form
+     * mark, so the resume transform can stamp
+     * `action="{endpoint}/{key}"` on a `<form>` at build time. Public
      * via `plugin.api`; SYNCHRONOUS by design (callable from a sync
      * transform). Relative/absolute specifiers only — bare (scanned
      * package) specifiers return null in v1, a documented stamping gap.
@@ -346,7 +357,7 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
         importer: string,
         specifier: string,
         exportName: string
-    ): { stableSymbol: string; form: boolean } | null {
+    ): { key: string; form: boolean } | null {
         if (!specifier.startsWith('.') && !path.isAbsolute(specifier)) return null;
         const resolved = normalizePath(
             path.isAbsolute(specifier)
@@ -362,7 +373,7 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
             const fns =
                 extractions.get(candidate)?.fns ?? inline.get(candidate)?.fns ?? null;
             const fn = fns?.find((f) => f.name === exportName);
-            if (fn) return { stableSymbol: fn.stableSymbol, form: fn.form };
+            if (fn) return { key: fn.key, form: fn.form };
         }
         return null;
     }
@@ -419,17 +430,43 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
         }
     }
 
-    function findSymbol(symbol: string): { file: string; exportName: string } | null {
-        // Dual routing (rev 2, N.3): hashed and stable symbols both resolve.
+    /**
+     * The dev twin of the registry virtual module (rfc-server-v5 §4.3): the
+     * same `key → { version, load }` shape, built from the live extraction
+     * maps per request (they are small, and rebuilding beats invalidating),
+     * loading through `ssrLoadModule` so edits apply without a restart. One
+     * code path resolves keys in dev and prod: the endpoint's `functions`.
+     */
+    function devRegistry(devServer: ViteDevServer): DevRegistry {
+        const registry: DevRegistry = Object.create(null) as DevRegistry;
+        /** key → file, the dev twin of the prod registry's duplicate check. */
+        const owners = new Map<string, string>();
+        const add = (file: string, fn: { key: string; version: string }, exportName: string): void => {
+            const owner = owners.get(fn.key);
+            if (owner !== undefined && owner !== file) {
+                // Two functions on one route: the prod registry fails the
+                // build (`load()` above); dev must not silently route to
+                // whichever file was extracted last. Thrown from inside the
+                // request, so it reaches `next(err)` and the error overlay.
+                throw new Error(
+                    `[sigx:server] key ${JSON.stringify(fn.key)} is minted by both ` +
+                    `${relPath(owner)} and ${relPath(file)} (duplicate explicit \`id\`?) — ` +
+                    `two server functions cannot share one route.`
+                );
+            }
+            owners.set(fn.key, file);
+            registry[fn.key] = {
+                version: fn.version,
+                load: () => devServer.ssrLoadModule(devSpec(file)).then((m) => m[exportName])
+            };
+        };
         for (const [file, extraction] of extractions) {
-            const fn = extraction.fns.find((f) => f.symbol === symbol || f.stableSymbol === symbol);
-            if (fn) return { file, exportName: fn.name };
+            for (const fn of extraction.fns) add(file, fn, fn.name);
         }
         for (const [file, extraction] of inline) {
-            const fn = extraction.fns.find((f) => f.symbol === symbol || f.stableSymbol === symbol);
-            if (fn) return { file, exportName: fn.mangled };
+            for (const fn of extraction.fns) add(file, fn, fn.mangled);
         }
-        return null;
+        return registry;
     }
 
     return {
@@ -467,6 +504,21 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
 
         load(id) {
             if (id !== RESOLVED_VIRTUAL_ID) return;
+            // Server environments only (the `virtual:sigx-app` posture): a
+            // client import would yield a registry of dynamic imports of the
+            // STUB modules — every `load()` an RPC to itself. Loud, not silent.
+            if (this.environment?.name === 'client') {
+                this.error(
+                    `[sigx:server] '${VIRTUAL_ID}' is server-only — it maps keys to the real ` +
+                    `server modules. Import it from the server entry, never from client code.`
+                );
+            }
+            if (role === 'client') {
+                this.error(
+                    `[sigx:server] '${VIRTUAL_ID}' has nothing to register under role: 'client' — ` +
+                    `this build has no server; its functions live on the remote backend the stubs target.`
+                );
+            }
             const lines: string[] = [
                 // The app-config import rides the registry (rfc-server-v4
                 // §3.4): any entry importing `serverFns` evaluates the
@@ -477,38 +529,41 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
                 // the runtime denies rather than opens.
                 ...(options.serverApp ? [`import ${JSON.stringify(options.serverApp)};`] : []),
                 'export const serverFns = {',
-                // Null prototype (#555): a wire symbol like "__proto__" or
+                // Null prototype (#555): a wire key like "__proto__" or
                 // "constructor" must never resolve to an inherited
-                // Object.prototype member — adapters do `serverFns[symbol]`.
-                // The literal `__proto__: null` key is the one place setter
-                // semantics are wanted; every symbol key below is COMPUTED
-                // so a symbol literally named "__proto__" defines an own
-                // property instead of a second proto setter (SyntaxError).
+                // Object.prototype member. The literal `__proto__: null` key
+                // is the one place setter semantics are wanted; every key
+                // below is COMPUTED so a key literally named "__proto__"
+                // defines an own property instead of a second proto setter
+                // (SyntaxError).
                 '    __proto__: null,'
             ];
-            /** stableSymbol → file, to surface duplicate explicit `id`s. */
-            const stableOwners = new Map<string, string>();
+            /** key → file, to refuse two functions on one route. */
+            const owners = new Map<string, string>();
             const register = (
                 file: string,
-                fn: { symbol: string; stableSymbol: string },
+                fn: { key: string; version: string },
                 exportName: string
             ): void => {
-                const moduleSpec = JSON.stringify(buildSpec(file));
-                const record = `() => import(${moduleSpec}).then(m => m[${JSON.stringify(exportName)}])`;
-                // Dual registration (rev 2, N.3): hashed keys keep the web's
-                // skew detection; stable keys keep installed apps working
-                // across backend redeploys.
-                lines.push(`    [${JSON.stringify(fn.symbol)}]: ${record},`);
-                lines.push(`    [${JSON.stringify(fn.stableSymbol)}]: ${record},`);
-                const owner = stableOwners.get(fn.stableSymbol);
+                const owner = owners.get(fn.key);
                 if (owner && owner !== file) {
-                    this.warn(
-                        `[sigx:server] stable symbol ${JSON.stringify(fn.stableSymbol)} is minted by both ` +
+                    // Two functions on one route is a routing bug, not a
+                    // preference (rfc-server-v5 §1.7): a duplicate explicit
+                    // `id`, or two packages minting the same stable id.
+                    this.error(
+                        `[sigx:server] key ${JSON.stringify(fn.key)} is minted by both ` +
                         `${relPath(owner)} and ${relPath(file)} (duplicate explicit \`id\`?) — ` +
-                        `the later registration wins.`
+                        `two server functions cannot share one route.`
                     );
                 }
-                stableOwners.set(fn.stableSymbol, file);
+                owners.set(fn.key, file);
+                const moduleSpec = JSON.stringify(buildSpec(file));
+                // One record per key (v5 §4.3): the version the stub sends is
+                // what the endpoint compares for skew.
+                lines.push(
+                    `    [${JSON.stringify(fn.key)}]: { version: ${JSON.stringify(fn.version)}, ` +
+                    `load: () => import(${moduleSpec}).then(m => m[${JSON.stringify(exportName)}]) },`
+                );
             };
             for (const [file, extraction] of extractions) {
                 for (const fn of extraction.fns) register(file, fn, fn.name);
@@ -837,16 +892,15 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
                     // became unreachable in dev (#561). The plugin's own keys
                     // (include/exclude/endpoint/role/scan/requireAuthorization) ride
                     // along inert: the endpoint reads only what it declares.
-                    // The three below are overridden with the resolved values.
-                    ...options,
+                    // The plugin IS the registry: a caller's `resolve` /
+                    // `functions` (unspellable in the TS type, but a JS config
+                    // can carry them) must not ride along and trip the
+                    // endpoint's exactly-one gate. The three below are
+                    // overridden with the resolved values.
+                    ...forwardedOptions,
                     base,
                     renderBoundaries,
-                    resolve: async (symbol: string) => {
-                        const record = findSymbol(symbol);
-                        if (!record) return null;
-                        const mod = await devServer.ssrLoadModule(devSpec(record.file));
-                        return mod[record.exportName];
-                    }
+                    functions: devRegistry(devServer)
                 });
                 await handler(req, res, next);
             }

@@ -3,7 +3,8 @@
  *
  * handleServerFnRequest() — the WinterCG endpoint (rfc-server §4/§5): the
  * status matrix, the guard seam, response-header/status plumbing, error
- * masking, and the prototype-pollution reviver.
+ * masking, the prototype-pollution reviver, and the `functions` registry
+ * path with its version-skew 409 (rfc-server-v5 §1.6/§3.2).
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -12,7 +13,12 @@ import {
     matchesServerFn,
     type ServerFnRequestOptions
 } from '../src/server/index';
-import { serverFn, ServerFnError } from '../src/index';
+import {
+    serverFn,
+    ServerFnError,
+    type ServerFnRegistry,
+    type ServerFnRegistryEntry
+} from '../src/index';
 import { stubServerApp } from '../src/testing';
 
 // The endpoint now runs the app pipeline's wire half (middleware →
@@ -53,12 +59,14 @@ const withHeaders = serverFn({
     }
 });
 
+// Keys are `<id>/<name>` (rfc-server-v5 §1.3) — the only identity a server
+// function has now; the endpoint derives `info.name` from the last segment.
 const FNS: Record<string, unknown> = {
-    add_fn_00000001: add,
-    boom_fn_00000002: boom,
-    polite_fn_00000003: politeBoom,
-    echo_fn_00000004: echo,
-    headers_fn_00000005: withHeaders
+    'api/add': add,
+    'api/boom': boom,
+    'api/polite': politeBoom,
+    'api/echo': echo,
+    'api/headers': withHeaders
 };
 
 function call(
@@ -87,15 +95,15 @@ describe('matchesServerFn (rfc-deploy §2)', () => {
     const req = (path: string, method = 'POST') => new Request(`${ORIGIN}${path}`, { method });
 
     it('matches requests under the default base, any method', () => {
-        expect(matchesServerFn(req('/_sigx/fn/add_fn_00000001'))).toBe(true);
+        expect(matchesServerFn(req('/_sigx/fn/api/add'))).toBe(true);
         expect(matchesServerFn(req('/_sigx/fn/@acme/api/add'))).toBe(true);
         // Method deliberately unchecked — a GET should reach the 405, not
         // fall through to the document handler.
-        expect(matchesServerFn(req('/_sigx/fn/add_fn_00000001', 'GET'))).toBe(true);
+        expect(matchesServerFn(req('/_sigx/fn/api/add', 'GET'))).toBe(true);
     });
 
     it('ignores query strings (pathname match)', () => {
-        expect(matchesServerFn(req('/_sigx/fn/add_fn_00000001?trace=1'))).toBe(true);
+        expect(matchesServerFn(req('/_sigx/fn/api/add?trace=1'))).toBe(true);
     });
 
     it('does not match other paths, the bare base, or prefix look-alikes', () => {
@@ -106,10 +114,10 @@ describe('matchesServerFn (rfc-deploy §2)', () => {
     });
 
     it('honors a custom base however it is slashed', () => {
-        expect(matchesServerFn(req('/rpc/add_fn_00000001'), '/rpc')).toBe(true);
-        expect(matchesServerFn(req('/rpc/add_fn_00000001'), '/rpc/')).toBe(true);
-        expect(matchesServerFn(req('/rpc/add_fn_00000001'), '/rpc//')).toBe(true);
-        expect(matchesServerFn(req('/_sigx/fn/add_fn_00000001'), '/rpc')).toBe(false);
+        expect(matchesServerFn(req('/rpc/api/add'), '/rpc')).toBe(true);
+        expect(matchesServerFn(req('/rpc/api/add'), '/rpc/')).toBe(true);
+        expect(matchesServerFn(req('/rpc/api/add'), '/rpc//')).toBe(true);
+        expect(matchesServerFn(req('/_sigx/fn/api/add'), '/rpc')).toBe(false);
     });
 });
 
@@ -120,7 +128,7 @@ describe('base agreement (#563)', () => {
         // is included because leaving it doubled would put an empty first
         // segment into the symbol `decodeFnPath` splits.
         for (const base of ['/rpc', '/rpc/', '/rpc//']) {
-            const request = new Request(`${ORIGIN}/rpc/add_fn_00000001`, {
+            const request = new Request(`${ORIGIN}/rpc/api/add`, {
                 method: 'POST',
                 headers: { 'content-type': 'application/json', origin: ORIGIN },
                 body: JSON.stringify({ args: [[2, 3]] })
@@ -136,7 +144,7 @@ describe('base agreement (#563)', () => {
 
     /** A well-formed POST under the DEFAULT base — the mismatch case. */
     const defaultBasePost = (): Request =>
-        new Request(`${ORIGIN}/_sigx/fn/add_fn_00000001`, {
+        new Request(`${ORIGIN}/_sigx/fn/api/add`, {
             method: 'POST',
             headers: { 'content-type': 'application/json', origin: ORIGIN },
             body: JSON.stringify({ args: [[2, 3]] })
@@ -180,7 +188,7 @@ describe('base agreement (#563)', () => {
 
 describe('handleServerFnRequest — happy path', () => {
     it('invokes the function and returns {data}', async () => {
-        const res = await call('add_fn_00000001', { args: [[2, 3]] });
+        const res = await call('api/add', { args: [[2, 3]] });
         expect(res.status).toBe(200);
         expect(res.headers.get('content-type')).toBe('application/json');
         await expect(res.json()).resolves.toEqual({ data: 5 });
@@ -201,14 +209,14 @@ describe('handleServerFnRequest — happy path', () => {
     });
 
     it('applies rq.responseHeaders and rq.status()', async () => {
-        const res = await call('headers_fn_00000005', { args: [] });
+        const res = await call('api/headers', { args: [] });
         expect(res.status).toBe(201);
         expect(res.headers.get('x-custom')).toBe('yes');
         await expect(res.json()).resolves.toEqual({ data: 'created' });
     });
 
     it('tolerates content-type parameters', async () => {
-        const res = await call('add_fn_00000001', { args: [[1, 1]] }, {
+        const res = await call('api/add', { args: [[1, 1]] }, {
             headers: { 'content-type': 'application/json; charset=utf-8' }
         });
         expect(res.status).toBe(200);
@@ -217,14 +225,14 @@ describe('handleServerFnRequest — happy path', () => {
 
 describe('handleServerFnRequest — status matrix', () => {
     it('405 + Allow for non-POST', async () => {
-        const res = await call('add_fn_00000001', undefined, { method: 'GET', body: undefined as never });
+        const res = await call('api/add', undefined, { method: 'GET', body: undefined as never });
         expect(res.status).toBe(405);
         expect(res.headers.get('allow')).toBe('POST');
     });
 
     it('415 for a missing or wrong content-type', async () => {
         const res = await handleServerFnRequest(
-            new Request(`${ORIGIN}/_sigx/fn/add_fn_00000001`, {
+            new Request(`${ORIGIN}/_sigx/fn/api/add`, {
                 method: 'POST',
                 headers: { 'content-type': 'text/plain', origin: ORIGIN },
                 body: '{"args":[[1,2]]}'
@@ -236,7 +244,7 @@ describe('handleServerFnRequest — status matrix', () => {
 
     it('403 for a missing or cross-origin Origin header (default policy)', async () => {
         const missing = await handleServerFnRequest(
-            new Request(`${ORIGIN}/_sigx/fn/add_fn_00000001`, {
+            new Request(`${ORIGIN}/_sigx/fn/api/add`, {
                 method: 'POST',
                 headers: { 'content-type': 'application/json' },
                 body: '{"args":[[1,2]]}'
@@ -245,20 +253,20 @@ describe('handleServerFnRequest — status matrix', () => {
         );
         expect(missing.status).toBe(403);
 
-        const cross = await call('add_fn_00000001', { args: [[1, 2]] }, {
+        const cross = await call('api/add', { args: [[1, 2]] }, {
             headers: { origin: 'https://evil.example' }
         });
         expect(cross.status).toBe(403);
     });
 
     it('origin allowlist and origin:false override the default', async () => {
-        const listed = await call('add_fn_00000001', { args: [[1, 2]] }, {
+        const listed = await call('api/add', { args: [[1, 2]] }, {
             headers: { origin: 'https://app.example' }
         }, { origin: ['https://app.example'] });
         expect(listed.status).toBe(200);
 
         const open = await handleServerFnRequest(
-            new Request(`${ORIGIN}/_sigx/fn/add_fn_00000001`, {
+            new Request(`${ORIGIN}/_sigx/fn/api/add`, {
                 method: 'POST',
                 headers: { 'content-type': 'application/json' },
                 body: '{"args":[[1,2]]}'
@@ -269,21 +277,21 @@ describe('handleServerFnRequest — status matrix', () => {
     });
 
     it('404 with an error envelope for an unknown symbol', async () => {
-        const res = await call('gone_fn_ffffffff', { args: [] });
+        const res = await call('api/gone', { args: [] });
         expect(res.status).toBe(404);
         const body = await res.json();
-        expect(body.error.message).toContain('gone_fn_ffffffff');
+        expect(body.error.message).toContain('api/gone');
     });
 
     it('400 for malformed JSON and for a non-array args', async () => {
-        const malformed = await call('add_fn_00000001', undefined, { body: '{not json' });
+        const malformed = await call('api/add', undefined, { body: '{not json' });
         expect(malformed.status).toBe(400);
-        const notArray = await call('add_fn_00000001', { args: 'nope' });
+        const notArray = await call('api/add', { args: 'nope' });
         expect(notArray.status).toBe(400);
     });
 
     it('413 when the body exceeds maxBodyBytes', async () => {
-        const res = await call('add_fn_00000001', { args: ['x'.repeat(2048)] }, {}, { maxBodyBytes: 1024 });
+        const res = await call('api/add', { args: ['x'.repeat(2048)] }, {}, { maxBodyBytes: 1024 });
         expect(res.status).toBe(413);
     });
 });
@@ -316,12 +324,11 @@ describe('handleServerFnRequest — stable symbols (rfc-server rev 2, N.3)', () 
         expect(res.status).toBe(200);
         await expect(res.json()).resolves.toEqual({ data: 5 });
         // resolve received every segment after the base, rejoined; the
-        // middleware's info.name is the last one, even though the id
-        // carries no hashed tail.
+        // middleware's info.name is the last one.
         expect(seen).toEqual([{ symbol: stable, name: 'addToCart', transport: 'wire' }]);
     });
 
-    it('a stable id containing a hashed-looking tail cannot misparse the name', async () => {
+    it('a segment that looks like the retired `<name>_fn_<hex8>` symbol is plain text — the last "/" names the fn', async () => {
         const tricky = 'legacy_fn_00000001/api.server.ts/run';
         const seen: string[] = [];
         restoreApp();
@@ -342,7 +349,7 @@ describe('handleServerFnRequest — stable symbols (rfc-server rev 2, N.3)', () 
             { resolve: () => echo }
         );
         expect(res.status).toBe(200);
-        expect(seen).toEqual(['run']); // the last '/' wins over the _fn_<hex8> pattern
+        expect(seen).toEqual(['run']); // the last '/' wins; `_fn_<hex8>` means nothing any more
     });
 
     it('decodes a segment that HAD to be escaped', async () => {
@@ -394,7 +401,7 @@ describe('handleServerFnRequest — stable symbols (rfc-server rev 2, N.3)', () 
 
     it('404s a path outside the configured base rather than guessing a symbol', async () => {
         const res = await handleServerFnRequest(
-            new Request(`${ORIGIN}/elsewhere/add_fn_00000001`, {
+            new Request(`${ORIGIN}/elsewhere/api/add`, {
                 method: 'POST',
                 headers: { 'content-type': 'application/json', origin: ORIGIN },
                 body: '{"args":[[1,2]]}'
@@ -424,7 +431,28 @@ describe('handleServerFnRequest — stable symbols (rfc-server rev 2, N.3)', () 
         expect(got).toBe('@acme/api/add');
     });
 
-    it('hashed-symbol name derivation is unregressed', async () => {
+    it('a slash-free key names the whole key; a two-segment key names its tail', async () => {
+        const seen: { symbol: string; name: string }[] = [];
+        restoreApp();
+        restoreApp = stubServerApp({
+            middleware: [
+                (_rq, fn) => {
+                    seen.push({ symbol: fn.symbol, name: fn.name });
+                }
+            ],
+            authenticate: () => ({ id: 'tester' })
+        });
+        // A `resolve`-path key with no separator: nothing to strip, so the
+        // name IS the key (the retired `_fn_<hex8>` tail is not recognised).
+        await call('add_fn_00000001', { args: [[1, 2]] }, {}, { resolve: () => add });
+        await call('api/add', { args: [[1, 2]] });
+        expect(seen).toEqual([
+            { symbol: 'add_fn_00000001', name: 'add_fn_00000001' },
+            { symbol: 'api/add', name: 'add' }
+        ]);
+    });
+
+    it("the name is the key's last segment", async () => {
         const seen: string[] = [];
         restoreApp();
         restoreApp = stubServerApp({
@@ -435,7 +463,7 @@ describe('handleServerFnRequest — stable symbols (rfc-server rev 2, N.3)', () 
             ],
             authenticate: () => ({ id: 'tester' })
         });
-        await call('add_fn_00000001', { args: [[1, 2]] });
+        await call('api/add', { args: [[1, 2]] });
         expect(seen).toEqual(['add']);
     });
 });
@@ -443,7 +471,7 @@ describe('handleServerFnRequest — stable symbols (rfc-server rev 2, N.3)', () 
 describe('handleServerFnRequest — origin: verify-when-present (rfc-server rev 2)', () => {
     const noOrigin = (options: Partial<ServerFnRequestOptions>) =>
         handleServerFnRequest(
-            new Request(`${ORIGIN}/_sigx/fn/add_fn_00000001`, {
+            new Request(`${ORIGIN}/_sigx/fn/api/add`, {
                 method: 'POST',
                 headers: { 'content-type': 'application/json' },
                 body: '{"args":[[1,2]]}'
@@ -458,19 +486,19 @@ describe('handleServerFnRequest — origin: verify-when-present (rfc-server rev 
     });
 
     it('still verifies a PRESENT Origin — match passes, mismatch 403s', async () => {
-        const match = await call('add_fn_00000001', { args: [[1, 2]] }, {}, {
+        const match = await call('api/add', { args: [[1, 2]] }, {}, {
             origin: 'verify-when-present'
         });
         expect(match.status).toBe(200);
 
-        const cross = await call('add_fn_00000001', { args: [[1, 2]] }, {
+        const cross = await call('api/add', { args: [[1, 2]] }, {
             headers: { origin: 'https://evil.example' }
         }, { origin: 'verify-when-present' });
         expect(cross.status).toBe(403);
     });
 
     it('rejects "Origin: null" — a PRESENT header, not an absent one', async () => {
-        const res = await call('add_fn_00000001', { args: [[1, 2]] }, {
+        const res = await call('api/add', { args: [[1, 2]] }, {
             headers: { origin: 'null' }
         }, { origin: 'verify-when-present' });
         expect(res.status).toBe(403);
@@ -484,7 +512,7 @@ describe('handleServerFnRequest — origin: verify-when-present (rfc-server rev 
 
 describe('handleServerFnRequest — errors', () => {
     it('ServerFnError passes through verbatim', async () => {
-        const res = await call('polite_fn_00000003', { args: [] });
+        const res = await call('api/polite', { args: [] });
         expect(res.status).toBe(418);
         await expect(res.json()).resolves.toEqual({
             error: { message: 'teapot', status: 418, data: { hint: 'short and stout' } }
@@ -494,7 +522,7 @@ describe('handleServerFnRequest — errors', () => {
     it('masks other throws to a generic 500 in production', async () => {
         vi.stubEnv('NODE_ENV', 'production');
         try {
-            const res = await call('boom_fn_00000002', { args: [] });
+            const res = await call('api/boom', { args: [] });
             expect(res.status).toBe(500);
             const body = await res.json();
             expect(body.error.message).toBe('Internal error');
@@ -507,7 +535,7 @@ describe('handleServerFnRequest — errors', () => {
     it('includes the message in dev', async () => {
         const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
         try {
-            const res = await call('boom_fn_00000002', { args: [] });
+            const res = await call('api/boom', { args: [] });
             expect(res.status).toBe(500);
             const body = await res.json();
             expect(body.error.message).toBe('secret internals');
@@ -522,7 +550,7 @@ describe('handleServerFnRequest — throwing resolve (#555)', () => {
         vi.stubEnv('NODE_ENV', 'production');
         try {
             const seen: unknown[][] = [];
-            const res = await call('broken_fn_00000001', { args: [] }, {}, {
+            const res = await call('api/broken', { args: [] }, {}, {
                 resolve: async () => {
                     throw new Error('registry import failed: /srv/secret/chunk.js');
                 },
@@ -537,7 +565,7 @@ describe('handleServerFnRequest — throwing resolve (#555)', () => {
             expect(seen).toHaveLength(1);
             expect((seen[0][0] as Error).message).toContain('registry import failed');
             // The name is derived from the symbol alone — the fn never resolved.
-            expect(seen[0][1]).toMatchObject({ symbol: 'broken_fn_00000001', name: 'broken' });
+            expect(seen[0][1]).toMatchObject({ symbol: 'api/broken', name: 'broken' });
         } finally {
             vi.unstubAllEnvs();
         }
@@ -546,7 +574,7 @@ describe('handleServerFnRequest — throwing resolve (#555)', () => {
     it('includes the message in dev', async () => {
         const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
         try {
-            const res = await call('broken_fn_00000001', { args: [] }, {}, {
+            const res = await call('api/broken', { args: [] }, {}, {
                 resolve: async () => {
                     throw new Error('ssrLoadModule: syntax error in cart.server.ts');
                 }
@@ -562,7 +590,7 @@ describe('handleServerFnRequest — throwing resolve (#555)', () => {
     it('a synchronously throwing resolve is masked the same way', async () => {
         vi.stubEnv('NODE_ENV', 'production');
         try {
-            const res = await call('broken_fn_00000001', { args: [] }, {}, {
+            const res = await call('api/broken', { args: [] }, {}, {
                 resolve: () => {
                     throw new Error('sync registry failure');
                 }
@@ -578,7 +606,7 @@ describe('handleServerFnRequest — throwing resolve (#555)', () => {
 
     it('a resolve throwing ServerFnError passes through verbatim, no onError', async () => {
         const onError = vi.fn();
-        const res = await call('warming_fn_00000001', { args: [] }, {}, {
+        const res = await call('api/warming', { args: [] }, {}, {
             resolve: () => {
                 throw new ServerFnError(503, 'registry warming');
             },
@@ -595,7 +623,7 @@ describe('handleServerFnRequest — throwing resolve (#555)', () => {
         vi.stubEnv('NODE_ENV', 'production');
         try {
             const res = await handleServerFnRequest(
-                new Request(`${ORIGIN}/_sigx/fn/read_fn_00000001?args=%5B%5D`, { method: 'GET' }),
+                new Request(`${ORIGIN}/_sigx/fn/api/read?args=%5B%5D`, { method: 'GET' }),
                 {
                     resolve: async () => {
                         throw new Error('chunk missing');
@@ -612,9 +640,11 @@ describe('handleServerFnRequest — throwing resolve (#555)', () => {
         }
     });
 
-    it('a prototype-key symbol against a plain-object registry is a clean 404', async () => {
+    it('a prototype-key symbol against a plain-object `resolve` map is a clean 404', async () => {
         // FNS['__proto__'] is Object.prototype — truthy but carrying no
         // __sigx descriptor, so the unknown-symbol check must catch it.
+        // (The `functions` path has its own own-property guard — see the
+        // registry describe below.)
         const res = await call('__proto__', { args: [] });
         expect(res.status).toBe(404);
         const body = await res.json();
@@ -629,7 +659,7 @@ describe('handleServerFnRequest — throwing resolve (#555)', () => {
                 controller.error(new Error('connection reset'));
             }
         });
-        const request = new Request(`${ORIGIN}/_sigx/fn/add_fn_00000001`, {
+        const request = new Request(`${ORIGIN}/_sigx/fn/api/add`, {
             method: 'POST',
             headers: { 'content-type': 'application/json', origin: ORIGIN },
             body,
@@ -644,6 +674,212 @@ describe('handleServerFnRequest — throwing resolve (#555)', () => {
             error: { message: 'Malformed request body', status: 400 }
         });
         expect(onError).not.toHaveBeenCalled();
+    });
+});
+
+describe('handleServerFnRequest — the `functions` registry (rfc-server-v5 §1.6/§3.2)', () => {
+    // A cache-marked read so the GET side of the skew check is reachable;
+    // `add` covers POST. Both entries carry the build's version tag exactly
+    // as `virtual:sigx-server-fns` emits them.
+    const double = serverFn({
+        cache: { maxAge: 60 },
+        handler: async ({ input: n }: { input: number }) => n * 2
+    });
+    const registry: ServerFnRegistry = {
+        'api/add': { version: 'v1', load: async () => add },
+        'api/double': { version: 'v1', load: async () => double }
+    };
+    const SKEW = { error: { message: 'version skew', status: 409, code: 'version-skew' } };
+
+    const post = (
+        key: string,
+        body: string,
+        options: Partial<ServerFnRequestOptions> = { functions: registry }
+    ): Promise<Response> =>
+        handleServerFnRequest(
+            new Request(`${ORIGIN}/_sigx/fn/${key}`, {
+                method: 'POST',
+                headers: { 'content-type': 'application/json', origin: ORIGIN },
+                body
+            }),
+            options
+        );
+    const get = (
+        key: string,
+        query: string,
+        options: Partial<ServerFnRequestOptions> = { functions: registry }
+    ): Promise<Response> =>
+        handleServerFnRequest(
+            new Request(`${ORIGIN}/_sigx/fn/${key}${query}`, { method: 'GET' }),
+            options
+        );
+
+    it("resolves a key through the entry's load() and serves the call", async () => {
+        const res = await post('api/add', '{"args":[[2,3]]}');
+        expect(res.status).toBe(200);
+        await expect(res.json()).resolves.toEqual({ data: 5 });
+    });
+
+    it('a rejecting load() is the masked 500 with the key-derived info (#555/§5)', async () => {
+        vi.stubEnv('NODE_ENV', 'production');
+        try {
+            const seen: unknown[] = [];
+            const res = await post('api/broken', '{"args":[]}', {
+                functions: {
+                    'api/broken': {
+                        version: 'v1',
+                        load: async () => {
+                            throw new Error('chunk missing after partial deploy');
+                        }
+                    }
+                },
+                onError: (_error, info) => void seen.push(info)
+            });
+            expect(res.status).toBe(500);
+            await expect(res.json()).resolves.toEqual({
+                error: { message: 'Internal error', status: 500 }
+            });
+            expect(seen).toEqual([{ symbol: 'api/broken', name: 'broken', transport: 'wire' }]);
+        } finally {
+            vi.unstubAllEnvs();
+        }
+    });
+
+    it('prototype keys against the registry are structured 404s — the guard lives in the resolver', async () => {
+        for (const key of ['__proto__', 'constructor', 'hasOwnProperty']) {
+            const res = await post(key, '{"args":[]}');
+            expect(res.status).toBe(404);
+            await expect(res.json()).resolves.toEqual({
+                error: { message: `Unknown server function "${key}"`, status: 404 }
+            });
+        }
+    });
+
+    it('a registry entry that is not `{ load }` is an unknown function, not a TypeError', async () => {
+        // Hand-written registries drift; a bare fn where an entry belongs
+        // must 404 like any miss rather than throw into a masked 500.
+        const res = await post('api/add', '{"args":[[1,2]]}', {
+            functions: { 'api/add': add as unknown as ServerFnRegistryEntry }
+        });
+        expect(res.status).toBe(404);
+    });
+
+    it('both `functions` and `resolve` throws — one route table, one source of truth', async () => {
+        await expect(
+            post('api/add', '{"args":[[1,2]]}', { functions: registry, resolve: () => add })
+        ).rejects.toThrow(/EITHER `functions` OR `resolve`/);
+    });
+
+    it('a null `functions` is absent, and a non-object one is rejected — both at construction', async () => {
+        // A JSON-shaped config or a missed optional import hands over null;
+        // it must read as "not provided", never pass the exactly-one gate
+        // and then throw inside the own-property check on the first request.
+        await expect(post('api/add', '{"args":[[1,2]]}', { functions: null as never })).rejects.toThrow(
+            /pass `functions`/
+        );
+        await expect(post('api/add', '{"args":[[1,2]]}', { functions: 'nope' as never })).rejects.toThrow(
+            /must be the registry object/
+        );
+        // …and a mis-typed `resolve` (a JS caller's `resolve: 0`) is refused
+        // the same way, never falling through to the registry path.
+        await expect(post('api/add', '{"args":[[1,2]]}', { resolve: 0 as never })).rejects.toThrow(
+            /`resolve` must be a function/
+        );
+    });
+
+    it('neither `functions` nor `resolve` throws — the endpoint refuses to boot blind', async () => {
+        await expect(post('api/add', '{"args":[[1,2]]}', {})).rejects.toThrow(/pass `functions`/);
+    });
+
+    it('middleware sees the key as info.symbol and its last segment as info.name', async () => {
+        const seen: unknown[] = [];
+        restoreApp();
+        restoreApp = stubServerApp({
+            middleware: [
+                (_rq, fn) => {
+                    seen.push(fn);
+                }
+            ],
+            authenticate: () => ({ id: 'tester' })
+        });
+        const res = await post('api/add', '{"args":[[1,2]]}');
+        expect(res.status).toBe(200);
+        expect(seen).toEqual([{ symbol: 'api/add', name: 'add', transport: 'wire' }]);
+    });
+
+    describe('version skew (§3.2)', () => {
+        it("a POST whose `v` differs from the entry's version is a 409 version-skew envelope", async () => {
+            const res = await post('api/add', '{"args":[[1,2]],"v":"other"}');
+            expect(res.status).toBe(409);
+            expect(res.headers.get('content-type')).toBe('application/json');
+            await expect(res.json()).resolves.toEqual(SKEW);
+        });
+
+        it('a GET whose `v` differs is a 409 with no-store — a CDN must not cache the skew', async () => {
+            const res = await get('api/double', '?a0=1&v=other');
+            expect(res.status).toBe(409);
+            expect(res.headers.get('cache-control')).toBe('no-store');
+            await expect(res.json()).resolves.toEqual(SKEW);
+        });
+
+        it('the 409 wins BEFORE the handler runs', async () => {
+            let ran = 0;
+            const counted = serverFn({
+                handler: async () => {
+                    ran += 1;
+                    return 'ran';
+                }
+            });
+            const res = await post('api/counted', '{"args":[],"v":"other"}', {
+                functions: { 'api/counted': { version: 'v1', load: async () => counted } }
+            });
+            expect(res.status).toBe(409);
+            expect(ran).toBe(0);
+        });
+
+        it('served when `v` matches the entry — POST and GET', async () => {
+            const posted = await post('api/add', '{"args":[[2,3]],"v":"v1"}');
+            expect(posted.status).toBe(200);
+            await expect(posted.json()).resolves.toEqual({ data: 5 });
+            const got = await get('api/double', '?a0=21&v=v1');
+            expect(got.status).toBe(200);
+            await expect(got.json()).resolves.toEqual({ data: 42 });
+        });
+
+        it('served when `v` is absent — a native client or curl is never skew-checked', async () => {
+            const posted = await post('api/add', '{"args":[[2,3]]}');
+            expect(posted.status).toBe(200);
+            const got = await get('api/double', '?a0=4');
+            expect(got.status).toBe(200);
+            await expect(got.json()).resolves.toEqual({ data: 8 });
+        });
+
+        it('served when the entry carries no version — nothing to compare against', async () => {
+            // The type requires a tag (the build always emits one); a
+            // hand-rolled registry without it simply opts out of the check.
+            const untagged = { load: async () => add } as ServerFnRegistryEntry;
+            const res = await post('api/add', '{"args":[[2,3]],"v":"other"}', {
+                functions: { 'api/add': untagged }
+            });
+            expect(res.status).toBe(200);
+            await expect(res.json()).resolves.toEqual({ data: 5 });
+        });
+
+        it('served through the `resolve` escape hatch even with a wrong `v` — no version is known there', async () => {
+            const res = await post('api/add', '{"args":[[2,3]],"v":"other"}', {
+                resolve: (key) => FNS[key] ?? null
+            });
+            expect(res.status).toBe(200);
+            await expect(res.json()).resolves.toEqual({ data: 5 });
+        });
+
+        it('a non-string `v` is ignored, not a 400 and not a 409', async () => {
+            const numeric = await post('api/add', '{"args":[[2,3]],"v":1}');
+            expect(numeric.status).toBe(200);
+            await expect(numeric.json()).resolves.toEqual({ data: 5 });
+            const nested = await post('api/add', '{"args":[[2,3]],"v":{"tag":"other"}}');
+            expect(nested.status).toBe(200);
+        });
     });
 });
 
@@ -662,7 +898,7 @@ describe('handleServerFnRequest — app middleware at the endpoint', () => {
             authenticate: () => ({ id: 'tester' })
         });
         const res = await handleServerFnRequest(
-            new Request(`${ORIGIN}/_sigx/fn/who_fn_00000006`, {
+            new Request(`${ORIGIN}/_sigx/fn/api/whoami`, {
                 method: 'POST',
                 headers: { 'content-type': 'application/json', origin: ORIGIN },
                 body: '{"args":[]}'
@@ -670,7 +906,7 @@ describe('handleServerFnRequest — app middleware at the endpoint', () => {
             { resolve: () => whoami }
         );
         await expect(res.json()).resolves.toEqual({ data: 'andy' });
-        expect(seen).toEqual(['who_fn_00000006']);
+        expect(seen).toEqual(['api/whoami']);
     });
 
     it('a middleware veto becomes the response, cookies included', async () => {
@@ -684,7 +920,7 @@ describe('handleServerFnRequest — app middleware at the endpoint', () => {
             ],
             authenticate: () => ({ id: 'tester' })
         });
-        const res = await call('add_fn_00000001', { args: [[1, 2]] });
+        const res = await call('api/add', { args: [[1, 2]] });
         expect(res.status).toBe(401);
         expect(res.headers.get('set-cookie')).toBe('challenge=1');
         await expect(res.json()).resolves.toEqual({
@@ -721,7 +957,7 @@ describe('handleServerFnRequest — app middleware at the endpoint', () => {
         // exactly once (the endpoint runs the prelude; invoke does not
         // re-run it for wire calls — the ownership contract).
         const res = await handleServerFnRequest(
-            new Request(`${ORIGIN}/_sigx/fn/secret_fn_00000007`, {
+            new Request(`${ORIGIN}/_sigx/fn/api/secret`, {
                 method: 'POST',
                 headers: { 'content-type': 'application/json', origin: ORIGIN },
                 body: '{"args":[]}'
@@ -738,7 +974,7 @@ describe('handleServerFnRequest — pollution reviver', () => {
     it('drops an own __proto__ key from parsed args, with a dev warning (#560)', async () => {
         const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
         try {
-            const res = await call('echo_fn_00000004', undefined, {
+            const res = await call('api/echo', undefined, {
                 body: '{"args":[{"__proto__":{"polluted":true},"ok":1}]}'
             });
             const body = await res.json();
@@ -753,7 +989,7 @@ describe('handleServerFnRequest — pollution reviver', () => {
     it('"constructor" and "prototype" are plain data keys and SURVIVE (#560)', async () => {
         // Dropping them silently ate legitimate payloads — only __proto__ is
         // a prototype swap under assignment; these are ordinary own props.
-        const res = await call('echo_fn_00000004', undefined, {
+        const res = await call('api/echo', undefined, {
             body: '{"args":[{"constructor":"Acme Corp","prototype":"blueprint","ok":1}]}'
         });
         const body = await res.json();
@@ -786,7 +1022,7 @@ describe('handleServerFnRequest — pollution reviver', () => {
         const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
         try {
             const { fn, seen } = captor();
-            const res = await call('capture_fn_00000006', undefined, {
+            const res = await call('api/capture', undefined, {
                 body: '{"args":[{"\\u005f\\u005fproto\\u005f\\u005f":{"polluted":true},"ok":1}]}'
             }, { resolve: () => fn });
 
@@ -805,7 +1041,7 @@ describe('handleServerFnRequest — pollution reviver', () => {
 
     it('"constructor"/"prototype" spelled with \\u escapes survive as data (#560)', async () => {
         const { fn, seen } = captor();
-        const res = await call('capture_fn_00000006', undefined, {
+        const res = await call('api/capture', undefined, {
             body:
                 '{"args":[{"\\u0063onstructor":{"a":1},' +
                 '"\\u0070rototype":{"b":2},"ok":1}]}'
@@ -819,7 +1055,7 @@ describe('handleServerFnRequest — pollution reviver', () => {
 
     it('leaves a body that merely MENTIONS a dangerous name in a value alone', async () => {
         const { fn, seen } = captor();
-        await call('capture_fn_00000006', undefined, {
+        await call('api/capture', undefined, {
             body: '{"args":[{"note":"see the constructor docs","ok":1}]}'
         }, { resolve: () => fn });
 
@@ -832,7 +1068,7 @@ describe('handleServerFnRequest — onError observability seam (#349)', () => {
         vi.stubEnv('NODE_ENV', 'production');
         try {
             const seen: unknown[][] = [];
-            const res = await call('boom_fn_00000002', { args: [] }, {}, {
+            const res = await call('api/boom', { args: [] }, {}, {
                 onError: (error, info, ctx) => {
                     seen.push([error, info, ctx]);
                 }
@@ -843,7 +1079,7 @@ describe('handleServerFnRequest — onError observability seam (#349)', () => {
             });
             expect(seen).toHaveLength(1);
             expect((seen[0][0] as Error).message).toBe('secret internals');
-            expect(seen[0][1]).toMatchObject({ symbol: 'boom_fn_00000002', name: 'boom' });
+            expect(seen[0][1]).toMatchObject({ symbol: 'api/boom', name: 'boom' });
             expect(seen[0][2]).toMatchObject({ locals: {} });
         } finally {
             vi.unstubAllEnvs();
@@ -853,21 +1089,21 @@ describe('handleServerFnRequest — onError observability seam (#349)', () => {
     it('fires in dev too', async () => {
         const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
         const onError = vi.fn();
-        await call('boom_fn_00000002', { args: [] }, {}, { onError });
+        await call('api/boom', { args: [] }, {}, { onError });
         expect(onError).toHaveBeenCalledTimes(1);
         spy.mockRestore();
     });
 
     it('does NOT fire for a ServerFnError (expected, client-visible)', async () => {
         const onError = vi.fn();
-        const res = await call('polite_fn_00000003', { args: [] }, {}, { onError });
+        const res = await call('api/polite', { args: [] }, {}, { onError });
         expect(res.status).toBe(418);
         expect(onError).not.toHaveBeenCalled();
     });
 
     it('is awaited (async work completes before the response returns)', async () => {
         let flag = false;
-        await call('boom_fn_00000002', { args: [] }, {}, {
+        await call('api/boom', { args: [] }, {}, {
             onError: async () => {
                 await new Promise((r) => setTimeout(r, 5));
                 flag = true;
@@ -879,7 +1115,7 @@ describe('handleServerFnRequest — onError observability seam (#349)', () => {
     it('its own throws are swallowed — response unchanged', async () => {
         vi.stubEnv('NODE_ENV', 'production');
         try {
-            const res = await call('boom_fn_00000002', { args: [] }, {}, {
+            const res = await call('api/boom', { args: [] }, {}, {
                 onError: () => {
                     throw new Error('telemetry down');
                 }
@@ -888,7 +1124,7 @@ describe('handleServerFnRequest — onError observability seam (#349)', () => {
             await expect(res.json()).resolves.toEqual({
                 error: { message: 'Internal error', status: 500 }
             });
-            const rejected = await call('boom_fn_00000002', { args: [] }, {}, {
+            const rejected = await call('api/boom', { args: [] }, {}, {
                 onError: async () => Promise.reject(new Error('async telemetry down'))
             });
             expect(rejected.status).toBe(500);
@@ -908,7 +1144,7 @@ describe('handleServerFnRequest — onError observability seam (#349)', () => {
             ],
             authenticate: () => ({ id: 'tester' })
         });
-        const res = await call('add_fn_00000001', { args: [[1, 2]] }, {}, { onError });
+        const res = await call('api/add', { args: [[1, 2]] }, {}, { onError });
         expect(res.status).toBe(500);
         expect(onError).toHaveBeenCalledTimes(1);
     });
@@ -925,12 +1161,12 @@ describe('handleServerFnRequest — timeoutMs (#350)', () => {
         }
     });
     const never = serverFn({ handler: async () => new Promise(() => {}) });
-    FNS['hang_fn_00000006'] = hang;
-    FNS['never_fn_00000007'] = never;
+    FNS['api/hang'] = hang;
+    FNS['api/never'] = never;
 
     it('a hung handler gets a 504 and onError receives the timeout error', async () => {
         const onError = vi.fn();
-        const res = await call('never_fn_00000007', { args: [] }, {}, { timeoutMs: 25, onError });
+        const res = await call('api/never', { args: [] }, {}, { timeoutMs: 25, onError });
         expect(res.status).toBe(504);
         await expect(res.json()).resolves.toEqual({
             error: { message: 'Server function timed out', status: 504 }
@@ -940,19 +1176,19 @@ describe('handleServerFnRequest — timeoutMs (#350)', () => {
     });
 
     it('rq.abortSignal fires on timeout (cooperative handlers cancel cleanly)', async () => {
-        const res = await call('hang_fn_00000006', { args: [] }, {}, { timeoutMs: 25 });
+        const res = await call('api/hang', { args: [] }, {}, { timeoutMs: 25 });
         // The race wins with the 504 even though the handler then resolves.
         expect(res.status).toBe(504);
     });
 
     it('a fast handler under a generous timeout is unaffected', async () => {
-        const res = await call('add_fn_00000001', { args: [[2, 3]] }, {}, { timeoutMs: 5000 });
+        const res = await call('api/add', { args: [[2, 3]] }, {}, { timeoutMs: 5000 });
         expect(res.status).toBe(200);
         await expect(res.json()).resolves.toEqual({ data: 5 });
     });
 
     it('absent timeoutMs keeps the exact current behavior', async () => {
-        const res = await call('add_fn_00000001', { args: [[2, 3]] });
+        const res = await call('api/add', { args: [[2, 3]] });
         expect(res.status).toBe(200);
     });
 });
@@ -986,37 +1222,37 @@ describe('handleServerFnRequest — rich wire serialization (rfc-server §4)', (
         }
     });
     Object.assign(FNS, {
-        date_fn_00000008: returnsDate,
-        map_fn_00000009: returnsMap,
-        undef_fn_0000000a: returnsNestedUndefined,
-        inst_fn_0000000b: returnsInstance,
-        tojson_fn_0000000c: returnsToJson,
-        plain_fn_0000000d: returnsPlain,
-        rich_fn_0000000e: returnsRich,
-        taglike_fn_0000000f: returnsTagLike,
-        echo_fn_00000010: echoes,
-        circular_fn_00000011: returnsCircular
+        'api/date': returnsDate,
+        'api/map': returnsMap,
+        'api/undef': returnsNestedUndefined,
+        'api/inst': returnsInstance,
+        'api/tojson': returnsToJson,
+        'api/plain': returnsPlain,
+        'api/rich': returnsRich,
+        'api/taglike': returnsTagLike,
+        'api/echoes': echoes,
+        'api/circular': returnsCircular
     });
 
     const dataOf = async (symbol: string, args: unknown[] = []): Promise<unknown> =>
         ((await (await call(symbol, { args })).json()) as { data?: unknown }).data;
 
     it('tags a Date instead of flattening it to a string', async () => {
-        expect(await dataOf('date_fn_00000008')).toEqual({
+        expect(await dataOf('api/date')).toEqual({
             createdAt: { $date: 1_700_000_000_000 }
         });
     });
 
     it('tags a Map instead of emitting {}', async () => {
-        expect(await dataOf('map_fn_00000009')).toEqual({ $map: [['a', 1]] });
+        expect(await dataOf('api/map')).toEqual({ $map: [['a', 1]] });
     });
 
     it('keeps a nested undefined property instead of dropping it', async () => {
-        expect(await dataOf('undef_fn_0000000a')).toEqual({ a: { b: { $undef: 0 } } });
+        expect(await dataOf('api/undef')).toEqual({ a: { b: { $undef: 0 } } });
     });
 
     it('covers every built-in tag in one payload', async () => {
-        expect(await dataOf('rich_fn_0000000e')).toEqual({
+        expect(await dataOf('api/rich')).toEqual({
             at: { $date: 5 },
             tags: { $set: ['a'] },
             total: { $bigint: '42' },
@@ -1026,7 +1262,7 @@ describe('handleServerFnRequest — rich wire serialization (rfc-server §4)', (
     });
 
     it('escapes a user object that would be mistaken for a tag', async () => {
-        expect(await dataOf('taglike_fn_0000000f')).toEqual({
+        expect(await dataOf('api/taglike')).toEqual({
             $esc: { $date: 'just a string' }
         });
     });
@@ -1034,42 +1270,42 @@ describe('handleServerFnRequest — rich wire serialization (rfc-server §4)', (
     it('still flattens a class instance and honors toJSON', async () => {
         // Prototypes are NOT recovered — a class instance needs a registered
         // handler, which is what the registry seam is for.
-        expect(await dataOf('inst_fn_0000000b')).toEqual({ items: 3 });
-        expect(await dataOf('tojson_fn_0000000c')).toEqual({ range: [1, 2] });
+        expect(await dataOf('api/inst')).toEqual({ items: 3 });
+        expect(await dataOf('api/tojson')).toEqual({ range: [1, 2] });
     });
 
     it('leaves plain JSON-safe data byte-identical', async () => {
-        expect(await dataOf('plain_fn_0000000d')).toEqual({ ok: [1, 2, { deep: true }] });
+        expect(await dataOf('api/plain')).toEqual({ ok: [1, 2, { deep: true }] });
     });
 
     it('decodes rich types in ARGUMENTS, not just results', async () => {
         // The direction that had no coverage at all before §4 landed.
-        const echoed = await dataOf('echo_fn_00000010', [{ $date: 5 }]);
+        const echoed = await dataOf('api/echoes', [{ $date: 5 }]);
         expect(echoed).toEqual({ $date: 5 });
     });
 
     it('revives an argument into a live instance for the handler', async () => {
         let seen: unknown;
         Object.assign(FNS, {
-            seen_fn_00000012: serverFn({
+            'api/seen': serverFn({
                 handler: async ({ input: v }: { input: unknown }) => {
                     seen = v;
                     return null;
                 }
             })
         });
-        await call('seen_fn_00000012', { args: [{ $map: [['k', { $date: 1 }]] }] });
+        await call('api/seen', { args: [{ $map: [['k', { $date: 1 }]] }] });
         expect(seen).toBeInstanceOf(Map);
         expect((seen as Map<string, unknown>).get('k')).toBeInstanceOf(Date);
     });
 
     it('rejects a malformed encoded argument as a 400, not a 500', async () => {
-        const res = await call('echo_fn_00000010', { args: [{ $bigint: 'not a number' }] });
+        const res = await call('api/echoes', { args: [{ $bigint: 'not a number' }] });
         expect(res.status).toBe(400);
     });
 
     it('still fails on a circular result — the one unsupported shape', async () => {
-        const res = await call('circular_fn_00000011', { args: [] });
+        const res = await call('api/circular', { args: [] });
         expect(res.status).toBe(500);
     });
 
@@ -1087,7 +1323,7 @@ describe('handleServerFnRequest — rich wire serialization (rfc-server §4)', (
             ],
             authenticate: () => ({ id: 'tester' })
         });
-        const res = await call('echo_fn_00000010', { args: [{ $bigint: 'not a number' }] });
+        const res = await call('api/echoes', { args: [{ $bigint: 'not a number' }] });
         expect(res.status).toBe(401);
         // And the #557 rule holds on the post-prelude revive 400 too:
         restoreApp();
@@ -1099,14 +1335,14 @@ describe('handleServerFnRequest — rich wire serialization (rfc-server §4)', (
             ],
             authenticate: () => ({ id: 'tester' })
         });
-        const reject = await call('echo_fn_00000010', { args: [{ $bigint: 'not a number' }] });
+        const reject = await call('api/echoes', { args: [{ $bigint: 'not a number' }] });
         expect(reject.status).toBe(400);
         expect(reject.headers.get('set-cookie')).toBe('trace=1');
     });
 
     it('a body nesting past the codec depth cap is a clean 400 (#559)', async () => {
         const body = `{"args":[${'{"child":'.repeat(300)}1${'}'.repeat(300)}]}`;
-        const res = await call('echo_fn_00000010', undefined, { body });
+        const res = await call('api/echoes', undefined, { body });
         expect(res.status).toBe(400);
         const parsed = await res.json();
         expect(parsed.error.message).toBe('Malformed encoded value in body');
@@ -1118,8 +1354,8 @@ describe('handleServerFnRequest — unvalidated wire-arg warning (#412/#437)', (
         const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
         try {
             const fn = serverFn({ handler: async ({ input: id }: { input: string }) => id });
-            await call('direct_fn_00000013', { args: ['a'] }, {}, { resolve: () => fn });
-            await call('direct_fn_00000013', { args: ['b'] }, {}, { resolve: () => fn });
+            await call('api/direct', { args: ['a'] }, {}, { resolve: () => fn });
+            await call('api/direct', { args: ['b'] }, {}, { resolve: () => fn });
             expect(warn).toHaveBeenCalledOnce();
             expect(warn).toHaveBeenCalledWith(expect.stringContaining('"direct"'));
             expect(warn).toHaveBeenCalledWith(expect.stringContaining('no `input` validator'));
@@ -1135,16 +1371,16 @@ describe('handleServerFnRequest — unvalidated wire-arg warning (#412/#437)', (
 
 describe('response cap — maxResponseBytes (#571)', () => {
     it('no cap configured: a large response passes (the unlimited default)', async () => {
-        const res = await call('echo_fn_00000004', { args: ['x'.repeat(100_000)] });
+        const res = await call('api/echo', { args: ['x'.repeat(100_000)] });
         expect(res.status).toBe(200);
     });
 
     it('under the cap the body is byte-identical to the uncapped JSON', async () => {
         // Pins the bytes-as-body refactor: capping must not change a single
         // byte of a response that fits.
-        const uncapped = await call('echo_fn_00000004', { args: [{ note: 'héllo wörld' }] });
+        const uncapped = await call('api/echo', { args: [{ note: 'héllo wörld' }] });
         const capped = await call(
-            'echo_fn_00000004',
+            'api/echo',
             { args: [{ note: 'héllo wörld' }] },
             {},
             { maxResponseBytes: 10_000 }
@@ -1158,7 +1394,7 @@ describe('response cap — maxResponseBytes (#571)', () => {
         const seen: unknown[] = [];
         try {
             const res = await call(
-                'echo_fn_00000004',
+                'api/echo',
                 { args: ['x'.repeat(2_000)] },
                 {},
                 { maxResponseBytes: 1_000, onError: (error) => void seen.push(error) }
@@ -1178,7 +1414,7 @@ describe('response cap — maxResponseBytes (#571)', () => {
         // .length metric would let this response through.
         const seen: unknown[] = [];
         const res = await call(
-            'echo_fn_00000004',
+            'api/echo',
             { args: ['🧨'.repeat(400)] },
             {},
             { maxResponseBytes: 1_200, onError: (error) => void seen.push(error) }
@@ -1197,7 +1433,7 @@ describe('response cap — maxResponseBytes (#571)', () => {
         });
         try {
             const res = await call(
-                'add_fn_00000001',
+                'api/add',
                 { args: [] },
                 {},
                 {
@@ -1219,7 +1455,7 @@ describe('response cap — maxResponseBytes (#571)', () => {
 
     it('a small ServerFnError.data survives under the cap', async () => {
         const res = await call(
-            'polite_fn_00000003',
+            'api/polite',
             { args: [] },
             {},
             { maxResponseBytes: 10_000 }

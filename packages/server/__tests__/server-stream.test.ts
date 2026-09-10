@@ -481,15 +481,15 @@ describe('__serverStreamStub', () => {
     it('POSTs the envelope lazily and yields each chunk until done', async () => {
         const mock = vi.fn(async () => ndjsonResponse('{"chunk":"a"}\n{"chunk":"b"}\n{"done":1}\n'));
         vi.stubGlobal('fetch', mock);
-        const stub = __serverStreamStub('s_fn_00000001', 'explain', '/_sigx/fn');
+        const stub = __serverStreamStub('api/stream', 'explain', '/_sigx/fn', 'deadbeef');
         const iterable = stub({ topic: 'topic', depth: 2 });
         expect(mock).not.toHaveBeenCalled(); // lazy — no request until iterated
         await expect(collect(iterable)).resolves.toEqual(['a', 'b']);
         expect(mock).toHaveBeenCalledTimes(1);
         const [url, init] = mock.mock.calls[0] as unknown as [string, RequestInit];
-        expect(url).toBe('/_sigx/fn/s_fn_00000001');
+        expect(url).toBe('/_sigx/fn/api/stream');
         expect(init.method).toBe('POST');
-        expect(init.body).toBe('{"args":[{"topic":"topic","depth":2}]}');
+        expect(init.body).toBe('{"args":[{"topic":"topic","depth":2}],"v":"deadbeef"}');
         expect(init.signal).toBeInstanceOf(AbortSignal);
     });
 
@@ -497,7 +497,7 @@ describe('__serverStreamStub', () => {
         vi.stubGlobal('fetch', vi.fn(async () =>
             ndjsonResponse('{"chunk":"a"}\n{"error":{"message":"source gone","status":410}}\n')
         ));
-        const stub = __serverStreamStub('s_fn_00000001', 'explain', '/_sigx/fn');
+        const stub = __serverStreamStub('api/stream', 'explain', '/_sigx/fn', 'deadbeef');
         const seen: unknown[] = [];
         const error = await (async () => {
             for await (const chunk of stub()) seen.push(chunk);
@@ -508,14 +508,32 @@ describe('__serverStreamStub', () => {
         expect((error as Error).message).toBe('source gone');
     });
 
-    it('a non-ok pre-stream response throws like a fn stub (404 = skew hint)', async () => {
+    it('a non-ok pre-stream response throws like a fn stub (404 = not found)', async () => {
         vi.stubGlobal('fetch', vi.fn(async () =>
             new Response('{"error":{"message":"Unknown server function","status":404}}', { status: 404 })
         ));
-        const stub = __serverStreamStub('old_fn_00000001', 'oldStream', '/_sigx/fn');
+        const stub = __serverStreamStub('api/oldStream', 'oldStream', '/_sigx/fn', 'deadbeef');
         const error = await collect(stub()).catch((e: unknown) => e);
         expect(isServerFnError(error)).toBe(true);
         expect((error as { status: number }).status).toBe(404);
+        expect((error as Error).message).toBe('Unknown server function');
+        expect((error as Error).message).not.toContain('stale build');
+    });
+
+    it('a 409 version-skew pre-stream response throws the reload hint (rfc-server-v5 §3.2)', async () => {
+        vi.stubGlobal('fetch', vi.fn(async () =>
+            new Response(
+                '{"error":{"message":"version skew","status":409,"code":"version-skew"}}',
+                { status: 409 }
+            )
+        ));
+        const stub = __serverStreamStub('api/oldStream', 'oldStream', '/_sigx/fn', 'deadbeef');
+        const error = await collect(stub()).catch((e: unknown) => e);
+        expect(isServerFnError(error)).toBe(true);
+        expect(error).toMatchObject({ status: 409, code: 'version-skew' });
+        expect((error as Error).message).toContain('"oldStream"');
+        expect((error as Error).message).toContain('version skew');
+        expect((error as Error).message).toContain('reload');
     });
 
     it('consumer break aborts the fetch', async () => {
@@ -531,7 +549,7 @@ describe('__serverStreamStub', () => {
             });
             return new Response(body, { status: 200 });
         }));
-        const stub = __serverStreamStub('s_fn_00000001', 'endless', '/_sigx/fn');
+        const stub = __serverStreamStub('api/stream', 'endless', '/_sigx/fn', 'deadbeef');
         for await (const chunk of stub()) {
             expect(chunk).toBe(1);
             break;
@@ -541,7 +559,7 @@ describe('__serverStreamStub', () => {
 
     it('a body that ends without a terminator throws (truncation ≠ completion)', async () => {
         vi.stubGlobal('fetch', vi.fn(async () => ndjsonResponse('{"chunk":"a"}\n')));
-        const stub = __serverStreamStub('s_fn_00000001', 'cutOff', '/_sigx/fn');
+        const stub = __serverStreamStub('api/stream', 'cutOff', '/_sigx/fn', 'deadbeef');
         const error = await collect(stub()).catch((e: unknown) => e);
         expect((error as Error).message).toContain('without a done/error terminator');
 
@@ -553,7 +571,7 @@ describe('__serverStreamStub', () => {
 
     it('honors a final terminator line WITHOUT a trailing newline', async () => {
         vi.stubGlobal('fetch', vi.fn(async () => ndjsonResponse('{"chunk":"a"}\n{"done":1}')));
-        const stub = __serverStreamStub('s_fn_00000001', 'noTrailingNl', '/_sigx/fn');
+        const stub = __serverStreamStub('api/stream', 'noTrailingNl', '/_sigx/fn', 'deadbeef');
         await expect(collect(stub())).resolves.toEqual(['a']);
 
         vi.stubGlobal('fetch', vi.fn(async () =>
@@ -578,7 +596,7 @@ describe('__serverStreamStub', () => {
             });
             return new Response(body, { status: 200 });
         }));
-        const stub = __serverStreamStub('s_fn_00000001', 'utf8', '/_sigx/fn');
+        const stub = __serverStreamStub('api/stream', 'utf8', '/_sigx/fn', 'deadbeef');
         await expect(collect(stub())).resolves.toEqual(['héllo']);
     });
 
@@ -589,13 +607,13 @@ describe('__serverStreamStub', () => {
             endpoint: 'https://api.example.com/_sigx/fn',
             headers: { authorization: 'Bearer abc' }
         });
-        const stub = __serverStreamStub('s_fn_00000001', 'explain', '/_sigx/fn');
+        const stub = __serverStreamStub('api/stream', 'explain', '/_sigx/fn', 'deadbeef');
         await collect(stub());
         const [url, init] = mock.mock.calls[0] as unknown as [
             string,
             RequestInit & { headers: Record<string, string> }
         ];
-        expect(url).toBe('https://api.example.com/_sigx/fn/s_fn_00000001');
+        expect(url).toBe('https://api.example.com/_sigx/fn/api/stream');
         expect(init.headers.authorization).toBe('Bearer abc');
         expect(init.headers['content-type']).toBe('application/json');
     });
@@ -604,7 +622,7 @@ describe('__serverStreamStub', () => {
         const mock = vi.fn(async () => ndjsonResponse('{"done":1}\n'));
         vi.stubGlobal('fetch', mock);
         configureServerFn({ headers: { authorization: 'Bearer abc', 'x-app': 'transport' } });
-        const stub = __serverStreamStub('s_fn_00000001', 'explain', '/_sigx/fn');
+        const stub = __serverStreamStub('api/stream', 'explain', '/_sigx/fn', 'deadbeef');
         await collect(
             stub.with({
                 headers: { 'x-app': 'per-call', 'x-trace-id': 't1', 'Content-Type': 'text/plain' }
@@ -635,7 +653,7 @@ describe('__serverStreamStub', () => {
             });
             return new Response(body, { status: 200 });
         }));
-        const stub = __serverStreamStub('s_fn_00000001', 'endless', '/_sigx/fn');
+        const stub = __serverStreamStub('api/stream', 'endless', '/_sigx/fn', 'deadbeef');
         for await (const chunk of stub.with({ signal: outer.signal })()) {
             expect(chunk).toBe(1);
             expect(observed?.aborted).toBe(false);
@@ -660,7 +678,7 @@ describe('__serverStreamStub', () => {
             });
             return new Response(body, { status: 200 });
         }));
-        const stub = __serverStreamStub('s_fn_00000001', 'endless', '/_sigx/fn');
+        const stub = __serverStreamStub('api/stream', 'endless', '/_sigx/fn', 'deadbeef');
         for await (const chunk of stub.with({ signal: outer.signal })()) {
             expect(chunk).toBe(1);
             break;
@@ -672,7 +690,7 @@ describe('__serverStreamStub', () => {
     it('.with({ context }) dev-warns on the client — a stub sends nothing', async () => {
         const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
         vi.stubGlobal('fetch', vi.fn(async () => ndjsonResponse('{"done":1}\n')));
-        const stub = __serverStreamStub('s_fn_00000001', 'explain', '/_sigx/fn');
+        const stub = __serverStreamStub('api/stream', 'explain', '/_sigx/fn', 'deadbeef');
         await collect(stub.with({ context: new Request('https://example.com/feed') })());
         expect(warn).toHaveBeenCalledTimes(1);
         expect(warn.mock.calls[0][0]).toContain('.with({ context }) is ignored on the client');
@@ -682,7 +700,7 @@ describe('__serverStreamStub', () => {
         vi.stubGlobal('fetch', vi.fn(async () =>
             ndjsonResponse('{"chunk":{"__proto__":{"polluted":true},"ok":1}}\n{"done":1}\n')
         ));
-        const stub = __serverStreamStub('s_fn_00000001', 'echo', '/_sigx/fn');
+        const stub = __serverStreamStub('api/stream', 'echo', '/_sigx/fn', 'deadbeef');
         await expect(collect(stub())).resolves.toEqual([{ ok: 1 }]);
     });
 });

@@ -8,7 +8,8 @@
  *    resume handler chunks reach server functions through the generated
  *    STUBS (the resume + serverFn composition, zero extractor changes).
  * 2. SSR build: the registry chunk (`sigx-server-fns.js`) is emitted with
- *    symbol → lazy-import records over the REAL modules.
+ *    key → `{ version, load }` records over the REAL modules (rfc-server-v5
+ *    §4.3).
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -111,15 +112,19 @@ export const Widget = component(() => {
                 `export const __chunks = [];\n` +
                 `export function registerComponentChunk(name, loader) { __chunks.push(name); }\n`
         });
+        // The wrapper carries the `__sigx` descriptor the endpoint reads
+        // (kind/invoke/anon/form); the stub factory takes the rfc-server-v5
+        // §1.4 positionals: key, name, endpoint, version, flags?.
         stub('@sigx/server', {
             'index.js':
-                `export const serverFn = (impl) => Object.assign(` +
-                `(...args) => impl({}, ...args), ` +
-                `{ __sigxFn: (rq, info, args) => impl(rq, ...args), __sigxName: impl.name || '' });\n`,
+                `export const serverFn = (opts) => Object.assign(` +
+                `(...args) => opts.handler({ input: args[0], rq: {} }), ` +
+                `{ __sigx: { kind: 'fn', invoke: (rq, args) => opts.handler({ input: args[0], rq }), anon: true, form: false } });\n`,
             'client.js':
-                `export function __serverFnStub(symbol, name, base) {\n` +
-                `    return async (...args) => { globalThis.__stubCalls = (globalThis.__stubCalls ?? []).concat(symbol); };\n` +
+                `export function __serverFnStub(key, name, endpoint, version, flags) {\n` +
+                `    return async (...args) => { globalThis.__stubCalls = (globalThis.__stubCalls ?? []).concat(key + '@' + version); };\n` +
                 `}\n` +
+                `export function __serverStreamStub(key, name, endpoint, version) { return async function* () {}; }\n` +
                 `export function __serverOnly(name, file) { return () => { throw new Error(name); }; }\n`
         });
     }, 60_000);
@@ -157,10 +162,19 @@ export const Widget = component(() => {
             expect(code).not.toContain(SECRET);
         }
 
-        // (b) The stubs (with their content-hashed symbols) are in the bundle.
+        // (b) The stubs — keyed by the stable key and carrying this build's
+        //     version tag (rfc-server-v5 §1.4) — are in the bundle. Minified
+        //     (the minifier picks its own string quotes — backticks today),
+        //     so only the string positionals are pinned, quote-agnostically.
         const joined = allCode.join('\n');
-        expect(joined).toMatch(/addToCart_fn_[0-9a-f]{8}/);
-        expect(joined).toMatch(/stamp_fn_[0-9a-f]{8}/); // inline form
+        const q = '[`"\']';
+        const stubCall = (key: string, name: string): RegExp =>
+            new RegExp(
+                `${q}${key.replace(/[./]/g, '\\$&')}${q},\\s*${q}${name}${q},\\s*${q}/_sigx/fn${q},\\s*${q}[0-9a-f]{8}${q}`
+            );
+        expect(joined).toMatch(stubCall('src/api.server.ts/addToCart', 'addToCart'));
+        expect(joined).toMatch(stubCall('src/Widget.tsx/stamp', 'stamp')); // inline form
+        expect(joined).not.toMatch(/_fn_[0-9a-f]{8}/); // the hashed twin is gone
         expect(joined).toContain('__stubCalls'); // the stub impl was bundled
 
         // (c) The resume handler chunk reaches addToCart through the stubbed
@@ -180,7 +194,7 @@ export const Widget = component(() => {
         expect(handlerCode).not.toContain(SECRET);
     }, 60_000);
 
-    it('SSR build: emits the registry chunk with symbol → import records', async () => {
+    it('SSR build: emits the registry chunk with key → { version, load } records', async () => {
         const { build } = await import('vite');
         await build({
             root,
@@ -194,10 +208,14 @@ export const Widget = component(() => {
         expect(existsSync(registryPath)).toBe(true);
         const registry = readFileSync(registryPath, 'utf-8');
         expect(registry).toContain('serverFns');
-        expect(registry).toMatch(/addToCart_fn_[0-9a-f]{8}/);
+        expect(registry).toMatch(
+            /\["src\/api\.server\.ts\/addToCart"\]:\s*\{\s*version:\s*"[0-9a-f]{8}",\s*load:/
+        );
         // Inline fns resolve through the mangled export of the SAME module.
-        expect(registry).toMatch(/stamp_fn_[0-9a-f]{8}/);
+        expect(registry).toMatch(/\["src\/Widget\.tsx\/stamp"\]:\s*\{\s*version:\s*"[0-9a-f]{8}",\s*load:/);
         expect(registry).toContain('__sigxSrvFn_stamp');
+        // One identity per function: no hashed twin registered beside the key.
+        expect(registry).not.toMatch(/_fn_[0-9a-f]{8}/);
         // The registry reaches the REAL module (its body, not a stub).
         const files: string[] = [];
         const walk = (dir: string) => {
@@ -217,6 +235,13 @@ describe('sigxServer end-to-end — rev 2: role:client + shared package (#320)',
     let solution: string;
     const STABLE = '@acme/shared/src/cart.server.ts/addToCart';
     const ENDPOINT = 'https://api.example.com/_sigx/fn';
+    /** The stub call the native build bakes: key, name, endpoint, version
+     *  (rfc-server-v5 §1.4) — group 1 is the version tag. Quote-agnostic:
+     *  a minifier may respell the string literals. */
+    const STUB =
+        /[`"']@acme\/shared\/src\/cart\.server\.ts\/addToCart[`"'],\s*[`"']addToCart[`"'],\s*[`"']https:\/\/api\.example\.com\/_sigx\/fn[`"'],\s*[`"']([0-9a-f]{8})[`"']/;
+    /** The server build's registry record for it — group 1 is the version. */
+    const RECORD = /\["@acme\/shared\/src\/cart\.server\.ts\/addToCart"\]:\s*\{\s*version:\s*"([0-9a-f]{8})"/;
 
     const outputFiles = (dir: string): string[] => {
         const files: string[] = [];
@@ -266,11 +291,11 @@ export const addToCart = serverFn({
             exports: { '.': './index.js', './client': './client.js' }
         }));
         writeFileSync(join(dir, 'index.js'),
-            `export const serverFn = (impl) => Object.assign(` +
-            `(...args) => impl({}, ...args), ` +
-            `{ __sigxFn: (rq, info, args) => impl(rq, ...args), __sigxName: impl.name || '' });\n`);
+            `export const serverFn = (opts) => Object.assign(` +
+            `(...args) => opts.handler({ input: args[0], rq: {} }), ` +
+            `{ __sigx: { kind: 'fn', invoke: (rq, args) => opts.handler({ input: args[0], rq }), anon: true, form: false } });\n`);
         writeFileSync(join(dir, 'client.js'),
-            `export function __serverFnStub(symbol, name, endpoint) { return async () => symbol + endpoint; }\n` +
+            `export function __serverFnStub(key, name, endpoint, version, flags) { return async () => key + '@' + version + endpoint; }\n` +
             `export function __serverOnly(name, file) { return () => { throw new Error(name); }; }\n`);
     }, 60_000);
 
@@ -278,7 +303,7 @@ export const addToCart = serverFn({
         rmSync(solution, { recursive: true, force: true });
     });
 
-    it("role:'client' build (ssr-target): stable-symbol stubs, baked endpoint, no bodies, no registry", async () => {
+    it("role:'client' build (ssr-target): stable-key stubs, baked endpoint, no bodies, no registry", async () => {
         const { build } = await import('vite');
         const root = join(solution, 'apps/native');
         await build({
@@ -300,13 +325,15 @@ export const addToCart = serverFn({
             .map((f) => readFileSync(f, 'utf-8'))
             .join('\n');
         // The ssr-named environment STILL got stubs (role:'client'), baked
-        // with the stable symbol and the absolute endpoint.
+        // with the stable key, the absolute endpoint and a version tag.
         expect(combined).toContain(STABLE);
         expect(combined).toContain(ENDPOINT);
+        expect(combined).toMatch(STUB);
+        expect(combined).not.toMatch(/_fn_[0-9a-f]{8}/);
         expect(combined).not.toContain(SECRET);
     }, 60_000);
 
-    it("server app build: registry dual-registers the SAME stable symbol (cross-build coherence)", async () => {
+    it("server app build: the registry carries the SAME key AND version the native build baked (cross-build coherence)", async () => {
         const { build } = await import('vite');
         const root = join(solution, 'apps/server');
         await build({
@@ -319,11 +346,24 @@ export const addToCart = serverFn({
         const registryPath = join(root, 'dist', 'sigx-server-fns.js');
         expect(existsSync(registryPath)).toBe(true);
         const registry = readFileSync(registryPath, 'utf-8');
-        // The exact stable symbol the native build baked into its stubs —
-        // an installed app keeps working across this backend's redeploys.
+        // The exact stable key the native build baked into its stubs — an
+        // installed app keeps working across this backend's redeploys.
         expect(registry).toContain(JSON.stringify(STABLE));
-        // …and the hashed twin is registered too (web skew detection).
-        expect(registry).toMatch(/addToCart_fn_[0-9a-f]{8}/);
+        const record = RECORD.exec(registry);
+        if (!record) throw new Error(`no { version, load } record for ${STABLE} in:\n${registry}`);
+        // …and the SAME version: two app builds of one solution (different
+        // roots) hash the shared definition identically, so the native
+        // client is not "skew" to this backend. The native dist is the
+        // previous test's output (same describe, in order).
+        const native = outputFiles(join(solution, 'apps/native/dist'))
+            .filter((f) => /\.(js|mjs)$/.test(f))
+            .map((f) => readFileSync(f, 'utf-8'))
+            .join('\n');
+        const stub = STUB.exec(native);
+        if (!stub) throw new Error(`no stub call for ${STABLE} in the native build`);
+        expect(record[1]).toBe(stub[1]);
+        // No hashed twin registered beside the key.
+        expect(registry).not.toMatch(/_fn_[0-9a-f]{8}/);
         // The real body ships in this build.
         const combined = outputFiles(join(root, 'dist'))
             .filter((f) => /\.(js|mjs)$/.test(f))

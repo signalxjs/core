@@ -188,7 +188,7 @@ import { serverFns, serverFnBase } from 'virtual:sigx-server-fns';
 if (matchesServerFn(request, serverFnBase)) {
   return handleServerFnRequest(request, {
     base: serverFnBase,
-    resolve: (symbol) => serverFns[symbol]?.() ?? null
+    functions: serverFns
   });
 }
 ```
@@ -201,7 +201,7 @@ if (matchesServerFn(request, serverFnBase)) {
 | `exclude` | `string \| string[]` | `['**/node_modules/**', '**/dist/**']` | Excluded from matching. |
 | `base` | `string` | `'/_sigx/fn'` | The **server mount path** — the dev middleware's and `createServerFnHandler`'s prefix. Exported back to your entry as `serverFnBase`; pass it to `matchesServerFn` and the handler so all three agree. |
 | `endpoint` | `string` | `base` | The **fetch target** baked into stubs; an absolute URL for a build that calls a remote server. Call-time precedence: `configureServerFn` > this > `base`. |
-| `role` | `'auto' \| 'client'` | `'auto'` | `'auto'` swaps stubs in the Vite `client` environment only. `'client'` declares the whole build a remote-server client (lynx, terminal): every environment gets stubs, baked with **stable** symbols, and no registry is emitted — there is no server in this build. |
+| `role` | `'auto' \| 'client'` | `'auto'` | `'auto'` swaps stubs in the Vite `client` environment only. `'client'` declares the whole build a remote-server client (lynx, terminal): every environment gets stubs and no registry is emitted — there is no server in this build. (Stub identity is the same stable key under every role.) |
 | `scan` | `string[]` | `[]` | Extra directories scanned for server modules — shared workspace packages outside the Vite root. |
 | `serverApp` | `string` | — | The app's server-app module (`'/src/server-app.ts'`) — it calls `createServerApp(...)` at module scope (rfc-server-v4 §3.4). Dev loads it eagerly through the SSR module runner and re-evaluates it after edits, so middleware/authentication/authorization/posture apply to the dev endpoint AND in-process SSR calls without a restart; a production build injects one side-effect import of it at the top of `virtual:sigx-server-fns`. Without it the fail-closed runtime denies rather than opens. |
 | `requireAuthorization` | `boolean \| 'warn'` | `true` | The access gate (rfc-server-v4 §5): every extracted `serverFn`/`serverStream` must have a decided access policy — declare `authorize: [...]`, declare the literal `allowAnonymous: true`, or inherit the app default via a configured `serverApp`. A bare one with no app is a build error naming its file, line and the remedies. `'warn'` lists them without failing; `false` opts out deliberately. |

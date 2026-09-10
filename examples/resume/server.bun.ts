@@ -22,7 +22,7 @@ import { createBoundaryRefresh } from '@sigx/resume/server';
 // it is built below and needs the manifest here.
 import { template, assets, resumeManifest } from './dist/server/sigx-app.js';
 import { createApp, refreshComponents } from './dist/server/entry-server.js';
-import { serverFns } from './dist/server/sigx-server-fns.js';
+import { serverFns, serverFnBase } from './dist/server/sigx-server-fns.js';
 import { join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -78,10 +78,13 @@ Bun.serve({
             }
         }
 
-        if (matchesServerFn(request)) {
+        if (matchesServerFn(request, serverFnBase)) {
             return handleServerFnRequest(request, {
+                // The build's own mount path, so the router above and the
+                // handler here cannot disagree (#563).
+                base: serverFnBase,
                 // The registry is explicitly passed, never ambient.
-                resolve: (symbol) => serverFns[symbol]?.() ?? null,
+                functions: serverFns,
                 renderBoundaries
             });
         }

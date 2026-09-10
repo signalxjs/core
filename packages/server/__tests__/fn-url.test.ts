@@ -134,4 +134,11 @@ describe('encodeReadQuery / decodeReadQuery', () => {
         expect(decodeReadQuery(new URLSearchParams('a0=1&utm_source=x'))).toEqual([1]);
         expect(decodeReadQuery(new URLSearchParams('utm_source=x'))).toBeNull();
     });
+
+    it('ignores the version tag `v` (rfc-server-v5 §3.2) — the endpoint reads it, not the decoder', () => {
+        expect(decodeReadQuery(new URLSearchParams('a0=1&v=0badf00d'))).toEqual([1]);
+        expect(decodeReadQuery(new URLSearchParams('a0=1&a1=two&v=0badf00d'))).toEqual([1, 'two']);
+        // `v` alone (a no-argument read) is the blob path's business: null.
+        expect(decodeReadQuery(new URLSearchParams('v=0badf00d'))).toBeNull();
+    });
 });

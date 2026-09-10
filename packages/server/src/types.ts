@@ -407,10 +407,12 @@ export interface ServerFnDescriptor {
      */
     readonly read?: { readonly cacheControl: string };
     /**
-     * Present iff `invalidates` was declared (rfc-server §6.2): VALIDATED
-     * input (stashed on the request context by the pipeline) + settled
-     * result → patterns the endpoint RESOLVES (fn refs → stable-key tuples)
-     * and attaches to the envelope as `$cache.invalidates`.
+     * Present iff `invalidates` was declared (rfc-server §6.2): the input
+     * the handler received (validated when the definition declares `input`,
+     * otherwise the raw wire argument — stashed on the request context by
+     * the pipeline) + settled result → patterns the endpoint RESOLVES (fn
+     * refs → stable-key tuples) and attaches to the envelope as
+     * `$cache.invalidates`.
      */
     readonly invalidates?: (
         input: unknown,
@@ -433,6 +435,28 @@ export interface WrappedServerFn {
      */
     __sigxKey?: string;
 }
+
+/**
+ * One registry record — what `virtual:sigx-server-fns` emits per function
+ * (rfc-server-v5 §4.3), keyed by the stable key `<id>/<name>`.
+ */
+export interface ServerFnRegistryEntry {
+    /** Lazy import of the wrapped function. */
+    load(): Promise<unknown>;
+    /**
+     * This build's version tag for the function — hash8 of its normalized
+     * definition (rfc-server-v5 §4.2). The stub sends it with every call;
+     * the endpoint answers 409 `version-skew` when a client's differs.
+     */
+    readonly version: string;
+}
+
+/**
+ * Key (`<id>/<name>`) → entry. Null-prototype when emitted by the build, so
+ * a wire key named `__proto__` never resolves to an inherited member; the
+ * endpoint's resolver applies its own own-property check regardless.
+ */
+export type ServerFnRegistry = Record<string, ServerFnRegistryEntry>;
 
 /**
  * Minimal structural typing of the Standard Schema spec

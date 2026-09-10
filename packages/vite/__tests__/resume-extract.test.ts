@@ -703,13 +703,13 @@ export const Toasty = component((ctx) => {
 });
 
 describe('zero-JS form actions — action/method stamping (rfc-server §6.4, #312)', () => {
-    const SYMBOL = 'app/api.server.ts/submitFeedback';
-    // #355: the stable symbol's slashes are REAL path separators, so the
-    // stamped action carries the symbol verbatim — no `%2F`, no `%23`.
-    const ENCODED = SYMBOL;
+    const KEY = 'app/api.server.ts/submitFeedback';
+    // #355: the key's slashes are REAL path separators, so the
+    // stamped action carries the key verbatim — no `%2F`, no `%23`.
+    const ENCODED = KEY;
     const resolveServerFn = (specifier: string, exportName: string) =>
         specifier === './api.server' && exportName === 'submitFeedback'
-            ? { stableSymbol: SYMBOL, form: true }
+            ? { key: KEY, form: true }
             : null;
 
     const FEEDBACK = (body: string) => `
@@ -800,7 +800,7 @@ export const Plain = component(() => {
         it('reports nothing when the import is not form-marked', () => {
             expect(
                 formMarkedImportsOf(FEEDBACK('() => submitFeedback({})'), '/src/Feedback.tsx',
-                    () => ({ stableSymbol: 'x', form: false }))
+                    () => ({ key: 'x', form: false }))
             ).toEqual([]);
         });
 
@@ -811,7 +811,7 @@ import * as api from './api.server';
 import def from './api.server';
 export const X = () => null;
 `;
-            expect(formMarkedImportsOf(code, '/src/X.tsx', () => ({ stableSymbol: 'x', form: true }))).toEqual([]);
+            expect(formMarkedImportsOf(code, '/src/X.tsx', () => ({ key: 'x', form: true }))).toEqual([]);
         });
     });
 
@@ -838,7 +838,7 @@ export const X = () => null;
         const result = extractResumeHandlers(
             FEEDBACK(`() => submitFeedback({})`),
             '/src/Feedback.tsx',
-            { resolveServerFn: () => ({ stableSymbol: SYMBOL, form: false }) }
+            { resolveServerFn: () => ({ key: KEY, form: false }) }
         );
         expect(result.code).not.toContain('action=');
         expect(result.warnings).toHaveLength(0);
@@ -877,7 +877,7 @@ export const Two = component((ctx) => {
     return () => <form onSubmit={(e) => { e.preventDefault(); submitFeedback({}); submitOther({}); }}>x</form>;
 });
 `, '/src/Two.tsx', {
-            resolveServerFn: (_spec, name) => ({ stableSymbol: `app#${name}`, form: true })
+            resolveServerFn: (_spec, name) => ({ key: `app#${name}`, form: true })
         });
         expect(result.code).not.toContain('action=');
         expect(result.warnings).toHaveLength(1);
@@ -924,7 +924,7 @@ export const Spread = component((ctx) => {
     return () => <form {...extra} onSubmit={(e) => { e.preventDefault(); submitFeedback({}); }}>x</form>;
 });
 `, '/src/Spread.tsx', {
-            resolveServerFn: () => ({ stableSymbol: 'app#submitFeedback', form: true })
+            resolveServerFn: () => ({ key: 'app#submitFeedback', form: true })
         });
         expect(result.code).not.toContain('action=');
         expect(result.warnings).toHaveLength(1);
@@ -943,7 +943,7 @@ export const Def = component((ctx) => {
 `, '/src/Def.tsx', {
             resolveServerFn: (spec, name) => {
                 resolved.push(`${spec}#${name}`);
-                return { stableSymbol: 'should-not-happen', form: true };
+                return { key: 'should-not-happen', form: true };
             }
         });
         expect(result.code).not.toContain('action=');

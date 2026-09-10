@@ -30,7 +30,7 @@ function makeProject(
         mkdirSync(join(root, rel, '..'), { recursive: true });
         writeFileSync(join(root, rel), content);
     }
-    // These tests are about EXTRACTION mechanics — symbols, stubs, registry
+    // These tests are about EXTRACTION mechanics — keys, stubs, registry
     // keys — so the guard gate (#489, default ON) is opt-in here rather than
     // noise on every fixture. Its own behaviour is covered below.
     const plugin = sigxServer({ requireAuthorization: false, ...options }) as any;
@@ -56,7 +56,7 @@ describe('sigxServer — transform', () => {
         );
         expect(result.code).toContain(`from '@sigx/server/client'`);
         expect(result.code).toMatch(
-            /__serverFnStub\("addToCart_fn_[0-9a-f]{8}", "addToCart", "\/_sigx\/fn", "src\/cart\.server\.ts\/addToCart"\)/
+            /__serverFnStub\("src\/cart\.server\.ts\/addToCart", "addToCart", "\/_sigx\/fn", "[0-9a-f]{8}"\)/
         );
         expect(result.code).toContain('__serverOnly("auditLog"');
         expect(result.code).not.toContain('db.cart.add');
@@ -137,8 +137,8 @@ describe('sigxServer — path-separator normalization (#324)', () => {
             );
             const registry = plugin.load(plugin.resolveId('virtual:sigx-server-fns'));
             // One record — an unnormalized second map entry would emit the
-            // same symbol key twice.
-            expect(registry.match(/\["addToCart_fn_[0-9a-f]{8}"\]:/g)).toHaveLength(1);
+            // same key twice.
+            expect(registry.match(/\["src\/cart\.server\.ts\/addToCart"\]:/g)).toHaveLength(1);
         } finally {
             rmSync(root, { recursive: true, force: true });
         }
@@ -155,15 +155,15 @@ describe('sigxServer — virtual registry', () => {
 
     afterAll(() => rmSync(root, { recursive: true, force: true }));
 
-    it('resolves and loads symbol → lazy-import records', () => {
+    it('resolves and loads key → { version, load } records', () => {
         const resolved = plugin.resolveId('virtual:sigx-server-fns');
         expect(resolved).toBe('\0virtual:sigx-server-fns');
         const code = plugin.load(resolved);
         expect(code).toContain('export const serverFns = {');
         expect(code).toMatch(
-            /\["addToCart_fn_[0-9a-f]{8}"\]: \(\) => import\("\/src\/cart\.server\.ts"\)\.then\(m => m\["addToCart"\]\)/
+            /\["src\/cart\.server\.ts\/addToCart"\]: \{ version: "[0-9a-f]{8}", load: \(\) => import\("\/src\/cart\.server\.ts"\)\.then\(m => m\["addToCart"\]\) \},/
         );
-        // Only serverFn exports register — server-only values have no symbol.
+        // Only serverFn exports register — server-only values have no key.
         expect(code).not.toContain('auditLog');
     });
 
@@ -191,10 +191,10 @@ describe('sigxServer — virtual registry', () => {
         }
     });
 
-    it('emits a null-prototype registry — prototype-key symbols miss cleanly (#555)', () => {
+    it('emits a null-prototype registry — prototype-named keys miss cleanly (#555)', () => {
         const code = plugin.load(plugin.resolveId('virtual:sigx-server-fns'));
         // The literal `__proto__: null` must LEAD the object so every
-        // adapter's `serverFns[symbol]` lookup has no inherited chain.
+        // registry lookup (`functions[key]`) has no inherited chain.
         expect(code).toContain('__proto__: null,');
         // Behavior pin: evaluate the emitted module text. The lazy `import()`
         // records are parse-legal inside Function and never invoked.
@@ -255,7 +255,7 @@ describe('sigxServer — the moved-mount lint (#563)', () => {
 import { handleServerFnRequest, matchesServerFn } from '@sigx/server/server';
 import { serverFns } from 'virtual:sigx-server-fns';
 export default { fetch(request) {
-    if (matchesServerFn(request)) return handleServerFnRequest(request, { resolve: (s) => serverFns[s]?.() ?? null });
+    if (matchesServerFn(request)) return handleServerFnRequest(request, { functions: serverFns });
     return new Response('doc');
 } };
 `;
@@ -334,7 +334,7 @@ describe('sigxServer — inline extraction (non-matching files)', () => {
     it('client env: swaps module-scope declarations for stubs', () => {
         const result = plugin.transform.call(ctx('client'), INLINE, join(root, 'src/Page.tsx'));
         expect(result.code).toContain('__serverFnStub(');
-        expect(result.code).toMatch(/ping_fn_[0-9a-f]{8}/);
+        expect(result.code).toMatch(/__serverFnStub\("src\/Page\.tsx\/ping", "ping", "\/_sigx\/fn", "[0-9a-f]{8}"\)/);
         expect(result.code).not.toContain('async (rq) => 1');
     });
 
@@ -344,11 +344,11 @@ describe('sigxServer — inline extraction (non-matching files)', () => {
         expect(result.code).toContain('export const __sigxSrvFn_ping = ping;');
     });
 
-    it('registers inline symbols in the registry under the mangled export', () => {
+    it('registers inline keys in the registry under the mangled export', () => {
         plugin.transform.call(ctx('client'), INLINE, join(root, 'src/Page.tsx'));
         const registry = plugin.load(plugin.resolveId('virtual:sigx-server-fns'));
         expect(registry).toMatch(
-            /\["ping_fn_[0-9a-f]{8}"\]: \(\) => import\("\/src\/Page\.tsx"\)\.then\(m => m\["__sigxSrvFn_ping"\]\)/
+            /\["src\/Page\.tsx\/ping"\]: \{ version: "[0-9a-f]{8}", load: \(\) => import\("\/src\/Page\.tsx"\)\.then\(m => m\["__sigxSrvFn_ping"\]\) \},/
         );
     });
 
@@ -476,7 +476,7 @@ describe('sigxServer — inline extraction (non-matching files)', () => {
             file
         );
         // Second pass over our own output: no re-transform, and the registry
-        // still knows the symbol afterwards.
+        // still knows the key afterwards.
         const echo = plugin.transform.call(
             { environment: { name: 'client' }, warn: () => {} },
             first.code,
@@ -484,7 +484,7 @@ describe('sigxServer — inline extraction (non-matching files)', () => {
         );
         expect(echo).toBeNull();
         const registry = plugin.load(plugin.resolveId('virtual:sigx-server-fns'));
-        expect(registry).toMatch(/addToCart_fn_[0-9a-f]{8}/);
+        expect(registry).toMatch(/\["src\/cart\.server\.ts\/addToCart"\]: \{ version: "[0-9a-f]{8}"/);
     });
 
     it('does not warn when only other values are imported', () => {
@@ -513,7 +513,7 @@ describe('sigxServer — inline extraction (non-matching files)', () => {
     });
 });
 
-describe('sigxServer — rev 2: role, endpoint, stable symbols, scan (#320)', () => {
+describe('sigxServer — rev 2: role, endpoint, stable keys, scan (#320)', () => {
     // A named package.json in the project root makes stable ids
     // deterministic (no dependence on manifests above the temp dir).
     const APP = { 'package.json': '{"name": "@test/app"}', 'src/cart.server.ts': CART };
@@ -542,20 +542,44 @@ describe('sigxServer — rev 2: role, endpoint, stable symbols, scan (#320)', ()
         });
     });
 
-    it('dual-registers hashed AND stable symbols to the same import record', () => {
-        const { plugin, root } = makeProject(APP);
-        try {
-            const registry = plugin.load(plugin.resolveId('virtual:sigx-server-fns'));
-            expect(registry).toMatch(/\["addToCart_fn_[0-9a-f]{8}"\]: \(\) => import\("\/src\/cart\.server\.ts"\)/);
-            expect(registry).toContain(
-                `["@test/app/src/cart.server.ts/addToCart"]: () => import("/src/cart.server.ts").then(m => m["addToCart"])`
-            );
-        } finally {
-            rmSync(root, { recursive: true, force: true });
-        }
+    it('registers ONE record per key — { version, load } — and the version hashes the definition, not its spelling (rfc-server-v5 §4.2/§4.3)', () => {
+        // The former hashed twin (`<name>_fn_<hash8>`) is gone: the key is
+        // the only route, and what used to be the twin is now the `version`
+        // tag beside the loader. That tag is seeded from the parsed call, so
+        // a reformat or a comment keeps it while a semantic edit bumps it —
+        // the property that makes a 409 mean "different build", never
+        // "different whitespace".
+        const RECORD =
+            /\["@test\/app\/src\/cart\.server\.ts\/addToCart"\]: \{ version: "([0-9a-f]{8})", load: \(\) => import\("\/src\/cart\.server\.ts"\)\.then\(m => m\["addToCart"\]\) \},/;
+        const versionOf = (source: string): string => {
+            const { plugin, root } = makeProject({ ...APP, 'src/cart.server.ts': source });
+            try {
+                const registry = plugin.load(plugin.resolveId('virtual:sigx-server-fns')) as string;
+                // Exactly one computed-key line for the one function — no
+                // second (hashed) registration of the same loader.
+                expect(registry.match(/^\s+\["[^"]+"\]:/gm)).toHaveLength(1);
+                expect(registry).not.toMatch(/_fn_[0-9a-f]{8}/);
+                const match = RECORD.exec(registry);
+                if (!match) throw new Error(`no { version, load } record for addToCart in:\n${registry}`);
+                return match[1];
+            } finally {
+                rmSync(root, { recursive: true, force: true });
+            }
+        };
+        const base = versionOf(CART);
+        expect(base).toMatch(/^[0-9a-f]{8}$/);
+        // Reformatted + commented: same AST, same version.
+        const REFORMATTED = CART.replace(
+            'serverFn(async (rq, id: string) => db.cart.add(id));',
+            'serverFn(\n    // add one line\n    async (rq, id: string) =>   db.cart.add( id )\n);'
+        );
+        expect(REFORMATTED).not.toBe(CART);
+        expect(versionOf(REFORMATTED)).toBe(base);
+        // A body edit: different version.
+        expect(versionOf(CART.replace('db.cart.add(id)', 'db.cart.addOne(id)'))).not.toBe(base);
     });
 
-    it("role: 'client' stubs EVERY environment with STABLE symbols and the baked endpoint", () => {
+    it("role: 'client' stubs EVERY environment with the stable key and the baked endpoint", () => {
         const { plugin, root } = makeProject(APP, 'build', {
             role: 'client',
             endpoint: 'https://api.example.com/_sigx/fn'
@@ -567,12 +591,46 @@ describe('sigxServer — rev 2: role, endpoint, stable symbols, scan (#320)', ()
                     CART,
                     join(root, 'src/cart.server.ts')
                 );
-                expect(result.code).toContain(
-                    `__serverFnStub("@test/app/src/cart.server.ts/addToCart", "addToCart", ` +
-                    `"https://api.example.com/_sigx/fn", "@test/app/src/cart.server.ts/addToCart")`
+                // The same stub call as every other role since rfc-server-v5
+                // §1.3: key, name, endpoint, version — nothing role-specific.
+                expect(result.code).toMatch(
+                    /__serverFnStub\("@test\/app\/src\/cart\.server\.ts\/addToCart", "addToCart", "https:\/\/api\.example\.com\/_sigx\/fn", "[0-9a-f]{8}"\)/
                 );
                 expect(result.code).not.toContain('db.cart.add');
             }
+        } finally {
+            rmSync(root, { recursive: true, force: true });
+        }
+    });
+
+    /** load-hook context: `this.error` throws, like rollup's. */
+    const loadCtx = (env: string) => ({
+        environment: { name: env },
+        warn: () => {},
+        error: (m: string): never => {
+            throw new Error(m);
+        }
+    });
+
+    it("importing 'virtual:sigx-server-fns' from the client environment is a build error", () => {
+        // A client-side registry would be a table of dynamic imports of the
+        // STUB modules — every `load()` an RPC to itself. Loud, not silent.
+        const { plugin, root } = makeProject(APP);
+        try {
+            const id = plugin.resolveId('virtual:sigx-server-fns');
+            expect(() => plugin.load.call(loadCtx('client'), id)).toThrow(/server-only/);
+            // The control: the ssr environment gets the registry.
+            expect(plugin.load.call(loadCtx('ssr'), id)).toContain('export const serverFns = {');
+        } finally {
+            rmSync(root, { recursive: true, force: true });
+        }
+    });
+
+    it("role: 'client' refuses the registry import — there is no server in this build", () => {
+        const { plugin, root } = makeProject(APP, 'build', { role: 'client' });
+        try {
+            const id = plugin.resolveId('virtual:sigx-server-fns');
+            expect(() => plugin.load.call(loadCtx('ssr'), id)).toThrow(/role: 'client'/);
         } finally {
             rmSync(root, { recursive: true, force: true });
         }
@@ -616,6 +674,55 @@ describe('sigxServer — rev 2: role, endpoint, stable symbols, scan (#320)', ()
             // @sigx/server/node; in dev nothing would load it before the
             // first RPC, leaving SSR-time rq.request throwing until then.
             expect(loaded).toEqual(['@sigx/server/node']);
+        } finally {
+            rmSync(root, { recursive: true, force: true });
+        }
+    });
+
+    it('the dev endpoint is built with `functions` — the registry shape, not a bespoke resolver (rfc-server-v5 §4.3)', async () => {
+        // One code path resolves keys in dev and prod: the endpoint's
+        // `functions`. The dev middleware hands `createServerFnHandler` a
+        // live `key → { version, load }` twin of the registry chunk, so the
+        // skew check (and the #555 own-property guard) apply under `vite dev`
+        // exactly as they do in production.
+        const { plugin, root } = makeProject(APP, 'serve');
+        try {
+            type Registry = Record<string, { version: string; load(): Promise<unknown> }>;
+            const captured: { functions?: Registry; resolve?: unknown }[] = [];
+            const nodeEntry = {
+                createServerFnHandler: (opts: { functions?: Registry; resolve?: unknown }) => {
+                    captured.push(opts);
+                    return async () => {};
+                }
+            };
+            let middleware:
+                | ((req: unknown, res: unknown, next: (err?: unknown) => void) => Promise<void>)
+                | undefined;
+            plugin.configureServer({
+                middlewares: { use: (fn: typeof middleware) => (middleware = fn) },
+                watcher: { add: () => {} },
+                ssrLoadModule: (id: string) =>
+                    Promise.resolve(id === '@sigx/server/node' ? nodeEntry : { addToCart: 'the live fn' })
+            });
+            if (!middleware) throw new Error('configureServer mounted no middleware');
+            await middleware({ url: '/_sigx/fn/anything' }, {}, () => {});
+
+            expect(captured).toHaveLength(1);
+            const { functions, resolve } = captured[0];
+            expect(resolve).toBeUndefined();
+            if (!functions) throw new Error('the dev endpoint was built without `functions`');
+            // Null-prototype, like the emitted chunk: a wire key named
+            // "__proto__" must not find Object.prototype's setter.
+            expect(Object.getPrototypeOf(functions)).toBe(null);
+            const key = '@test/app/src/cart.server.ts/addToCart';
+            expect(Object.keys(functions)).toEqual([key]);
+            expect(functions[key].version).toMatch(/^[0-9a-f]{8}$/);
+            // The same version the prod chunk would carry for this source.
+            expect(plugin.load(plugin.resolveId('virtual:sigx-server-fns'))).toContain(
+                `["${key}"]: { version: "${functions[key].version}", load:`
+            );
+            // load() reaches the live module through ssrLoadModule.
+            await expect(functions[key].load()).resolves.toBe('the live fn');
         } finally {
             rmSync(root, { recursive: true, force: true });
         }
@@ -692,7 +799,7 @@ describe('sigxServer — rev 2: role, endpoint, stable symbols, scan (#320)', ()
                 join(root, 'src/cart.server.ts')
             );
             expect(result.code).toMatch(
-                /__serverFnStub\("addToCart_fn_[0-9a-f]{8}", "addToCart", "https:\/\/api\.example\.com\/_sigx\/fn", "@test\/app\/src\/cart\.server\.ts\/addToCart"\)/
+                /__serverFnStub\("@test\/app\/src\/cart\.server\.ts\/addToCart", "addToCart", "https:\/\/api\.example\.com\/_sigx\/fn", "[0-9a-f]{8}"\)/
             );
         } finally {
             rmSync(root, { recursive: true, force: true });
@@ -720,13 +827,22 @@ describe('sigxServer — rev 2: role, endpoint, stable symbols, scan (#320)', ()
             const stableKey = '"@acme/shared/src/cart.server.ts/addToCart"';
             expect(a).toContain(stableKey);
             // Out-of-root module ⇒ absolute-path import spec, not '/src/…'.
-            const spec = /\["@acme\/shared\/src\/cart\.server\.ts\/addToCart"\]: \(\) => import\("([^"]+)"\)/.exec(a)![1];
+            const record =
+                /\["@acme\/shared\/src\/cart\.server\.ts\/addToCart"\]: \{ version: "[0-9a-f]{8}", load: \(\) => import\("([^"]+)"\)/.exec(a);
+            if (!record) throw new Error(`no record for the shared fn in:\n${a}`);
+            const spec = record[1];
             expect(spec).toContain('sigx-shared-');
             expect(spec).not.toBe('/src/cart.server.ts');
             // Two app builds (different roots) mint IDENTICAL registry keys
-            // for the shared module — the whole point of stable-id seeds.
-            const keys = (s: string): string[] => [...s.matchAll(/^\s+\["([^"]+)"\]:/gm)].map((m) => m[1]).sort();
-            expect(keys(a)).toEqual(keys(b));
+            // AND versions for the shared module — the whole point of
+            // stable-id seeds: a client built by one app is not skew to a
+            // server built by the other.
+            const identities = (s: string): string[] =>
+                [...s.matchAll(/^\s+\["([^"]+)"\]: \{ version: "([0-9a-f]{8})"/gm)]
+                    .map((m) => `${m[1]}@${m[2]}`)
+                    .sort();
+            expect(identities(a)).toHaveLength(1);
+            expect(identities(a)).toEqual(identities(b));
         } finally {
             for (const dir of roots) rmSync(dir, { recursive: true, force: true });
         }
@@ -753,16 +869,19 @@ describe('sigxServer — rev 2: role, endpoint, stable symbols, scan (#320)', ()
                 CART,
                 fsId
             );
-            expect(result.code).toMatch(/__serverFnStub\("addToCart_fn_[0-9a-f]{8}"/);
+            expect(result.code).toMatch(/__serverFnStub\("@acme\/fs-pkg\/src\/cart\.server\.ts\/addToCart", "addToCart", "\/_sigx\/fn", "[0-9a-f]{8}"\)/);
             const registry = plugin.load(plugin.resolveId('virtual:sigx-server-fns'));
-            expect(registry.match(/\["addToCart_fn_[0-9a-f]{8}"\]:/g)).toHaveLength(1);
-            expect(registry).toContain('"@acme/fs-pkg/src/cart.server.ts/addToCart"');
+            expect(registry.match(/\["@acme\/fs-pkg\/src\/cart\.server\.ts\/addToCart"\]:/g)).toHaveLength(1);
+            expect(registry).toMatch(/\["@acme\/fs-pkg\/src\/cart\.server\.ts\/addToCart"\]: \{ version: "[0-9a-f]{8}", load: /);
         } finally {
             for (const dir of roots) rmSync(dir, { recursive: true, force: true });
         }
     });
 
-    it('warns when duplicate explicit `id`s collide on a stable symbol', () => {
+    it('two files minting one key (duplicate explicit `id`s) is a build ERROR, not a warning (rfc-server-v5 §1.7)', () => {
+        // Two functions on one route is a routing bug: the key is the only
+        // route now, so "the later registration wins" would silently serve
+        // one file's function under the other's calls.
         const FN = (impl: string) =>
             `import { serverFn } from '@sigx/server';\n` +
             `export const add = serverFn({ id: 'cart/add', handler: async (rq, input) => ${impl} });`;
@@ -773,13 +892,25 @@ describe('sigxServer — rev 2: role, endpoint, stable symbols, scan (#320)', ()
         });
         try {
             const warnings: string[] = [];
-            plugin.load.call(
-                { warn: (m: string) => warnings.push(m) },
-                plugin.resolveId('virtual:sigx-server-fns')
-            );
-            expect(warnings).toHaveLength(1);
-            expect(warnings[0]).toContain('cart/add/add');
-            expect(warnings[0]).toContain('duplicate explicit `id`');
+            let message = '';
+            try {
+                plugin.load.call(
+                    {
+                        environment: { name: 'ssr' },
+                        warn: (m: string) => warnings.push(m),
+                        error: (m: string): never => {
+                            throw new Error(m);
+                        }
+                    },
+                    plugin.resolveId('virtual:sigx-server-fns')
+                );
+            } catch (error) {
+                message = (error as Error).message;
+            }
+            expect(warnings).toEqual([]);
+            expect(message).toContain('cart/add/add');
+            expect(message).toContain('duplicate explicit `id`');
+            expect(message).toContain('cannot share one route');
         } finally {
             rmSync(root, { recursive: true, force: true });
         }
@@ -796,15 +927,15 @@ export const submitFeedback = serverFn({
 export const getQuote = serverFn(async (rq, i) => i);
 `;
 
-    it('resolves a relative specifier (with and without extension) to the stable symbol + form mark', () => {
+    it('resolves a relative specifier (with and without extension) to the stable key + form mark', () => {
         const { plugin, root } = makeProject({ 'src/api.server.ts': API });
         const importer = join(root, 'src/Feedback.tsx');
         for (const spec of ['./api.server', './api.server.ts']) {
             const hit = plugin.api.resolveServerFn(importer, spec, 'submitFeedback');
-            expect(hit).toEqual({ stableSymbol: 'src/api.server.ts/submitFeedback', form: true });
+            expect(hit).toEqual({ key: 'src/api.server.ts/submitFeedback', form: true });
         }
         expect(plugin.api.resolveServerFn(importer, './api.server', 'getQuote')).toEqual({
-            stableSymbol: 'src/api.server.ts/getQuote',
+            key: 'src/api.server.ts/getQuote',
             form: false
         });
     });
@@ -825,7 +956,7 @@ export const use = () => save;
             file
         );
         const hit = plugin.api.resolveServerFn(join(root, 'src/App.tsx'), './widget', 'save');
-        expect(hit).toEqual({ stableSymbol: 'src/widget.ts/save', form: true });
+        expect(hit).toEqual({ key: 'src/widget.ts/save', form: true });
     });
 
     it('returns null for unknown exports, unknown files, and bare specifiers', () => {
@@ -840,11 +971,17 @@ export const use = () => save;
 describe('sigxServer — hotUpdate (#568)', () => {
     /**
      * The re-extract → invalidate-registry path had no coverage at all, and it
-     * is what makes a symbol change propagate: symbols are content-hashed, so
-     * every edit to a server function's body mints a new one, and a registry
-     * that kept serving the old map would 404 every call from the freshly
-     * transformed client.
+     * is what makes a version change propagate: the version tag hashes the
+     * function's definition, so every edit to a server function's body mints
+     * a new one, and a registry that kept serving the old map would 409
+     * every call from the freshly transformed client.
      */
+    /** The version the registry text carries for `addToCart`. */
+    const versionIn = (registry: string): string => {
+        const match = /\["src\/cart\.server\.ts\/addToCart"\]: \{ version: "([0-9a-f]{8})"/.exec(registry);
+        if (!match) throw new Error(`no addToCart record in:\n${registry}`);
+        return match[1];
+    };
     const hotCtx = (): {
         ctx: unknown;
         invalidated: unknown[];
@@ -885,8 +1022,9 @@ export const addToBasket = serverFn(async (rq, id: string) => id);
                 read: async () => EDITED
             });
             const after = registryOf(plugin);
-            // Same export, NEW content hash — the whole point of re-extracting.
-            expect(after).toMatch(/\["addToCart_fn_[0-9a-f]{8}"\]/);
+            // Same key, NEW version — the whole point of re-extracting.
+            expect(after).toContain('["src/cart.server.ts/addToCart"]');
+            expect(versionIn(after)).not.toBe(versionIn(before));
             expect(after).not.toBe(before);
             expect(invalidated).toHaveLength(1);
         } finally {
@@ -894,7 +1032,7 @@ export const addToBasket = serverFn(async (rq, id: string) => id);
         }
     });
 
-    it('a renamed export replaces the old symbol', async () => {
+    it('a renamed export replaces the old key', async () => {
         const { plugin, root } = makeProject({ 'src/cart.server.ts': CART });
         try {
             const { ctx } = hotCtx();
@@ -938,7 +1076,7 @@ export const addToBasket = serverFn(async (rq, id: string) => id);
                 read: async () => CART + '\nconst oops = {'
             });
             // Unchanged: an editor saves broken syntax constantly, and
-            // dropping the symbol would 404 every call until the next keystroke.
+            // dropping the key would 404 every call until the next keystroke.
             expect(registryOf(plugin)).toBe(before);
         } finally {
             rmSync(root, { recursive: true, force: true });

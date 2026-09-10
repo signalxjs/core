@@ -100,6 +100,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- **`@sigx/server` + `@sigx/vite`: one route per function; version skew is
+  a 409 (#692, rfc-server-v5 §1.3/§1.4/§1.6).** The stable key `<id>/<name>`
+  is the only route and registry key; the content hash is a version tag the
+  stub sends (`"v"` in the POST envelope, `?v=` on GET reads) and the
+  endpoint 409s with `code: 'version-skew'` on a mismatch (404 = unknown
+  function). `virtual:sigx-server-fns` emits one `{ version, load }` record
+  per key (a duplicate key across files is a build error; a client import
+  or a `role: 'client'` import is a build error); `sigxServer({ stubSymbols })`
+  is gone; `ExtractedServerFn.symbol`/`.stableSymbol` → `.key`/`.version`,
+  `mintSymbols(name, source, …)` → `mintIdentity(name, callNode, …)` (the
+  version seed is the normalized AST — a reformat keeps it), and
+  `api.resolveServerFn` returns `{ key, form }`. Every endpoint entry takes
+  `functions: serverFns` (the `resolve` callback stays as the escape
+  hatch; exactly one, else a boot throw). Stub factories:
+  `__serverFnStub(key, name, endpoint, version, flags)` /
+  `__serverStreamStub(key, name, endpoint, version)`. The example entries
+  and the cloudflare/vercel/netlify scaffolds pass `functions: serverFns`;
+  the bun example now passes `serverFnBase` to both routing sites (#563).
+  Details and the old→new table in `packages/server/CHANGELOG.md`;
+  migration in `docs/migrations/1.0-serverfn.md`.
+
 - **`@sigx/server`: the handler takes one object, `handler({ input, rq })`
   (#692, rfc-server-v5 §1.2).** Streams: `async function* ({ input, rq })`.
   `handler(rq, input)` → `handler({ input, rq })`; `handler(rq)` →

@@ -370,6 +370,37 @@ describe('query-string arguments (§4.1)', () => {
         }
     });
 
+    it('the version tag `v` rides beside the named params without disturbing them (rfc-server-v5 §3.2)', async () => {
+        // `v` is not an `aN` param, so the named decoder must neither count
+        // it as an argument nor read the call as sparse/mixed.
+        const res = await get('echo_fn_00000004', undefined, {
+            url: `${ORIGIN}/_sigx/fn/echo_fn_00000004?a0=shoes&v=0badf00d`
+        });
+        expect(res.status).toBe(200);
+        await expect(res.json()).resolves.toEqual({ data: 'shoes' });
+    });
+
+    it('a wrong `v` against a registry entry is a 409 + no-store, before the read runs (rfc-server-v5 §3.2)', async () => {
+        let ran = 0;
+        const counted = serverFn({
+            cache: { maxAge: 60 },
+            handler: async () => {
+                ran += 1;
+                return 'ran';
+            }
+        });
+        const res = await handleServerFnRequest(
+            new Request(`${ORIGIN}/_sigx/fn/api/counted?v=other`, { method: 'GET' }),
+            { functions: { 'api/counted': { version: 'v1', load: async () => counted } } }
+        );
+        expect(res.status).toBe(409);
+        expect(res.headers.get('cache-control')).toBe('no-store');
+        await expect(res.json()).resolves.toEqual({
+            error: { message: 'version skew', status: 409, code: 'version-skew' }
+        });
+        expect(ran).toBe(0);
+    });
+
     it('an oversized query string is a 414 + no-store', async () => {
         const res = await get('read_fn_00000001', [{ id: 'x'.repeat(10_000) }]);
         expect(res.status).toBe(414);

@@ -49,9 +49,10 @@ Mount the endpoint before the document render — the scaffold carries the
 three-line block as a comment:
 
 ```ts
-if (matchesServerFn(request)) {
+if (matchesServerFn(request, serverFnBase)) {
     return handleServerFnRequest(request, {
-        resolve: (symbol) => serverFns[symbol]?.() ?? null
+        base: serverFnBase,
+        functions: serverFns
     });
 }
 return handler(request);

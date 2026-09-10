@@ -432,7 +432,7 @@ export default {
         if (matchesServerFn(request, serverFnBase)) {
             return handleServerFnRequest(request, {
                 base: serverFnBase,
-                resolve: (s) => serverFns[s]?.() ?? null,
+                functions: serverFns,
                 renderBoundaries
                 // guard, origin: see §5
             });
@@ -442,9 +442,10 @@ export default {
 };
 ```
 
-The generated `serverFns` registry has a null prototype (#555), so a
-prototype-key symbol (`__proto__`, `constructor`) misses cleanly and
-`serverFns[s]?.() ?? null` is safe exactly as written.
+The generated `serverFns` registry has a null prototype (#555), and the
+endpoint's own resolver behind `functions` adds an own-property check, so a
+prototype-key request (`__proto__`, `constructor`) is a clean 404 (rfc-server-v5
+§1.6).
 
 `renderBoundaries` is what makes single-flight boundary refresh (rfc-server
 §6.3) work on this tier. It is **optional**, so an entry that omits it

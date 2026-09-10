@@ -70,15 +70,18 @@ const streamRows = serverStream({
     }
 });
 
+// Keyed by the stable key (`<id>/<name>`, rfc-server-v5 §1.3) through the
+// `resolve` escape hatch — no version, so no skew check, which is what a
+// bench wants: it measures the request half, not a 409.
 const REGISTRY: Record<string, unknown> = {
-    readRows_fn_00000001: readRows,
-    readRich_fn_00000002: readRich,
-    mutate_fn_00000003: mutate,
-    cachedRead_fn_00000004: cachedRead,
-    failing_fn_00000005: failing,
-    streamRows_fn_00000006: streamRows,
-    noop_fn_00000007: noop,
-    countKeys_fn_00000008: countKeys
+    'bench/readRows': readRows,
+    'bench/readRich': readRich,
+    'bench/mutate': mutate,
+    'bench/cachedRead': cachedRead,
+    'bench/failing': failing,
+    'bench/streamRows': streamRows,
+    'bench/noop': noop,
+    'bench/countKeys': countKeys
 };
 
 const options = { resolve: (symbol: string) => REGISTRY[symbol] ?? null };
@@ -139,10 +142,10 @@ export const serverFnSuite: MicroSuite = {
                 name: 'POST read 1k rows (floor)',
                 isFloor: true,
                 check: async () => {
-                    const res = await floorHandler(post('readRows_fn_00000001', []), plainList);
+                    const res = await floorHandler(post('bench/readRows', []), plainList);
                     await expectOk(res, plainList.length);
                 },
-                run: () => floorHandler(post('readRows_fn_00000001', []), plainList)
+                run: () => floorHandler(post('bench/readRows', []), plainList)
             },
             {
                 suite: 'serverfn',
@@ -150,19 +153,19 @@ export const serverFnSuite: MicroSuite = {
                 floorOf: 'POST read 1k rows (floor)',
                 quick: true,
                 check: async () => {
-                    const res = await handleServerFnRequest(post('readRows_fn_00000001', []), options);
+                    const res = await handleServerFnRequest(post('bench/readRows', []), options);
                     await expectOk(res, plainList.length);
                 },
-                run: () => handleServerFnRequest(post('readRows_fn_00000001', []), options)
+                run: () => handleServerFnRequest(post('bench/readRows', []), options)
             },
             {
                 suite: 'serverfn',
                 name: 'POST read rich payload',
                 check: async () => {
-                    const res = await handleServerFnRequest(post('readRich_fn_00000002', []), options);
+                    const res = await handleServerFnRequest(post('bench/readRich', []), options);
                     await expectOk(res, richPayload.length);
                 },
-                run: () => handleServerFnRequest(post('readRich_fn_00000002', []), options)
+                run: () => handleServerFnRequest(post('bench/readRich', []), options)
             },
 
             // --- fixed per-call overhead ------------------------------------
@@ -171,22 +174,22 @@ export const serverFnSuite: MicroSuite = {
                 name: 'POST mutation, tiny args (floor)',
                 isFloor: true,
                 check: async () => {
-                    const res = await floorHandler(post('mutate_fn_00000003', smallArgs), { ok: true });
+                    const res = await floorHandler(post('bench/mutate', smallArgs), { ok: true });
                     assert(res.status === 200, `expected 200, got ${res.status}`);
                 },
-                run: () => floorHandler(post('mutate_fn_00000003', smallArgs), { ok: true })
+                run: () => floorHandler(post('bench/mutate', smallArgs), { ok: true })
             },
             {
                 suite: 'serverfn',
                 name: 'POST mutation, tiny args',
                 floorOf: 'POST mutation, tiny args (floor)',
                 check: async () => {
-                    const res = await handleServerFnRequest(post('mutate_fn_00000003', smallArgs), options);
+                    const res = await handleServerFnRequest(post('bench/mutate', smallArgs), options);
                     assert(res.status === 200, `expected 200, got ${res.status}`);
                     const envelope = (await res.json()) as { data?: { id?: number } };
                     assert(envelope.data?.id === 42, 'mutation did not echo its input');
                 },
-                run: () => handleServerFnRequest(post('mutate_fn_00000003', smallArgs), options)
+                run: () => handleServerFnRequest(post('bench/mutate', smallArgs), options)
             },
 
             // --- #544: the two axes the benches above cannot see ------------
@@ -197,10 +200,10 @@ export const serverFnSuite: MicroSuite = {
                 name: 'POST noop (floor)',
                 isFloor: true,
                 check: async () => {
-                    const res = await floorHandler(post('noop_fn_00000007', []), { ok: true });
+                    const res = await floorHandler(post('bench/noop', []), { ok: true });
                     assert(res.status === 200, `expected 200, got ${res.status}`);
                 },
-                run: () => floorHandler(post('noop_fn_00000007', []), { ok: true })
+                run: () => floorHandler(post('bench/noop', []), { ok: true })
             },
             {
                 suite: 'serverfn',
@@ -208,12 +211,12 @@ export const serverFnSuite: MicroSuite = {
                 floorOf: 'POST noop (floor)',
                 quick: true,
                 check: async () => {
-                    const res = await handleServerFnRequest(post('noop_fn_00000007', []), options);
+                    const res = await handleServerFnRequest(post('bench/noop', []), options);
                     assert(res.status === 200, `expected 200, got ${res.status}`);
                     const envelope = (await res.json()) as { data?: { ok?: boolean } };
                     assert(envelope.data?.ok === true, 'noop did not answer { ok: true }');
                 },
-                run: () => handleServerFnRequest(post('noop_fn_00000007', []), options)
+                run: () => handleServerFnRequest(post('bench/noop', []), options)
             },
             // Per-KEY overhead. Same order of bytes as the 1k-row read, but the
             // weight is in key count — the axis a reviver or a tree walk is
@@ -224,13 +227,13 @@ export const serverFnSuite: MicroSuite = {
                 name: 'POST wide args, 400 keys (floor)',
                 isFloor: true,
                 check: async () => {
-                    const res = await floorHandler(post('countKeys_fn_00000008', wideArgs), {
+                    const res = await floorHandler(post('bench/countKeys', wideArgs), {
                         keys: WIDE_ARG_KEYS
                     });
                     assert(res.status === 200, `expected 200, got ${res.status}`);
                 },
                 run: () =>
-                    floorHandler(post('countKeys_fn_00000008', wideArgs), { keys: WIDE_ARG_KEYS })
+                    floorHandler(post('bench/countKeys', wideArgs), { keys: WIDE_ARG_KEYS })
             },
             {
                 suite: 'serverfn',
@@ -239,7 +242,7 @@ export const serverFnSuite: MicroSuite = {
                 quick: true,
                 check: async () => {
                     const res = await handleServerFnRequest(
-                        post('countKeys_fn_00000008', wideArgs),
+                        post('bench/countKeys', wideArgs),
                         options
                     );
                     assert(res.status === 200, `expected 200, got ${res.status}`);
@@ -250,7 +253,7 @@ export const serverFnSuite: MicroSuite = {
                         `expected ${WIDE_ARG_KEYS} keys through, got ${envelope.data?.keys}`
                     );
                 },
-                run: () => handleServerFnRequest(post('countKeys_fn_00000008', wideArgs), options)
+                run: () => handleServerFnRequest(post('bench/countKeys', wideArgs), options)
             },
 
             // --- the §4.1 GET read path -------------------------------------
@@ -258,7 +261,7 @@ export const serverFnSuite: MicroSuite = {
                 suite: 'serverfn',
                 name: 'GET idempotent read',
                 check: async () => {
-                    const res = await handleServerFnRequest(get('cachedRead_fn_00000004', []), options);
+                    const res = await handleServerFnRequest(get('bench/cachedRead', []), options);
                     assert(res.status === 200, `expected 200, got ${res.status}`);
                     assert(
                         res.headers.get('cache-control') === 'private, max-age=60',
@@ -266,7 +269,7 @@ export const serverFnSuite: MicroSuite = {
                     );
                     await expectOk(res, 50);
                 },
-                run: () => handleServerFnRequest(get('cachedRead_fn_00000004', []), options)
+                run: () => handleServerFnRequest(get('bench/cachedRead', []), options)
             },
 
             // --- the §5 masking branch --------------------------------------
@@ -274,10 +277,10 @@ export const serverFnSuite: MicroSuite = {
                 suite: 'serverfn',
                 name: 'POST error path (ServerFnError)',
                 check: async () => {
-                    const res = await handleServerFnRequest(post('failing_fn_00000005', []), options);
+                    const res = await handleServerFnRequest(post('bench/failing', []), options);
                     assert(res.status === 422, `expected 422, got ${res.status}`);
                 },
-                run: () => handleServerFnRequest(post('failing_fn_00000005', []), options)
+                run: () => handleServerFnRequest(post('bench/failing', []), options)
             },
 
             // --- NDJSON streaming (§6.1) ------------------------------------
@@ -285,7 +288,7 @@ export const serverFnSuite: MicroSuite = {
                 suite: 'serverfn',
                 name: 'NDJSON stream, 1000 chunks',
                 check: async () => {
-                    const res = await handleServerFnRequest(post('streamRows_fn_00000006', []), options);
+                    const res = await handleServerFnRequest(post('bench/streamRows', []), options);
                     assert(res.status === 200, `expected 200, got ${res.status}`);
                     assert(
                         res.headers.get('content-type') === 'application/x-ndjson',
@@ -294,7 +297,7 @@ export const serverFnSuite: MicroSuite = {
                     assert((await drain(res)) > 10_000, 'stream produced suspiciously few bytes');
                 },
                 run: async () => {
-                    const res = await handleServerFnRequest(post('streamRows_fn_00000006', []), options);
+                    const res = await handleServerFnRequest(post('bench/streamRows', []), options);
                     return drain(res);
                 }
             }
@@ -309,7 +312,7 @@ export const serverFnSuite: MicroSuite = {
  */
 export async function streamTtfbNs(): Promise<{ ttfbNs: bigint; totalNs: bigint; bytes: number }> {
     const start = process.hrtime.bigint();
-    const res = await handleServerFnRequest(post('streamRows_fn_00000006', []), options);
+    const res = await handleServerFnRequest(post('bench/streamRows', []), options);
     const reader = res.body!.getReader();
     let ttfb = 0n;
     let bytes = 0;

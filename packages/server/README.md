@@ -183,7 +183,7 @@ What the app hands back:
   (`{ resolve, base?, renderBoundaries?, authorizeBoundary?, …posture }`),
   inheriting the app's posture with per-mount overrides winning. Each mount
   claims its `base` namespace; overlapping prefixes throw at mount time
-  (everything after the base IS the symbol). Routing still lives in your
+  (everything after the base IS the key). Routing still lives in your
   entry — `matchesServerFn` stays a predicate.
 - **Posture inheritance everywhere** — a bare `handleServerFnRequest` call
   inherits the app posture too (`origin`, `maxBodyBytes`, `maxUrlBytes`,
@@ -337,7 +337,7 @@ The mutation-side twin of `cache` (rfc-server §6.4): declaring `form: true`
 marks a function as a **form target**. The endpoint then accepts native form
 POSTs (`application/x-www-form-urlencoded` / `multipart/form-data`) for it,
 and — when a resume `<form>`'s submit handler calls it — the build stamps a
-real `action="/_sigx/fn/<symbol>" method="post"` onto the form:
+real `action="/_sigx/fn/<key>" method="post"` onto the form:
 
 ```ts
 export const submitFeedback = serverFn({
@@ -378,7 +378,7 @@ export const submitFeedback = serverFn({
 
 The read-side twin of `invalidates` (rfc-server §4.1): declaring `cache`
 marks a function as a **side-effect-free idempotent read**. The stub then
-calls it with `GET {endpoint}/{symbol}?a0=…` and the endpoint emits
+calls it with `GET {endpoint}/{key}?a0=…` and the endpoint emits
 `Cache-Control` from the declaration — the browser and any edge cache can
 absorb repeats without touching the origin:
 
@@ -700,9 +700,12 @@ against production bundles does not change context semantics.
 
 ## The endpoint
 
-`POST /_sigx/fn/<symbol>` with `{"args": [...]}` → `{"data": ...}` or
-`{"error": {message, status, data?}}`. Symbols are content-hashed, so a
-stale client gets a typed version-skew error, never a silent wrong call.
+`POST /_sigx/fn/<key>` with `{"args": [...]}` → `{"data": ...}` or
+`{"error": {message, status, code?, data?}}`. Every call carries the build's
+version tag for the function (`"v"` in the POST envelope, `?v=` on a GET
+read), so a stale client gets a typed `409` `code: 'version-skew'` error
+with a reload hint, never a silent wrong call; `404` means only "unknown
+function".
 
 Dev needs no wiring — the `sigxServer()` Vite plugin serves the endpoint
 from `vite.middlewares`. Production mounts the handler beside the document
@@ -731,19 +734,26 @@ already fetch-handler-shaped. Route with its sibling predicate:
 ```js
 import { handleServerFnRequest, matchesServerFn } from '@sigx/server/server';
 
-if (matchesServerFn(request)) return handleServerFnRequest(request, opts);
+if (matchesServerFn(request, serverFnBase)) {
+    return handleServerFnRequest(request, { base: serverFnBase, functions: serverFns });
+}
 return renderDocument(request);   // your document handler
 ```
 
 (`matchesServerFn(request, base?)` matches the pathname under the mount
 path — deliberately a predicate, not a combinator; composition stays in
-your entry.)
+your entry.) `functions` is the build's registry — the `serverFns` export
+of `'virtual:sigx-server-fns'`, key `<id>/<name>` → `{ version, load }` —
+and the primary way every entry (this handler, `createServerFnHandler`,
+`app.serverFns()`) learns its functions; `resolve(key)` remains as the
+escape hatch for a hand-built table (no version there, so no skew check).
+Exactly one of the two: both or neither throws when the handler is built.
 
 **If you moved the mount, say so in one place.** `sigxServer({ base })`,
 `matchesServerFn(request, base)` and the handler's own `base` must agree, and
 they default independently — a disagreement is a silent 404, and since #543
 `base` is load-bearing for symbol extraction (everything after it *is* the
-symbol), so a base that is wrong only in part slices the symbol at the wrong
+symbol), so a base that is wrong only in part slices the key at the wrong
 offset instead of missing cleanly. The build exports what it baked, so nothing
 has to be repeated:
 
@@ -753,7 +763,7 @@ import { serverFns, serverFnBase } from 'virtual:sigx-server-fns';
 if (matchesServerFn(request, serverFnBase)) {
     return handleServerFnRequest(request, {
         base: serverFnBase,
-        resolve: (symbol) => serverFns[symbol]?.() ?? null
+        functions: serverFns
     });
 }
 ```
@@ -1080,29 +1090,39 @@ A native-client build declares itself in the Vite plugin:
 `sigxServer({ role: 'client', endpoint: 'https://api.example.com/_sigx/fn' })`
 — every environment gets stubs and no registry is emitted (there is no
 server in that build). Shared `*.server.ts` packages outside the app's
-Vite root are discovered with `scan: ['../packages/api']`.
+Vite root are discovered with `scan: ['../packages/api']`. A cross-origin
+`endpoint` sends no cookies by default; `configureServerFn({ credentials:
+'include' })` opts a remote backend into cookie auth (its CORS must allow it).
 
-## Stable routes — backend deploys never break installed apps
+## One route per function, one version per deploy
 
-Every function is registered under TWO symbols. The content-hashed one
-(`addToCart_fn_9f3a01cc`) is what web builds fetch — version skew is a
-typed 404 and a reload fixes it. The hash-free **stable symbol**
-(`@acme/api/src/cart.server.ts/addToCart`) is what `role: 'client'` builds
-fetch — an installed lynx app or terminal CLI cannot reload, so its routes
-survive every backend redeploy. Symbol seeds are package-qualified, so
-every app build of one solution mints identical symbols for a shared
-server module.
+Every function has ONE identity (rfc-server-v5 §1.3): the **stable key**
+`<id>/<name>` — `@acme/api/src/cart.server.ts/addToCart` — is the route,
+the registry key and the `useData(fn)` data identity, and it is the same
+under every build role. Key seeds are package-qualified, so every app build
+of one solution mints the identical key for a shared server module, and a
+backend redeploy never breaks an installed lynx app or terminal CLI that
+cannot reload.
 
-Moving or renaming a server module changes its stable symbol — a breaking
-API change for native clients, exactly like changing a REST route. Published
-APIs pin an explicit id instead: `serverFn({ id: 'cart/add', handler })`
-(string literal — the build reads it statically) keeps both routes stable
-across file moves. Contract safety lives in the `input` validator (argument
-changes surface as a 400 the client can show as "update the app"), and
-semantic changes are explicit versioning — a new export or a new `id`.
+Skew detection is a **version tag**, not a second route: the build hashes
+each function's normalized definition (the parsed call — a reformat or a
+comment keeps it, any semantic change bumps it), bakes the hex into the
+stub, and the stub sends it with every call. When it differs from the
+registry's, the endpoint answers `409` with `code: 'version-skew'` and the
+stub throws the one hint a user can act on: reload. A client that sends no
+tag (curl, a native client, a form post) is simply served; so is a
+hand-built `resolve` table, which knows no version.
 
-A stable symbol's slashes are REAL path separators, so the route reads as
-the id does and needs nothing special from your infrastructure:
+Moving or renaming a server module changes its key — a breaking API change
+for native clients, exactly like changing a REST route. Published APIs pin
+an explicit id instead: `serverFn({ id: 'cart/add', handler })` (string
+literal — the build reads it statically) keeps the route stable across file
+moves. Contract safety lives in the `input` validator (argument changes
+surface as a 400 the client can show as "update the app"), and semantic
+changes are explicit versioning — a new export or a new `id`.
+
+A key's slashes are REAL path separators, so the route reads as the id does
+and needs nothing special from your infrastructure:
 
 ```
 POST /_sigx/fn/@acme/api/src/cart.server.ts/addToCart
