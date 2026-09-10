@@ -324,8 +324,8 @@ The version rides **in-band**: `v` in the JSON envelope for POST (fn and
 stream), `?v=` for GET, nothing on a form post. Not a request header:
 
 - a custom header needs `Access-Control-Allow-Headers` cooperation for the
-  remote-endpoint deployment `configureServerFn({ endpoint })` exists for
-  (N.1), and header-stripping proxies are a documented failure class;
+  remote-endpoint deployment that `configureServerFn({ endpoint })` exists
+  for (N.1), and header-stripping proxies are a documented failure class;
 - `?v=` gives every deploy a fresh HTTP cache key for its GET reads — the
   deploy-coupling the hashed route used to provide, now without moving the
   route;
@@ -380,9 +380,12 @@ reformat or a comment edit keeps the version; any identifier, literal or
 structural change — the handler body, the `input` schema expression, the
 `authorize` list — bumps it, which is what "this definition differs" means.
 A parser upgrade that reorders node properties bumps every version once;
-harmless, both ends ship from one build. Rejected: regex comment stripping
-(breaks on `//` inside strings and templates); an AST printer (none is
-exposed by vite or rolldown).
+harmless, both ends ship from one build. One known blind spot, accepted:
+dropping `raw` also drops a template element's raw text, so two tagged
+templates whose content is uncookable (`cooked: null`) and differs only in
+raw spelling share a version. Rejected: regex comment stripping (breaks on
+`//` inside strings and templates); an AST printer (none is exposed by vite
+or rolldown).
 
 ### 4.3 The registry
 

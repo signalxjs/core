@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+> **rfc-server-v5 (#692) — the 1.0 server-function consolidation** is every
+> entry marked #692 below (`Removed` / `Changed` / `Added`); the design is
+> `docs/rfc-server-v5.md` and the migration `docs/migrations/1.0-serverfn.md`.
+
 ### Removed
 
 - **`@sigx/server`: the direct authoring form and the eight loose wrapper
