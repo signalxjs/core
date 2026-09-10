@@ -1049,8 +1049,12 @@ const key = 'allowAnonymous';
 export const a = serverFn({ [key]: true, handler: async () => 1 });
 `;
         const result = extractServerFns(computed, '/src/x.server.ts', gateOpts());
-        expect(result.errors).toHaveLength(1);
-        expect(result.errors[0].message).toContain('has no decided access policy');
+        // Two errors, both right: the computed key is refused outright
+        // (rfc-server-v5 §1.7), AND the gate still cannot see a declaration.
+        expect(result.errors.map((e) => e.message)).toEqual([
+            expect.stringMatching(/^serverFn "a": a computed key/),
+            expect.stringContaining('has no decided access policy')
+        ]);
     });
 
     it('the pre-v4 spellings no longer count — `use:`/`unguarded:` fns are undecided (#611)', () => {
