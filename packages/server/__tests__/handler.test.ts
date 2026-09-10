@@ -770,6 +770,18 @@ describe('handleServerFnRequest — the `functions` registry (rfc-server-v5 §1.
         ).rejects.toThrow(/EITHER `functions` OR `resolve`/);
     });
 
+    it('a null `functions` is absent, and a non-object one is rejected — both at construction', async () => {
+        // A JSON-shaped config or a missed optional import hands over null;
+        // it must read as "not provided", never pass the exactly-one gate
+        // and then throw inside the own-property check on the first request.
+        await expect(post('api/add', '{"args":[[1,2]]}', { functions: null as never })).rejects.toThrow(
+            /pass `functions`/
+        );
+        await expect(post('api/add', '{"args":[[1,2]]}', { functions: 'nope' as never })).rejects.toThrow(
+            /must be the registry object/
+        );
+    });
+
     it('neither `functions` nor `resolve` throws — the endpoint refuses to boot blind', async () => {
         await expect(post('api/add', '{"args":[[1,2]]}', {})).rejects.toThrow(/pass `functions`/);
     });

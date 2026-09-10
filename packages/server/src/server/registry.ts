@@ -37,7 +37,11 @@ export interface ServerFnResolverOptions {
  * the endpoint masks it per §5 like any resolve failure.
  */
 export function createServerFnResolver(options: ServerFnResolverOptions): ServerFnResolver {
-    const { functions, resolve } = options;
+    // `null` is absent (a JSON-shaped config, an optional-chained import
+    // that missed), never "provided": it would pass the exactly-one gate and
+    // then throw inside `hasOwnProperty.call` on the first request.
+    const functions = options.functions ?? undefined;
+    const resolve = options.resolve ?? undefined;
     if ((functions === undefined) === (resolve === undefined)) {
         throw new Error(
             functions === undefined
@@ -47,7 +51,13 @@ export function createServerFnResolver(options: ServerFnResolverOptions): Server
                   'two sources of truth for one route table cannot agree by construction.'
         );
     }
-    if (resolve) {
+    if (functions !== undefined && (typeof functions !== 'object' || functions === null)) {
+        throw new TypeError(
+            `[sigx server] \`functions\` must be the registry object (key → { version, load }); ` +
+            `got ${typeof functions}.`
+        );
+    }
+    if (typeof resolve === 'function') {
         return async (key) => {
             const fn = await resolve(key);
             return fn === null || fn === undefined ? null : { fn };
