@@ -518,8 +518,8 @@ export function extractInlineServerFns(
                 errors.push({ offset: call.start, message: optionsLiteralError(name, stream) });
                 continue;
             }
-            // Explicit `id` is the OPTIONS form's field — serverStream is
-            // direct-form only, so only serverFn calls are probed.
+            // Explicit `id` is a serverFn-only option (a stream is not a `useData`
+            // target and has no pinned route), so only serverFn calls are probed.
             const idOption = stream
                 ? { id: undefined, nonLiteral: false as const }
                 : readServerFnIdOption(call);
