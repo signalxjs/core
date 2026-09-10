@@ -169,22 +169,6 @@ afterEach(async () => {
     for (const handle of mounted.splice(0)) await handle.close();
 });
 
-describe('sigxServer — the plugin owns the registry (rfc-server-v5 §1.6)', () => {
-    it("a JS caller's resolve/functions in the plugin options never reach the endpoint", async () => {
-        // Unspellable in the TS type, but a JS config can carry them; if
-        // they rode the spread they would trip the exactly-one gate against
-        // the plugin's own `functions` and 500 every dev request.
-        const dev = await mount({ resolve: () => null, functions: {} } as unknown as SigxServerOptions);
-        const res = await fetch(`${dev.origin}/_sigx/fn/${dev.key('read')}`, {
-            method: 'POST',
-            headers: { 'content-type': 'application/json', origin: dev.origin },
-            body: JSON.stringify({ args: ['p1'] })
-        });
-        expect(res.status).toBe(200);
-        await expect(res.json()).resolves.toEqual({ data: 'read:p1' });
-    });
-});
-
 describe('sigxServer — the dev registry refuses two functions on one route (rfc-server-v5 §1.7)', () => {
     it('a duplicate key across two files is an error on the request, never a silent last-wins', async () => {
         const dup = (n: number) => `

@@ -16,7 +16,7 @@ const CART = `
 import { serverFn } from '@sigx/server';
 import { db } from './db';
 
-export const addToCart = serverFn(async (rq, id: string) => db.cart.add(id));
+export const addToCart = serverFn({ handler: async ({ input: id }: { input: string }) => db.cart.add(id) });
 export const auditLog = (line: string) => { console.log(line); };
 `;
 
@@ -80,15 +80,54 @@ describe('sigxServer — transform', () => {
         expect(again).toBeNull();
     });
 
-    it('surfaces extraction warnings through this.warn', () => {
+    it('routes extraction ERRORS to this.error with a file:line:column prefix (rfc-server-v5 §1.7)', () => {
+        // `export *` used to be a warning; it is a build error now, and the
+        // client build never receives anything for the module — this.error
+        // throws (like rollup's) before a stub or the real module is returned.
         const warnings: string[] = [];
-        plugin.transform.call(
-            { environment: { name: 'client' }, warn: (m: string) => warnings.push(m) },
-            `import { serverFn } from '@sigx/server';\nexport * from './more';`,
+        const errors: string[] = [];
+        expect(() =>
+            plugin.transform.call(
+                {
+                    environment: { name: 'client' },
+                    warn: (m: string) => warnings.push(m),
+                    error: (m: string): never => {
+                        errors.push(m);
+                        throw new Error(m);
+                    }
+                },
+                `import { serverFn } from '@sigx/server';\nexport * from './more';`,
+                join(root, 'src/other.server.ts')
+            )
+        ).toThrow(/other\.server\.ts:2:1 "export \* from "\.\/more"" cannot be stubbed/);
+        expect(errors).toHaveLength(1);
+        expect(errors[0]).toMatch(/^src\/other\.server\.ts:2:1 /);
+        expect(errors[0]).toContain('rfc-server-v5 §1.7');
+        expect(warnings).toEqual([]);
+    });
+
+    it('surfaces extraction WARNINGS through this.warn — a rewritten explicit `id` still only warns', () => {
+        const warnings: string[] = [];
+        const code =
+            `import { serverFn } from '@sigx/server';\n` +
+            `export const add = serverFn({ id: 'cart/../add item', handler: async (rq, input) => input });`;
+        const result = plugin.transform.call(
+            {
+                environment: { name: 'client' },
+                warn: (m: string) => warnings.push(m),
+                error: (m: string): never => {
+                    throw new Error(m);
+                }
+            },
+            code,
             join(root, 'src/other.server.ts')
         );
         expect(warnings).toHaveLength(1);
-        expect(warnings[0]).toContain('export *');
+        expect(warnings[0]).toMatch(/^\[sigx:server\] src\/other\.server\.ts: serverFn "add": `id: "cart\/\.\.\/add item"` is not URL-path-safe/);
+        expect(warnings[0]).toContain('cart/_up/add%20item');
+        // A warning does not block the stub.
+        expect(result.code).toContain('__serverFnStub("cart/_up/add%20item/add", "add"');
+        expect(result.code).not.toContain('handler:');
     });
 
     it('never serves the real module on a failed extraction', () => {
@@ -122,6 +161,87 @@ describe('sigxServer — transform', () => {
                 join(root, 'src/Page.tsx')
             )
         ).toBeNull();
+    });
+});
+
+describe('sigxServer — the default include matches .server.js / .server.mjs / .server.mts too (#692)', () => {
+    // Plain JS server modules — no type annotations, so `.js` really parses.
+    const JS_CART = `
+import { serverFn } from '@sigx/server';
+import { db } from './db.js';
+
+export const addToCart = serverFn({ handler: async ({ input: id }) => db.cart.add(id) });
+export const auditLog = (line) => { console.log(line); };
+`;
+    const FILES = ['src/a.server.js', 'src/b.server.mjs', 'src/c.server.mts'];
+    let plugin: any;
+    let root: string;
+
+    beforeAll(() => {
+        ({ plugin, root } = makeProject(Object.fromEntries(FILES.map((rel) => [rel, JS_CART]))));
+    });
+
+    afterAll(() => rmSync(root, { recursive: true, force: true }));
+
+    it.each(FILES)('%s: the client transform yields a stub module', (rel) => {
+        const result = plugin.transform.call(
+            { environment: { name: 'client' }, warn: () => {} },
+            JS_CART,
+            join(root, rel)
+        );
+        expect(result).not.toBeNull();
+        expect(result.code).toContain(`from '@sigx/server/client'`);
+        expect(result.code).toMatch(
+            new RegExp(`__serverFnStub\\("${rel.replace(/\./g, '\\.')}/addToCart", "addToCart", "/_sigx/fn", "[0-9a-f]{8}"\\)`)
+        );
+        expect(result.code).toContain('__serverOnly("auditLog"');
+        expect(result.code).not.toContain('db.cart.add');
+    });
+
+    it('discovery registered all of them under their file-derived keys', () => {
+        const registry = plugin.load(plugin.resolveId('virtual:sigx-server-fns'));
+        for (const rel of FILES) expect(registry).toContain(`["${rel}/addToCart"]`);
+    });
+
+    it('a .server.js file authoring the removed direct form is a build error routed to this.error (rfc-server-v5 §1.1)', () => {
+        // Plain JS is where the direct form is most tempting — no type error
+        // catches it first — so the extractor's error is the only signal, and
+        // it must reach this.error with a file:line:column like every other
+        // extraction error.
+        const DIRECT = `
+import { serverFn } from '@sigx/server';
+import { db } from './db.js';
+
+export const addToCart = serverFn(async (rq, id) => db.cart.add(id));
+`;
+        const { plugin: direct, root: directRoot } = makeProject({ 'src/d.server.js': DIRECT });
+        try {
+            const errors: string[] = [];
+            const warnings: string[] = [];
+            expect(() =>
+                direct.transform.call(
+                    {
+                        environment: { name: 'client' },
+                        warn: (m: string) => warnings.push(m),
+                        error: (m: string): never => {
+                            errors.push(m);
+                            throw new Error(m);
+                        }
+                    },
+                    DIRECT,
+                    join(directRoot, 'src/d.server.js')
+                )
+            ).toThrow(/d\.server\.js:5:26 serverFn "addToCart": the only authoring form is serverFn\(\{ input\?, handler, … \}\)/);
+            expect(errors).toHaveLength(1);
+            expect(errors[0]).toMatch(/^src\/d\.server\.js:5:26 /);
+            expect(errors[0]).toContain('rfc-server-v5 §1.1');
+            expect(warnings).toEqual([]);
+            // Discovery saw the file too: a function the build cannot read
+            // has no route, so the registry carries no record for it.
+            expect(direct.load(direct.resolveId('virtual:sigx-server-fns'))).not.toContain('addToCart');
+        } finally {
+            rmSync(directRoot, { recursive: true, force: true });
+        }
     });
 });
 
@@ -213,7 +333,7 @@ import { serverFn } from '@sigx/server';
 export const MAX = 10;
 export class Db {}
 export const helper = makeThing();
-export const addToCart = serverFn(async (rq, id) => id);
+export const addToCart = serverFn({ handler: async ({ input: id }) => id });
 `;
 
     /** Transform the server module in one environment, collecting warnings. */
@@ -329,18 +449,18 @@ describe('sigxServer — inline extraction (non-matching files)', () => {
 
     afterAll(() => rmSync(root, { recursive: true, force: true }));
 
-    const INLINE = `import { serverFn } from '@sigx/server';\nexport const ping = serverFn(async (rq) => 1);`;
+    const INLINE = `import { serverFn } from '@sigx/server';\nexport const ping = serverFn({ handler: async () => 1 });`;
 
     it('client env: swaps module-scope declarations for stubs', () => {
         const result = plugin.transform.call(ctx('client'), INLINE, join(root, 'src/Page.tsx'));
         expect(result.code).toContain('__serverFnStub(');
         expect(result.code).toMatch(/__serverFnStub\("src\/Page\.tsx\/ping", "ping", "\/_sigx\/fn", "[0-9a-f]{8}"\)/);
-        expect(result.code).not.toContain('async (rq) => 1');
+        expect(result.code).not.toContain('async () => 1');
     });
 
     it('ssr env: keeps the body and appends the mangled export', () => {
         const result = plugin.transform.call(ctx('ssr'), INLINE, join(root, 'src/Page.tsx'));
-        expect(result.code).toContain('async (rq) => 1');
+        expect(result.code).toContain('async () => 1');
         expect(result.code).toContain('export const __sigxSrvFn_ping = ping;');
     });
 
@@ -354,7 +474,7 @@ describe('sigxServer — inline extraction (non-matching files)', () => {
 
     it('never serves the original module when inline extraction fails to parse', () => {
         const file = join(root, 'src/Live.tsx');
-        const good = `import { serverFn } from '@sigx/server';\nexport const ping = serverFn(async (rq) => 'SECRET_BODY');`;
+        const good = `import { serverFn } from '@sigx/server';\nexport const ping = serverFn({ handler: async () => 'SECRET_BODY' });`;
         const first = plugin.transform.call(ctx('client'), good, file);
         expect(first.code).not.toContain('SECRET_BODY');
 
@@ -365,7 +485,7 @@ describe('sigxServer — inline extraction (non-matching files)', () => {
 
         const fresh = plugin.transform.call(
             ctx('client'),
-            `import { serverFn } from '@sigx/server';\nconst x = serverFn(async (rq) => 'SECRET_BODY');\nconst broken = {`,
+            `import { serverFn } from '@sigx/server';\nconst x = serverFn({ handler: async () => 'SECRET_BODY' });\nconst broken = {`,
             join(root, 'src/NeverSeen.tsx')
         );
         expect(fresh.code).toMatch(/^throw new Error/);
@@ -373,7 +493,7 @@ describe('sigxServer — inline extraction (non-matching files)', () => {
     });
 
     it('capture violations are hard errors', () => {
-        const bad = `import { serverFn } from '@sigx/server';\nconst T = {};\nexport const leak = serverFn(async (rq) => T);`;
+        const bad = `import { serverFn } from '@sigx/server';\nconst T = {};\nexport const leak = serverFn({ handler: async () => T });`;
         expect(() =>
             plugin.transform.call(ctx('client'), bad, join(root, 'src/Bad.tsx'))
         ).toThrow(/module-scope binding "T"/);
@@ -382,7 +502,7 @@ describe('sigxServer — inline extraction (non-matching files)', () => {
     it('requireAuthorization fails the build with a file and line (#489/#611)', () => {
         const bare =
             `import { serverFn } from '@sigx/server';\n` +
-            `export const read = serverFn(async (rq) => 1);`;
+            `export const read = serverFn({ handler: async () => 1 });`;
         const { plugin: gated, root: gatedRoot } = makeProject(
             { 'src/api.server.ts': bare },
             'build',
@@ -400,7 +520,7 @@ describe('sigxServer — inline extraction (non-matching files)', () => {
     it("requireAuthorization 'warn' reports without failing (#489)", () => {
         const bare =
             `import { serverFn } from '@sigx/server';\n` +
-            `export const read = serverFn(async (rq) => 1);`;
+            `export const read = serverFn({ handler: async () => 1 });`;
         const { plugin: warned, root: warnRoot } = makeProject(
             { 'src/api.server.ts': bare },
             'build',
@@ -423,7 +543,7 @@ describe('sigxServer — inline extraction (non-matching files)', () => {
     it('a configured serverApp passes a bare fn — the app default decides it (rfc-server-v4 §5)', () => {
         const bare =
             `import { serverFn } from '@sigx/server';\n` +
-            `export const read = serverFn(async (rq) => 1);`;
+            `export const read = serverFn({ handler: async () => 1 });`;
         const { plugin: withApp, root: appRoot } = makeProject(
             { 'src/api.server.ts': bare },
             'build',
@@ -462,7 +582,7 @@ describe('sigxServer — inline extraction (non-matching files)', () => {
     it('serverFn inside a component is a hard error with a location', () => {
         const bad =
             `import { serverFn } from '@sigx/server';\n` +
-            `export const C = () => {\n    const f = serverFn(async (rq) => 1);\n    return f;\n};`;
+            `export const C = () => {\n    const f = serverFn({ handler: async () => 1 });\n    return f;\n};`;
         expect(() =>
             plugin.transform.call(ctx('client'), bad, join(root, 'src/Nested.tsx'))
         ).toThrow(/Nested\.tsx:3:15/);
@@ -570,8 +690,8 @@ describe('sigxServer — rev 2: role, endpoint, stable keys, scan (#320)', () =>
         expect(base).toMatch(/^[0-9a-f]{8}$/);
         // Reformatted + commented: same AST, same version.
         const REFORMATTED = CART.replace(
-            'serverFn(async (rq, id: string) => db.cart.add(id));',
-            'serverFn(\n    // add one line\n    async (rq, id: string) =>   db.cart.add( id )\n);'
+            'serverFn({ handler: async ({ input: id }: { input: string }) => db.cart.add(id) });',
+            'serverFn(\n    // add one line\n    {\n        handler: async ({ input: id }: { input: string }) =>   db.cart.add( id )\n    }\n);'
         );
         expect(REFORMATTED).not.toBe(CART);
         expect(versionOf(REFORMATTED)).toBe(base);
@@ -924,7 +1044,7 @@ export const submitFeedback = serverFn({
     form: true,
     handler: async (rq, input) => input
 });
-export const getQuote = serverFn(async (rq, i) => i);
+export const getQuote = serverFn({ handler: async ({ input: i }) => i });
 `;
 
     it('resolves a relative specifier (with and without extension) to the stable key + form mark', () => {
@@ -1008,7 +1128,7 @@ describe('sigxServer — hotUpdate (#568)', () => {
     const EDITED = CART.replace('db.cart.add(id)', 'db.cart.addOne(id)');
     const RENAMED = `
 import { serverFn } from '@sigx/server';
-export const addToBasket = serverFn(async (rq, id: string) => id);
+export const addToBasket = serverFn({ handler: async ({ input: id }: { input: string }) => id });
 `;
 
     it('re-extracts an edited server module and invalidates the registry', async () => {
@@ -1104,7 +1224,7 @@ export const addToBasket = serverFn(async (rq, id: string) => id);
         const INLINE = `
 import { serverFn } from '@sigx/server';
 export const Page = () => null;
-const search = serverFn(async (rq, q: string) => q);
+const search = serverFn({ handler: async ({ input: q }: { input: string }) => q });
 `;
         const { plugin, root } = makeProject({ 'src/cart.server.ts': CART });
         try {
@@ -1119,7 +1239,7 @@ const search = serverFn(async (rq, q: string) => q);
             await plugin.hotUpdate.call(ctx, {
                 type: 'update',
                 file,
-                read: async () => INLINE.replace('async (rq, q: string) => q', 'async (rq, q: string) => q + "!"')
+                read: async () => INLINE.replace('=> q })', '=> q + "!" })')
             });
             expect(invalidated).toHaveLength(1);
 

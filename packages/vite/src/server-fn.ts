@@ -89,7 +89,7 @@ import type { ServerFnRequestOptions } from '@sigx/server/server';
  */
 export interface SigxServerOptions
     extends Omit<ServerFnRequestOptions, 'resolve' | 'functions' | 'base' | 'renderBoundaries'> {
-    /** Which modules are server modules. Default: `**` + `/*.server.{ts,tsx}`. */
+    /** Which modules are server modules. Default: `**` + `/*.server.{ts,tsx,mts,js,mjs}`. */
     include?: string | string[];
     /** Excluded from matching. Default: node_modules and dist. */
     exclude?: string | string[];
@@ -177,7 +177,7 @@ const VIRTUAL_ID = 'virtual:sigx-server-fns';
 const RESOLVED_VIRTUAL_ID = '\0' + VIRTUAL_ID;
 const REGISTRY_FILE = 'sigx-server-fns.js';
 
-const DEFAULT_INCLUDE = ['**/*.server.ts', '**/*.server.tsx'];
+const DEFAULT_INCLUDE = ['**/*.server.ts', '**/*.server.tsx', '**/*.server.mts', '**/*.server.js', '**/*.server.mjs'];
 const DEFAULT_EXCLUDE = ['**/node_modules/**', '**/dist/**'];
 const DEFAULT_BASE = '/_sigx/fn';
 

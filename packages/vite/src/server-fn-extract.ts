@@ -9,7 +9,7 @@
  *
  * ```ts
  * import { serverFn } from '@sigx/server';
- * export const addToCart = serverFn(async (rq, id: string) => { … });
+ * export const addToCart = serverFn({ input: Id, handler: async ({ input: id, rq }) => { … } });
  * export const auditLog = (line: string) => { … };
  * ```
  *
@@ -45,8 +45,14 @@
  * comment edit keeps it while any semantic change bumps it.
  *
  * Type-only exports pass through untouched at runtime (they erase), so
- * "types + fns in one file" stays a supported layout. Re-exports cannot be
- * stubbed (the names are another module's) and are surfaced as warnings.
+ * "types + fns in one file" stays a supported layout. Everything the
+ * extraction cannot represent client-side is a BUILD ERROR (rfc-server-v5
+ * §1.7, the rfc-1.0 §4.5 posture): a re-export or `export *` (the names are
+ * another module's — the client stub would silently lack them), a
+ * default-exported server function (no stable export name), a server
+ * function that is not an exported module-scope `const`, a spread in the
+ * options literal (it hides the statically-read options), a non-literal
+ * `id`, and a `form` / `allowAnonymous` that is not the literal `true`.
  */
 
 import { parseAst } from 'vite';
@@ -207,14 +213,38 @@ interface CallKind {
 }
 
 /**
+ * The options literal a `serverFn(...)` / `serverStream(...)` call passes,
+ * seen through the TypeScript expression wrappers that erase at runtime —
+ * `satisfies`, `as`, a non-null `!`, and parentheses — or `null` when the
+ * single argument is not an object literal at all (rfc-server-v5 §1.1).
+ * Every static option reader goes through this, so `serverFn({ … } satisfies
+ * Opts)` reads exactly like `serverFn({ … })`.
+ */
+export function optionsLiteralOf(call: Node): Node | null {
+    const args = (call.arguments as Node[]) ?? [];
+    if (args.length !== 1) return null;
+    let node: Node | undefined = args[0];
+    while (
+        node &&
+        (node.type === 'TSSatisfiesExpression' ||
+            node.type === 'TSAsExpression' ||
+            node.type === 'TSNonNullExpression' ||
+            node.type === 'ParenthesizedExpression')
+    ) {
+        node = isNode(node.expression) ? (node.expression as Node) : undefined;
+    }
+    return node && node.type === 'ObjectExpression' ? node : null;
+}
+
+/**
  * Statically read the options-form `id` from a `serverFn({...})` call:
  * string literal only (`nonLiteral` reports a present-but-dynamic `id` so
  * callers can warn). Shared with the inline extractor.
  */
 export function readServerFnIdOption(call: Node): { id?: string; nonLiteral: boolean } {
-    const args = (call.arguments as Node[]) ?? [];
-    if (args.length !== 1 || args[0]?.type !== 'ObjectExpression') return { nonLiteral: false };
-    for (const prop of (args[0].properties as Node[]) ?? []) {
+    const literal = optionsLiteralOf(call);
+    if (!literal) return { nonLiteral: false };
+    for (const prop of (literal.properties as Node[]) ?? []) {
         if (prop.type !== 'Property' || prop.computed === true) continue;
         const key = prop.key as Node;
         const keyName =
@@ -255,27 +285,80 @@ export function readServerFnInvalidatesOption(call: Node): boolean {
 
 /**
  * A spread in a `serverFn({...})` options literal (#398). `id`, `cache`,
- * `invalidates` and `form` are read statically from the call site, so keys
- * arriving through a spread are invisible to every reader above — and the
- * failure is silent in all four directions. Warning-only: the function still
- * extracts, and the check deliberately fires even when the spread happens to
- * carry none of them, because which keys it carries is undecidable here.
+ * `invalidates`, `form`, `authorize` and `allowAnonymous` are read
+ * statically from the call site, so keys arriving through a spread are
+ * invisible to every reader above — and the failure would be silent in every
+ * direction. A build error since rfc-server-v5 §1.7; the check deliberately
+ * fires even when the spread happens to carry none of them, because which
+ * keys it carries is undecidable here.
  */
 export function hasServerFnOptionsSpread(call: Node): boolean {
-    const args = (call.arguments as Node[]) ?? [];
-    if (args.length !== 1 || args[0]?.type !== 'ObjectExpression') return false;
-    return ((args[0].properties as Node[]) ?? []).some((prop) => prop.type === 'SpreadElement');
+    const literal = optionsLiteralOf(call);
+    if (!literal) return false;
+    return ((literal.properties as Node[]) ?? []).some((prop) => prop.type === 'SpreadElement');
+}
+
+/**
+ * A computed key (`['form']: true`, `[name]: …`) in the options literal — the
+ * spread rule's twin (rfc-server-v5 §1.7): every static reader skips computed
+ * keys, so one would silently hide `id` / `cache` / `invalidates` / `form` /
+ * `authorize` / `allowAnonymous` from the build, or dodge the literal-`true`
+ * check. A build error, whatever the key turns out to be.
+ */
+export function hasServerFnComputedOptionKey(call: Node): boolean {
+    const literal = optionsLiteralOf(call);
+    if (!literal) return false;
+    return ((literal.properties as Node[]) ?? []).some(
+        (prop) => prop.type === 'Property' && prop.computed === true
+    );
+}
+
+/** The message for {@link hasServerFnComputedOptionKey}, shared by both extractors. */
+export function computedOptionKeyError(name: string, stream = false): string {
+    const wrapper = stream ? 'serverStream' : 'serverFn';
+    return (
+        `${wrapper} "${name}": a computed key (\`[…]: …\`) in the options literal is invisible to ` +
+        `the build — the declarations it reads statically (${stream ? '`authorize`, `allowAnonymous`' : '`id`, `cache`, `invalidates`, `form`, `authorize`, `allowAnonymous`'}) ` +
+        `must be plain keys written literally at the call site (rfc-server-v5 §1.7).`
+    );
 }
 
 /** The message for {@link hasServerFnOptionsSpread}, shared by both extractors. */
-export function optionsSpreadWarning(name: string): string {
+export function optionsSpreadError(name: string, stream = false): string {
+    if (stream) {
+        return (
+            `serverStream "${name}": a spread (\`...\`) in the options literal hides \`authorize\` and ` +
+            `\`allowAnonymous\` from the build — both are read STATICALLY from this call site for the ` +
+            `access gate, so a policy inside the spread is invisible to it. Write those keys literally ` +
+            `at the call site (rfc-server-v5 §1.7).`
+        );
+    }
     return (
         `serverFn "${name}": a spread (\`...\`) in the options literal hides \`id\`, \`cache\`, ` +
-        `\`invalidates\` and \`form\` from the build — all four are read STATICALLY from this ` +
-        `call site, so anything inside the spread is invisible: the stub stays POST-only, no ` +
-        `\`action\`/\`method\` is stamped, and a hidden \`invalidates\` silently disables ` +
-        `single-flight boundary refresh (rfc-server §6.3). Write those four keys literally at ` +
-        `the call site.`
+        `\`invalidates\`, \`form\`, \`authorize\` and \`allowAnonymous\` from the build — they are ` +
+        `read STATICALLY from this call site, so anything inside the spread is invisible: the ` +
+        `stub would stay POST-only, no \`action\`/\`method\` would be stamped, a hidden ` +
+        `\`invalidates\` would silently disable single-flight boundary refresh (rfc-server §6.3), ` +
+        `and the access gate could not see a hidden policy. Write those keys literally at the ` +
+        `call site (rfc-server-v5 §1.7).`
+    );
+}
+
+/** The message for a non-literal `id`, shared by both extractors. */
+export function nonLiteralIdError(name: string): string {
+    return (
+        `serverFn "${name}": \`id\` must be a non-empty string literal — it is read statically ` +
+        `and becomes the function's route (rfc-server N.3, rfc-server-v5 §1.7).`
+    );
+}
+
+/** The message for a `form` / `allowAnonymous` that is not the literal `true`. */
+export function nonLiteralTrueError(name: string, key: string, stream = false): string {
+    return (
+        `${stream ? 'serverStream' : 'serverFn'} "${name}": \`${key}\` must be the LITERAL \`true\` — the build reads it ` +
+        `statically, and a value that merely happens to be truthy at runtime would ` +
+        `${key === 'form' ? 'stamp no form action' : 'not pass the access gate'} ` +
+        `(rfc-server-v5 §1.7). Write \`${key}: true\`, or drop the key.`
     );
 }
 
@@ -296,7 +379,17 @@ export function readServerFnAuthorizeOption(call: Node): boolean {
  * happened to be truthy at runtime must not silence it.
  */
 export function readServerFnAllowAnonymousOption(call: Node): boolean {
-    return readLiteralTrueOption(call, 'allowAnonymous');
+    return readLiteralTrueOption(call, 'allowAnonymous') === 'true';
+}
+
+/**
+ * A literal-`true` option (`form`, `allowAnonymous`) that is PRESENT but not
+ * the literal — a build error (rfc-server-v5 §1.7): the bit stands between a
+ * function and a build error or a stamped action, so a non-literal that
+ * happened to be truthy at runtime must never silently pass.
+ */
+export function invalidLiteralTrueOption(call: Node, keyName: string): boolean {
+    return readLiteralTrueOption(call, keyName) === 'invalid';
 }
 
 /**
@@ -318,11 +411,12 @@ export function missingAuthorizationError(name: string, stream: boolean): string
     );
 }
 
-/** The literal `true` on a non-computed key — the `form` discipline. */
-function readLiteralTrueOption(call: Node, keyName: string): boolean {
-    const args = (call.arguments as Node[]) ?? [];
-    if (args.length !== 1 || args[0]?.type !== 'ObjectExpression') return false;
-    for (const prop of (args[0].properties as Node[]) ?? []) {
+/** The literal `true` on a non-computed key — the `form` discipline.
+ *  `'invalid'` is present-but-not-the-literal. */
+function readLiteralTrueOption(call: Node, keyName: string): 'absent' | 'true' | 'invalid' {
+    const literal = optionsLiteralOf(call);
+    if (!literal) return 'absent';
+    for (const prop of (literal.properties as Node[]) ?? []) {
         if (prop.type !== 'Property' || prop.computed === true) continue;
         const key = prop.key as Node;
         const name =
@@ -331,16 +425,16 @@ function readLiteralTrueOption(call: Node, keyName: string): boolean {
             : '';
         if (name !== keyName) continue;
         const value = prop.value as Node;
-        return value.type === 'Literal' && value.value === true;
+        return value.type === 'Literal' && value.value === true ? 'true' : 'invalid';
     }
-    return false;
+    return 'absent';
 }
 
 /** Presence of a non-computed key on the single object-literal argument. */
 function hasServerFnOptionKey(call: Node, keyName: string): boolean {
-    const args = (call.arguments as Node[]) ?? [];
-    if (args.length !== 1 || args[0]?.type !== 'ObjectExpression') return false;
-    for (const prop of (args[0].properties as Node[]) ?? []) {
+    const literal = optionsLiteralOf(call);
+    if (!literal) return false;
+    for (const prop of (literal.properties as Node[]) ?? []) {
         if (prop.type !== 'Property' || prop.computed === true) continue;
         const key = prop.key as Node;
         const name =
@@ -361,20 +455,71 @@ function hasServerFnOptionKey(call: Node, keyName: string): boolean {
  * extractor.
  */
 export function readServerFnFormOption(call: Node): boolean {
-    const args = (call.arguments as Node[]) ?? [];
-    if (args.length !== 1 || args[0]?.type !== 'ObjectExpression') return false;
-    for (const prop of (args[0].properties as Node[]) ?? []) {
-        if (prop.type !== 'Property' || prop.computed === true) continue;
-        const key = prop.key as Node;
-        const keyName =
-            key.type === 'Identifier' ? (key.name as string)
-            : key.type === 'Literal' ? String(key.value)
-            : '';
-        if (keyName !== 'form') continue;
-        const value = prop.value as Node;
-        return value.type === 'Literal' && value.value === true;
+    return readLiteralTrueOption(call, 'form') === 'true';
+}
+
+/**
+ * Every node under `node`, skipping TS type-only subtrees (annotations
+ * erase; expression-carrying wrappers like as-casts still contain runtime
+ * code). The file-form twin of the inline extractor's walker, used for the
+ * misplaced-call check (rfc-server-v5 §1.7).
+ */
+export function forEachNode(node: Node, visit: (node: Node) => void): void {
+    if (node.type.startsWith('TS')) {
+        if (isNode(node.expression)) forEachNode(node.expression as Node, visit);
+        return;
     }
-    return false;
+    visit(node);
+    for (const key of Object.keys(node)) {
+        const value = node[key];
+        if (Array.isArray(value)) {
+            for (const item of value) if (isNode(item)) forEachNode(item, visit);
+        } else if (isNode(value)) {
+            forEachNode(value as Node, visit);
+        }
+    }
+}
+
+/**
+ * True when the call takes exactly ONE object-literal argument — the only
+ * shape `@sigx/server` accepts since rfc-server-v5 §1.1. The direct form
+ * (`serverFn(async (rq, …) => …)`) is gone from the runtime, so accepting it
+ * here would compile a module that throws on first call; a non-literal
+ * options object (`serverFn(opts)`) hides EVERY statically-read option
+ * (`id`, `cache`, `form`, `invalidates`, `authorize`, `allowAnonymous`),
+ * the spread rule taken to its conclusion.
+ */
+export function hasOptionsLiteralArgument(call: Node): boolean {
+    return optionsLiteralOf(call) !== null;
+}
+
+/** The message for {@link hasOptionsLiteralArgument} failing, shared by both extractors. */
+export function optionsLiteralError(name: string, stream: boolean): string {
+    const wrapper = stream ? 'serverStream' : 'serverFn';
+    const keys = stream
+        ? '`authorize`, `allowAnonymous`'
+        : '`id`, `cache`, `form`, `invalidates`, `authorize`, `allowAnonymous`';
+    return (
+        `${wrapper} "${name}": the only authoring form is ${wrapper}({ input?, handler, … }) ` +
+        `with ONE object-literal argument (rfc-server-v5 §1.1). The direct form ` +
+        `${stream ? 'serverStream(async function* (rq, …) { … })' : 'serverFn(async (rq, …) => …)'} was removed — it cannot ` +
+        `declare validation or access and would throw on first call — and a non-literal ` +
+        `options object hides the statically-read declarations (${keys}) from the build. ` +
+        `Write the options object literally at the call site.`
+    );
+}
+
+/** The message for a `serverFn()` call that is not an exported module-scope `const`. */
+export function misplacedServerFnError(stream = false): string {
+    const wrapper = stream ? 'serverStream' : 'serverFn';
+    return (
+        `${wrapper}() must be an exported module-scope \`const name = ${wrapper}(...)\` in a ` +
+        'server module — not created inside a function or expression (component state ' +
+        'crosses the boundary as arguments, never as captures; rfc-server §1.2), not a ' +
+        'let/var binding (the stub swap needs a fixed binding), and not left unexported ' +
+        '(an unexported server function has no route and would be silently dropped; ' +
+        'rfc-server-v5 §1.7).'
+    );
 }
 
 /**
@@ -581,6 +726,8 @@ export function extractServerFns(
     // Default ON: forgetting is the failure mode worth catching, and declining
     // is a word you type once in the function it applies to (§5).
     const requireAuthorization = options.requireAuthorization ?? true;
+    /** Call nodes accepted as module-scope `const` declarations. */
+    const accepted = new Set<Node>();
 
     /** local name → wrapped call node + kind + explicit stable id + GET
      *  mark, for `export { x }` resolution. */
@@ -632,7 +779,22 @@ export function extractServerFns(
             const call = wrapperKind(declarator.init);
             if (call === undefined) continue;
             const init = declarator.init as Node;
+            // Claim the call site NOW — an invalid declaration raises ONE
+            // precise error, not also the misplaced-call error below.
+            accepted.add(init);
+            if (decl.kind !== 'const') {
+                errors.push({
+                    offset: (declarator.id as Node).start,
+                    message: misplacedServerFnError(call.kind === 'stream')
+                });
+                continue;
+            }
             const local = (declarator.id as Node).name as string;
+            if (!hasOptionsLiteralArgument(init)) {
+                // ONE precise error; the readers below all assume the literal.
+                errors.push({ offset: init.start, message: optionsLiteralError(local, call.kind === 'stream') });
+                continue;
+            }
             // Explicit `id` stays a serverFn-only option — serverStream's
             // options forms (#489/#572) don't carry it, so only serverFn
             // calls are probed.
@@ -640,16 +802,21 @@ export function extractServerFns(
                 call.kind === 'fn'
                     ? readServerFnIdOption(init)
                     : { id: undefined, nonLiteral: false as const };
-            if (idOption.nonLiteral) {
-                warnings.push(
-                    `serverFn "${local}": \`id\` must be a ` +
-                    `non-empty string literal (it is read statically) — falling back to the ` +
-                    `file-derived stable id.`
-                );
-            }
+            if (idOption.nonLiteral) errors.push({ offset: init.start, message: nonLiteralIdError(local) });
             if (idOption.id !== undefined) warnIfIdRewritten(warnings, local, idOption.id);
-            if (call.kind === 'fn' && hasServerFnOptionsSpread(init)) {
-                warnings.push(optionsSpreadWarning(local));
+            if (hasServerFnOptionsSpread(init)) {
+                errors.push({ offset: init.start, message: optionsSpreadError(local, call.kind === 'stream') });
+            }
+            if (hasServerFnComputedOptionKey(init)) {
+                errors.push({ offset: init.start, message: computedOptionKeyError(local, call.kind === 'stream') });
+            }
+            for (const key of call.kind === 'fn' ? ['form', 'allowAnonymous'] : ['allowAnonymous']) {
+                if (invalidLiteralTrueOption(init, key)) {
+                    errors.push({
+                        offset: init.start,
+                        message: nonLiteralTrueError(local, key, call.kind === 'stream')
+                    });
+                }
             }
             // The access gate (#489, rfc-server-v4 §5): a function passes
             // when its access is DECIDED — `authorize` declared, the literal
@@ -680,6 +847,8 @@ export function extractServerFns(
     // -- pass 2: exports --
     const fns: ExtractedServerFn[] = [];
     const serverOnly: string[] = [];
+    /** Locals that reached an export — the rest are unexported server fns. */
+    const exportedLocals = new Set<string>();
     const serverOnlyValues: Array<{ name: string; kind: 'value' | 'class' }> = [];
 
     /**
@@ -717,6 +886,7 @@ export function extractServerFns(
     const addExport = (exportedName: string, localName: string): void => {
         const record = localFnSources.get(localName);
         if (record !== undefined) {
+            exportedLocals.add(localName);
             fns.push({
                 ...mintIdentity(
                     exportedName,
@@ -739,19 +909,32 @@ export function extractServerFns(
 
     for (const stmt of program.body as Node[]) {
         if (stmt.type === 'ExportAllDeclaration') {
-            warnings.push(
-                `"export * from ${JSON.stringify((stmt.source as Node).value)}" cannot be stubbed ` +
-                `for the client — re-exported names are unknown here. Import and re-wrap what ` +
-                `the client needs, or move the re-export out of the server module.`
-            );
+            // Type-only `export type * from` erases; a value `export *` is a
+            // build error (v5 §1.7): the client stub would silently lack the
+            // names, and the first browser import would fail instead.
+            if (stmt.exportKind === 'type') continue;
+            errors.push({
+                offset: stmt.start,
+                message:
+                    `"export * from ${JSON.stringify((stmt.source as Node).value)}" cannot be stubbed ` +
+                    `for the client — re-exported names are unknown here, so the stub would silently ` +
+                    `lack them. Import and re-wrap what the client needs, or move the re-export out ` +
+                    `of the server module (rfc-server-v5 §1.7).`
+            });
             continue;
         }
         if (stmt.type === 'ExportDefaultDeclaration') {
             if (isServerFnCall(stmt.declaration)) {
-                warnings.push(
-                    'default-exported serverFn is not extracted — the transport symbol needs a ' +
-                    'stable export name. Use a named export.'
-                );
+                // Its route needs a stable export name; nothing to mint. ONE
+                // precise error: claim the call so the misplaced-call walk
+                // below does not report it a second time.
+                accepted.add(stmt.declaration as Node);
+                errors.push({
+                    offset: stmt.start,
+                    message:
+                        'default-exported serverFn cannot be extracted — the route needs a stable ' +
+                        'export name. Use a named export (rfc-server-v5 §1.7).'
+                });
             }
             serverOnly.push('default');
             continue;
@@ -759,10 +942,17 @@ export function extractServerFns(
         if (stmt.type !== 'ExportNamedDeclaration') continue;
         if (stmt.exportKind === 'type') continue;
         if (isNode(stmt.source)) {
-            warnings.push(
-                `re-export from ${JSON.stringify((stmt.source as Node).value)} cannot be stubbed ` +
-                `for the client — the bindings are another module's. Import and re-wrap instead.`
-            );
+            // `export { type A, type B } from './x'` erases like
+            // `export type { … } from` — only a VALUE re-export is refused.
+            const specs = (stmt.specifiers as Node[]) ?? [];
+            if (specs.length > 0 && specs.every((spec) => spec.exportKind === 'type')) continue;
+            errors.push({
+                offset: stmt.start,
+                message:
+                    `re-export from ${JSON.stringify((stmt.source as Node).value)} cannot be stubbed ` +
+                    `for the client — the bindings are another module's, so the stub would silently ` +
+                    `lack them. Import and re-wrap instead (rfc-server-v5 §1.7).`
+            });
             continue;
         }
         const decl = isNode(stmt.declaration) ? (stmt.declaration as Node) : null;
@@ -802,15 +992,36 @@ export function extractServerFns(
             // a transport symbol needs a stable NAMED export.
             if (exported === 'default') {
                 if (localFnSources.has(local)) {
-                    warnings.push(
-                        'default-exported serverFn is not extracted — the transport symbol needs a ' +
-                        'stable export name. Use a named export.'
-                    );
+                    exportedLocals.add(local);
+                    errors.push({
+                        offset: (spec.exported as Node).start,
+                        message:
+                            'default-exported serverFn cannot be extracted — the route needs a stable ' +
+                            'export name. Use a named export (rfc-server-v5 §1.7).'
+                    });
                 }
                 serverOnly.push('default');
                 continue;
             }
             addExport(exported, local);
+        }
+    }
+    // Any serverFn call NOT accepted above is misplaced — inside a function
+    // or expression, a destructured declarator — a hard error (v5 §1.7).
+    // After pass 2, so a default-exported call is claimed by its own error.
+    forEachNode(program, (node) => {
+        if (node.type === 'CallExpression' && isServerFnCall(node) && !accepted.has(node)) {
+            errors.push({
+                offset: node.start,
+                message: misplacedServerFnError(wrapperKind(node)?.kind === 'stream')
+            });
+        }
+    });
+    // A module-scope server function that never reached an export has no
+    // route: it used to be silently omitted from the stub (v5 §1.7).
+    for (const [local, record] of localFnSources) {
+        if (!exportedLocals.has(local)) {
+            errors.push({ offset: record.node.start, message: misplacedServerFnError(record.stream) });
         }
     }
 

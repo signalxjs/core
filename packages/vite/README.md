@@ -197,7 +197,7 @@ if (matchesServerFn(request, serverFnBase)) {
 
 | Option | Type | Default | What it does |
 |---|---|---|---|
-| `include` | `string \| string[]` | `['**/*.server.ts', '**/*.server.tsx']` | Which modules are server modules. |
+| `include` | `string \| string[]` | `['**/*.server.ts', '**/*.server.tsx', '**/*.server.mts', '**/*.server.js', '**/*.server.mjs']` | Which modules are server modules. |
 | `exclude` | `string \| string[]` | `['**/node_modules/**', '**/dist/**']` | Excluded from matching. |
 | `base` | `string` | `'/_sigx/fn'` | The **server mount path** — the dev middleware's and `createServerFnHandler`'s prefix. Exported back to your entry as `serverFnBase`; pass it to `matchesServerFn` and the handler so all three agree. |
 | `endpoint` | `string` | `base` | The **fetch target** baked into stubs; an absolute URL for a build that calls a remote server. Call-time precedence: `configureServerFn` > this > `base`. |

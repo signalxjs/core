@@ -100,6 +100,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- **`@sigx/vite/server`: transform-time server-function problems are build
+  errors (#692, rfc-server-v5 §1.7, the rfc-1.0 §4.5 posture).** Each of
+  these used to warn (or say nothing) and surface later as a browser
+  runtime failure or a silently missing route:
+
+  | In a `*.server.*` module | Was | Now |
+  |---|---|---|
+  | `export * from './x'` / `export { a } from './x'` (value re-exports) | warning; the client stub silently lacked the names | build error |
+  | `export default serverFn(…)` / `export { fn as default }` | warning; stubbed as `__serverOnly` | build error |
+  | `const fn = serverFn(…)` never exported | silently omitted from the stub | build error |
+  | `let`/`var` binding, or `serverFn(…)` inside a function/expression | not extracted, no message | build error (the inline form already errored) |
+  | a spread inside the `serverFn({ … })` options literal | warning | build error |
+  | non-literal `id` | warning + fallback to the file-derived id | build error |
+  | `form: someBool` / `allowAnonymous: someBool` (present, not the literal `true`) | silently not a form target / not anonymous | build error |
+  | the removed direct form `serverFn(async (rq, …) => …)`, a variable options object `serverFn(opts)`, zero or two arguments | extracted, then threw on first call at runtime | build error — exactly one object-literal argument (`satisfies` / `as` / `!` / parentheses around it erase and are fine); a spread in a `serverStream` literal is now checked like a `serverFn` one |
+
+  The inline (co-located) form mirrors the spread, `id` and literal-`true`
+  errors. Also: the default `include` now covers `**/*.server.mts`, `.js`
+  and `.mjs` — the extractors already parsed them, only the filter did not
+  match — and the `@sigx/server` browser-entry messages name the wider
+  pattern.
+
 - **`@sigx/server` + `@sigx/vite`: one route per function; version skew is
   a 409 (#692, rfc-server-v5 §1.3/§1.4/§1.6).** The stable key `<id>/<name>`
   is the only route and registry key; the content hash is a version tag the
