@@ -780,6 +780,11 @@ describe('handleServerFnRequest — the `functions` registry (rfc-server-v5 §1.
         await expect(post('api/add', '{"args":[[1,2]]}', { functions: 'nope' as never })).rejects.toThrow(
             /must be the registry object/
         );
+        // …and a mis-typed `resolve` (a JS caller's `resolve: 0`) is refused
+        // the same way, never falling through to the registry path.
+        await expect(post('api/add', '{"args":[[1,2]]}', { resolve: 0 as never })).rejects.toThrow(
+            /`resolve` must be a function/
+        );
     });
 
     it('neither `functions` nor `resolve` throws — the endpoint refuses to boot blind', async () => {
