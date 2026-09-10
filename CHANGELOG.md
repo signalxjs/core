@@ -114,6 +114,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   | a spread inside the `serverFn({ … })` options literal | warning | build error |
   | non-literal `id` | warning + fallback to the file-derived id | build error |
   | `form: someBool` / `allowAnonymous: someBool` (present, not the literal `true`) | silently not a form target / not anonymous | build error |
+  | the removed direct form `serverFn(async (rq, …) => …)`, a variable options object `serverFn(opts)`, zero or two arguments | extracted, then threw on first call at runtime | build error — exactly one object-literal argument (`satisfies` / `as` / `!` / parentheses around it erase and are fine); a spread in a `serverStream` literal is now checked like a `serverFn` one |
 
   The inline (co-located) form mirrors the spread, `id` and literal-`true`
   errors. Also: the default `include` now covers `**/*.server.mts`, `.js`

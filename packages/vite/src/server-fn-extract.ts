@@ -213,14 +213,38 @@ interface CallKind {
 }
 
 /**
+ * The options literal a `serverFn(...)` / `serverStream(...)` call passes,
+ * seen through the TypeScript expression wrappers that erase at runtime —
+ * `satisfies`, `as`, a non-null `!`, and parentheses — or `null` when the
+ * single argument is not an object literal at all (rfc-server-v5 §1.1).
+ * Every static option reader goes through this, so `serverFn({ … } satisfies
+ * Opts)` reads exactly like `serverFn({ … })`.
+ */
+export function optionsLiteralOf(call: Node): Node | null {
+    const args = (call.arguments as Node[]) ?? [];
+    if (args.length !== 1) return null;
+    let node: Node | undefined = args[0];
+    while (
+        node &&
+        (node.type === 'TSSatisfiesExpression' ||
+            node.type === 'TSAsExpression' ||
+            node.type === 'TSNonNullExpression' ||
+            node.type === 'ParenthesizedExpression')
+    ) {
+        node = isNode(node.expression) ? (node.expression as Node) : undefined;
+    }
+    return node && node.type === 'ObjectExpression' ? node : null;
+}
+
+/**
  * Statically read the options-form `id` from a `serverFn({...})` call:
  * string literal only (`nonLiteral` reports a present-but-dynamic `id` so
  * callers can warn). Shared with the inline extractor.
  */
 export function readServerFnIdOption(call: Node): { id?: string; nonLiteral: boolean } {
-    const args = (call.arguments as Node[]) ?? [];
-    if (args.length !== 1 || args[0]?.type !== 'ObjectExpression') return { nonLiteral: false };
-    for (const prop of (args[0].properties as Node[]) ?? []) {
+    const literal = optionsLiteralOf(call);
+    if (!literal) return { nonLiteral: false };
+    for (const prop of (literal.properties as Node[]) ?? []) {
         if (prop.type !== 'Property' || prop.computed === true) continue;
         const key = prop.key as Node;
         const keyName =
@@ -357,9 +381,9 @@ export function missingAuthorizationError(name: string, stream: boolean): string
 /** The literal `true` on a non-computed key — the `form` discipline.
  *  `'invalid'` is present-but-not-the-literal. */
 function readLiteralTrueOption(call: Node, keyName: string): 'absent' | 'true' | 'invalid' {
-    const args = (call.arguments as Node[]) ?? [];
-    if (args.length !== 1 || args[0]?.type !== 'ObjectExpression') return 'absent';
-    for (const prop of (args[0].properties as Node[]) ?? []) {
+    const literal = optionsLiteralOf(call);
+    if (!literal) return 'absent';
+    for (const prop of (literal.properties as Node[]) ?? []) {
         if (prop.type !== 'Property' || prop.computed === true) continue;
         const key = prop.key as Node;
         const name =
@@ -375,9 +399,9 @@ function readLiteralTrueOption(call: Node, keyName: string): 'absent' | 'true' |
 
 /** Presence of a non-computed key on the single object-literal argument. */
 function hasServerFnOptionKey(call: Node, keyName: string): boolean {
-    const args = (call.arguments as Node[]) ?? [];
-    if (args.length !== 1 || args[0]?.type !== 'ObjectExpression') return false;
-    for (const prop of (args[0].properties as Node[]) ?? []) {
+    const literal = optionsLiteralOf(call);
+    if (!literal) return false;
+    for (const prop of (literal.properties as Node[]) ?? []) {
         if (prop.type !== 'Property' || prop.computed === true) continue;
         const key = prop.key as Node;
         const name =
@@ -421,6 +445,33 @@ export function forEachNode(node: Node, visit: (node: Node) => void): void {
             forEachNode(value as Node, visit);
         }
     }
+}
+
+/**
+ * True when the call takes exactly ONE object-literal argument — the only
+ * shape `@sigx/server` accepts since rfc-server-v5 §1.1. The direct form
+ * (`serverFn(async (rq, …) => …)`) is gone from the runtime, so accepting it
+ * here would compile a module that throws on first call; a non-literal
+ * options object (`serverFn(opts)`) hides EVERY statically-read option
+ * (`id`, `cache`, `form`, `invalidates`, `authorize`, `allowAnonymous`),
+ * the spread rule taken to its conclusion.
+ */
+export function hasOptionsLiteralArgument(call: Node): boolean {
+    return optionsLiteralOf(call) !== null;
+}
+
+/** The message for {@link hasOptionsLiteralArgument} failing, shared by both extractors. */
+export function optionsLiteralError(name: string, stream: boolean): string {
+    const wrapper = stream ? 'serverStream' : 'serverFn';
+    return (
+        `${wrapper} "${name}": the only authoring form is ${wrapper}({ input?, handler, … }) ` +
+        `with ONE object-literal argument (rfc-server-v5 §1.1). The direct form ` +
+        `${wrapper}(async ${stream ? 'function* ' : ''}(rq, …) => …) was removed — it cannot ` +
+        `declare validation or access and would throw on first call — and a non-literal ` +
+        `options object hides the statically-read declarations (\`id\`, \`cache\`, \`form\`, ` +
+        `\`invalidates\`, \`authorize\`, \`allowAnonymous\`) from the build. Write the ` +
+        `options object literally at the call site.`
+    );
 }
 
 /** The message for a `serverFn()` call that is not an exported module-scope `const`. */
@@ -700,6 +751,11 @@ export function extractServerFns(
                 continue;
             }
             const local = (declarator.id as Node).name as string;
+            if (!hasOptionsLiteralArgument(init)) {
+                // ONE precise error; the readers below all assume the literal.
+                errors.push({ offset: init.start, message: optionsLiteralError(local, call.kind === 'stream') });
+                continue;
+            }
             // Explicit `id` stays a serverFn-only option — serverStream's
             // options forms (#489/#572) don't carry it, so only serverFn
             // calls are probed.
@@ -709,7 +765,7 @@ export function extractServerFns(
                     : { id: undefined, nonLiteral: false as const };
             if (idOption.nonLiteral) errors.push({ offset: init.start, message: nonLiteralIdError(local) });
             if (idOption.id !== undefined) warnIfIdRewritten(warnings, local, idOption.id);
-            if (call.kind === 'fn' && hasServerFnOptionsSpread(init)) {
+            if (hasServerFnOptionsSpread(init)) {
                 errors.push({ offset: init.start, message: optionsSpreadError(local) });
             }
             for (const key of call.kind === 'fn' ? ['form', 'allowAnonymous'] : ['allowAnonymous']) {

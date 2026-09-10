@@ -69,8 +69,10 @@ a stable export name; a server function that is not an exported module-scope
 `const` (unexported, `let`/`var`, or created inside a function); a spread in
 the options literal — it hides the statically-read `id` / `cache` /
 `invalidates` / `form` / `authorize` / `allowAnonymous`; a non-literal
-`id`; and a `form` or `allowAnonymous` that is not the literal `true`.
-Type-only re-exports erase and are fine. The default include is
+`id`; a `form` or `allowAnonymous` that is not the literal `true`; and a call
+whose single argument is not an object literal (the removed direct form,
+`serverFn(opts)`). Type-only re-exports erase and are fine, and so do
+`satisfies` / `as` around the literal. The default include is
 `**/*.server.{ts,tsx,mts,js,mjs}`.
 
 ### Inline form (co-location)

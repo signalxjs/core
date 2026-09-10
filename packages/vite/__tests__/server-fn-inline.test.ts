@@ -19,7 +19,7 @@ import { component } from 'sigx';
 import { serverFn } from '@sigx/server';
 import { searchIndex } from './search-index';
 
-const search = serverFn(async (rq, q: string) => searchIndex.query(q, { limit: 20 }));
+const search = serverFn({ handler: async ({ input: q }: { input: string }) => searchIndex.query(q, { limit: 20 }) });
 
 export const Search = component((ctx) => {
     const q = ctx.signal('');
@@ -89,8 +89,8 @@ describe('extractInlineServerFns — happy path', () => {
 
     it('the version is seeded from the AST — a reformat with comments keeps it', () => {
         const reformatted = SEARCH.replace(
-            'const search = serverFn(async (rq, q: string) => searchIndex.query(q, { limit: 20 }));',
-            'const search = serverFn(\n    // the index lookup\n    async (rq, q: string) =>\n        searchIndex.query(q, {\n            limit: 20 /* page size */\n        })\n);'
+            'const search = serverFn({ handler: async ({ input: q }: { input: string }) => searchIndex.query(q, { limit: 20 }) });',
+            'const search = serverFn(\n    // the index lookup\n    {\n        handler: async ({ input: q }: { input: string }) =>\n            searchIndex.query(q, {\n                limit: 20 /* page size */\n            })\n    }\n);'
         );
         expect(reformatted).not.toBe(SEARCH);
         expect(extract(reformatted).fns[0].version).toBe(extract(SEARCH).fns[0].version);
@@ -99,7 +99,7 @@ describe('extractInlineServerFns — happy path', () => {
     it('exported declarations and aliased serverFn imports work', () => {
         const code = `
 import { serverFn as fn } from '@sigx/server';
-export const ping = fn(async (rq) => 'pong');
+export const ping = fn({ handler: async () => 'pong' });
 `;
         const result = extract(code, '/src/api.ts');
         expect(result.errors).toHaveLength(0);
@@ -113,7 +113,7 @@ export const ping = fn(async (rq) => 'pong');
 import { serverFn } from '@sigx/server';
 import { used, onlyServer } from './utils';
 
-const stamp = serverFn(async (rq) => onlyServer(JSON.stringify({ ua: rq.request.headers.get('user-agent') })));
+const stamp = serverFn({ handler: async ({ rq }) => onlyServer(JSON.stringify({ ua: rq.request.headers.get('user-agent') })) });
 export const alsoClient = () => used(1);
 `;
         const result = extract(code, '/src/api.ts');
@@ -129,7 +129,7 @@ export const alsoClient = () => used(1);
 import { serverFn } from '@sigx/server';
 import { helper, serverSide } from './utils';
 
-const go = serverFn(async (rq) => serverSide());
+const go = serverFn({ handler: async () => serverSide() });
 export { helper };
 export { go };
 `;
@@ -145,7 +145,7 @@ export { go };
 import { serverFn } from '@sigx/server';
 import config, { serverBits } from './config.js' with { type: 'special' };
 
-const go = serverFn(async (rq) => serverBits());
+const go = serverFn({ handler: async () => serverBits() });
 export const show = () => config;
 export { go };
 `;
@@ -162,7 +162,7 @@ import { serverFn } from '@sigx/server';
 import type { Config } from './config';
 import { serverOnly } from './utils';
 
-const go = serverFn(async (rq) => serverOnly());
+const go = serverFn({ handler: async () => serverOnly() });
 export const shape = (c: Config) => c;
 export { go };
 `;
@@ -185,7 +185,7 @@ describe('extractInlineServerFns — the imports-only rule (hard errors)', () =>
         const code = `
 import { serverFn } from '@sigx/server';
 const TABLE = { a: 1 };
-const look = serverFn(async (rq, k: string) => TABLE[k]);
+const look = serverFn({ handler: async ({ input: k }: { input: string }) => TABLE[k] });
 `;
         const result = extract(code, '/src/api.ts');
         expect(result.errors).toHaveLength(1);
@@ -199,7 +199,7 @@ const look = serverFn(async (rq, k: string) => TABLE[k]);
 import { component } from 'sigx';
 import { serverFn } from '@sigx/server';
 export const C = component((ctx) => {
-    const save = serverFn(async (rq) => 1);
+    const save = serverFn({ handler: async () => 1 });
     return () => <button onClick={() => save()}>x</button>;
 });
 `;
@@ -212,7 +212,7 @@ export const C = component((ctx) => {
     it('rejects let/var declarations (const only)', () => {
         const result = extract(`
 import { serverFn } from '@sigx/server';
-let mutable = serverFn(async (rq) => 1);
+let mutable = serverFn({ handler: async () => 1 });
 `, '/src/api.ts');
         expect(result.errors).toHaveLength(1);
         expect(result.errors[0].message).toContain('const name = serverFn');
@@ -221,7 +221,7 @@ let mutable = serverFn(async (rq) => 1);
     it('rejects JSX inside a server body', () => {
         const code = `
 import { serverFn } from '@sigx/server';
-const render = serverFn(async (rq) => <div>no</div>);
+const render = serverFn({ handler: async () => <div>no</div> });
 `;
         const result = extract(code);
         expect(result.errors).toHaveLength(1);
@@ -232,7 +232,7 @@ const render = serverFn(async (rq) => <div>no</div>);
         const code = `
 import { serverFn } from '@sigx/server';
 import type { Helper } from './helper';
-const bad = serverFn(async (rq) => (Helper as never));
+const bad = serverFn({ handler: async () => (Helper as never) });
 `;
         const result = extract(code, '/src/api.ts');
         expect(result.errors).toHaveLength(1);
@@ -243,7 +243,7 @@ const bad = serverFn(async (rq) => (Helper as never));
         const viaEnum = extract(`
 import { serverFn } from '@sigx/server';
 enum Mode { A, B }
-const pick = serverFn(async (rq) => Mode.A);
+const pick = serverFn({ handler: async () => Mode.A });
 `, '/src/api.ts');
         expect(viaEnum.errors).toHaveLength(1);
         expect(viaEnum.errors[0].message).toContain('module-scope binding "Mode"');
@@ -251,7 +251,7 @@ const pick = serverFn(async (rq) => Mode.A);
         const viaDefault = extract(`
 import { serverFn } from '@sigx/server';
 export default function helper() { return 1; }
-const use = serverFn(async (rq) => helper());
+const use = serverFn({ handler: async () => helper() });
 `, '/src/api.ts');
         expect(viaDefault.errors).toHaveLength(1);
         expect(viaDefault.errors[0].message).toContain('module-scope binding "helper"');
@@ -261,7 +261,7 @@ const use = serverFn(async (rq) => helper());
         const result = extract(`
 import { serverFn } from '@sigx/server';
 const __serverFnStub = 1;
-const go = serverFn(async (rq) => 2);
+const go = serverFn({ handler: async () => 2 });
 `, '/src/api.ts');
         expect(result.errors).toHaveLength(1);
         expect(result.errors[0].message).toContain('reserved by the server-function transform');
@@ -272,7 +272,7 @@ const go = serverFn(async (rq) => 2);
         const viaImport = extract(`
 import { serverFn } from '@sigx/server';
 import { __sigxSrvFn_go } from './weird';
-const go = serverFn(async (rq) => 1);
+const go = serverFn({ handler: async () => 1 });
 `, '/src/api.ts');
         expect(viaImport.errors).toHaveLength(1);
         expect(viaImport.errors[0].message).toContain('collides');
@@ -281,7 +281,7 @@ const go = serverFn(async (rq) => 1);
 import { serverFn } from '@sigx/server';
 const other = 1;
 export { other as __sigxSrvFn_go };
-const go = serverFn(async (rq) => 1);
+const go = serverFn({ handler: async () => 1 });
 `, '/src/api.ts');
         expect(viaExport.errors).toHaveLength(1);
         expect(viaExport.errors[0].message).toContain('collides');
@@ -291,10 +291,10 @@ const go = serverFn(async (rq) => 1);
         const result = extract(`
 import { serverFn } from '@sigx/server';
 const db = { query: () => 1 };
-const f = serverFn(async (rq) => {
+const f = serverFn({ handler: async () => {
     { const db = 'local'; void db; }
     return db.query();
-});
+} });
 `, '/src/api.ts');
         expect(result.errors).toHaveLength(1);
         expect(result.errors[0].message).toContain('module-scope binding "db"');
@@ -304,10 +304,10 @@ const f = serverFn(async (rq) => {
         const result = extract(`
 import { serverFn } from '@sigx/server';
 const helper = 1;
-const f = serverFn(async (rq) => {
+const f = serverFn({ handler: async () => {
     { function helper() { return 2; } void helper; }
     return helper;
-});
+} });
 `, '/src/api.ts');
         expect(result.errors).toHaveLength(1);
         expect(result.errors[0].message).toContain('module-scope binding "helper"');
@@ -316,11 +316,11 @@ const f = serverFn(async (rq) => {
     it('body-top-level function declarations hoist across the whole body', () => {
         const result = extract(`
 import { serverFn } from '@sigx/server';
-const f = serverFn(async (rq) => {
+const f = serverFn({ handler: async () => {
     const early = helper();
     function helper() { return 1; }
     return early;
-});
+} });
 export { f };
 `, '/src/api.ts');
         expect(result.errors).toHaveLength(0);
@@ -330,10 +330,10 @@ export { f };
     it('var hoisting still binds across blocks', () => {
         const result = extract(`
 import { serverFn } from '@sigx/server';
-const f = serverFn(async (rq) => {
+const f = serverFn({ handler: async () => {
     { var v = 1; }
     return v;
-});
+} });
 export { f };
 `, '/src/api.ts');
         expect(result.errors).toHaveLength(0);
@@ -344,10 +344,10 @@ export { f };
         const result = extract(`
 import { serverFn } from '@sigx/server';
 const inner = 1;
-const f = serverFn(async (rq) => {
+const f = serverFn({ handler: async () => {
     const g = function inner() { return 2; };
     return g() + inner;
-});
+} });
 `, '/src/api.ts');
         expect(result.errors).toHaveLength(1);
         expect(result.errors[0].message).toContain('module-scope binding "inner"');
@@ -358,7 +358,7 @@ const f = serverFn(async (rq) => {
 import { serverFn } from '@sigx/server';
 import { shadowed } from './server-stuff';
 
-const go = serverFn(async (rq) => shadowed());
+const go = serverFn({ handler: async () => shadowed() });
 export const clientSide = () => { const shadowed = 1; return shadowed; };
 export { go };
 `, '/src/api.ts');
@@ -370,12 +370,12 @@ export { go };
     it('accepts params, locals, and nested function scopes', () => {
         const code = `
 import { serverFn } from '@sigx/server';
-const sum = serverFn(async (rq, items: number[]) => {
+const sum = serverFn({ handler: async ({ input: items }: { input: number[] }) => {
     const double = (n: number) => n * 2;
     let total = 0;
     for (const item of items) total += double(item);
     return total;
-});
+} });
 `;
         const result = extract(code, '/src/api.ts');
         expect(result.errors).toHaveLength(0);
@@ -385,7 +385,7 @@ const sum = serverFn(async (rq, items: number[]) => {
     it('namespace-import call sites extract too', () => {
         const code = `
 import * as srv from '@sigx/server';
-export const ping = srv.serverFn(async (rq) => 'pong');
+export const ping = srv.serverFn({ handler: async () => 'pong' });
 `;
         const result = extract(code, '/src/api.ts');
         expect(result.errors).toHaveLength(0);
@@ -456,7 +456,7 @@ describe('extractInlineServerFns — serverStream (#310)', () => {
 import { serverStream } from '@sigx/server';
 import { ticker } from './ticker';
 
-const ticks = serverStream(async function* (rq, id: string) { yield* ticker(id); });
+const ticks = serverStream({ handler: async function* ({ input: id }: { input: string }) { yield* ticker(id); } });
 export const use = () => ticks('x');
 `;
         const result = extract(code, '/src/Ticks.tsx');
@@ -478,7 +478,7 @@ export const use = () => ticks('x');
         const bad = `
 import { serverStream } from '@sigx/server';
 const SECRETS = ['a'];
-export const leak = serverStream(async function* () { yield SECRETS[0]; });
+export const leak = serverStream({ handler: async function* () { yield SECRETS[0]; } });
 `;
         const result = extract(bad, '/src/Bad.tsx');
         expect(result.errors).toHaveLength(1);
@@ -681,5 +681,70 @@ export const use = () => x;
         const absent = extract(carrier(`const x = serverFn({ handler: async () => 1 });`), '/src/api.ts');
         expect(absent.errors).toEqual([]);
         expect(absent.fns[0].form).toBe(false);
+    });
+});
+
+describe('extractInlineServerFns — the options literal is the only authoring form (rfc-server-v5 §1.1)', () => {
+    /** One inline declaration + a use. `opts` and `extra` are VALUE IMPORTS
+     *  — legal captures, so the imports-only rule (which runs first) stays
+     *  out of the way and the options-literal check is what speaks. */
+    const carrier = (decl: string) => `
+import { serverFn, serverStream } from '@sigx/server';
+import { opts, extra } from './options';
+${decl}
+export const use = () => x;
+`;
+    /** The message's fixed head, for the wrapper the call names. */
+    const head = (wrapper: string) =>
+        `${wrapper} "x": the only authoring form is ${wrapper}({ input?, handler, … })`;
+    const cases: Array<[string, 'serverFn' | 'serverStream', string]> = [
+        ['the removed direct fn form', 'serverFn', `const x = serverFn(async (rq, id: string) => id);`],
+        ['the removed direct stream form', 'serverStream', `const x = serverStream(async function* (rq, n: number) { yield n; });`],
+        ['a variable options object', 'serverFn', `const x = serverFn(opts);`],
+        ['no argument at all', 'serverFn', `const x = serverFn();`],
+        ['a second argument beside the literal', 'serverFn', `const x = serverFn({ handler: async () => 1 }, extra);`]
+    ];
+
+    it.each(cases)('%s is ONE error at the call — fns: [], no modules', (_shape, wrapper, decl) => {
+        const code = carrier(decl);
+        const result = extract(code, '/src/api.ts');
+        expect(result.warnings).toEqual([]);
+        // Exactly one error — not also the misplaced-call or option-reader
+        // errors for the same call site.
+        expect(result.errors).toHaveLength(1);
+        expect(result.errors[0].offset).toBe(code.indexOf(`${wrapper}(`));
+        expect(result.errors[0].message).toContain(head(wrapper));
+        expect(result.errors[0].message).toContain('ONE object-literal argument');
+        expect(result.errors[0].message).toContain('rfc-server-v5 §1.1');
+        // Inline errors mean no output in EITHER direction.
+        expect(result.fns).toEqual([]);
+        expect(result.clientModule).toBeNull();
+        expect(result.ssrModule).toBeNull();
+    });
+
+    it('stays ONE error with the access gate on — the gate has no literal to read', () => {
+        const code = carrier(`const x = serverFn(async () => 1);`);
+        const result = extract(code, '/src/api.ts', { requireAuthorization: true });
+        expect(result.errors.map((e) => e.message)).toEqual([expect.stringContaining(head('serverFn'))]);
+        expect(result.warnings).toEqual([]);
+    });
+
+    it('a module-scope options object trips the imports-only rule first — still one error, at the capture', () => {
+        // The capture check runs over the whole call before the shape check,
+        // so `serverFn(opts)` with a module-scope `opts` is reported as the
+        // capture it is. Either way the author is told to write the literal
+        // at the call site.
+        const code = `
+import { serverFn } from '@sigx/server';
+const opts = { handler: async () => 1 };
+const x = serverFn(opts);
+export const use = () => x;
+`;
+        const result = extract(code, '/src/api.ts');
+        expect(result.errors).toHaveLength(1);
+        expect(result.errors[0].message).toContain('captures module-scope binding "opts"');
+        expect(result.errors[0].offset).toBe(code.indexOf('(opts)') + 1);
+        expect(result.fns).toEqual([]);
+        expect(result.clientModule).toBeNull();
     });
 });
