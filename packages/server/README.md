@@ -183,7 +183,7 @@ What the app hands back:
   (`{ resolve, base?, renderBoundaries?, authorizeBoundary?, …posture }`),
   inheriting the app's posture with per-mount overrides winning. Each mount
   claims its `base` namespace; overlapping prefixes throw at mount time
-  (everything after the base IS the symbol). Routing still lives in your
+  (everything after the base IS the key). Routing still lives in your
   entry — `matchesServerFn` stays a predicate.
 - **Posture inheritance everywhere** — a bare `handleServerFnRequest` call
   inherits the app posture too (`origin`, `maxBodyBytes`, `maxUrlBytes`,
@@ -337,7 +337,7 @@ The mutation-side twin of `cache` (rfc-server §6.4): declaring `form: true`
 marks a function as a **form target**. The endpoint then accepts native form
 POSTs (`application/x-www-form-urlencoded` / `multipart/form-data`) for it,
 and — when a resume `<form>`'s submit handler calls it — the build stamps a
-real `action="/_sigx/fn/<symbol>" method="post"` onto the form:
+real `action="/_sigx/fn/<key>" method="post"` onto the form:
 
 ```ts
 export const submitFeedback = serverFn({
@@ -378,7 +378,7 @@ export const submitFeedback = serverFn({
 
 The read-side twin of `invalidates` (rfc-server §4.1): declaring `cache`
 marks a function as a **side-effect-free idempotent read**. The stub then
-calls it with `GET {endpoint}/{symbol}?a0=…` and the endpoint emits
+calls it with `GET {endpoint}/{key}?a0=…` and the endpoint emits
 `Cache-Control` from the declaration — the browser and any edge cache can
 absorb repeats without touching the origin:
 
@@ -700,7 +700,7 @@ against production bundles does not change context semantics.
 
 ## The endpoint
 
-`POST /_sigx/fn/<symbol>` with `{"args": [...]}` → `{"data": ...}` or
+`POST /_sigx/fn/<key>` with `{"args": [...]}` → `{"data": ...}` or
 `{"error": {message, status, code?, data?}}`. Every call carries the build's
 version tag for the function (`"v"` in the POST envelope, `?v=` on a GET
 read), so a stale client gets a typed `409` `code: 'version-skew'` error
@@ -753,7 +753,7 @@ Exactly one of the two: both or neither throws when the handler is built.
 `matchesServerFn(request, base)` and the handler's own `base` must agree, and
 they default independently — a disagreement is a silent 404, and since #543
 `base` is load-bearing for symbol extraction (everything after it *is* the
-symbol), so a base that is wrong only in part slices the symbol at the wrong
+symbol), so a base that is wrong only in part slices the key at the wrong
 offset instead of missing cleanly. The build exports what it baked, so nothing
 has to be repeated:
 
