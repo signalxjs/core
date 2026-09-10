@@ -29,9 +29,10 @@ describe('@sigx/server rides only public surface (#416, #692)', () => {
         // surface (rfc-1.0 §1.2) — a pack that needs something from there
         // needs the export promoted (as `provideTypeHandlers` was, #692),
         // not the import.
-        // Matches the bare subpath and its explicit-extension spellings
-        // (`sigx/internals`, `sigx/internals.js`, `.mjs`, `.ts`).
-        const INTERNALS_IMPORT = /from\s*['"][^'"]*\/internals(?:\.[cm]?[jt]s)?['"]/;
+        // Matches `from '…/internals'`, a bare side-effect `import '…/internals'`
+        // and a dynamic `import('…/internals')`, with or without an explicit
+        // extension (`sigx/internals`, `sigx/internals.js`, `.mjs`, `.ts`).
+        const INTERNALS_IMPORT = /(?:\bfrom\s*|\bimport\s*\(?\s*)['"][^'"]*\/internals(?:\.[cm]?[jt]s)?['"]/;
         const offenders = collectTsFiles(srcRoot).filter((file) =>
             INTERNALS_IMPORT.test(readFileSync(file, 'utf-8'))
         );
@@ -43,7 +44,7 @@ describe('@sigx/server rides only public surface (#416, #692)', () => {
         // `@sigx/server/client`: a resume handler chunk replicates these
         // imports, and a zero-JS page must not pull the framework to make
         // one RPC call. `@sigx/serialize` is the one allowed dependency.
-        const RUNTIME_IMPORT = /from\s*['"](sigx|@sigx\/(runtime-core|runtime-dom|reactivity|server-renderer|cache|resume|ssr-islands|vite))(\/[^'"]*)?['"]/;
+        const RUNTIME_IMPORT = /(?:\bfrom\s*|\bimport\s*\(?\s*)['"](sigx|@sigx\/(runtime-core|runtime-dom|reactivity|server-renderer|cache|resume|ssr-islands|vite))(\/[^'"]*)?['"]/;
         const clientFiles = [
             join(srcRoot, 'client', 'index.ts'),
             join(srcRoot, 'wire-codec.ts'),

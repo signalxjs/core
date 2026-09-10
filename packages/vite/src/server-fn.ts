@@ -89,7 +89,7 @@ import type { ServerFnRequestOptions } from '@sigx/server/server';
  */
 export interface SigxServerOptions
     extends Omit<ServerFnRequestOptions, 'resolve' | 'functions' | 'base' | 'renderBoundaries'> {
-    /** Which modules are server modules. Default: `**` + `/*.server.{ts,tsx}`. */
+    /** Which modules are server modules. Default: `**` + `/*.server.{ts,tsx,mts,js,mjs}`. */
     include?: string | string[];
     /** Excluded from matching. Default: node_modules and dist. */
     exclude?: string | string[];
@@ -177,7 +177,7 @@ const VIRTUAL_ID = 'virtual:sigx-server-fns';
 const RESOLVED_VIRTUAL_ID = '\0' + VIRTUAL_ID;
 const REGISTRY_FILE = 'sigx-server-fns.js';
 
-const DEFAULT_INCLUDE = ['**/*.server.ts', '**/*.server.tsx'];
+const DEFAULT_INCLUDE = ['**/*.server.ts', '**/*.server.tsx', '**/*.server.mts', '**/*.server.js', '**/*.server.mjs'];
 const DEFAULT_EXCLUDE = ['**/node_modules/**', '**/dist/**'];
 const DEFAULT_BASE = '/_sigx/fn';
 
@@ -434,7 +434,22 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
      */
     function devRegistry(devServer: ViteDevServer): DevRegistry {
         const registry: DevRegistry = Object.create(null) as DevRegistry;
+        /** key → file, the dev twin of the prod registry's duplicate check. */
+        const owners = new Map<string, string>();
         const add = (file: string, fn: { key: string; version: string }, exportName: string): void => {
+            const owner = owners.get(fn.key);
+            if (owner !== undefined && owner !== file) {
+                // Two functions on one route: the prod registry fails the
+                // build (`load()` above); dev must not silently route to
+                // whichever file was extracted last. Thrown from inside the
+                // request, so it reaches `next(err)` and the error overlay.
+                throw new Error(
+                    `[sigx:server] key ${JSON.stringify(fn.key)} is minted by both ` +
+                    `${relPath(owner)} and ${relPath(file)} (duplicate explicit \`id\`?) — ` +
+                    `two server functions cannot share one route.`
+                );
+            }
+            owners.set(fn.key, file);
             registry[fn.key] = {
                 version: fn.version,
                 load: () => devServer.ssrLoadModule(devSpec(file)).then((m) => m[exportName])

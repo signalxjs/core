@@ -80,15 +80,54 @@ describe('sigxServer — transform', () => {
         expect(again).toBeNull();
     });
 
-    it('surfaces extraction warnings through this.warn', () => {
+    it('routes extraction ERRORS to this.error with a file:line:column prefix (rfc-server-v5 §1.7)', () => {
+        // `export *` used to be a warning; it is a build error now, and the
+        // client build never receives anything for the module — this.error
+        // throws (like rollup's) before a stub or the real module is returned.
         const warnings: string[] = [];
-        plugin.transform.call(
-            { environment: { name: 'client' }, warn: (m: string) => warnings.push(m) },
-            `import { serverFn } from '@sigx/server';\nexport * from './more';`,
+        const errors: string[] = [];
+        expect(() =>
+            plugin.transform.call(
+                {
+                    environment: { name: 'client' },
+                    warn: (m: string) => warnings.push(m),
+                    error: (m: string): never => {
+                        errors.push(m);
+                        throw new Error(m);
+                    }
+                },
+                `import { serverFn } from '@sigx/server';\nexport * from './more';`,
+                join(root, 'src/other.server.ts')
+            )
+        ).toThrow(/other\.server\.ts:2:1 "export \* from "\.\/more"" cannot be stubbed/);
+        expect(errors).toHaveLength(1);
+        expect(errors[0]).toMatch(/^src\/other\.server\.ts:2:1 /);
+        expect(errors[0]).toContain('rfc-server-v5 §1.7');
+        expect(warnings).toEqual([]);
+    });
+
+    it('surfaces extraction WARNINGS through this.warn — a rewritten explicit `id` still only warns', () => {
+        const warnings: string[] = [];
+        const code =
+            `import { serverFn } from '@sigx/server';\n` +
+            `export const add = serverFn({ id: 'cart/../add item', handler: async (rq, input) => input });`;
+        const result = plugin.transform.call(
+            {
+                environment: { name: 'client' },
+                warn: (m: string) => warnings.push(m),
+                error: (m: string): never => {
+                    throw new Error(m);
+                }
+            },
+            code,
             join(root, 'src/other.server.ts')
         );
         expect(warnings).toHaveLength(1);
-        expect(warnings[0]).toContain('export *');
+        expect(warnings[0]).toMatch(/^\[sigx:server\] src\/other\.server\.ts: serverFn "add": `id: "cart\/\.\.\/add item"` is not URL-path-safe/);
+        expect(warnings[0]).toContain('cart/_up/add%20item');
+        // A warning does not block the stub.
+        expect(result.code).toContain('__serverFnStub("cart/_up/add%20item/add", "add"');
+        expect(result.code).not.toContain('handler:');
     });
 
     it('never serves the real module on a failed extraction', () => {
@@ -122,6 +161,46 @@ describe('sigxServer — transform', () => {
                 join(root, 'src/Page.tsx')
             )
         ).toBeNull();
+    });
+});
+
+describe('sigxServer — the default include matches .server.js / .server.mjs / .server.mts too (#692)', () => {
+    // Plain JS server modules — no type annotations, so `.js` really parses.
+    const JS_CART = `
+import { serverFn } from '@sigx/server';
+import { db } from './db.js';
+
+export const addToCart = serverFn(async (rq, id) => db.cart.add(id));
+export const auditLog = (line) => { console.log(line); };
+`;
+    const FILES = ['src/a.server.js', 'src/b.server.mjs', 'src/c.server.mts'];
+    let plugin: any;
+    let root: string;
+
+    beforeAll(() => {
+        ({ plugin, root } = makeProject(Object.fromEntries(FILES.map((rel) => [rel, JS_CART]))));
+    });
+
+    afterAll(() => rmSync(root, { recursive: true, force: true }));
+
+    it.each(FILES)('%s: the client transform yields a stub module', (rel) => {
+        const result = plugin.transform.call(
+            { environment: { name: 'client' }, warn: () => {} },
+            JS_CART,
+            join(root, rel)
+        );
+        expect(result).not.toBeNull();
+        expect(result.code).toContain(`from '@sigx/server/client'`);
+        expect(result.code).toMatch(
+            new RegExp(`__serverFnStub\\("${rel.replace(/\./g, '\\.')}/addToCart", "addToCart", "/_sigx/fn", "[0-9a-f]{8}"\\)`)
+        );
+        expect(result.code).toContain('__serverOnly("auditLog"');
+        expect(result.code).not.toContain('db.cart.add');
+    });
+
+    it('discovery registered all of them under their file-derived keys', () => {
+        const registry = plugin.load(plugin.resolveId('virtual:sigx-server-fns'));
+        for (const rel of FILES) expect(registry).toContain(`["${rel}/addToCart"]`);
     });
 });
 

@@ -40,7 +40,10 @@ import {
     readServerFnAllowAnonymousOption,
     readServerFnAuthorizeOption,
     mintIdentity,
-    optionsSpreadWarning,
+    optionsSpreadError,
+    nonLiteralIdError,
+    nonLiteralTrueError,
+    invalidLiteralTrueOption,
     readServerFnCacheOption,
     readServerFnFormOption,
     readServerFnIdOption,
@@ -509,14 +512,16 @@ export function extractInlineServerFns(
             const idOption = stream
                 ? { id: undefined, nonLiteral: false as const }
                 : readServerFnIdOption(call);
-            if (idOption.nonLiteral) {
-                warnings.push(
-                    `serverFn "${name}": \`id\` must be a non-empty string literal (it is read ` +
-                    `statically) — falling back to the file-derived stable id.`
-                );
-            }
+            if (idOption.nonLiteral) errors.push({ offset: call.start, message: nonLiteralIdError(name) });
             if (idOption.id !== undefined) warnIfIdRewritten(warnings, name, idOption.id);
-            if (!stream && hasServerFnOptionsSpread(call)) warnings.push(optionsSpreadWarning(name));
+            if (!stream && hasServerFnOptionsSpread(call)) {
+                errors.push({ offset: call.start, message: optionsSpreadError(name) });
+            }
+            for (const key of stream ? ['allowAnonymous'] : ['form', 'allowAnonymous']) {
+                if (invalidLiteralTrueOption(call, key)) {
+                    errors.push({ offset: call.start, message: nonLiteralTrueError(name, key, stream) });
+                }
+            }
             // The access gate (#489, rfc-server-v4 §5). An inline server
             // function is extracted and is a public endpoint like any other,
             // so it is held to the same rule as the file form.

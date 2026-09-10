@@ -16,10 +16,16 @@ import {
     serverFnKeyStamps,
     stubCall,
     KEY_STAMP_MARKER,
+    type ServerFnExtraction,
     type ServerFnExtractOptions
 } from '../src/server-fn-extract';
+import { offsetToLoc } from '../src/resume-extract';
 
 const HEX8 = /^[0-9a-f]{8}$/;
+
+/** The extraction's errors as `{ line, column, message }`, in report order. */
+const located = (code: string, result: ServerFnExtraction) =>
+    result.errors.map((e) => ({ ...offsetToLoc(code, e.offset), message: e.message }));
 
 const BASE = '/_sigx/fn';
 // Gate OFF by default: this file's non-gate suites use bare fixtures on
@@ -139,7 +145,7 @@ export const getCart = serverFn(async (rq, id: CartId) => ({ items: [] }));
         expect(result.stubModule).not.toContain('interface');
     });
 
-    it('warns on re-exports and default-exported serverFn', () => {
+    it('re-exports and a default-exported serverFn are build ERRORS, each at its statement (rfc-server-v5 §1.7)', () => {
         const code = `
 import { serverFn } from '@sigx/server';
 export { helper } from './helpers';
@@ -148,14 +154,48 @@ export default serverFn(async (rq) => 1);
 `;
         const result = extractServerFns(code, '/src/x.server.ts', opts('src/x.server.ts'));
         expect(result.fns).toHaveLength(0);
-        expect(result.warnings).toHaveLength(3);
-        expect(result.warnings[0]).toContain('re-export');
-        expect(result.warnings[1]).toContain('export *');
-        expect(result.warnings[2]).toContain('named export');
+        // Errors, not warnings: the client stub would silently lack the
+        // re-exported names, and a default export has no route name.
+        expect(result.warnings).toEqual([]);
+        const errors = located(code, result);
+        expect(errors).toContainEqual({
+            line: 3,
+            column: 1,
+            message: expect.stringContaining('re-export from "./helpers"')
+        });
+        expect(errors).toContainEqual({
+            line: 4,
+            column: 1,
+            message: expect.stringContaining('"export * from "./more""')
+        });
+        expect(errors).toContainEqual({
+            line: 5,
+            column: 1,
+            message: expect.stringContaining('default-exported serverFn cannot be extracted')
+        });
+        for (const error of errors) expect(error.message).toContain('rfc-server-v5 §1.7');
+        // The stub module is STILL produced next to the errors: whatever
+        // else is wrong, the client must never receive the real module.
         expect(result.stubModule).toContain('export default __serverOnly("default"');
+        expect(result.stubModule).not.toContain('async (rq) => 1');
     });
 
-    it('treats `export { x as default }` like an export default', () => {
+    it('`export type * from` and `export type { T } from` are still fine — they erase', () => {
+        const code = `
+import { serverFn } from '@sigx/server';
+export type * from './more';
+export type { T } from './types';
+export const ok = serverFn(async (rq) => 1);
+`;
+        const result = extractServerFns(code, '/src/x.server.ts', opts('src/x.server.ts'));
+        expect(result.errors).toEqual([]);
+        expect(result.warnings).toEqual([]);
+        expect(result.fns.map((f) => f.name)).toEqual(['ok']);
+        expect(result.stubModule).not.toContain('./more');
+        expect(result.stubModule).not.toContain('./types');
+    });
+
+    it('treats `export { x as default }` like an export default — an error at the `default` specifier', () => {
         const code = `
 import { serverFn } from '@sigx/server';
 const ping = serverFn(async (rq) => 'pong');
@@ -163,9 +203,82 @@ export { ping as default };
 `;
         const result = extractServerFns(code, '/src/x.server.ts', opts('src/x.server.ts'));
         expect(result.fns).toHaveLength(0);
-        expect(result.warnings).toHaveLength(1);
-        expect(result.warnings[0]).toContain('named export');
+        expect(result.warnings).toEqual([]);
+        // ONE error — the default-export one; `ping` did reach an export, so
+        // it is not also reported as an unexported server function.
+        expect(located(code, result)).toEqual([
+            { line: 4, column: 18, message: expect.stringContaining('default-exported serverFn cannot be extracted') }
+        ]);
+        expect(result.errors[0].message).toContain('Use a named export');
         expect(result.stubModule).toContain('export default __serverOnly("default"');
+    });
+
+    it('a module-scope const serverFn that is never exported is an error at its call', () => {
+        const code = `
+import { serverFn } from '@sigx/server';
+const hidden = serverFn(async (rq) => 1);
+export const shown = serverFn(async (rq) => 2);
+`;
+        const result = extractServerFns(code, '/src/x.server.ts', opts('src/x.server.ts'));
+        expect(located(code, result)).toEqual([
+            { line: 3, column: 16, message: expect.stringContaining('unexported') }
+        ]);
+        expect(result.errors[0].message).toContain('exported module-scope `const name = serverFn(...)`');
+        // It used to be silently dropped from the stub — still absent, but
+        // now loudly, and the exported sibling still extracts.
+        expect(result.fns.map((f) => f.name)).toEqual(['shown']);
+        expect(result.stubModule).not.toContain('hidden');
+    });
+
+    it('a let/var binding holding a serverFn is an error at the binding', () => {
+        const code = `
+import { serverFn } from '@sigx/server';
+export let mutable = serverFn(async (rq) => 1);
+var v = serverFn(async (rq) => 2);
+`;
+        const result = extractServerFns(code, '/src/x.server.ts', opts('src/x.server.ts'));
+        // One error per binding — not also the misplaced-call error for the
+        // same call site.
+        expect(located(code, result)).toEqual([
+            { line: 3, column: 12, message: expect.stringContaining('not a let/var binding') },
+            { line: 4, column: 5, message: expect.stringContaining('not a let/var binding') }
+        ]);
+        expect(result.fns).toHaveLength(0);
+        // The stub still never carries the body: the export degrades to a
+        // throwing server-only stub.
+        expect(result.stubModule).toContain('export const mutable = __serverOnly("mutable"');
+        expect(result.stubModule).not.toContain('async (rq)');
+    });
+
+    it('a serverFn call nested in a function body or an expression is an error at the call', () => {
+        const code = `
+import { serverFn } from '@sigx/server';
+export function make() {
+    return serverFn(async (rq) => 1);
+}
+export const wrapped = [serverFn(async (rq) => 2)];
+`;
+        const result = extractServerFns(code, '/src/x.server.ts', opts('src/x.server.ts'));
+        expect(located(code, result)).toEqual([
+            { line: 4, column: 12, message: expect.stringContaining('not created inside a function or expression') },
+            { line: 6, column: 25, message: expect.stringContaining('not created inside a function or expression') }
+        ]);
+        expect(result.fns).toHaveLength(0);
+        expect(result.serverOnly).toEqual(['make', 'wrapped']);
+    });
+
+    it('a destructured declarator holding a serverFn is an error at the call', () => {
+        const code = `
+import { serverFn } from '@sigx/server';
+export const { a } = serverFn(async (rq) => 1);
+const [b] = serverFn(async (rq) => 2);
+`;
+        const result = extractServerFns(code, '/src/x.server.ts', opts('src/x.server.ts'));
+        expect(located(code, result)).toEqual([
+            { line: 3, column: 22, message: expect.stringContaining('must be an exported module-scope') },
+            { line: 4, column: 13, message: expect.stringContaining('must be an exported module-scope') }
+        ]);
+        expect(result.fns).toHaveLength(0);
     });
 
     it('emits an empty module for a server file with no exports', () => {
@@ -442,16 +555,29 @@ export const add = serverFn({ id: 'cart/../add item', handler: async (rq, input)
         expect(result.warnings[0]).toContain('cart/_up/add%20item');
     });
 
-    it('warns on a non-literal `id` and falls back to the file-derived stable id', () => {
+    it('a non-literal `id` is a build error at the call — no fallback route (rfc-server-v5 §1.7)', () => {
         const code = `
 import { serverFn } from '@sigx/server';
 const routeId = 'cart/add';
 export const add = serverFn({ id: routeId, handler: async (rq, input) => input });
 `;
         const result = extractServerFns(code, '/x.server.ts', opts('src/x.server.ts'));
-        expect(result.warnings).toHaveLength(1);
-        expect(result.warnings[0]).toContain('string literal');
-        expect(result.fns[0].key).toBe('src/x.server.ts/add');
+        expect(result.warnings).toEqual([]);
+        expect(located(code, result)).toEqual([
+            { line: 4, column: 20, message: expect.stringContaining('serverFn "add": `id` must be a non-empty string literal') }
+        ]);
+        // An empty literal is "present but not a route" — the same error.
+        const empty = extractServerFns(
+            code.replace('id: routeId', `id: ''`),
+            '/x.server.ts',
+            opts('src/x.server.ts')
+        );
+        expect(empty.errors).toHaveLength(1);
+        expect(empty.errors[0].message).toContain('non-empty string literal');
+        // The stub module is still produced beside the error (the build
+        // fails; the client must still never see the body).
+        expect(result.stubModule).toContain('__serverFnStub(');
+        expect(result.stubModule).not.toContain('routeId');
     });
 
     it('`endpoint` bakes the fetch target into the stub; the key is the only route', () => {
@@ -620,7 +746,7 @@ export const addToCart = serverFn(async (rq, id) => id);
         );
     });
 
-    it('requires the LITERAL true — false, computed, and truthy strings do not mark', () => {
+    it('requires the LITERAL true — false, computed, and truthy strings do not mark, and are ERRORS', () => {
         for (const value of ['false', 'FORM_ON', '"true"', '1']) {
             const code = `
 import { serverFn } from '@sigx/server';
@@ -629,7 +755,25 @@ export const f = serverFn({ form: ${value}, handler: async (rq) => 1 });
 `;
             const result = extractServerFns(code, '/src/api.server.ts', opts('src/api.server.ts'));
             expect(result.fns[0].form).toBe(false);
+            // A PRESENT `form` that is not the literal is a build error
+            // (rfc-server-v5 §1.7) — the key would stamp no action while
+            // reading as if it did.
+            expect(located(code, result)).toEqual([
+                { line: 4, column: 18, message: expect.stringContaining('serverFn "f": `form` must be the LITERAL `true`') }
+            ]);
+            expect(result.errors[0].message).toContain('stamp no form action');
+            expect(result.errors[0].message).toContain('Write `form: true`, or drop the key');
         }
+    });
+
+    it('an ABSENT `form` is not an error — only a present, non-literal one', () => {
+        const code = `
+import { serverFn } from '@sigx/server';
+export const f = serverFn({ handler: async (rq) => 1 });
+`;
+        const result = extractServerFns(code, '/src/api.server.ts', opts('src/api.server.ts'));
+        expect(result.errors).toEqual([]);
+        expect(result.fns[0].form).toBe(false);
     });
 
     it('survives export { x } indirection', () => {
@@ -710,17 +854,35 @@ export const open = serverFn({ allowAnonymous: true, handler: async () => 'publi
     });
 });
 
-describe('extractServerFns — options spread (#398)', () => {
-    it('warns that a spread hides the statically-read options, and still extracts', () => {
+describe('extractServerFns — options spread (#398, an error since rfc-server-v5 §1.7)', () => {
+    it('a spread in the options literal is a build error at the call — it hides the statically-read options', () => {
         const code = `
 import { serverFn } from '@sigx/server';
 export const read = serverFn({ ...shared, handler: async () => 1 });
 `;
         const result = extractServerFns(code, '/src/x.server.ts', opts('src/x.server.ts'));
+        expect(result.warnings).toEqual([]);
+        expect(located(code, result)).toEqual([
+            { line: 3, column: 21, message: expect.stringContaining('serverFn "read": a spread (`...`) in the options literal') }
+        ]);
+        expect(result.errors[0].message).toContain('boundary refresh');
+        expect(result.errors[0].message).toContain('access gate');
+        // The stub module is still produced next to the error, and it is a
+        // stub — never the real module.
         expect(result.fns.map((f) => f.name)).toEqual(['read']);
-        expect(result.warnings).toHaveLength(1);
-        expect(result.warnings[0]).toContain('spread');
-        expect(result.warnings[0]).toContain('boundary refresh');
+        expect(result.stubModule).toContain('export const read = __serverFnStub(');
+        expect(result.stubModule).not.toContain('shared');
+    });
+
+    it('fires even when the spread carries none of the read keys — which keys it carries is undecidable here', () => {
+        const code = `
+import { serverFn } from '@sigx/server';
+const base = {};
+export const read = serverFn({ handler: async () => 1, ...base });
+`;
+        const result = extractServerFns(code, '/src/x.server.ts', opts('src/x.server.ts'));
+        expect(result.errors).toHaveLength(1);
+        expect(result.errors[0].message).toContain('spread');
     });
 
     it('stays quiet on a literal options object and on the direct form', () => {
@@ -731,6 +893,63 @@ export const b = serverFn(async () => 1);
 `;
         const result = extractServerFns(code, '/src/x.server.ts', opts('src/x.server.ts'));
         expect(result.warnings).toEqual([]);
+        expect(result.errors).toEqual([]);
+    });
+});
+
+describe('extractServerFns — literal-true options (`form`, `allowAnonymous`; rfc-server-v5 §1.7)', () => {
+    it('`allowAnonymous: flag` on a serverFn is an error at the call', () => {
+        const code = `
+import { serverFn } from '@sigx/server';
+const flag = true;
+export const a = serverFn({ allowAnonymous: flag, handler: async () => 1 });
+`;
+        const result = extractServerFns(code, '/src/x.server.ts', opts('src/x.server.ts'));
+        expect(result.warnings).toEqual([]);
+        expect(located(code, result)).toEqual([
+            { line: 4, column: 18, message: expect.stringContaining('serverFn "a": `allowAnonymous` must be the LITERAL `true`') }
+        ]);
+        expect(result.errors[0].message).toContain('not pass the access gate');
+        expect(result.errors[0].message).toContain('Write `allowAnonymous: true`, or drop the key');
+    });
+
+    it('`form: flag` on a serverFn is an error at the call', () => {
+        const code = `
+import { serverFn } from '@sigx/server';
+const flag = true;
+export const b = serverFn({ form: flag, handler: async () => 1 });
+`;
+        const result = extractServerFns(code, '/src/x.server.ts', opts('src/x.server.ts'));
+        expect(located(code, result)).toEqual([
+            { line: 4, column: 18, message: expect.stringContaining('serverFn "b": `form` must be the LITERAL `true`') }
+        ]);
+        expect(result.fns[0].form).toBe(false);
+    });
+
+    it("a serverStream's `allowAnonymous` is held to the same rule", () => {
+        const code = `
+import { serverStream } from '@sigx/server';
+const flag = true;
+export const c = serverStream({ allowAnonymous: flag, handler: async function* () { yield 1; } });
+`;
+        const result = extractServerFns(code, '/src/x.server.ts', opts('src/x.server.ts'));
+        expect(located(code, result)).toEqual([
+            { line: 4, column: 18, message: expect.stringContaining('`allowAnonymous` must be the LITERAL `true`') }
+        ]);
+        expect(result.errors[0].message).toContain('"c"');
+    });
+
+    it('the literal `true` and an absent key both pass, on both wrappers', () => {
+        const code = `
+import { serverFn, serverStream } from '@sigx/server';
+export const a = serverFn({ allowAnonymous: true, form: true, handler: async () => 1 });
+export const b = serverFn({ handler: async () => 1 });
+export const c = serverStream({ allowAnonymous: true, handler: async function* () { yield 1; } });
+export const d = serverStream({ handler: async function* () { yield 1; } });
+`;
+        const result = extractServerFns(code, '/src/x.server.ts', opts('src/x.server.ts'));
+        expect(result.errors).toEqual([]);
+        expect(result.fns.map((f) => f.name)).toEqual(['a', 'b', 'c', 'd']);
     });
 });
 
@@ -859,16 +1078,20 @@ export const f = serverStream({ unguarded: true, handler: async function* () { y
         expect(off.warnings).toEqual([]);
     });
 
-    it('demands the LITERAL true — a variable does not silence the gate', () => {
-        const v4 = extractServerFns(
-            `
+    it('demands the LITERAL true — a variable does not silence the gate, and is itself an error', () => {
+        const code = `
 import { serverFn } from '@sigx/server';
 export const read = serverFn({ allowAnonymous: isPublic, handler: async () => 1 });
-`,
-            '/src/x.server.ts',
-            gateOpts()
-        );
-        expect(v4.errors).toHaveLength(1);
+`;
+        const v4 = extractServerFns(code, '/src/x.server.ts', gateOpts());
+        // Two independent failures, both at the call: the present-but-not-
+        // literal key (rfc-server-v5 §1.7) and the undecided access policy
+        // it failed to decide.
+        expect(located(code, v4)).toEqual([
+            { line: 3, column: 21, message: expect.stringContaining('`allowAnonymous` must be the LITERAL `true`') },
+            { line: 3, column: 21, message: expect.stringContaining('has no decided access policy') }
+        ]);
+        expect(v4.warnings).toEqual([]);
     });
 
     it('the key-stamp block carries ONLY __sigxKey lines — the guard-checked markers are retired', () => {
@@ -951,5 +1174,38 @@ export const addToCart = serverFn(async (rq, id: string) => id);
         const result = extractServerFns(CART, '/src/cart.server.ts', opts('src/cart.server.ts'));
         // `auditLog` is an arrow function: honestly stubbed, so no warning.
         expect(result.serverOnlyValues).toEqual([]);
+    });
+});
+
+describe('build-error precision (rfc-server-v5 §1.7 follow-ups)', () => {
+    const opts = { stableId: 'src/x.server.ts', endpoint: '/_sigx/fn', requireAuthorization: false as const };
+
+    it('a default-exported serverFn is ONE error, not also a misplaced-call error', () => {
+        const out = extractServerFns(
+            `import { serverFn } from '@sigx/server';\nexport default serverFn({ handler: async () => 1 });\n`,
+            '/app/src/x.server.ts',
+            opts
+        );
+        expect(out.errors).toHaveLength(1);
+        expect(out.errors[0].message).toMatch(/default-exported serverFn/);
+    });
+
+    it('a re-export whose specifiers are all inline `type` erases and is not an error', () => {
+        const out = extractServerFns(
+            `import { serverFn } from '@sigx/server';\nexport { type A, type B } from './types';\nexport const f = serverFn({ handler: async () => 1 });\n`,
+            '/app/src/x.server.ts',
+            opts
+        );
+        expect(out.errors).toEqual([]);
+        expect(out.fns.map((fn) => fn.name)).toEqual(['f']);
+    });
+
+    it('the literal-true error names the wrapper — serverStream for a stream', () => {
+        const out = extractServerFns(
+            `import { serverStream } from '@sigx/server';\nconst flag = true;\nexport const s = serverStream({ allowAnonymous: flag, handler: async function* () { yield 1; } });\n`,
+            '/app/src/x.server.ts',
+            opts
+        );
+        expect(out.errors.map((e) => e.message)).toContainEqual(expect.stringMatching(/^serverStream "s": `allowAnonymous` must be the LITERAL/));
     });
 });

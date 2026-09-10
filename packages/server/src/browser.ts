@@ -34,7 +34,7 @@ export function serverFn(): never {
     throw new Error(
         '[sigx server] serverFn() reached the browser unextracted — is the @sigx/vite/server ' +
         'plugin configured, and does this file match its include pattern ' +
-        '(default **/*.server.{ts,tsx})?'
+        '(default **/*.server.{ts,tsx,mts,js,mjs})?'
     );
 }
 
@@ -42,7 +42,7 @@ export function serverStream(): never {
     throw new Error(
         '[sigx server] serverStream() reached the browser unextracted — is the @sigx/vite/server ' +
         'plugin configured, and does this file match its include pattern ' +
-        '(default **/*.server.{ts,tsx})?'
+        '(default **/*.server.{ts,tsx,mts,js,mjs})?'
     );
 }
 
@@ -55,7 +55,7 @@ export function perRequest(): never {
     throw new Error(
         '[sigx server] perRequest() reached the browser unextracted — is the @sigx/vite/server ' +
         'plugin configured, and does this file match its include pattern ' +
-        '(default **/*.server.{ts,tsx})?'
+        '(default **/*.server.{ts,tsx,mts,js,mjs})?'
     );
 }
 
@@ -63,7 +63,7 @@ export function disposeRequestValues(): never {
     throw new Error(
         '[sigx server] disposeRequestValues() reached the browser unextracted — is the ' +
         '@sigx/vite/server plugin configured, and does this file match its include pattern ' +
-        '(default **/*.server.{ts,tsx})?'
+        '(default **/*.server.{ts,tsx,mts,js,mjs})?'
     );
 }
 
@@ -75,7 +75,7 @@ export function principal(): never {
     throw new Error(
         '[sigx server] principal() reached the browser unextracted — is the @sigx/vite/server ' +
         'plugin configured, and does this file match its include pattern ' +
-        '(default **/*.server.{ts,tsx})?'
+        '(default **/*.server.{ts,tsx,mts,js,mjs})?'
     );
 }
 
@@ -83,7 +83,7 @@ export function requirePrincipal(): never {
     throw new Error(
         '[sigx server] requirePrincipal() reached the browser unextracted — is the ' +
         '@sigx/vite/server plugin configured, and does this file match its include pattern ' +
-        '(default **/*.server.{ts,tsx})?'
+        '(default **/*.server.{ts,tsx,mts,js,mjs})?'
     );
 }
 
@@ -91,7 +91,7 @@ export function setPrincipal(): never {
     throw new Error(
         '[sigx server] setPrincipal() reached the browser unextracted — is the ' +
         '@sigx/vite/server plugin configured, and does this file match its include pattern ' +
-        '(default **/*.server.{ts,tsx})?'
+        '(default **/*.server.{ts,tsx,mts,js,mjs})?'
     );
 }
 
@@ -113,6 +113,6 @@ export function requireAuthenticated(): never {
     throw new Error(
         '[sigx server] requireAuthenticated (a server-side authorization policy) reached the ' +
         'browser unextracted — is the @sigx/vite/server plugin configured, and does this file ' +
-        'match its include pattern (default **/*.server.{ts,tsx})?'
+        'match its include pattern (default **/*.server.{ts,tsx,mts,js,mjs})?'
     );
 }

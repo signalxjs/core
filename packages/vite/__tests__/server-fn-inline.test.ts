@@ -496,7 +496,7 @@ describe('extractInlineServerFns — rev 2 (keys, id, endpoint)', () => {
         expect(a.fns[0].version).toBe(b.fns[0].version);
     });
 
-    it('honors an explicit string-literal `id` and warns on a non-literal one', () => {
+    it('honors an explicit string-literal `id`; a non-literal one is a build error (rfc-server-v5 §1.7)', () => {
         const withId = `
 import { serverFn } from '@sigx/server';
 const search = serverFn({ id: 'search/query', handler: async (rq, q) => q });
@@ -507,11 +507,31 @@ export const use = () => search('x');
         expect(result.warnings).toHaveLength(0);
         expect(result.fns[0].key).toBe('search/query/search');
 
+        // A template literal is not a string literal — no fallback to the
+        // file-derived id: an error at the call, and nothing extracted.
         const dynamic = withId.replace(`'search/query'`, '`search/query`');
-        const warned = extract(dynamic, '/src/api.ts');
-        expect(warned.warnings).toHaveLength(1);
-        expect(warned.warnings[0]).toContain('string literal');
-        expect(warned.fns[0].key).toBe('src/api.ts/search');
+        const failed = extract(dynamic, '/src/api.ts');
+        expect(failed.warnings).toEqual([]);
+        expect(failed.errors).toHaveLength(1);
+        expect(failed.errors[0].message).toContain('serverFn "search": `id` must be a non-empty string literal');
+        expect(failed.errors[0].offset).toBe(dynamic.indexOf('serverFn({'));
+        expect(failed.fns).toEqual([]);
+        expect(failed.clientModule).toBeNull();
+        expect(failed.ssrModule).toBeNull();
+    });
+
+    it('an explicit `id` that routeSafeId rewrites is still only a WARNING', () => {
+        const code = `
+import { serverFn } from '@sigx/server';
+const add = serverFn({ id: 'cart/../add item', handler: async (rq, input) => input });
+export const use = () => add(1);
+`;
+        const result = extract(code, '/src/api.ts');
+        expect(result.errors).toEqual([]);
+        expect(result.warnings).toHaveLength(1);
+        expect(result.warnings[0]).toContain('not URL-path-safe');
+        expect(result.fns[0].key).toBe('cart/_up/add%20item/add');
+        expect(result.clientModule).not.toBeNull();
     });
 
     it('`endpoint` bakes into the client splice; the key is the only route', () => {
@@ -572,8 +592,8 @@ export const Panel = component((ctx) => {
     });
 });
 
-describe('extractInlineServerFns — options spread (#398)', () => {
-    it('warns without blocking extraction', () => {
+describe('extractInlineServerFns — options spread (#398, an error since rfc-server-v5 §1.7)', () => {
+    it('a spread in the options literal is a build error at the call — nothing is extracted', () => {
         const code = `
 import { component } from 'sigx';
 import { serverFn } from '@sigx/server';
@@ -583,9 +603,83 @@ export const P = component((ctx) => {
 });
 `;
         const result = extract(code, '/src/P.tsx');
+        expect(result.warnings).toEqual([]);
+        expect(result.errors).toHaveLength(1);
+        expect(result.errors[0].message).toContain('serverFn "load": a spread (`...`) in the options literal');
+        expect(result.errors[0].message).toContain('boundary refresh');
+        expect(result.errors[0].offset).toBe(code.indexOf('serverFn({'));
+        // Inline errors mean no output in EITHER direction.
+        expect(result.fns).toEqual([]);
+        expect(result.clientModule).toBeNull();
+        expect(result.ssrModule).toBeNull();
+    });
+
+    it('a literal options object stays quiet', () => {
+        const code = `
+import { serverFn } from '@sigx/server';
+const load = serverFn({ cache: { maxAge: 1 }, handler: async () => 1 });
+export const use = () => load();
+`;
+        const result = extract(code, '/src/api.ts');
         expect(result.errors).toEqual([]);
+        expect(result.warnings).toEqual([]);
         expect(result.fns).toHaveLength(1);
-        expect(result.warnings).toHaveLength(1);
-        expect(result.warnings[0]).toContain('spread');
+    });
+});
+
+describe('extractInlineServerFns — literal-true options (`form`, `allowAnonymous`; rfc-server-v5 §1.7)', () => {
+    /** One inline declaration + a use, so the file is a real carrier. `flag`
+     *  is a VALUE IMPORT — a legal capture, so the imports-only rule (which
+     *  runs first) stays out of the way and the literal-true check is what
+     *  speaks. */
+    const carrier = (decl: string) => `
+import { serverFn, serverStream } from '@sigx/server';
+import { flag } from './flags';
+${decl}
+export const use = () => x;
+`;
+
+    it('`allowAnonymous: flag` on a serverFn is an error at the call — fns: [], no modules', () => {
+        const code = carrier(`const x = serverFn({ allowAnonymous: flag, handler: async () => 1 });`);
+        const result = extract(code, '/src/api.ts');
+        expect(result.warnings).toEqual([]);
+        expect(result.errors).toHaveLength(1);
+        expect(result.errors[0].message).toContain('serverFn "x": `allowAnonymous` must be the LITERAL `true`');
+        expect(result.errors[0].message).toContain('not pass the access gate');
+        expect(result.errors[0].offset).toBe(code.indexOf('serverFn({'));
+        expect(result.fns).toEqual([]);
+        expect(result.clientModule).toBeNull();
+        expect(result.ssrModule).toBeNull();
+    });
+
+    it('`form: flag` on a serverFn is an error at the call', () => {
+        const code = carrier(`const x = serverFn({ form: flag, handler: async () => 1 });`);
+        const result = extract(code, '/src/api.ts');
+        expect(result.errors).toHaveLength(1);
+        expect(result.errors[0].message).toContain('serverFn "x": `form` must be the LITERAL `true`');
+        expect(result.errors[0].message).toContain('stamp no form action');
+        expect(result.errors[0].offset).toBe(code.indexOf('serverFn({'));
+        expect(result.fns).toEqual([]);
+        expect(result.clientModule).toBeNull();
+    });
+
+    it("a serverStream's `allowAnonymous` is held to the same rule", () => {
+        const code = carrier(`const x = serverStream({ allowAnonymous: flag, handler: async function* () { yield 1; } });`);
+        const result = extract(code, '/src/api.ts');
+        expect(result.errors).toHaveLength(1);
+        expect(result.errors[0].message).toContain('`allowAnonymous` must be the LITERAL `true`');
+        expect(result.errors[0].message).toContain('"x"');
+        expect(result.errors[0].offset).toBe(code.indexOf('serverStream({'));
+        expect(result.fns).toEqual([]);
+        expect(result.clientModule).toBeNull();
+    });
+
+    it('the literal `true` and an absent key both pass', () => {
+        const ok = extract(carrier(`const x = serverFn({ allowAnonymous: true, form: true, handler: async () => 1 });`), '/src/api.ts');
+        expect(ok.errors).toEqual([]);
+        expect(ok.fns[0].form).toBe(true);
+        const absent = extract(carrier(`const x = serverFn({ handler: async () => 1 });`), '/src/api.ts');
+        expect(absent.errors).toEqual([]);
+        expect(absent.fns[0].form).toBe(false);
     });
 });
