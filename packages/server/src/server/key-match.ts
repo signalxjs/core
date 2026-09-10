@@ -29,11 +29,38 @@ export interface PatternMatcher {
  * `JSON.stringify` runs ONCE here, not once per key tested — the whole point
  * of the split (#469).
  */
+/**
+ * Canonical (key-sorted) JSON — the byte-identical twin of runtime-core's
+ * `canonicalKeyJson` (#694), so a pattern with object elements meets the
+ * key a `useData` read minted whatever the property order was. Server-fn
+ * references were resolved to key strings before a pattern reaches here.
+ */
+export function canonicalJson(value: unknown): string {
+    if (value === null) return 'null';
+    if (typeof value !== 'object') return JSON.stringify(value) ?? 'null';
+    if (Array.isArray(value)) {
+        let out = '[';
+        for (let i = 0; i < value.length; i++) {
+            if (i > 0) out += ',';
+            out += canonicalJson(value[i]);
+        }
+        return out + ']';
+    }
+    const record = value as Record<string, unknown>;
+    const keys = Object.keys(record).sort();
+    let out = '{';
+    for (let i = 0; i < keys.length; i++) {
+        if (i > 0) out += ',';
+        out += JSON.stringify(keys[i]) + ':' + canonicalJson(record[keys[i]]);
+    }
+    return out + '}';
+}
+
 export function preparePattern(pattern: string | readonly unknown[]): PatternMatcher {
     if (typeof pattern === 'string') {
         return { match: (entryKey) => entryKey === pattern };
     }
-    const canon = JSON.stringify(pattern); // '["posts","u1"]'
+    const canon = canonicalJson(pattern); // '["posts","u1"]'
     const prefix = canon.slice(0, -1); // '["posts","u1"'
     const boundary = prefix.length;
     return {

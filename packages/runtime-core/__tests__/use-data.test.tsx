@@ -1112,3 +1112,73 @@ describe('useData', () => {
         expect(cell.value).toBe('item-1');
     });
 });
+
+describe('tuple keys with object elements (#694)', () => {
+    const containers: HTMLDivElement[] = [];
+    function mount(node: any): HTMLDivElement {
+        const container = document.createElement('div');
+        document.body.appendChild(container);
+        containers.push(container);
+        render(node, container);
+        return container;
+    }
+    afterEach(() => {
+        for (const c of containers.splice(0)) c.remove();
+        delete (globalThis as any).__SIGX_ASYNC__;
+        vi.restoreAllMocks();
+    });
+
+    const stampedRef = <A extends unknown[], R>(key: string, impl: (...args: A) => Promise<R>) =>
+        Object.assign(impl, { __sigxKey: key });
+
+    it('an object element canonicalizes with sorted keys — property order is not identity', async () => {
+        (globalThis as any).__SIGX_ASYNC__ = { '["cart",{"a":2,"b":1}]': 'seeded' };
+        const fetcher = vi.fn(async () => 'fresh');
+        let cell!: AsyncState<string>;
+        const App = component(() => {
+            cell = useData(() => ['cart', { b: 1, a: 2 }] as const, fetcher);
+            return () => <div />;
+        });
+        mount(jsx(App, {}));
+        await tick();
+        expect(fetcher).not.toHaveBeenCalled();
+        expect(cell.value).toBe('seeded');
+    });
+
+    it('a fn-headed tuple with an object input keys on it and hands it to the fn', async () => {
+        const seen: unknown[] = [];
+        const getCart = stampedRef('src/api.server.ts/getCart', async (input: { userId: string }) => {
+            seen.push(input);
+            return `cart:${input.userId}`;
+        });
+        let cell!: AsyncState<string>;
+        const App = component(() => {
+            cell = useData(() => [getCart, { userId: 'u1' }] as const);
+            return () => <div />;
+        });
+        mount(jsx(App, {}));
+        await settle();
+        expect(seen).toEqual([{ userId: 'u1' }]);
+        expect(cell.value).toBe('cart:u1');
+        expect(Object.keys((globalThis as any).__SIGX_ASYNC__ ?? {})).toContain('["src/api.server.ts/getCart",{"userId":"u1"}]');
+    });
+
+    it('nested arrays and objects are allowed; a class instance, a Date, or an undefined inside is not', () => {
+        const ok = component(() => {
+            useData(() => ['k', { x: [1, { y: null }] }] as const, async () => 1);
+            return () => <div />;
+        });
+        expect(() => mount(jsx(ok, {}))).not.toThrow();
+        for (const [bad, message] of [
+            [new Date(0), /identity is canonical JSON/],
+            [new Map(), /identity is canonical JSON/],
+            [{ when: undefined }, /JSON values/]
+        ] as const) {
+            const App = component(() => {
+                useData(() => ['k', bad] as never, async () => 1);
+                return () => <div />;
+            });
+            expect(() => mount(jsx(App, {})), String(bad)).toThrow(message);
+        }
+    });
+});

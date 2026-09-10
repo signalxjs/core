@@ -486,3 +486,21 @@ describe('endpoint — invalidates pattern hardening (#461 review)', () => {
         expect(payload.$cache?.invalidates?.[63]).toBe('k-63');
     });
 });
+
+describe('endpoint — invalidates tuples with object elements (#694)', () => {
+    it('passes a plain-object element through and drops a Date', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const vote = serverFn({
+            handler: async () => 'ok',
+            invalidates: () => [['cart', { b: 1, a: 2 }], ['when', new Date(0)]] as never
+        });
+        const res = await post(vote, { args: [{}] });
+        expect(res.status).toBe(200);
+        await expect(res.json()).resolves.toEqual({
+            data: 'ok',
+            $cache: { invalidates: [['cart', { b: 1, a: 2 }]] }
+        });
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining('non-JSON-safe'));
+        warn.mockRestore();
+    });
+});

@@ -258,13 +258,27 @@ const MAX_INVALIDATE_PATTERNS = 64;
  * bare server-fn reference becomes its stable-key TUPLE (`[__sigxKey]` —
  * `useData(fn)`'s identity, and a prefix of every `[fn, ...args]` key);
  * fn references INSIDE a tuple resolve to their key string in place;
- * strings and JSON-primitive tuples pass through. Everything else is
- * dropped with a dev warning: a reference without a build-stamped key can
- * never match anything, and a non-JSON-safe tuple element (a `bigint`,
- * say) would make `JSON.stringify(envelope)` throw and fail the whole
- * MUTATION response — the same "JSON primitives + finite numbers"
- * contract `useData` keys live under.
+ * strings and JSON tuples (primitives, arrays, plain objects — #694) pass
+ * through. Everything else is dropped with a dev warning: a reference
+ * without a build-stamped key can never match anything, and a non-JSON
+ * tuple element (a `bigint`, a `Date`, say) would make
+ * `JSON.stringify(envelope)` throw and fail the whole MUTATION response —
+ * the same "JSON values + finite numbers" contract `useData` keys live
+ * under.
  */
+
+/** JSON-safe, recursively: primitives, finite numbers, arrays, PLAIN objects. */
+function isJsonSafe(value: unknown): boolean {
+    if (value === null) return true;
+    const t = typeof value;
+    if (t === 'string' || t === 'boolean') return true;
+    if (t === 'number') return Number.isFinite(value as number);
+    if (t !== 'object') return false;
+    if (Array.isArray(value)) return value.every(isJsonSafe);
+    const proto = Object.getPrototypeOf(value) as unknown;
+    if (proto !== Object.prototype && proto !== null) return false;
+    return Object.values(value as Record<string, unknown>).every(isJsonSafe);
+}
 function resolveInvalidatePatterns(
     raw: unknown,
     fnName: string
@@ -275,7 +289,7 @@ function resolveInvalidatePatterns(
         if (__DEV__) {
             console.warn(
                 `[sigx server] "${fnName}" \`invalidates\` ${reason} — pattern dropped. ` +
-                `Patterns are canonical strings, JSON-primitive tuples, or build-stamped ` +
+                `Patterns are canonical strings, JSON tuples, or build-stamped ` +
                 `server-fn references.`
             );
         }
@@ -307,10 +321,8 @@ function resolveInvalidatePatterns(
                     dropped = 'contains a server-fn reference with no build-stamped key (__sigxKey)';
                     break;
                 }
-                const t = typeof el;
-                if (el === null || t === 'string' || t === 'boolean') continue;
-                if (t === 'number' && Number.isFinite(el as number)) continue;
-                dropped = `contains a non-JSON-safe tuple element (${t})`;
+                if (isJsonSafe(el)) continue;
+                dropped = `contains a non-JSON-safe tuple element (${typeof el})`;
                 break;
             }
             if (dropped !== undefined) {

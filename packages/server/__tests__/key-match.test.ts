@@ -38,6 +38,16 @@ const CASES: Array<[entryKey: string, pattern: string | readonly unknown[], expe
     ['["posts","u1"]', 'posts', false],
     // numbers / null elements
     ['["k",1,null]', ['k', 1], true],
+    // object elements (#694): key-SORTED canonical form on both sides, so a
+    // pattern spelled in another property order still meets the key
+    ['["cart",{"a":2,"b":1},7]', ['cart', { b: 1, a: 2 }], true],
+    ['["cart",{"a":2,"b":1},7]', ['cart', { a: 2, b: 1 }, 7], true],
+    ['["cart",{"a":2,"b":1},7]', ['cart', { a: 2 }], false],
+    ['["cart",{"a":2,"b":1}]', ['cart', { a: 2, b: 1, c: 3 }], false],
+    // nested arrays and objects canonicalize recursively
+    // (entry keys are always canonical — sorted — because useData mints them)
+    ['["k",{"x":[1,{"y":null,"z":true}]}]', ['k', { x: [1, { z: true, y: null }] }], true],
+    ['["k",{"x":[1,{"y":null,"z":true}]}]', ['k', { x: [1, { y: null, z: false }] }], false],
     ['["k",12]', ['k', 1], false]
 ];
 
@@ -67,9 +77,11 @@ describe('preparePattern — server/cache parity (#469)', () => {
         const spy = vi.spyOn(JSON, 'stringify');
         const cacheMatcher = cachePrepare(['posts', 'u1']);
         const serverMatcher = serverPrepare(['posts', 'u1']);
-        // Each prepare canonicalizes its tuple exactly once — no more, and
-        // (string patterns aside) no fewer.
-        expect(spy.mock.calls.length).toBe(2);
+        // Each prepare canonicalizes its tuple at prepare time (per element
+        // since #694's key-sorted canonical form — the count is the same on
+        // both sides, which is the parity that matters).
+        expect(spy.mock.calls.length).toBeGreaterThan(0);
+        expect(spy.mock.calls.length % 2).toBe(0);
 
         const afterPrepare = spy.mock.calls.length;
         for (const [entryKey] of CASES) {

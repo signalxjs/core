@@ -42,7 +42,7 @@ import {
     type Fetcher,
 } from './async/shared.js';
 
-export type { Falsy, KeyTuple, KeyValue, ServerFnDataRef } from './async/key.js';
+export type { Falsy, KeyJson, KeyTuple, KeyValue, ServerFnDataRef } from './async/key.js';
 export type { AsyncFetcherContext, Fetcher, MatchArms, AsyncState } from './async/shared.js';
 
 /**

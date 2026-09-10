@@ -63,7 +63,7 @@ const save = useAction(saveUser, {
   whether or not it opted into a cache policy — and drops the matching keys
   from the SSR transfer blob, so leaving the route and coming back refetches
   instead of restoring what was just invalidated.
-- Keys are core's canonical identities (strings; tuples as canonical JSON) —
+- Keys are core's canonical identities (strings; tuples as key-sorted canonical JSON, object elements included) —
   the store and core's SSR blob speak the same language.
 - **SSR/hydration**: the pack adopts `window.__SIGX_ASYNC__` as its *initial*
   cache state (§7 blob-as-seed) — server-fetched values hydrate as fresh
