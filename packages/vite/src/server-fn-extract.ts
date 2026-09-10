@@ -9,7 +9,7 @@
  *
  * ```ts
  * import { serverFn } from '@sigx/server';
- * export const addToCart = serverFn(async (rq, id: string) => { … });
+ * export const addToCart = serverFn({ input: Id, handler: async ({ input: id, rq }) => { … } });
  * export const auditLog = (line: string) => { … };
  * ```
  *
