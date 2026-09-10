@@ -222,6 +222,12 @@ one line in `docs/ecosystem-release.md`. Apps keep `sigx` in
 
 ### 3.4 The guard (#633 phase 1)
 
+Landed in #688: `assertSingleCopy` / `readCopyStamp` on
+`@sigx/reactivity/internals`, the stamps at `effect.ts` and
+`component-lifecycle.ts`, both rows in `docs/seams.md`. One refinement the
+text below leaves open: the identity is the module *file* (query and hash
+stripped), so the same file re-evaluating restamps silently — see seams.md.
+
 Each singleton package stamps one hidden-class seam on first evaluation:
 
 | Seam | Writer | Value |

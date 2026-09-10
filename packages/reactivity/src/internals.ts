@@ -9,6 +9,11 @@
 export { track, trigger, cleanup, setFlushHandler, collectSetupScope, takeSetupDisposers } from './effect';
 export { getSignalId } from './signal';
 
+// Duplicate-copy guard (rfc-1.0 §3.4). `@sigx/runtime-core` stamps its own
+// seam through the same writer; `readCopyStamp` is the one accessor for both.
+export { assertSingleCopy, readCopyStamp } from './copy-guard';
+export type { CopyStamp, CopyStampKey } from './copy-guard';
+
 // The deep-watch traversal, for a caller that needs the dirty signal but not
 // `watch` — `@sigx/actors` drives it from a scheduler-deferred `effect` so the
 // walk folds once per turn boundary instead of once per mutation, and
