@@ -5,8 +5,10 @@ Amends `rfc-server.md` §1.1 (two authoring forms → one), §3 (symbol format,
 dual registration), §4 (the envelope gains `v`; 404 vs 409) and N.2/N.3
 (stable routes: there is no hashed twin any more); `rfc-server-v4.md` §1.2
 (the direct-form paragraph is void — there is no direct form) and §1.3 step 4
-(the arity gate is universal). `rfc-server-v3.md` is unaffected. Pre-1.0,
-no-compat, the same stance as every revision before it: one way to do it.
+(the arity gate is universal). `rfc-server-v3.md`'s mechanism (request-scoped
+context, `perRequest`, disposal) is unchanged; only its direct-form examples
+are pre-v5 syntax, which its banner says. Pre-1.0, no-compat, the same stance
+as every revision before it: one way to do it.
 `docs/migrations/1.0-serverfn.md` is the migration.
 
 Everything below is stated against the code at `94cc047`, with `file:line`
