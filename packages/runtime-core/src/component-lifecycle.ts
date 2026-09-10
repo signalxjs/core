@@ -14,6 +14,7 @@ import { assertSingleCopy } from '@sigx/reactivity/internals';
 // reasons given at the reactivity stamp (`reactivity/src/effect.ts`).
 assertSingleCopy(
     '__SIGX_RUNTIME_CORE__',
+    '@sigx/runtime-core',
     typeof __SIGX_VERSION__ === 'string' ? __SIGX_VERSION__ : 'unknown',
     typeof import.meta.url === 'string' ? import.meta.url : ''
 );

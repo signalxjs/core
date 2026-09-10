@@ -19,6 +19,7 @@ import { assertSingleCopy, readCopyStamp } from '@sigx/reactivity/internals';
 import type { CopyStamp } from '@sigx/reactivity/internals';
 
 const KEY = '__SIGX_REACTIVITY__';
+const PKG = '@sigx/reactivity';
 const descriptor = () => Object.getOwnPropertyDescriptor(globalThis, KEY);
 const plant = (stamp: CopyStamp, enumerable = false) =>
     Object.defineProperty(globalThis, KEY, { value: stamp, writable: true, configurable: true, enumerable });
@@ -55,9 +56,9 @@ describe('__SIGX_REACTIVITY__', () => {
         const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
         const { url, version } = readCopyStamp(KEY)!;
 
-        expect(() => assertSingleCopy(KEY, version, url)).not.toThrow();
-        expect(() => assertSingleCopy(KEY, version, `${url}?t=1725000000000`)).not.toThrow();
-        expect(() => assertSingleCopy(KEY, version, `${url}#hash`)).not.toThrow();
+        expect(() => assertSingleCopy(KEY, PKG, version, url)).not.toThrow();
+        expect(() => assertSingleCopy(KEY, PKG, version, `${url}?t=1725000000000`)).not.toThrow();
+        expect(() => assertSingleCopy(KEY, PKG, version, `${url}#hash`)).not.toThrow();
 
         expect(warn).not.toHaveBeenCalled();
         expect(descriptor()!.enumerable).toBe(false);
@@ -71,7 +72,7 @@ describe('__SIGX_REACTIVITY__', () => {
         };
         plant(foreign);
 
-        expect(() => assertSingleCopy(KEY, '0.15.6', 'file:///app/node_modules/@sigx/reactivity/dist/index.js'))
+        expect(() => assertSingleCopy(KEY, PKG, '0.15.6', 'file:///app/node_modules/@sigx/reactivity/dist/index.js'))
             .toThrow(
                 /Two copies of @sigx\/reactivity are loaded: 0\.9\.0 at file:\/\/\/app\/node_modules\/\.pnpm\/old.* and 0\.15\.6 at file:\/\/\/app\/node_modules\/@sigx.*rfc-1\.0/s
             );
@@ -79,9 +80,15 @@ describe('__SIGX_REACTIVITY__', () => {
         expect(readCopyStamp(KEY)).toBe(foreign);
     });
 
+    it('names the runtime-core symptom when that package trips', () => {
+        plant({ version: '0.9.0', url: 'file:///a' });
+        expect(() => assertSingleCopy(KEY, '@sigx/runtime-core', '0.15.6', 'file:///b'))
+            .toThrow(/Two copies of @sigx\/runtime-core.*Components, app contexts and DI tokens/);
+    });
+
     it('a copy with no url still names the gap rather than the empty string', () => {
         plant({ version: '0.9.0', url: '' });
-        expect(() => assertSingleCopy(KEY, '0.15.6', 'file:///b'))
+        expect(() => assertSingleCopy(KEY, PKG, '0.15.6', 'file:///b'))
             .toThrow(/0\.9\.0 at <unknown url> and 0\.15\.6 at file:\/\/\/b/);
     });
 
@@ -90,14 +97,14 @@ describe('__SIGX_REACTIVITY__', () => {
         const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
         plant({ version: '0.9.0', url: 'file:///a' });
 
-        assertSingleCopy(KEY, '0.15.6', 'file:///b');
+        assertSingleCopy(KEY, PKG, '0.15.6', 'file:///b');
         expect(warn).toHaveBeenCalledTimes(1);
         expect(warn.mock.calls[0][0]).toMatch(/Two copies of @sigx\/reactivity.*0\.9\.0 at file:\/\/\/a and 0\.15\.6 at file:\/\/\/b/);
         expect(readCopyStamp(KEY)).toMatchObject({ version: '0.15.6', url: 'file:///b', warned: true });
         expect(descriptor()!.enumerable).toBe(false);
 
         // The latch rides the stamp, so a third copy does not warn again.
-        assertSingleCopy(KEY, '0.16.0', 'file:///c');
+        assertSingleCopy(KEY, PKG, '0.16.0', 'file:///c');
         expect(warn).toHaveBeenCalledTimes(1);
         expect(readCopyStamp(KEY)).toMatchObject({ version: '0.16.0', url: 'file:///c', warned: true });
     });
@@ -108,7 +115,7 @@ describe('__SIGX_REACTIVITY__', () => {
         plant({ version: 'x', url: 'file:///same' }, true);
         expect(descriptor()!.enumerable).toBe(true);
 
-        assertSingleCopy(KEY, 'x', 'file:///same');
+        assertSingleCopy(KEY, PKG, 'x', 'file:///same');
         expect(descriptor()!.enumerable).toBe(false);
         expect(Object.keys(globalThis)).not.toContain(KEY);
     });

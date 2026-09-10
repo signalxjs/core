@@ -56,22 +56,25 @@ export function readCopyStamp(key: CopyStampKey): CopyStamp | undefined {
 }
 
 /**
- * Stamp `key` for the copy evaluating now, or fail loudly if a copy from
- * another file already did. Called once per package, at module init.
+ * Stamp `key` for the copy of `pkg` evaluating now, or fail loudly if a copy
+ * from another file already did. Called once per package, at module init.
+ *
+ * The seam name is passed in rather than derived here, so the literal occurs
+ * only at the two call sites: `verify-pack` greps a consumer's production
+ * bundle for it to prove the top-level call survived tree-shaking, and this
+ * function is exported from `/internals` — alive whether or not the call is.
  */
-export function assertSingleCopy(key: CopyStampKey, version: string, url: string): void {
+export function assertSingleCopy(key: CopyStampKey, pkg: string, version: string, url: string): void {
     const host = globalThis as CopyStampHost;
     const prev = host[key];
     let warned = prev?.warned;
     if (prev && moduleFile(prev.url) !== moduleFile(url)) {
-        const reactivity = key === '__SIGX_REACTIVITY__';
-        const pkg = reactivity ? '@sigx/reactivity' : '@sigx/runtime-core';
         const detail =
             `${prev.version} at ${prev.url || '<unknown url>'} and ` +
             `${version} at ${url || '<unknown url>'}`;
         if (__DEV__) {
             // Name the symptom the split actually produces for THIS package.
-            const symptom = reactivity
+            const symptom = pkg === '@sigx/reactivity'
                 ? 'Signals created by one copy are invisible to effects tracked by the other.'
                 : 'Components, app contexts and DI tokens of one copy are invisible to the other.';
             throw new Error(

@@ -63,6 +63,7 @@ const pendingEffects: Subscriber[] = [];
 // source-bundling tests evaluate this file without the define.
 assertSingleCopy(
     '__SIGX_REACTIVITY__',
+    '@sigx/reactivity',
     typeof __SIGX_VERSION__ === 'string' ? __SIGX_VERSION__ : 'unknown',
     typeof import.meta.url === 'string' ? import.meta.url : ''
 );

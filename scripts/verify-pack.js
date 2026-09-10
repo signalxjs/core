@@ -338,7 +338,10 @@ function main() {
         // The duplicate-copy stamps (rfc-1.0 §3.4) are top-level calls in the
         // modules that own each singleton's state, under `sideEffects: false`.
         // This is the only place a CONSUMER's production tree-shake is proven
-        // to keep them — unit tests import sources and never bundle.
+        // to keep them — unit tests import sources and never bundle. The seam
+        // name occurs ONLY at those call sites (`assertSingleCopy` takes it as
+        // a parameter and never spells it), so the marker cannot be satisfied
+        // by the guard function alone surviving via `/internals`.
         {
             marker: '__SIGX_REACTIVITY__',
             what: 'the @sigx/reactivity duplicate-copy stamp (the top-level assertSingleCopy call in effect.ts)'
