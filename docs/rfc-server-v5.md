@@ -382,7 +382,7 @@ structural change — the handler body, the `input` schema expression, the
 A parser upgrade that reorders node properties bumps every version once;
 harmless, both ends ship from one build. One known blind spot, accepted:
 dropping `raw` also drops a template element's raw text, so two tagged
-templates whose content is un-cookable (`cooked: null`) and differs only in
+templates whose content is uncookable (`cooked: null`) and differs only in
 raw spelling share a version. Rejected: regex comment stripping (breaks on
 `//` inside strings and templates); an AST printer (none is exposed by vite
 or rolldown).

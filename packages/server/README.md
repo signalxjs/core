@@ -1178,8 +1178,9 @@ Every server function is a public HTTP endpoint; the defaults assume that:
 - **Version skew is a 409, never a wrong call**: every stub call carries its
   build's version tag for the function, and a mismatch against the registry
   is refused with `code: 'version-skew'` before the prelude runs (a stale tab
-  after a deploy). Clients that send no tag — native clients, curl, form
-  posts — and hand-built `resolve` tables are simply served.
+  after a deploy). A call that carries no tag — from a native client, curl,
+  or a form post — is simply served; so is every call through a hand-built
+  `resolve` table, which knows no registry version to compare against.
 - **Error masking**: only `ServerFnError` crosses the wire verbatim; other
   throws become a generic 500 in production.
 - **Prototype-pollution keys dropped** from parsed values on both parse
