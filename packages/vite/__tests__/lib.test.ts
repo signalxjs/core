@@ -3,6 +3,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import path from 'path';
+import { readFileSync } from 'fs';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { defineLibConfig } from '../src/lib';
 
@@ -237,5 +238,34 @@ describe('defineLibConfig — prod-dist mode', () => {
         expect(config.define['process.env.NODE_ENV']).toBeUndefined();
         expect(config.build.lib.fileName('es', 'index')).toBe('index.js');
         expect(config.build.emptyOutDir).toBe(true);
+    });
+});
+
+describe('defineLibConfig — __SIGX_VERSION__ (rfc-1.0 §3.4)', () => {
+    // The vite package's own manifest is the versioned root at hand.
+    const pkgRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+    const version = JSON.parse(
+        readFileSync(path.join(pkgRoot, 'package.json'), 'utf-8')
+    ).version as string;
+
+    it('defines the package version from the root manifest, in both passes', () => {
+        expect(resolveConfig({ entry: 'src/index.ts', root: pkgRoot }).define.__SIGX_VERSION__)
+            .toBe(JSON.stringify(version));
+        expect(resolveConfig({ entry: 'src/index.ts', root: pkgRoot }, 'prod-dist').define.__SIGX_VERSION__)
+            .toBe(JSON.stringify(version));
+    });
+
+    it('accepts the file:// root form too', () => {
+        const root = pathToFileURL(path.join(pkgRoot, 'vite.config.ts')).href;
+        expect(resolveConfig({ entry: 'src/index.ts', root }).define.__SIGX_VERSION__)
+            .toBe(JSON.stringify(version));
+    });
+
+    it('omits the define when the root has no versioned manifest (the repo root)', () => {
+        // The default root is process.cwd() — the workspace root, whose
+        // package.json carries no `version`. Sources read the constant
+        // through `typeof`, so absence is `'unknown'`, never a throw.
+        const config = resolveConfig({ entry: 'src/index.ts' });
+        expect('__SIGX_VERSION__' in config.define).toBe(false);
     });
 });

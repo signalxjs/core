@@ -2,6 +2,11 @@
 
 Status: **accepted** (§2's mechanism decided, #503; implementation phased in
 §5). Tracking: signalxjs/core#491.
+**Amended by `rfc-server-v5.md`** (signalxjs/core#692): every direct-form
+`serverFn(async (rq, …) => …)` example here is pre-v5 syntax — the form is
+removed and the handler is `handler({ input, rq })`. §2 (request-scoped
+context, `perRequest`, disposal) is otherwise unaffected.
+
 **Amended by `rfc-server-v4.md`** (signalxjs/core#607): §1 (the guard system is
 split into middleware / authentication / authorization — `use:`, `unguarded`,
 `serverFnPreset` and `requireGuards` are superseded), §2.8's `ServerFnGuard`

@@ -5,7 +5,6 @@
 import express from 'express';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, resolve } from 'node:path';
-import { readFile } from 'node:fs/promises';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const isProd = process.env.NODE_ENV === 'production';
@@ -37,22 +36,23 @@ async function createServer() {
         }));
     } else {
         // Prod: static assets + ONE handler over the built entry, with
-        // manifest-fed modulepreload/stylesheet links per request.
+        // manifest-fed modulepreload/stylesheet links per request. The
+        // template and the manifest resolver come from the build's own
+        // dist/server/sigx-app.js — nothing from @sigx/vite runs here: it is
+        // a devDependency, and a production install without dev deps must
+        // still boot (#501).
         const { createRequestHandler } = await import('@sigx/server-renderer/node');
-        const { collectAssets } = await import('@sigx/vite/ssr');
-
-        const clientDir = resolve(__dirname, 'dist/client');
-        const template = await readFile(resolve(clientDir, 'index.html'), 'utf-8');
-        const manifest = JSON.parse(
-            await readFile(resolve(clientDir, '.vite/manifest.json'), 'utf-8')
+        const { template, assetsFor } = await import(
+            pathToFileURL(resolve(__dirname, 'dist/server/sigx-app.js')).href
         );
         const { createApp } = await import(
             pathToFileURL(resolve(__dirname, 'dist/server/entry-server.js')).href
         );
+        const clientDir = resolve(__dirname, 'dist/client');
 
         // The matched route's lazy chunks preload from the shell
-        // (docs/router-ssr-contract.md §2) — mapped through the client
-        // manifest. Boundary chunks are preloaded automatically.
+        // (docs/router-ssr-contract.md §2) — mapped through the inlined
+        // client manifest. Boundary chunks are preloaded automatically.
         const ROUTE_MODULES = {
             '/about': ['src/sections/TechDetails.tsx']
         };
@@ -64,7 +64,7 @@ async function createServer() {
             app: (url) => createApp(url),
             isBot,
             document: (url) => ({
-                assets: collectAssets(manifest, ROUTE_MODULES[routePath(url)] ?? [])
+                assets: assetsFor(ROUTE_MODULES[routePath(url)] ?? [])
             })
         }));
     }

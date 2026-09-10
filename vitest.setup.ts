@@ -1,5 +1,6 @@
-import { realpathSync } from 'node:fs';
+import { readFileSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 // Tests run against package sources, which use the `__DEV__` compile-time
 // flag. A static `define` won't do here: Vite substitutes
@@ -9,6 +10,19 @@ import { tmpdir } from 'node:os';
 Object.defineProperty(globalThis, '__DEV__', {
     configurable: true,
     get: () => process.env.NODE_ENV !== 'production'
+});
+
+// The version the duplicate-copy stamp reads through `typeof __SIGX_VERSION__`
+// (rfc-1.0 §3.4). All 14 packages are on one version line (bump-version.js),
+// so any one manifest is the truth; reactivity owns the guard. Resolved from
+// the cwd (vitest runs at the repo root): under happy-dom this file's
+// `import.meta.url` is not a `file:` URL.
+const { version: sigxVersion } = JSON.parse(
+    readFileSync(join(process.cwd(), 'packages/reactivity/package.json'), 'utf-8')
+) as { version: string };
+Object.defineProperty(globalThis, '__SIGX_VERSION__', {
+    configurable: true,
+    value: sigxVersion
 });
 
 // Hand the suite a REAL temp path (#512). Two dozen tests build real Vite

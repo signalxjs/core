@@ -67,10 +67,11 @@ export type ServerPolicy<P = unknown> = (
 export interface ServerPolicyOp {
     fn: ServerFnInfo;
     /**
-     * The VALIDATED input — the resource for resource-based policies ("may
-     * P edit post `op.input.id`"). `undefined` when the definition
-     * declares no `input` (the value then reached the handler unvalidated,
-     * dev-warned) or the call carried none.
+     * The function's single input — VALIDATED when the definition declares
+     * `input` (the resource for resource-based policies: "may P edit post
+     * `op.input.id`"), the RAW wire argument when it does not (unvalidated,
+     * attacker-controlled, dev-warned — treat it as untrusted), and
+     * `undefined` when the call carried no argument at all.
      */
     input?: unknown;
     /**

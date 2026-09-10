@@ -71,12 +71,18 @@ declare module 'virtual:sigx-server-fns' {
  * and assets live.
  */
 declare module 'virtual:sigx-app' {
-    import type { CollectedAssets, ViteManifest } from '@sigx/vite/ssr';
+    import type { CollectedAssets, ViteManifest } from '@sigx/vite/assets';
     export const template: string;
     export const assets: CollectedAssets;
     export const manifest: ViteManifest;
     export const islandsManifest: SigxIslandsManifest | undefined;
     export const resumeManifest: SigxResumeManifest | undefined;
+    /**
+     * Per-route assets from the inlined manifest — `collectAssets` with the
+     * resolver body baked in, so the running server imports nothing from
+     * `@sigx/vite` (#501). `base` defaults to the build's `config.base`.
+     */
+    export function assetsFor(entries: string[], base?: string): CollectedAssets;
 }
 
 /**

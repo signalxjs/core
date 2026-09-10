@@ -29,7 +29,9 @@ describe('@sigx/server rides only public surface (#416, #692)', () => {
         // surface (rfc-1.0 §1.2) — a pack that needs something from there
         // needs the export promoted (as `provideTypeHandlers` was, #692),
         // not the import.
-        const INTERNALS_IMPORT = /from\s*['"][^'"]*\/internals['"]/;
+        // Matches the bare subpath and its explicit-extension spellings
+        // (`sigx/internals`, `sigx/internals.js`, `.mjs`, `.ts`).
+        const INTERNALS_IMPORT = /from\s*['"][^'"]*\/internals(?:\.[cm]?[jt]s)?['"]/;
         const offenders = collectTsFiles(srcRoot).filter((file) =>
             INTERNALS_IMPORT.test(readFileSync(file, 'utf-8'))
         );

@@ -426,6 +426,43 @@ Marks a runtime with no HTML page. A `serverFn` body reaching a live client is
 an unextracted call and throws. `@sigx/runtime-dom/platform` must **not** stamp
 it.
 
+### `__SIGX_REACTIVITY__`
+
+| | |
+|---|---|
+| **Stamped by** | `reactivity/src/effect.ts` at module init, through `assertSingleCopy` (`reactivity/src/copy-guard.ts`) — the one writer for both copy stamps; a full `defineProperty` on every evaluation |
+| **Read by** | `assertSingleCopy` itself (the next evaluation of the package) and `readCopyStamp` (`@sigx/reactivity/internals`), the one accessor. Nothing else. |
+| **Contract** | `{ version: string; url: string; warned?: boolean }` — `version` is the copy's `__SIGX_VERSION__` (`'unknown'` when evaluated unbundled), `url` its `import.meta.url` (`''` in an IIFE bundle), `warned` the prod once-latch |
+
+### `__SIGX_RUNTIME_CORE__`
+
+| | |
+|---|---|
+| **Stamped by** | `runtime-core/src/component-lifecycle.ts` at module init, through the same `assertSingleCopy` |
+| **Read by** | the same two — `assertSingleCopy` and `readCopyStamp` |
+| **Contract** | as above |
+
+The duplicate-copy guard (rfc-1.0 §3.4, #633 phase 1). The two packages that
+carry per-process singleton state — the tracking context and batch queue
+here, the current instance and DI tokens there — stamp the module that owns
+that state, so any real use of the package evaluates the stamp (a top-level
+call of a used import, because `"sideEffects": false` licenses a bundler to
+drop a bare side-effect import). A later evaluation from a **different file**
+(the query and hash stripped — Vite's HMR `?t=` and prebundle `?v=` are the
+same file) is a second copy: under `__DEV__` it throws, naming both versions
+and both URLs; in prod it warns once and continues, restamping with the newer
+copy. The **same file** evaluating again — an in-process Vite
+`server.restart()`, an HMR re-import, `vi.resetModules()` — restamps silently.
+
+What this cannot see: one file loaded twice into one realm, the #425 shape
+(the same `@sigx/server-renderer` file through Vite's SSR module runner *and*
+natively through Node). Those two copies share a URL, and there is no cheap
+way to tell "the old copy is dead" (a restart) from "both are alive" (#425).
+That class is closed structurally by `virtual:sigx-ssr-node`
+(`vite/src/dev-runner.ts`) and caught at the DI interaction point by
+`hasForeignToken` (above). The class this guard exists for — two *installed*
+versions, the #633 incident — always has two files.
+
 ### `__SIGX_STREAMING_COMPLETE__`
 
 | | |

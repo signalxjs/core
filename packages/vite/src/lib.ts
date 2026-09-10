@@ -6,6 +6,7 @@
  */
 import { defineConfig, type UserConfig, type UserConfigFnObject } from 'vite';
 import path from 'path';
+import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 
 // ============================================================================
@@ -102,6 +103,22 @@ function normalizeEntries(entry: LibBuildOptions['entry']): Record<string, strin
         return Object.fromEntries(entry.map(e => [e.name, e.entry]));
     }
     return entry;
+}
+
+/**
+ * `version` of `<dir>/package.json`, or `undefined` when there is no
+ * manifest or no string field — a root that is not a package (the repo root)
+ * builds fine; it just has no version to stamp.
+ */
+function readPackageVersion(dir: string): string | undefined {
+    try {
+        const { version } = JSON.parse(
+            readFileSync(path.join(dir, 'package.json'), 'utf-8')
+        ) as { version?: unknown };
+        return typeof version === 'string' ? version : undefined;
+    } catch {
+        return undefined;
+    }
 }
 
 function resolveAliases(
@@ -211,6 +228,7 @@ export function defineLibConfig(options: LibBuildOptions): UserConfigFnObject {
 
     const entries = normalizeEntries(entry);
     const resolvedAliases = resolveAliases(alias, rootDir);
+    const version = readPackageVersion(rootDir);
 
     // Always treat the sigx runtime tier as external, regardless of what the
     // caller passed. De-dupe in case it's already in their list.
@@ -255,6 +273,13 @@ export function defineLibConfig(options: LibBuildOptions): UserConfigFnObject {
                 __DEV__: prodDist
                     ? 'false'
                     : "(process.env.NODE_ENV !== 'production')",
+                // The package's own version, for the duplicate-copy stamp
+                // (rfc-1.0 §3.4). Omitted when the root has no versioned
+                // manifest — sources read it through `typeof`, so absence
+                // is `'unknown'`, never a ReferenceError.
+                ...(version !== undefined && {
+                    __SIGX_VERSION__: JSON.stringify(version)
+                }),
                 ...(prodDist && {
                     'process.env.NODE_ENV': JSON.stringify('production')
                 })

@@ -54,6 +54,22 @@ describe('@sigx/vite/assets — edge-clean entry (#486)', () => {
         }
     });
 
+    // virtual:sigx-app inlines `collectAssets.toString()` as its `assetsFor`
+    // (#501): the function must stand alone — no free identifier beyond the
+    // language and `console`/`process` — or the emitted module would throw at
+    // first call while still "importing nothing".
+    it('the function text evaluates on its own (it is inlined into virtual:sigx-app)', () => {
+        const text = collectAssets.toString();
+        expect(importsOf(text)).toEqual([]);
+        const standalone = new Function('return ' + text)() as typeof collectAssets;
+        const manifest: ViteManifest = {
+            'index.html': { file: 'assets/index-abc.js', isEntry: true, imports: ['_shared-def.js'], css: ['assets/index.css'] },
+            '_shared-def.js': { file: 'assets/shared-def.js' }
+        };
+        expect(standalone(manifest, ['index.html'], '/b/')).toEqual(collectAssets(manifest, ['index.html'], '/b/'));
+        expect(standalone(manifest, ['index.html']).modulepreload).toEqual(['/assets/index-abc.js', '/assets/shared-def.js']);
+    });
+
     it('resolves entries with no host APIs available', () => {
         const manifest: ViteManifest = {
             'src/entry-client.tsx': {
