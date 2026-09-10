@@ -299,9 +299,9 @@ export function hasServerFnOptionsSpread(call: Node): boolean {
 }
 
 /** The message for {@link hasServerFnOptionsSpread}, shared by both extractors. */
-export function optionsSpreadError(name: string): string {
+export function optionsSpreadError(name: string, stream = false): string {
     return (
-        `serverFn "${name}": a spread (\`...\`) in the options literal hides \`id\`, \`cache\`, ` +
+        `${stream ? 'serverStream' : 'serverFn'} "${name}": a spread (\`...\`) in the options literal hides \`id\`, \`cache\`, ` +
         `\`invalidates\`, \`form\`, \`authorize\` and \`allowAnonymous\` from the build — they are ` +
         `read STATICALLY from this call site, so anything inside the spread is invisible: the ` +
         `stub would stay POST-only, no \`action\`/\`method\` would be stamped, a hidden ` +
@@ -766,7 +766,7 @@ export function extractServerFns(
             if (idOption.nonLiteral) errors.push({ offset: init.start, message: nonLiteralIdError(local) });
             if (idOption.id !== undefined) warnIfIdRewritten(warnings, local, idOption.id);
             if (hasServerFnOptionsSpread(init)) {
-                errors.push({ offset: init.start, message: optionsSpreadError(local) });
+                errors.push({ offset: init.start, message: optionsSpreadError(local, call.kind === 'stream') });
             }
             for (const key of call.kind === 'fn' ? ['form', 'allowAnonymous'] : ['allowAnonymous']) {
                 if (invalidLiteralTrueOption(init, key)) {

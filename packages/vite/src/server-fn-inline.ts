@@ -521,7 +521,7 @@ export function extractInlineServerFns(
             if (idOption.nonLiteral) errors.push({ offset: call.start, message: nonLiteralIdError(name) });
             if (idOption.id !== undefined) warnIfIdRewritten(warnings, name, idOption.id);
             if (hasServerFnOptionsSpread(call)) {
-                errors.push({ offset: call.start, message: optionsSpreadError(name) });
+                errors.push({ offset: call.start, message: optionsSpreadError(name, stream) });
             }
             for (const key of stream ? ['allowAnonymous'] : ['form', 'allowAnonymous']) {
                 if (invalidLiteralTrueOption(call, key)) {
