@@ -12,7 +12,10 @@ generates TypeScript definitions for tag-named components.
 npm install -D @sigx/vite
 ```
 
-`@sigx/vite` peer-depends on `vite >= 8` and `sigx`.
+`@sigx/vite` peer-depends on `vite >= 8` and `sigx` (a caret on the published version, `^1.0.0` from 1.0 — the app
+installs the runtime once and owns the copy, `docs/rfc-1.0.md` §3). The
+strategy and server packs (`@sigx/server-renderer`, `@sigx/ssr-islands`,
+`@sigx/resume`, `@sigx/server`) are optional peers on the same range.
 
 ## Usage
 

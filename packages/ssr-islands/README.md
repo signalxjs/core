@@ -12,6 +12,8 @@ Full guides, API reference and live examples → **<https://sigx.dev/server/>**
 npm install @sigx/ssr-islands sigx vite
 ```
 
+> **Peer of `sigx`.** `sigx` is in that line because this pack peers on it and on `@sigx/server-renderer` (a caret on the published version, `^1.0.0` from 1.0). An app installs `sigx` once and owns the single copy of the runtime; a library declares it as a peer, never as a dependency (`docs/rfc-1.0.md` §3).
+
 ```tsx
 <Counter client:load />         {/* hydrate immediately */}
 <Counter client:idle />         {/* hydrate when the browser is idle */}

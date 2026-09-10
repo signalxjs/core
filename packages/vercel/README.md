@@ -12,6 +12,9 @@ privileged access; the runtime story is `createFetchHandler`
 pnpm add -D @sigx/vercel
 ```
 
+It peers on `@sigx/vite` (a caret on the published version, `^1.0.0` from 1.0) — install that alongside, as the
+`sigx()` plugin already requires.
+
 ## Usage
 
 ```ts

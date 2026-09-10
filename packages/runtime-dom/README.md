@@ -10,6 +10,8 @@ DOM runtime for SignalX. Provides the DOM-specific renderer, event handling, att
 npm install @sigx/runtime-dom
 ```
 
+> **Peer of `sigx`.** This package peers on `@sigx/reactivity` and `@sigx/runtime-core` (a caret on the published version, `^1.0.0` from 1.0) rather than bringing its own copy — most apps get all three through `sigx`. An app installs `sigx` once and owns the single copy of the runtime; a library declares it as a peer, never as a dependency (`docs/rfc-1.0.md` §3).
+
 ## Usage
 
 ```tsx

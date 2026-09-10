@@ -55,15 +55,17 @@
     "bugs": {
         "url": "https://github.com/signalxjs/core/issues"
     },
-    "dependencies": {
-        "@sigx/server-renderer": "workspace:^",
-        "sigx": "workspace:^"
+    "peerDependencies": {
+        "sigx": "workspace:^",
+        "@sigx/server-renderer": "workspace:^"
     },
     "devDependencies": {
         "@sigx/vite": "workspace:^",
         "@types/node": "^26.4.0",
         "typescript": "^7.0.2",
-        "vite": "^8.2.2"
+        "vite": "^8.2.2",
+        "sigx": "workspace:^",
+        "@sigx/server-renderer": "workspace:^"
     },
     "publishConfig": {
         "access": "public"

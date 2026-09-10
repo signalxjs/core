@@ -182,6 +182,11 @@ one of those two.
 
 ### 3.2 The shape
 
+Landed in #690, exactly as tabulated below (`workspace:^` in the repo, the
+packed caret on publish; `verify-pack` asserts every family peer is that
+caret). §7 Q2 is answered: `pnpm publish` does rewrite `workspace:` in
+`peerDependencies`.
+
 | Package | Core deps as `dependencies` | Core deps as `peerDependencies` (`^1.0.0`) |
 |---|---|---|
 | `sigx` (the app install) | `@sigx/reactivity`, `@sigx/runtime-core`, `@sigx/runtime-dom` | — |
@@ -213,6 +218,9 @@ zero-dependency leaf, duplicates are harmless, and forcing every app to
 install it by hand buys nothing.
 
 ### 3.3 The ecosystem side
+
+Tooling: signalxjs/repo-template#53 (`sync-core.mjs` writes the peer block for
+a consumer's publishable packages, `check-catalog.mjs` asserts it).
 
 Consumer repos (`docs/ecosystem.json`) move core from `dependencies` to
 `peerDependencies: "^1.0.0"` + `devDependencies: "catalog:"` in the

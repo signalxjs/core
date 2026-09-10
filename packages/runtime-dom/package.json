@@ -70,14 +70,19 @@
     "engines": {
         "node": "^20.19.0 || >=22.12.0"
     },
-    "dependencies": {
-        "@sigx/runtime-core": "workspace:^",
-        "@sigx/reactivity": "workspace:^"
+    "peerDependencies": {
+        "@sigx/reactivity": "workspace:^",
+        "@sigx/runtime-core": "workspace:^"
     },
     "devDependencies": {
         "@sigx/vite": "workspace:^",
         "@types/node": "^26.4.0",
         "typescript": "^7.0.2",
-        "vite": "^8.2.2"
+        "vite": "^8.2.2",
+        "@sigx/reactivity": "workspace:^",
+        "@sigx/runtime-core": "workspace:^"
+    },
+    "publishConfig": {
+        "access": "public"
     }
 }

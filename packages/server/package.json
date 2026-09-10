@@ -77,17 +77,20 @@
     "bugs": {
         "url": "https://github.com/signalxjs/core/issues"
     },
+    "peerDependencies": {
+        "sigx": "workspace:^"
+    },
     "devDependencies": {
         "@sigx/vite": "workspace:^",
         "@types/node": "^26.4.0",
         "typescript": "^7.0.2",
-        "vite": "^8.2.2"
+        "vite": "^8.2.2",
+        "sigx": "workspace:^"
+    },
+    "dependencies": {
+        "@sigx/serialize": "workspace:^"
     },
     "publishConfig": {
         "access": "public"
-    },
-    "dependencies": {
-        "@sigx/serialize": "workspace:^",
-        "sigx": "workspace:^"
     }
 }
