@@ -7,7 +7,6 @@
 import express from 'express';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
-import { readFile } from 'node:fs/promises';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const isProd = process.env.NODE_ENV === 'production';
@@ -37,20 +36,19 @@ async function createServer() {
             isBot
         }));
     } else {
-        // Prod: static assets + ONE handler. Vite's client manifest feeds
-        // entry preloads; the islands manifest reaches the pack inside the
-        // app factory via virtual:sigx-manifests — nothing to read here.
+        // Prod: static assets + ONE handler. The template and the entry
+        // preloads come from the build's own dist/server/sigx-app.js; the
+        // islands manifest reaches the pack inside the app factory via
+        // virtual:sigx-manifests — nothing to read here, and nothing from
+        // @sigx/vite (a devDependency) runs in production (#501).
         const { createRequestHandler } = await import('@sigx/server-renderer/node');
-        const { collectAssets } = await import('@sigx/vite/ssr');
-
-        const clientDir = resolve(__dirname, 'dist/client');
-        const template = await readFile(resolve(clientDir, 'index.html'), 'utf-8');
-        const manifest = JSON.parse(
-            await readFile(resolve(clientDir, '.vite/manifest.json'), 'utf-8')
+        const { template, assetsFor } = await import(
+            new URL('./dist/server/sigx-app.js', import.meta.url).href
         );
         const { createApp } = await import(
             new URL('./dist/server/entry-server.js', import.meta.url).href
         );
+        const clientDir = resolve(__dirname, 'dist/client');
 
         app.use(express.static(clientDir, { index: false }));
         app.use(createRequestHandler({
@@ -58,7 +56,7 @@ async function createServer() {
             app: (url) => createApp(url),
             isBot,
             document: {
-                assets: collectAssets(manifest, ['index.html'])
+                assets: assetsFor(['index.html'])
             }
         }));
     }

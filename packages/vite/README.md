@@ -102,17 +102,27 @@ import { createDevRequestHandler } from '@sigx/vite/ssr';
 app.use(vite.middlewares);
 app.use(await createDevRequestHandler(vite, { entry: '/src/entry-server.tsx' }));
 
-// prod: resolve manifest entries into DocumentOptions.assets
-import { collectAssets } from '@sigx/vite/assets';
-const assets = collectAssets(manifest, ['index.html']);
+// prod: the template and the manifest resolver come from the build itself
+const { template, assets, assetsFor } = await import('./dist/server/sigx-app.js');
+assets;                                          // every entry, precomputed
+assetsFor(['src/sections/TechDetails.tsx']);     // per route (docs/router-ssr-contract.md §2)
 ```
 
-`@sigx/vite/assets` imports **nothing** — no `node:` builtins — and its one
-`process.env` read is `typeof`-guarded, so a workerd/Deno/Bun entry (where
-`process` may not exist at all) can use it directly. Import it from `/assets`, not
-`/ssr`: the latter also carries the dev request handler, which does import
-`node:fs/promises` and `node:path`, and pulling that into an edge graph is not
-possible. `@sigx/vite/ssr` still re-exports it, so existing imports keep
+**`@sigx/vite` is a build tool and a devDependency — the running production
+server never imports it.** A server that did `await import('@sigx/vite/ssr')`
+in production booted only while dev dependencies happened to be installed;
+`npm ci --omit=dev` or a slim Docker layer breaks it (#501). Everything the
+document side needs is emitted by the build as `virtual:sigx-app` /
+`dist/server/sigx-app.js` — `template`, `assets`, `manifest`, the pack
+manifests, and `assetsFor(entries, base?)`, which is `collectAssets` with the
+resolver body inlined, so the module imports nothing on any platform.
+
+`@sigx/vite/assets` remains the lower-level escape hatch — `collectAssets`
+over a manifest you hold yourself, for build-time and dev tooling. It imports
+**nothing** — no `node:` builtins — and its one `process.env` read is
+`typeof`-guarded. Import it from `/assets`, not `/ssr`: the latter also
+carries the dev request handler, which does import `node:fs/promises` and
+`node:path`. `@sigx/vite/ssr` still re-exports it, so existing imports keep
 working.
 
 ### Styles in dev
@@ -268,17 +278,20 @@ may also hook the dev server via `dev(server)` — dev stays
 `createDevRequestHandler` on every platform.
 
 The document-side artifacts become code: `virtual:sigx-app` exports
-`template`, `assets` (precomputed `collectAssets`), `manifest`,
-`islandsManifest`, and `resumeManifest` as inlined literals — no filesystem
-in the output. External builds also materialize it as
+`template`, `assets` (precomputed `collectAssets` over every entry),
+`manifest`, `islandsManifest`, and `resumeManifest` as inlined literals, plus
+`assetsFor(entries, base?)` — the same resolver over the inlined manifest,
+with its body baked in — for per-route preloads (#501). No filesystem and no
+`@sigx/vite` in the output. External builds also materialize it as
 `dist/server/sigx-app.js` (imports of the virtual resolve to that emitted
 sibling), so a Node `server.mjs` collapses from four `readFile`s to one
 import:
 
 ```js
-const { template, assets, islandsManifest, resumeManifest } = await import(
+const { template, assets, assetsFor, islandsManifest, resumeManifest } = await import(
     new URL('./dist/server/sigx-app.js', import.meta.url).href
 );
+document: (url) => ({ assets: assetsFor(ROUTE_MODULES[url] ?? []) })
 ```
 
 Bundled builds inline the module instead — one self-contained file is the

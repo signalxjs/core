@@ -83,18 +83,29 @@ const mounted: Mounted[] = [];
  */
 async function mount(
     options: SigxServerOptions = {},
-    modules: Record<string, unknown> = {}
+    modules: Record<string, unknown> = {},
+    /** Extra fixture files (root-relative path → source), written before discovery. */
+    extraFiles: Record<string, string> = {}
 ): Promise<Mounted> {
     const root = mkdtempSync(join(tmpdir(), 'sigx-dev-endpoint-'));
     mkdirSync(join(root, 'src'), { recursive: true });
     writeFileSync(join(root, 'src/api.server.ts'), API);
+    for (const [rel, source] of Object.entries(extraFiles)) writeFileSync(join(root, rel), source);
 
     // requireAuthorization off: this file is about option forwarding, not the
     // access gate (which has its own coverage in server-fn-plugin.test.ts).
     const plugin = sigxServer({ requireAuthorization: false, ...options }) as any;
     plugin.configResolved({ root, command: 'serve' });
 
-    const registry = plugin.load(plugin.resolveId('virtual:sigx-server-fns')) as string;
+    // The prod registry fails the build on a duplicate key (`this.error`,
+    // which this bare plugin object lacks) — tolerate that here so the DEV
+    // path's own duplicate handling can be exercised below.
+    let registry = '';
+    try {
+        registry = plugin.load(plugin.resolveId('virtual:sigx-server-fns')) as string;
+    } catch {
+        registry = '';
+    }
 
     let middleware:
         | ((req: unknown, res: unknown, next: (err?: unknown) => void) => void)
@@ -156,6 +167,25 @@ async function mount(
 
 afterEach(async () => {
     for (const handle of mounted.splice(0)) await handle.close();
+});
+
+describe('sigxServer — the dev registry refuses two functions on one route (rfc-server-v5 §1.7)', () => {
+    it('a duplicate key across two files is an error on the request, never a silent last-wins', async () => {
+        const dup = (n: number) => `
+import { serverFn } from '@sigx/server';
+export const dup = serverFn({ id: 'dup', allowAnonymous: true, handler: async () => ${n} });
+`;
+        const dev = await mount({}, {}, { 'src/one.server.ts': dup(1), 'src/two.server.ts': dup(2) });
+        const res = await fetch(`${dev.origin}/_sigx/fn/dup/dup`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', origin: dev.origin },
+            body: JSON.stringify({ args: [] })
+        });
+        // The middleware threw into `next(err)` (this harness answers 500
+        // 'error' there) instead of routing to whichever file won.
+        expect(res.status).toBe(500);
+        await expect(res.text()).resolves.toBe('error');
+    });
 });
 
 describe('sigxServer — the dev endpoint forwards every endpoint option (#561)', () => {

@@ -347,7 +347,15 @@ export const assets: CollectedAssets;              // collectAssets(manifest, [h
 export const manifest: ViteManifest;               // raw, for apps needing more than entry assets
 export const islandsManifest: unknown | undefined; // .vite/sigx-islands-manifest.json, if emitted
 export const resumeManifest: unknown | undefined;  // .vite/sigx-resume-manifest.json, if emitted
+export function assetsFor(entries: string[], base?: string): CollectedAssets; // per route; resolver inlined (#501)
 ```
+
+- **Import contract of a deployed server:** it imports its runtime
+  dependencies and the build's own emitted modules — never `@sigx/vite`,
+  which is a devDependency and a build tool. Manifest-derived data reaches
+  production only through `virtual:sigx-app` / `sigx-app.js`; `assetsFor`
+  exists so a per-route server has no reason to reach for
+  `@sigx/vite/assets` at runtime (#501).
 
 - `load()` reads the client outDir with `fs` **at build time** (the build
   always runs in Node; only the *output* must be fs-free) and inlines

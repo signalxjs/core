@@ -50,6 +50,11 @@ describe('@sigx/vite/client packaging', () => {
         ]) {
             expect(source).toContain(`declare module '${id}'`);
         }
+        // virtual:sigx-app's per-route resolver (#501) rides the same ambient,
+        // typed from the edge-clean /assets entry — never /ssr.
+        expect(source).toMatch(/export function assetsFor\(entries: string\[\], base\?: string\): CollectedAssets;/);
+        expect(source).toContain("from '@sigx/vite/assets'");
+        expect(source).not.toContain("from '@sigx/vite/ssr'");
     });
 
     it('never imports the optional pack peers', () => {

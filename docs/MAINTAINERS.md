@@ -183,8 +183,9 @@ Settings → Rules → Rulesets → New branch ruleset:
    `pnpm version:patch` — pnpm v11's pre-run deps-status check fails
    interactively here.
 2. Update `CHANGELOG.md` — move `Unreleased` content under a new heading
-   `## [X.Y.Z] — YYYY-MM-DD`, add the `[X.Y.Z]: …/releases/tag/vX.Y.Z` link,
-   update the `[Unreleased]` compare URL.
+   `## [X.Y.Z] — YYYY-MM-DD`, add the
+   `[X.Y.Z]: …/compare/vPREV...vX.Y.Z` link at the bottom, and point the
+   `[Unreleased]` compare URL at `vX.Y.Z...HEAD`.
 3. Refresh the lockfile: `pnpm install --lockfile-only` (regenerates
    `pnpm-lock.yaml` so `pnpm install --frozen-lockfile` in CI passes).
 4. Local sanity: `pnpm build && pnpm verify:pack` — catches packaging bugs
@@ -192,8 +193,14 @@ Settings → Rules → Rulesets → New branch ruleset:
    range in any of the 14 tarball manifests) before the tag exists. The
    CI's `verify-pack` job re-runs this, but a tag is harder to undo than a
    commit.
-5. Commit: `git commit -am "chore: release vX.Y.Z"`.
-6. Tag and push: `git tag -a vX.Y.Z -m "vX.Y.Z" && git push --follow-tags`.
+5. Commit on a branch, PR it, merge it — `main` is ruleset-guarded, a direct
+   push is rejected (the full branch → PR → tag sequence is in
+   [`ecosystem-release.md` → "Then finish the job"](ecosystem-release.md)).
+6. Tag the **merged commit on `main`** and push the tag by itself:
+   `git tag -a vX.Y.Z -m "vX.Y.Z" && git push origin vX.Y.Z`. Never
+   `git push --follow-tags`: on the 0.13.0 rollout it pushed a tag whose
+   branch push was then rejected, and `release.yml` fired against a commit
+   that was never on `main`.
 7. `release.yml` takes over — see the two-job structure above. End state:
    every package lives at `X.Y.Z` on npm with provenance (npm versions carry no
    leading `v` — that is the git-tag convention), and the `vX.Y.Z` GitHub
@@ -225,10 +232,25 @@ Settings → Rules → Rulesets → New branch ruleset:
 
 ### Prereleases
 
-Use a prerelease version (e.g. `1.2.3-rc.0`) and push the matching tag.
-The publish script does not pass `--tag` automatically; add `--tag beta`
-(or similar) to `release.yml`'s publish step if a non-`latest` dist-tag is
-needed.
+Bump to a prerelease version (`node scripts/bump-version.js 1.0.0-rc.0`) and
+push the matching tag (`v1.0.0-rc.0`) exactly as above. The rest follows
+from the version, not from anything hand-edited per release:
+
+- `publish.js` publishes any version with a `-` under the **`next`**
+  dist-tag (`--tag <other>` overrides; `--tag latest` on a prerelease is
+  refused), and verifies the wave against that tag. `latest` keeps serving
+  the previous stable release, so `npm i sigx` is unaffected and
+  `npm i sigx@next` opts in.
+- `release.yml` marks the GitHub Release as a **pre-release** and does not
+  make it the repo's latest.
+- `release.yml` does **not** dispatch `core-released` to the consumer
+  repos — their catalog aligns to a `^X.Y.0` minor, which an rc is not.
+  An rc's ecosystem pass is the dry run in
+  [`ecosystem-release.md`](ecosystem-release.md) (`dryRun: true`).
+
+Confirm with `npm view <pkg> dist-tags` — `next` at the rc, `latest`
+unchanged. The next stable bump (`node scripts/bump-version.js patch` from
+`1.0.0-rc.N` yields `1.0.0`) publishes under `latest` again and fans out.
 
 ## What runs when
 
@@ -236,4 +258,4 @@ needed.
 | ------------------------------------ | ------------------------------------------------------ |
 | PR opened / updated                  | `ci.yml` (test matrix, verify-pack, coverage), `bundle-size.yml`, `release-drafter.yml`, `dependabot-automerge.yml` (if dependabot) |
 | Push to `main`                       | `ci.yml`, `release-drafter.yml`                         |
-| Push tag `v*.*.*`                    | `release.yml`                                           |
+| Push tag `v*.*.*`                    | `release.yml` (a `-` in the tag = prerelease: dist-tag `next`, GitHub pre-release, no consumer dispatch) |

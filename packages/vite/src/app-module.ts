@@ -12,7 +12,7 @@
 
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { collectAssets, type ViteManifest } from './ssr.js';
+import { collectAssets, type ViteManifest } from './assets.js';
 
 export const APP_VIRTUAL_ID = 'virtual:sigx-app';
 export const APP_RESOLVED_ID = '\0' + APP_VIRTUAL_ID;
@@ -117,6 +117,15 @@ export function generateAppModuleCode(clientDir: string, base: string): string {
         `export const manifest = ${JSON.stringify(manifest)};`,
         `export const islandsManifest = ${islandsManifest === undefined ? 'undefined' : JSON.stringify(islandsManifest)};`,
         `export const resumeManifest = ${resumeManifest === undefined ? 'undefined' : JSON.stringify(resumeManifest)};`,
+        // Per-route resolution WITHOUT importing @sigx/vite at runtime (#501):
+        // the resolver's compiled body is inlined, so the module keeps
+        // importing nothing on every platform. `collectAssets` is
+        // self-contained by the #486 contract (assets-entry.test.ts asserts
+        // the entry imports nothing and, since #501, that the function text
+        // evaluates on its own); an `import from '@sigx/vite/assets'` here
+        // would be exactly the devDependency-at-runtime this removes.
+        `const collectAssets = ${collectAssets.toString()};`,
+        `export function assetsFor(entries, base = ${JSON.stringify(base)}) { return collectAssets(manifest, entries, base); }`,
         ''
     ].join('\n');
 }
