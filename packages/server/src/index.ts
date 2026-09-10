@@ -65,6 +65,7 @@ export type {
     ServerFnCallable,
     ServerFnDescriptor,
     ServerFnHandlerArgs,
+    ServerFnInfo,
     ServerFnInvoke,
     ServerFnKeyRef,
     ServerMiddleware,
