@@ -209,8 +209,15 @@ function collectSigxOptimizeDepsExcludes(root: string): string[] {
     try {
         const pkgJson = JSON.parse(
             fs.readFileSync(path.join(root, 'package.json'), 'utf-8')
-        ) as { dependencies?: Record<string, string>; devDependencies?: Record<string, string> };
-        for (const deps of [pkgJson.dependencies, pkgJson.devDependencies]) {
+        ) as {
+            dependencies?: Record<string, string>;
+            devDependencies?: Record<string, string>;
+            peerDependencies?: Record<string, string>;
+        };
+        // `peerDependencies` too: since 1.0 a library declares its `@sigx/*`
+        // companions as peers (rfc-1.0 §3), and its own playground is served
+        // from that manifest.
+        for (const deps of [pkgJson.dependencies, pkgJson.devDependencies, pkgJson.peerDependencies]) {
             if (!deps) continue;
             for (const name of Object.keys(deps)) {
                 if (name === 'sigx' || name.startsWith('@sigx/')) {

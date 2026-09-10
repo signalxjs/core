@@ -135,6 +135,32 @@ function assertRangesResolved(packed) {
 }
 
 /**
+ * The 1.0 dependency shape (rfc-1.0 §3.2): `sigx` brings the singletons in,
+ * every other package PEERS on what it needs from the family, and the peer
+ * range a tarball carries is the caret on the version packed beside it —
+ * `^1.0.0`, wide enough to dedupe. In the repo the peers are `workspace:^`,
+ * which pnpm rewrites on pack; this asserts the result, so a `*` (what the
+ * plugin and the adapters shipped before 1.0 — matches anything, dedupes
+ * nothing) or a hand-written narrow range can never come back.
+ */
+function assertFamilyPeersCaret(packed) {
+    const versions = new Map(packed.map((p) => [p.name, p.version]));
+    for (const p of packed) {
+        const peers = p.manifest.peerDependencies ?? {};
+        const bad = Object.entries(peers)
+            .filter(([name]) => versions.has(name))
+            .filter(([name, range]) => range !== `^${versions.get(name)}`)
+            .map(([name, range]) => `peerDependencies.${name} = ${JSON.stringify(range)} (expected "^${versions.get(name)}")`);
+        if (bad.length > 0) {
+            throw new Error(
+                `${p.name}@${p.version} peers on the sigx family with a range that is not the ` +
+                `packed caret:\n     ${bad.join('\n     ')}`
+            );
+        }
+    }
+}
+
+/**
  * Every import specifier the packed tarballs expose at runtime, derived from
  * each manifest's `exports` map so the list can never lag a new subpath:
  * `.` and `./x` keys whose target is a plain path or carries any condition
@@ -188,6 +214,9 @@ function main() {
 
     step('Assert every packed manifest has workspace:/catalog: ranges resolved');
     assertRangesResolved(packed);
+
+    step('Assert every peer on the sigx family is the caret on the packed version');
+    assertFamilyPeersCaret(packed);
     console.log(`   ✔ ${packed.length} tarball manifests clean`);
 
     step('Create scratch app');

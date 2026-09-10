@@ -46,6 +46,13 @@ working with no error. Every consumer therefore pins core to a **single minor**
 (`^X.Y.0` == `>=X.Y.0 <X.(Y+1).0`) through the `catalog:` block of its
 `pnpm-workspace.yaml`, so pnpm hoists exactly one copy.
 
+From 1.0 the copy belongs to the **app** (rfc-1.0 §3): a library declares the
+core packages it needs as `peerDependencies` (`^X.0.0` — wide, because 1.0
+promises additive minors) with a `devDependencies: "catalog:"` twin for its
+own build and tests; only an app keeps `sigx` in `dependencies`. Core's own
+packs ship that shape (signalxjs/core#633 phase 2), `sync:core` writes it for a
+consumer's publishable packages, and `verify:catalog` asserts it.
+
 The consequence for releases: while an ecosystem package on npm still declares
 `^0.12.0` and a sibling has moved to `^0.13.0`, any app depending on both resolves
 **two** copies. The window is real but it closes as each tier publishes — which is
@@ -115,12 +122,15 @@ git pull --ff-only origin main
 pnpm wt new <N>-align-core-X.Y --from main
 cd <repo>/branches/<N>-align-core-X.Y
 
-# 2. Align the catalog. Rewrites only core entries; siblings are left alone.
+# 2. Align the catalog — and, for every publishable package, the peer shape:
+#    core deps move from dependencies to peerDependencies ^X.0.0 + a
+#    devDependencies "catalog:" twin. Siblings are left alone.
 pnpm sync:core X.Y
 
 # 3. Install + prove it.
 pnpm install --no-frozen-lockfile
-pnpm verify:catalog      # no inline core deps; every catalog core entry is ^X.Y.0
+pnpm verify:catalog      # no inline core deps; every catalog core entry is ^X.Y.0;
+                         # every publishable package peers on core at ^X.0.0
 pnpm build
 pnpm typecheck
 pnpm test

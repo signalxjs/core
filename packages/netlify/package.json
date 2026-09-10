@@ -39,11 +39,8 @@
     "bugs": {
         "url": "https://github.com/signalxjs/core/issues"
     },
-    "publishConfig": {
-        "access": "public"
-    },
     "peerDependencies": {
-        "@sigx/vite": "*",
+        "@sigx/vite": "workspace:^",
         "vite": ">=8.0.0"
     },
     "devDependencies": {
@@ -51,5 +48,8 @@
         "@types/node": "^26.4.0",
         "typescript": "^7.0.2",
         "vite": "^8.2.2"
+    },
+    "publishConfig": {
+        "access": "public"
     }
 }

@@ -118,6 +118,37 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- **The app owns the copy: every package except `sigx` now PEERS on the
+  sigx family (#633 phase 2, rfc-1.0 §3.2).** `sigx` still brings
+  `@sigx/reactivity`, `@sigx/runtime-core` and `@sigx/runtime-dom` in as
+  dependencies; everything else declares what it needs from the family as a
+  `peerDependencies` caret on the published version (`^1.0.0` from 1.0):
+  runtime-core → reactivity; runtime-dom → reactivity + runtime-core; cache →
+  reactivity + runtime-core; server-renderer, server → `sigx`; ssr-islands,
+  resume → `sigx` + server-renderer; `@sigx/vite` → `sigx` (was `*`) with
+  the four packs as optional peers (were `*`); the three adapters →
+  `@sigx/vite` (was `*`). `@sigx/serialize` stays a plain dependency
+  wherever it is used — a zero-dependency leaf, harmless duplicated. What an
+  existing install observes:
+  - an app that installs `sigx` plus the packs it uses: nothing changes —
+    the peers resolve to the copy it already has, and a second copy of
+    reactivity can no longer be installed beside it by a lagging library.
+  - a project that installed only `@sigx/runtime-core` (or `@sigx/cache`,
+    a pack, an adapter) and never `sigx`: npm 7+ and pnpm auto-install the
+    missing peer, so it still resolves — with an unmet-peer notice naming
+    what to add. Add `sigx` (or the named package) to the app's
+    `dependencies`.
+  - a library that bundled or depended on its own copy of core: it now
+    resolves the app's — the pattern the 0.15.x actors incident was made of.
+  `pnpm verify:pack` asserts every family peer in every tarball is the caret
+  on the packed version, so a `*` cannot come back. All fourteen manifests
+  now carry `publishConfig.access: public` (six relied on the publish flag).
+  The consumer side (peers + `devDependencies: "catalog:"` written by
+  `sync:core`, asserted by `verify:catalog`) ships from
+  `signalxjs/repo-template`.
+- **`@sigx/vite`: `optimizeDeps.exclude` also collects `@sigx/*` names from
+  the project's `peerDependencies`** — a library's own playground is served
+  from a manifest that now declares its companions as peers.
 - **`@sigx/vite/server`: transform-time server-function problems are build
   errors (#692, rfc-server-v5 §1.7, the rfc-1.0 §4.5 posture).** Each of
   these used to warn (or say nothing) and surface later as a browser

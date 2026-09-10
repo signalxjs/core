@@ -43,7 +43,7 @@
     "bugs": {
         "url": "https://github.com/signalxjs/core/issues"
     },
-    "dependencies": {
+    "peerDependencies": {
         "@sigx/reactivity": "workspace:^",
         "@sigx/runtime-core": "workspace:^"
     },
@@ -52,7 +52,9 @@
         "@types/node": "^26.4.0",
         "esbuild": "^0.28.2",
         "typescript": "^7.0.2",
-        "vite": "^8.2.2"
+        "vite": "^8.2.2",
+        "@sigx/reactivity": "workspace:^",
+        "@sigx/runtime-core": "workspace:^"
     },
     "publishConfig": {
         "access": "public"

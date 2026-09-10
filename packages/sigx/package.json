@@ -84,5 +84,8 @@
         "typescript": "^7.0.2",
         "vite": "^8.2.2",
         "esbuild": "^0.28.2"
+    },
+    "publishConfig": {
+        "access": "public"
     }
 }

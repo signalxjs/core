@@ -24,6 +24,8 @@ engine internals, tests, and custom engines; there is no `SSRInstance.use()`.
 npm install @sigx/server-renderer
 ```
 
+> **Peer of `sigx`.** This package peers on `sigx` (`^1.0.0`); `@sigx/serialize` is its only dependency. An app installs `sigx` once and owns the single copy of the runtime; a library declares it as a peer, never as a dependency (`docs/rfc-1.0.md` §3).
+
 ## A taste
 
 ```tsx
