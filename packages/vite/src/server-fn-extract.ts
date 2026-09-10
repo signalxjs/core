@@ -300,8 +300,16 @@ export function hasServerFnOptionsSpread(call: Node): boolean {
 
 /** The message for {@link hasServerFnOptionsSpread}, shared by both extractors. */
 export function optionsSpreadError(name: string, stream = false): string {
+    if (stream) {
+        return (
+            `serverStream "${name}": a spread (\`...\`) in the options literal hides \`authorize\` and ` +
+            `\`allowAnonymous\` from the build — both are read STATICALLY from this call site for the ` +
+            `access gate, so a policy inside the spread is invisible to it. Write those keys literally ` +
+            `at the call site (rfc-server-v5 §1.7).`
+        );
+    }
     return (
-        `${stream ? 'serverStream' : 'serverFn'} "${name}": a spread (\`...\`) in the options literal hides \`id\`, \`cache\`, ` +
+        `serverFn "${name}": a spread (\`...\`) in the options literal hides \`id\`, \`cache\`, ` +
         `\`invalidates\`, \`form\`, \`authorize\` and \`allowAnonymous\` from the build — they are ` +
         `read STATICALLY from this call site, so anything inside the spread is invisible: the ` +
         `stub would stay POST-only, no \`action\`/\`method\` would be stamped, a hidden ` +
