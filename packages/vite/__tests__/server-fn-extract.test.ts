@@ -1347,3 +1347,13 @@ describe('build-error messages name the wrapper they are about', () => {
         expect(messages(`export function make() { return serverFn({ handler: async () => 1 }); }\n`)[0]).toMatch(/^serverFn\(\) must be/);
     });
 });
+
+describe('the options-literal error shows the removed form in the right shape', () => {
+    it('a stream sees the generator shape, a fn the arrow shape', () => {
+        const opts = { stableId: 'src/x.server.ts', endpoint: '/_sigx/fn', requireAuthorization: false as const };
+        const msg = (code: string): string =>
+            extractServerFns(`import { serverFn, serverStream } from '@sigx/server';\n${code}`, '/app/src/x.server.ts', opts).errors[0]!.message;
+        expect(msg(`export const s = serverStream(async function* () { yield 1; });\n`)).toContain('serverStream(async function* (rq, …) { … }) was removed');
+        expect(msg(`export const f = serverFn(async () => 1);\n`)).toContain('serverFn(async (rq, …) => …) was removed');
+    });
+});
