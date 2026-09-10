@@ -407,10 +407,12 @@ export interface ServerFnDescriptor {
      */
     readonly read?: { readonly cacheControl: string };
     /**
-     * Present iff `invalidates` was declared (rfc-server §6.2): VALIDATED
-     * input (stashed on the request context by the pipeline) + settled
-     * result → patterns the endpoint RESOLVES (fn refs → stable-key tuples)
-     * and attaches to the envelope as `$cache.invalidates`.
+     * Present iff `invalidates` was declared (rfc-server §6.2): the input
+     * the handler received (validated when the definition declares `input`,
+     * otherwise the raw wire argument — stashed on the request context by
+     * the pipeline) + settled result → patterns the endpoint RESOLVES (fn
+     * refs → stable-key tuples) and attaches to the envelope as
+     * `$cache.invalidates`.
      */
     readonly invalidates?: (
         input: unknown,
