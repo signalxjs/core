@@ -737,9 +737,11 @@ export async function handleServerFnRequest(
         // endpoint from ever becoming globally form-accepting (§5.2b).
         return formErrorResponse(415, 'Content-Type must be application/json');
     }
-    // The descriptor is frozen at definition time, so `read` present means
-    // `cacheControl` present — no combination defence needed (v5 §1.5).
-    if (isGet && (!d.read || d.kind === 'stream')) {
+    // A descriptor this package minted is frozen with `read` and its
+    // `cacheControl` together (v5 §1.5); a FOREIGN wrapper through `resolve`
+    // may not be, and a read whose header is not a string must degrade to
+    // POST-only here rather than throw into a masked 500 below.
+    if (isGet && (!d.read || typeof d.read.cacheControl !== 'string' || d.kind === 'stream')) {
         // Resource-precise: THIS function supports only POST (§4.1).
         return errorResponse(405, 'Method not allowed', undefined, undefined, {
             Allow: 'POST',

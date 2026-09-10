@@ -156,6 +156,25 @@ describe('method gating (§4.1)', () => {
         }
     });
 
+    it('a foreign wrapper whose `read` has no string cacheControl is POST-only (405), never a 500', async () => {
+        // A descriptor this package minted is frozen with `read` and its
+        // header together, but `resolve` can hand back a hand-built one.
+        // The GET gate must treat "read without a header" as "not a read"
+        // rather than let the header emission below throw into a masked 500.
+        const shapes: Record<string, unknown> = {
+            noHeader: { __sigx: { kind: 'fn', invoke: async () => 'x', anon: true, form: false, read: {} } },
+            nonString: {
+                __sigx: { kind: 'fn', invoke: async () => 'x', anon: true, form: false, read: { cacheControl: 60 } }
+            }
+        };
+        for (const [label, wrapped] of Object.entries(shapes)) {
+            const res = await get('w', [{ id: 'p1' }], {}, { resolve: () => wrapped });
+            expect(res.status, label).toBe(405);
+            expect(res.headers.get('allow'), label).toBe('POST');
+            expect(res.headers.get('cache-control'), label).toBe('no-store');
+        }
+    });
+
     it('GET to a serverStream is 405 even though streams carry no cache mark', async () => {
         const res = await get('stream_fn_00000009', []);
         expect(res.status).toBe(405);
