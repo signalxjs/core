@@ -1309,3 +1309,17 @@ describe('the options literal is seen through TypeScript wrappers; streams obey 
         expect(out.errors.map((e) => e.message)).toContainEqual(expect.stringMatching(/a spread \(`\.\.\.`\) in the options literal/));
     });
 });
+
+describe('the spread rule sees through TypeScript wrappers too', () => {
+    it('a spread inside a `satisfies`/`as`/`!`/parenthesized literal is still the build error', () => {
+        const opts = { stableId: 'src/x.server.ts', endpoint: '/_sigx/fn', requireAuthorization: false as const };
+        for (const wrap of ['({ ...shared, handler: async () => 1 }) satisfies Opts', '({ ...shared, handler: async () => 1 }) as Opts', '({ ...shared, handler: async () => 1 })!', '(({ ...shared, handler: async () => 1 }))']) {
+            const out = extractServerFns(
+                `import { serverFn } from '@sigx/server';\nimport { shared } from './shared';\ntype Opts = { handler(): Promise<number> };\nexport const f = serverFn(${wrap});\n`,
+                '/app/src/x.server.ts',
+                opts
+            );
+            expect(out.errors.map((e) => e.message), wrap).toContainEqual(expect.stringMatching(/a spread \(`\.\.\.`\) in the options literal/));
+        }
+    });
+});
