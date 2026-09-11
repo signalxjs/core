@@ -332,13 +332,26 @@ export const P = component<{ onSelect?: (id: number) => void; items: number[]; c
 });
 `, '/src/P.resume.tsx');
 
-    it('calling a props member is ineligible — functions never serialize', () => {
-        for (const body of ['ctx.props.onSelect(n.value);', 'ctx.props.onSelect?.(n.value);']) {
+    it('calling a props member is ineligible — functions never serialize, whatever the key', () => {
+        for (const body of [
+            'ctx.props.onSelect(n.value);',
+            'ctx.props.onSelect?.(n.value);',
+            'const { onSelect } = ctx.props; onSelect(n.value);',
+            'const { cb } = ctx.props; cb(n.value);',
+            'const { cb = () => {} } = ctx.props; cb();',
+            'const f = ctx.props.cb; f();'
+        ]) {
             const result = handler(body);
             expect(result.components[0].mode, body).toBe('hydrate');
-            expect(result.ineligible[0].reason, body).toContain('calls ctx.props.onSelect');
-            expect(result.ineligible[0].reason, body).toContain('functions never serialize');
+            expect(result.ineligible[0].reason, body).toMatch(/(calls ctx\.props\.(onSelect|cb)|reads ctx\.props\.onSelect)/);
+            expect(result.ineligible[0].reason, body).toContain('never serialize');
         }
+    });
+
+    it('uses the serializer\'s own on* predicate — unicode-aware', () => {
+        const result = handler('const x = ctx.props.onΔelta; n.value++;');
+        expect(result.components[0].mode).toBe('hydrate');
+        expect(result.ineligible[0].reason).toContain('never serialize');
     });
 
     it('reading an on* prop is ineligible, directly, by computed string key, by destructuring, or under a TS wrapper', () => {
