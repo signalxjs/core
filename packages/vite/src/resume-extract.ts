@@ -9,7 +9,8 @@
  *
  * - the component module rewritten so each handled element also carries
  *   `data-sigx-on:<event>="<symbol>"` (plus `data-sigx-pd:<event>` when the
- *   body calls `preventDefault`, and one dynamic `data-sigx-b={<ctx>.$sigxB}`
+ *   body calls `preventDefault` unconditionally at top level — the stamp is
+ *   applied for the page's lifetime — and one dynamic `data-sigx-b={<ctx>.$sigxB}`
  *   per element for boundary resolution). The original `on*` prop is KEPT —
  *   dev/SPA/post-upgrade behavior is untouched;
  * - a per-file handlers module exporting each handler as
@@ -48,7 +49,11 @@ export interface ExtractedHandler {
     event: string;
     /** Exported name of the owning component. */
     component: string;
-    /** Whether the body syntactically calls `preventDefault` (→ `data-sigx-pd`). */
+    /**
+     * Whether the body calls `preventDefault` UNCONDITIONALLY at top level
+     * (→ `data-sigx-pd`). The loader applies the stamp on every event for the
+     * page's lifetime, so nothing weaker can be stamped.
+     */
     preventDefault: boolean;
     /** The `export const <symbol> = …` statement for the handlers module. */
     exportSource: string;
@@ -103,6 +108,11 @@ export interface ResumeExtraction {
     components: ResumeComponent[];
     /** Union of extracted event names — feeds the loader's delegation list. */
     events: string[];
+    /**
+     * Union of event names that got a `data-sigx-pd` stamp (either mode) —
+     * the only types the loader must register non-passive.
+     */
+    pdEvents: string[];
     /** §6.4 stamping notes (ambiguous targets, author-provided action) —
      *  surfaced by the plugin via this.warn. */
     warnings: string[];
@@ -279,7 +289,17 @@ interface FreeRef {
 
 interface HandlerScan {
     freeRefs: FreeRef[];
-    callsPreventDefault: boolean;
+    /**
+     * `'always'`: an unconditional top-level `<ev>.preventDefault()` — the only
+     * shape a `data-sigx-pd` stamp can honour, since the loader applies it on
+     * every event for the page's lifetime. `'conditional'`: a call that is
+     * guarded, nested, late (after return/throw/await), or indirect (the
+     * event aliased, destructured, or handed to a helper) — unprovable either
+     * way. `'none'`: no sign of it.
+     */
+    preventDefault: 'always' | 'conditional' | 'none';
+    /** Why `'conditional'`, for the reason string. */
+    preventDefaultNote: string | null;
     /** `this` in an arrow chain, bare `arguments`, or `import.meta` — always ineligible. */
     contextual: string | null;
     usesReservedName: boolean;
@@ -316,13 +336,22 @@ function isValueReference(node: Node, parent: Node, key: string): boolean {
 
 /** Scan a handler function for free references and disqualifying constructs. */
 function scanHandler(fn: Node): HandlerScan {
-    const result: HandlerScan = { freeRefs: [], callsPreventDefault: false, contextual: null, usesReservedName: false };
+    const result: HandlerScan = {
+        freeRefs: [],
+        preventDefault: 'none',
+        preventDefaultNote: null,
+        contextual: null,
+        usesReservedName: false
+    };
     // Scope stack rooted at the handler's own scope.
     const scopes: { bindings: Set<string>; isFunction: boolean }[] = [];
     // `data-sigx-pd` must fire only for preventDefault on the EVENT param —
     // `someController.preventDefault()` is not a browser-default concern.
     const firstParam = (fn.params as Node[])[0];
     const eventParam = firstParam?.type === 'Identifier' ? (firstParam.name as string) : null;
+    let pdSeen = false;
+    let pdIndirect: string | null =
+        firstParam && firstParam.type !== 'Identifier' ? 'the event parameter is destructured' : null;
 
     function isBound(name: string): boolean {
         for (let i = scopes.length - 1; i >= 0; i--) {
@@ -396,9 +425,10 @@ function scanHandler(fn: Node): HandlerScan {
         ) {
             const receiver = (node.callee as Node).object as Node;
             if (eventParam !== null && receiver.type === 'Identifier' && (receiver.name as string) === eventParam) {
-                result.callsPreventDefault = true;
+                pdSeen = true;
             }
         }
+        if (eventParam !== null && pdIndirect === null) pdIndirect = indirectEventUse(node, parent, key, eventParam);
 
         const scope = ownScopeBindings(node);
         // Non-arrow nested functions own `this`/`arguments`.
@@ -437,7 +467,160 @@ function scanHandler(fn: Node): HandlerScan {
     for (const param of fn.params as Node[]) visit(param, fn, 'params', false);
     const body = fn.body as Node;
     visit(body, fn, 'body', false);
+    if (pdSeen && eventParam !== null && pdAlways(fn, eventParam)) {
+        result.preventDefault = 'always';
+    } else if (pdSeen) {
+        result.preventDefault = 'conditional';
+        result.preventDefaultNote = 'the call is guarded, inside a nested function, or after a return, throw or await';
+    } else if (pdIndirect !== null) {
+        result.preventDefault = 'conditional';
+        result.preventDefaultNote = pdIndirect;
+    }
     return result;
+}
+
+/**
+ * A use of the event parameter through which `preventDefault` could be
+ * called where the scan cannot see it — the reason a stamp cannot be proven
+ * absent. Plain member reads (`e.target`, `e.currentTarget.value`) are not.
+ */
+function indirectEventUse(node: Node, parent: Node, key: string, ev: string): string | null {
+    const isEv = (n: unknown): boolean => isNode(n) && n.type === 'Identifier' && (n.name as string) === ev;
+    if (node.type === 'VariableDeclarator' && isEv(node.init)) {
+        return (node.id as Node).type === 'Identifier'
+            ? `the event is aliased as \`${(node.id as Node).name as string}\``
+            : 'the event is destructured';
+    }
+    if (node.type === 'AssignmentExpression' && isEv(node.right)) return 'the event is assigned away';
+    if (
+        node.type === 'MemberExpression' &&
+        isEv(node.object) &&
+        node.computed !== true &&
+        isNode(node.property) &&
+        ((node.property as Node).name as string) === 'preventDefault' &&
+        !(parent.type === 'CallExpression' && key === 'callee')
+    ) {
+        return '`preventDefault` is read off the event without being called';
+    }
+    if ((node.type === 'CallExpression' || node.type === 'NewExpression') && ((node.arguments as Node[]) ?? []).some(isEv)) {
+        const callee = node.callee as Node;
+        const name =
+            callee.type === 'Identifier' ? (callee.name as string)
+            : callee.type === 'MemberExpression' && isNode(callee.property) ? ((callee.property as Node).name as string)
+            : '…';
+        return `the event is passed to \`${name}(…)\``;
+    }
+    return null;
+}
+
+/**
+ * Is `<ev>.preventDefault()` an unconditional top-level statement of the
+ * handler body — met, in statement order, before anything that could leave
+ * the handler (a return/throw/await/yield outside nested functions)?
+ */
+function pdAlways(fn: Node, ev: string): boolean {
+    const body = fn.body as Node;
+    if (body.type !== 'BlockStatement') return isPdCall(firstOfSequence(body), ev);
+    for (const stmt of body.body as Node[]) {
+        if (stmt.type === 'ExpressionStatement' && isPdCall(firstOfSequence(stmt.expression as Node), ev)) return true;
+        if (mayNotReachNext(stmt)) return false;
+    }
+    return false;
+}
+
+function firstOfSequence(expr: Node): Node {
+    while (expr.type === 'SequenceExpression') expr = (expr.expressions as Node[])[0];
+    if (expr.type === 'ChainExpression') expr = expr.expression as Node;
+    return expr;
+}
+
+function isPdCall(expr: Node, ev: string): boolean {
+    if (expr.type !== 'CallExpression') return false;
+    const callee = expr.callee as Node;
+    return (
+        callee.type === 'MemberExpression' &&
+        callee.computed !== true &&
+        (callee.object as Node).type === 'Identifier' &&
+        ((callee.object as Node).name as string) === ev &&
+        isNode(callee.property) &&
+        ((callee.property as Node).name as string) === 'preventDefault'
+    );
+}
+
+/** Could control leave the handler inside `stmt`, before the next top-level statement? */
+function mayNotReachNext(stmt: Node): boolean {
+    let abrupt = false;
+    (function walk(node: Node): void {
+        if (abrupt) return;
+        if (
+            node.type === 'ReturnStatement' ||
+            node.type === 'ThrowStatement' ||
+            node.type === 'AwaitExpression' ||
+            node.type === 'YieldExpression'
+        ) {
+            abrupt = true;
+            return;
+        }
+        if (FUNCTION_TYPES.has(node.type)) return; // a nested body does not run here
+        for (const child of childNodes(node)) walk(child);
+    })(stmt);
+    return abrupt;
+}
+
+const ALWAYS_DEFAULT_EVENTS = new Set([
+    'keydown', 'keypress', 'beforeinput', 'paste', 'cut', 'copy', 'contextmenu', 'wheel',
+    'touchstart', 'touchmove', 'touchend', 'mousedown', 'pointerdown',
+    'dragstart', 'dragover', 'drop', 'dblclick', 'auxclick'
+]);
+
+/**
+ * Does `event` on a `<tag>` have a native default action the loader would
+ * have to cancel before any handler code loads? `attr(name)` is the
+ * element's string-literal attribute (`null` when present but dynamic —
+ * treated as "might", `undefined` when absent).
+ */
+export function hasDefaultAction(
+    tag: string,
+    event: string,
+    attr: (name: string) => string | null | undefined
+): boolean {
+    if (ALWAYS_DEFAULT_EVENTS.has(event)) return true;
+    if (event === 'submit' || event === 'reset') return tag === 'form';
+    if (event !== 'click') return false;
+    switch (tag) {
+        case 'a':
+        case 'area':
+            return attr('href') !== undefined;
+        case 'button':
+            return attr('type') !== 'button';
+        case 'input': {
+            const type = attr('type');
+            if (type === undefined) return false; // text
+            return type === null || /^(submit|reset|checkbox|radio|image|file)$/i.test(type);
+        }
+        case 'label':
+        case 'summary':
+            return true;
+        default:
+            return false;
+    }
+}
+
+/** A JSX attribute's string-literal value; `null` when present but not a literal; `undefined` when absent. */
+function literalAttr(element: Node, name: string): string | null | undefined {
+    for (const attr of element.attributes as Node[]) {
+        if (attr.type !== 'JSXAttribute') continue;
+        const attrName = attr.name as Node;
+        if (attrName.type !== 'JSXIdentifier' || (attrName.name as string) !== name) continue;
+        if (!isNode(attr.value)) return null; // bare boolean attribute — present
+        const value = attr.value as Node;
+        if (typeof value.value === 'string') return value.value;
+        if (value.type === 'JSXExpressionContainer' && isNode(value.expression) && typeof (value.expression as Node).value === 'string') {
+            return (value.expression as Node).value as string;
+        }
+        return null;
+    }
+    return undefined;
 }
 
 /** Which property of `parent` holds `child` (for reference-position checks). */
@@ -981,6 +1164,7 @@ export function extractResumeHandlers(
     const handlerExports = new Map<string, string>(); // symbol → export statement
     const replicatedImports = new Map<string, Set<string>>(); // source → clause pieces
     const events = new Set<string>();
+    const pdEvents = new Set<string>();
     const warnings: string[] = [];
 
     /** The JSX tag of a host element's opening node, or null for components. */
@@ -988,6 +1172,12 @@ export function extractResumeHandlers(
         const tag = element.name as Node;
         return tag.type === 'JSXIdentifier' ? ((tag.name as string) ?? null) : null;
     };
+    /** Does this site's element have a native default the loader must cancel synchronously? */
+    const defaultAction = (site: HandlerSite): boolean => {
+        const tag = tagNameOf(site.element);
+        return tag !== null && hasDefaultAction(tag, site.event, (name) => literalAttr(site.element, name));
+    };
+
     /**
      * Why ELEMENT may already own its action/method: an explicit JSX
      * attribute, or a spread (`{...props}`) that could carry either —
@@ -1156,6 +1346,20 @@ export function extractResumeHandlers(
                 const name = fn.name as string;
                 const imported = moduleScan.imports.get(name);
                 if (imported && !imported.typeOnly) {
+                    if (defaultAction(site)) {
+                        // Whether it calls preventDefault is invisible across
+                        // modules, and this element's default would fire
+                        // before the handler loads — unprovable either way.
+                        allSites.push({ site, preventDefault: false });
+                        fail(
+                            site,
+                            `handler "${name}" is imported from ${JSON.stringify(imported.source)} — whether it calls ` +
+                            `preventDefault cannot be seen across modules, and <${tagNameOf(site.element)}> has a ` +
+                            `native ${site.event} default the loader would have to cancel before the handler ` +
+                            `loads; define the handler in this module (inline, or as a setup-scope const)`
+                        );
+                        continue;
+                    }
                     // Imported function: the handler module re-imports and wraps it.
                     allSites.push({ site, preventDefault: false });
                     pending.push({
@@ -1190,7 +1394,7 @@ export function extractResumeHandlers(
             }
 
             const scan = scanHandler(fn);
-            allSites.push({ site, preventDefault: scan.callsPreventDefault });
+            allSites.push({ site, preventDefault: scan.preventDefault === 'always' });
             if (scan.usesReservedName) {
                 // A build error, not a hydrate-mode downgrade (§4.5): the
                 // handler is re-emitted as `($scope, …) => …` and `$el` is
@@ -1208,6 +1412,23 @@ export function extractResumeHandlers(
             }
             if (scan.contextual) {
                 fail(site, `handler uses ${scan.contextual}`);
+                continue;
+            }
+            if (scan.preventDefault === 'conditional' && defaultAction(site)) {
+                // The stamp is applied on every event, upgraded or not, so a
+                // guarded call can neither be stamped (over-cancels) nor left
+                // unstamped on an element whose default fires before the
+                // handler loads. Wake-on-interaction restores the author's
+                // semantics exactly, so this is a fallback, not an error.
+                const evName = ((fn.params as Node[])[0]?.type === 'Identifier' ? ((fn.params as Node[])[0].name as string) : 'e');
+                fail(
+                    site,
+                    `handler calls preventDefault() conditionally or indirectly (${scan.preventDefaultNote}) — ` +
+                    `the loader must cancel <${tagNameOf(site.element)}>'s native ${site.event} default ` +
+                    `synchronously, before any JavaScript loads, so the call has to be an unconditional ` +
+                    `top-level statement of the handler body: \`${evName}.preventDefault()\` not inside ` +
+                    `if / ?: / && / a nested function, and not after a return, throw or await`
+                );
                 continue;
             }
 
@@ -1291,7 +1512,7 @@ export function extractResumeHandlers(
                 exportSrc,
                 hashSeed: exportSrc('$'),
                 imports: neededImports,
-                preventDefault: scan.callsPreventDefault
+                preventDefault: scan.preventDefault === 'always'
             });
         }
 
@@ -1335,6 +1556,7 @@ export function extractResumeHandlers(
                 // fire alongside the replayed RPC.
                 if (entry.preventDefault || formAction !== null) {
                     attrs += ` data-sigx-pd:${entry.site.event}=""`;
+                    pdEvents.add(entry.site.event);
                 }
                 if (formAction !== null) attrs += formAction;
                 attrs += stampBoundary(entry.site);
@@ -1369,7 +1591,10 @@ export function extractResumeHandlers(
                 }
                 events.add(site.event);
                 let attrs = ` data-sigx-wake:${site.event}=""`;
-                if (preventDefault) attrs += ` data-sigx-pd:${site.event}=""`;
+                if (preventDefault) {
+                    attrs += ` data-sigx-pd:${site.event}=""`;
+                    pdEvents.add(site.event);
+                }
                 attrs += stampBoundary(site);
                 componentSplices.push({ start: site.attr.end, end: site.attr.end, text: attrs });
             }
@@ -1494,6 +1719,7 @@ export function extractResumeHandlers(
         errors,
         components: componentResults,
         events: [...events].sort(),
+        pdEvents: [...pdEvents].sort(),
         warnings
     };
 }

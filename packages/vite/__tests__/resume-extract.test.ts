@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { extractResumeHandlers, formMarkedImportsOf, offsetToLoc } from '../src/resume-extract';
+import { extractResumeHandlers, formMarkedImportsOf, hasDefaultAction, offsetToLoc } from '../src/resume-extract';
 
 const COUNTER = `
 import { component } from 'sigx';
@@ -111,12 +111,14 @@ export const Button = component((ctx) => {
     });
 
     it('wraps an imported-identifier handler', () => {
+        // On an element with no native default — on a <form> submit it is
+        // ineligible instead (see the preventDefault describe).
         const code = `
 import { component } from 'sigx';
 import { onSubmit } from './form';
 export const Form = component((ctx) => {
     const dirty = ctx.signal(false);
-    return () => <form onSubmit={onSubmit}>x</form>;
+    return () => <div onClick={onSubmit}>x</div>;
 });
 `;
         const result = extractResumeHandlers(code, '/src/Form.resume.tsx');
@@ -178,6 +180,125 @@ export const Multi = component((ctx) => {
         expect(result.handlers).toHaveLength(2);
         expect(result.events).toEqual(['focus', 'input']);
         expect(result.code.split('data-sigx-b=').length - 1).toBe(1);
+    });
+});
+
+describe('preventDefault — unconditional stamps only', () => {
+    const form = (handler: string) => extractResumeHandlers(`
+import { component } from 'sigx';
+export const F = component((ctx) => {
+    const n = ctx.signal(0);
+    return () => <form onSubmit={${handler}}><input name="q" /></form>;
+});
+`, '/src/F.resume.tsx');
+
+    it('stamps data-sigx-pd only for a top-level unconditional call', () => {
+        const first = form('(e) => { e.preventDefault(); n.value++; }');
+        expect(first.handlers[0].preventDefault).toBe(true);
+        expect(first.code).toContain('data-sigx-pd:submit=""');
+        expect(first.pdEvents).toEqual(['submit']);
+        // After a harmless statement is still unconditional.
+        const later = form('(e) => { const q = e.target; n.value++; e.preventDefault(); }');
+        expect(later.handlers[0].preventDefault).toBe(true);
+        // So are an expression body and an optional call.
+        expect(form('(e) => e.preventDefault()').handlers[0].preventDefault).toBe(true);
+        expect(form('(e) => { e?.preventDefault(); }').handlers[0].preventDefault).toBe(true);
+    });
+
+    it('a guarded call on an element with a native default is ineligible and stamps nothing', () => {
+        const result = form('(e) => { if (n.value > 0) e.preventDefault(); n.value++; }');
+        expect(result.components[0].mode).toBe('hydrate');
+        expect(result.ineligible[0].reason).toContain('conditionally or indirectly');
+        expect(result.ineligible[0].reason).toContain("<form>'s native submit default");
+        // The stamp is applied on every event, upgraded or not — so hydrate
+        // mode must not carry it either (it used to, and cancelled every submit).
+        expect(result.code).not.toContain('data-sigx-pd');
+        expect(result.pdEvents).toEqual([]);
+    });
+
+    it('an early return, throw or await before the call, a try, or a nested function makes it conditional', () => {
+        for (const body of [
+            '(e) => { if (!n.value) return; e.preventDefault(); }',
+            '(e) => { if (!n.value) throw new Error("x"); e.preventDefault(); }',
+            'async (e) => { await Promise.resolve(); e.preventDefault(); }',
+            '(e) => { try { e.preventDefault(); } catch {} }',
+            '(e) => { const go = () => e.preventDefault(); go(); }'
+        ]) {
+            expect(form(body).components[0].mode, body).toBe('hydrate');
+        }
+    });
+
+    it('an alias, a destructured preventDefault, a method read, or the event passed to a helper is indirect', () => {
+        const cases: Array<[string, string]> = [
+            ['(e) => { const ev = e; ev.preventDefault(); }', 'aliased as `ev`'],
+            ['({ preventDefault }) => { preventDefault(); }', 'destructured'],
+            ['(e) => { const { preventDefault } = e; preventDefault(); }', 'destructured'],
+            ['(e) => { const pd = e.preventDefault; pd.call(e); }', 'read off the event'],
+            ['(e) => { cancel(e); n.value++; }', 'passed to `cancel(…)`']
+        ];
+        for (const [body, note] of cases) {
+            const result = form(body);
+            expect(result.components[0].mode, body).toBe('hydrate');
+            expect(result.ineligible[0].reason, body).toContain(note);
+        }
+    });
+
+    it('a guarded call on an element with no native default extracts without a stamp', () => {
+        const result = extractResumeHandlers(`
+import { component } from 'sigx';
+export const D = component((ctx) => {
+    const n = ctx.signal(0);
+    return () => <div onClick={(e) => { if (n.value) e.preventDefault(); n.value++; }}>x</div>;
+});
+`, '/src/D.resume.tsx');
+        expect(result.components[0].mode).toBe('resume');
+        expect(result.handlers[0].preventDefault).toBe(false);
+        expect(result.code).not.toContain('data-sigx-pd');
+    });
+
+    it('an imported handler on a default-action element is ineligible — the call is invisible across modules', () => {
+        const result = extractResumeHandlers(`
+import { component } from 'sigx';
+import { onSubmit } from './form';
+export const Form = component((ctx) => {
+    const dirty = ctx.signal(false);
+    return () => <form onSubmit={onSubmit}>x</form>;
+});
+`, '/src/Form.resume.tsx');
+        // It used to be wrapped: the form natively submitted on first interaction.
+        expect(result.components[0].mode).toBe('hydrate');
+        expect(result.handlers).toHaveLength(0);
+        expect(result.ineligible[0].reason).toContain('imported from "./form"');
+        expect(result.ineligible[0].reason).toContain('native submit default');
+    });
+
+    it('hasDefaultAction — the native-default table', () => {
+        const attrs = (map: Record<string, string | null>) => (name: string) => (name in map ? map[name] : undefined);
+        expect(hasDefaultAction('form', 'submit', attrs({}))).toBe(true);
+        expect(hasDefaultAction('div', 'submit', attrs({}))).toBe(false);
+        expect(hasDefaultAction('a', 'click', attrs({ href: '/x' }))).toBe(true);
+        expect(hasDefaultAction('a', 'click', attrs({}))).toBe(false);
+        expect(hasDefaultAction('button', 'click', attrs({}))).toBe(true);
+        expect(hasDefaultAction('button', 'click', attrs({ type: 'button' }))).toBe(false);
+        expect(hasDefaultAction('button', 'click', attrs({ type: null }))).toBe(true); // dynamic — might
+        expect(hasDefaultAction('input', 'click', attrs({ type: 'checkbox' }))).toBe(true);
+        expect(hasDefaultAction('input', 'click', attrs({ type: 'text' }))).toBe(false);
+        expect(hasDefaultAction('input', 'click', attrs({}))).toBe(false);
+        expect(hasDefaultAction('summary', 'click', attrs({}))).toBe(true);
+        expect(hasDefaultAction('div', 'keydown', attrs({}))).toBe(true);
+        expect(hasDefaultAction('div', 'click', attrs({}))).toBe(false);
+        expect(hasDefaultAction('input', 'input', attrs({}))).toBe(false);
+    });
+
+    it('reads the element attributes the table needs: a typed button is default-free', () => {
+        const result = extractResumeHandlers(`
+import { component } from 'sigx';
+export const B = component((ctx) => {
+    const n = ctx.signal(0);
+    return () => <button type="button" onClick={(e) => { if (n.value) e.preventDefault(); n.value++; }}>x</button>;
+});
+`, '/src/B.resume.tsx');
+        expect(result.components[0].mode).toBe('resume');
     });
 });
 

@@ -20,7 +20,9 @@
  *    both code-split behind dynamic imports that only execute on interaction.
  * 4. **Loader entry** — `virtual:sigx-resume/entry` is the page's only
  *    script: it wires the delegation loader with the build-wide union of
- *    handled event names and lazy references to the registry and runtime.
+ *    handled event names, lazy references to the registry and runtime, and
+ *    the union of event types carrying a `data-sigx-pd` stamp (the only
+ *    ones the loader needs to register non-passive).
  * 5. **Build manifest** — the client build emits
  *    `.vite/sigx-resume-manifest.json` (`components` for upgrade chunks —
  *    feed to `resumePlugin({ manifest })` — and `handlers` for
@@ -341,12 +343,15 @@ export function sigxResume(options: SigxResumeOptions = {}): Plugin {
             }
             if (id === RESOLVED_ENTRY_ID) {
                 const events = new Set<string>();
+                const pdEvents = new Set<string>();
                 for (const extraction of extractions.values()) {
                     for (const event of extraction.events) events.add(event);
+                    for (const event of extraction.pdEvents) pdEvents.add(event);
                 }
                 return [
                     "import { initResume } from '@sigx/resume/loader';",
-                    `initResume(${JSON.stringify([...events].sort())}, () => import(${JSON.stringify(VIRTUAL_ID)}), () => import('@sigx/resume/client'));`
+                    `initResume(${JSON.stringify([...events].sort())}, () => import(${JSON.stringify(VIRTUAL_ID)}), ` +
+                        `() => import('@sigx/resume/client'), ${JSON.stringify([...pdEvents].sort())});`
                 ].join('\n');
             }
             if (id.startsWith(RESOLVED_HANDLERS_PREFIX)) {
