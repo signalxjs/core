@@ -52,6 +52,7 @@ packages/
 | Verify npm pack output — all 14 packages, `workspace:`/`catalog:` leftovers, every export subpath loads, the scratch consumer typechecks against the emitted `.d.ts` (after `pnpm build`) | `pnpm verify:pack` |
 | Edge smoke test (after `pnpm build`) | `pnpm test:edge` |
 | Hydration smoke — did a prod build hydrate, or re-render client-side? (after `pnpm build`) | `pnpm smoke:hydration` (needs `pnpm exec playwright install chromium` once) |
+| Resume smoke — the resumability ladder in a browser, prod build and dev server (after `pnpm build`) | `pnpm smoke:resume` (same Chromium install) |
 | SSR benchmarks (after `pnpm build`) | `pnpm bench:ssr:quick` (quick + regression table) / `pnpm bench:ssr` (vs Vue, React, Preact) |
 | Try a runnable example | `pnpm --filter @sigx/spa-example dev` |
 

@@ -12,6 +12,21 @@
   transform now refuses `ctx.slots` in a component with handlers
   (`@sigx/vite`, root CHANGELOG); this is the net for what it cannot see.
 
+- **Dev trace (#702 phase 7, closes #414).** `@sigx/resume/client` logs one
+  `[sigx resume]` line per replay (`boundary N (X): replaying "<symbol>"
+  (click)`), first write (`first write to "count" — upgrading`), completed
+  upgrade (`upgraded — real listeners now own the element`) and wake
+  (`woke (hydrate mode) — the triggering event is not replayed`), all
+  `__DEV__`-gated and stripped from the prod dist. #414 asked for a dev
+  flag that strips the original `on*` props to "exercise delegation in
+  dev" — but dev already runs the same ladder (the transform has no
+  environment gate, the dev server serves the handlers virtuals, the
+  registry lazily imports the component modules), and stripping `on*`
+  would kill post-upgrade dispatch, which IS the hydrated listener. What
+  was missing was visibility (this trace), a dev smoke in CI
+  (`pnpm smoke:resume`, `examples/resume/smoke.mjs --dev`) and a reload on
+  handler-symbol change (`@sigx/vite`, root CHANGELOG).
+
 - **Handler chunks are modulepreloaded — `ResumeManifest.handlers` does what
   it says (#410, rfc-1.0 §4.8).** `resumePlugin` now implements the pack
   `assets()` hook (the `islandsPlugin` precedent): for every boundary a
@@ -27,6 +42,25 @@
   then contributes nothing.
 
 ### Changed
+
+- **The loader registers `passive: false` only where a `data-sigx-pd` stamp
+  exists (#702 phase 5).** `initResume` takes a fourth argument — the
+  build-wide list of stamped event types, which `@sigx/vite`'s entry now
+  passes — and every other type leaves `passive` unspecified, so a UA's
+  intervention can apply (Chrome treats `touchstart`/`touchmove`/`wheel`
+  listeners on the document as passive when the option is omitted): a page
+  whose only such handlers never cancel no longer forces a scroll-blocking
+  document listener for the page's lifetime. An
+  entry from an older `@sigx/vite` passes no list, and then every listener
+  stays non-passive, exactly as before.
+
+- **Non-bubbling events replay only on the target element's carrier.**
+  `focus`, `blur`, `mouseenter`, `scroll`, … reach the capture-phase
+  document listener like any event, but the synthetic bubble used to walk
+  every ancestor `data-sigx-on:*` / `data-sigx-wake:*` carrier — invoking
+  handlers (and waking boundaries) a live listener there would never have
+  seen. The walk now stops at the target for an event with
+  `bubbles === false`.
 
 - **Replayed handlers receive exactly what live dispatch gives them (#702
   phase 1).** `invoke` now calls a QRL handler as `(scope, event)`. The

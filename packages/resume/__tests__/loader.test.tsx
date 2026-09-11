@@ -147,6 +147,44 @@ describe('initResume — delegation', () => {
         expect(rt.invocations.filter((i) => i.symbol === 'Sym_once')).toHaveLength(1);
     });
 
+    it('registers non-passive listeners only for pd-stamped types; no list means all non-passive', () => {
+        const add = vi.spyOn(document, 'addEventListener');
+        const rt = makeRuntime();
+        initResume(['click', 'submit', 'touchstart'], rt.loadRegistry, rt.loadRuntime, ['submit']);
+        const options = (type: string) => add.mock.calls.find((c) => c[0] === type)?.[2];
+        expect(options('submit')).toEqual({ capture: true, passive: false });
+        expect(options('click')).toEqual({ capture: true });
+        expect(options('touchstart')).toEqual({ capture: true }); // `passive` unspecified: the UA may intervene
+
+        // An entry from an older @sigx/vite passes no list — every listener
+        // stays non-passive so a stamp never loses its preventDefault.
+        resetResumeDelegation();
+        add.mockClear();
+        initResume(['click', 'touchstart'], rt.loadRegistry, rt.loadRuntime);
+        expect(options('click')).toEqual({ capture: true, passive: false });
+        expect(options('touchstart')).toEqual({ capture: true, passive: false });
+        add.mockRestore();
+    });
+
+    it('a non-bubbling event invokes only the target element\'s carrier, and wakes no ancestor', async () => {
+        const rt = makeRuntime();
+        initResume(['focus'], rt.loadRegistry, rt.loadRuntime);
+        container.innerHTML =
+            `<section data-sigx-wake:focus="" data-sigx-b="7">` +
+            `<div data-sigx-on:focus="Sym_outer"><input data-sigx-on:focus="Sym_inner" /></div>` +
+            `</section>`;
+        const input = container.querySelector('input')!;
+        input.dispatchEvent(new Event('focus')); // bubbles: false, as the native event
+        await tick();
+        // A live listener on <div> or <section> would never have seen it.
+        expect(rt.invocations.map((i) => i.symbol)).toEqual(['Sym_inner']);
+        expect(rt.wakes).toEqual([]);
+
+        container.querySelector('div')!.dispatchEvent(new Event('focus'));
+        await tick();
+        expect(rt.invocations.map((i) => i.symbol)).toEqual(['Sym_inner', 'Sym_outer']);
+    });
+
     it('wakes hydrate-mode boundaries via data-sigx-wake (no replay), deduped per boundary', async () => {
         const rt = makeRuntime();
         initResume(['click'], rt.loadRegistry, rt.loadRuntime);

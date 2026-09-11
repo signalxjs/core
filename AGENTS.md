@@ -186,6 +186,12 @@ pnpm smoke:hydration   # did the prod build actually HYDRATE, or silently re-ren
                        # removeSSRRange takes nested markers with it). Both mismatch warnings are __DEV__-gated,
                        # so this is the ONLY hydration signal a prod dist has (#377). Needs a browser:
                        # `pnpm exec playwright install chromium` once. CI job: hydration-smoke.
+pnpm smoke:resume      # the resumability ladder in a real browser, against BOTH the prod build and the
+                       # dev server of examples/resume (after pnpm build): loader-only boot, first-event
+                       # replay, upgrade-on-write exactly once (#266), read-only handlers, single-flight
+                       # refresh, wake-on-interaction, and in dev the `[sigx resume]` console trace. Dev
+                       # runs the same ladder as prod; this is what keeps it so (#702). Needs Chromium
+                       # like smoke:hydration. CI job: resume-smoke.
 pnpm bench:ssr:quick   # sigx-only quick SSR bench + regression table vs the committed baseline (after pnpm build)
 pnpm bench:ssr:quick:ci # the same, plus --require-baseline-rows: FAILS when a quick bench has no
                        # baseline entry. A row check-regression cannot match is compared against

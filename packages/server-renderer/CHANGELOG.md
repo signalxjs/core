@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **`<link rel="modulepreload">` carries the request's CSP nonce (#702
+  phase 8).** `script-src` governs module preloads, so under a nonce-only
+  policy every preload `renderDocument` emitted — the app's `assets`, the
+  boundary chunks, and the pack-contributed ones (`@sigx/ssr-islands`,
+  `@sigx/resume`'s handler chunks) — was blocked and logged while the
+  `<script>` tags next to them carried the nonce. All three now stamp
+  `SSRContextOptions.nonce` like `scriptOpen` does; the output is
+  byte-identical without one, and stylesheets (`style-src`) are untouched.
+
 - **`getCurrentInstance()` is stable across suspensions in a render (#552).**
   `renderNode` sets the current instance around a component's frame and
   restores it in a `finally`, but the frame suspends in between — `yield
