@@ -115,7 +115,7 @@ jobs:
       # is indented past the first. A more-indented line in a `>-` scalar keeps
       # its newline, and the expression then reaches Actions with a literal
       # newline inside it.
-      - uses: azure/login@v2
+      - uses: azure/login@v3
         if: >-
           github.event_name == 'workflow_dispatch' ||
           (github.event_name == 'pull_request' &&
