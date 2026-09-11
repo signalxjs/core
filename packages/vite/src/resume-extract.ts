@@ -14,9 +14,11 @@
  *   per element for boundary resolution). The original `on*` prop is KEPT —
  *   dev/SPA/post-upgrade behavior is untouched;
  * - a per-file handlers module exporting each handler as
- *   `($scope, <original params>) => body` with captured named signals
+ *   `($scope, <original params>) => body`, with captured named signals
  *   rewritten to `$scope.signals.<name>` and `ctx.props` reads to
- *   `$scope.props`. The module imports nothing from this file (that would
+ *   `$scope.props`. The runtime invokes it as `($scope, event)` — the arity
+ *   live dispatch gives the original — with `event.currentTarget` pointed
+ *   at the delegated element for the duration of the call. The module imports nothing from this file (that would
  *   defeat the chunk split); only third-party/shared imports are replicated.
  *
  * Handlers whose captures cannot be rewritten (view-scope locals, same-file
@@ -521,18 +523,19 @@ function indirectEventUse(node: Node, parent: Node, key: string, ev: string): st
  */
 function pdAlways(fn: Node, ev: string): boolean {
     const body = fn.body as Node;
-    if (body.type !== 'BlockStatement') return isPdCall(firstOfSequence(body), ev);
+    if (body.type !== 'BlockStatement') return hasPdCall(body, ev);
     for (const stmt of body.body as Node[]) {
-        if (stmt.type === 'ExpressionStatement' && isPdCall(firstOfSequence(stmt.expression as Node), ev)) return true;
+        if (stmt.type === 'ExpressionStatement' && hasPdCall(stmt.expression as Node, ev)) return true;
         if (mayNotReachNext(stmt)) return false;
     }
     return false;
 }
 
-function firstOfSequence(expr: Node): Node {
-    while (expr.type === 'SequenceExpression') expr = (expr.expressions as Node[])[0];
+/** Every part of a sequence runs unconditionally: `(a(), e.preventDefault(), b())` counts. */
+function hasPdCall(expr: Node, ev: string): boolean {
+    if (expr.type === 'SequenceExpression') return (expr.expressions as Node[]).some((part) => hasPdCall(part, ev));
     if (expr.type === 'ChainExpression') expr = expr.expression as Node;
-    return expr;
+    return isPdCall(expr, ev);
 }
 
 function isPdCall(expr: Node, ev: string): boolean {

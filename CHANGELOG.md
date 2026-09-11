@@ -156,8 +156,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   on any other element a guarded call extracts without a stamp.
   `ExtractedHandler.preventDefault` means "unconditional"; new
   `ResumeExtraction.pdEvents` (the stamped types) rides into
-  `virtual:sigx-resume/entry` as `initResume`'s fourth argument, and
-  `hasDefaultAction(tag, event, attr)` is exported.
+  `virtual:sigx-resume/entry` as `initResume`'s fourth argument. The
+  native-default table is `hasDefaultAction` in `resume-extract.ts` (an
+  internal module, exported for the tests — not a `@sigx/vite/resume` API).
 
 - **`@sigx/vite/resume`: five more silent shapes are diagnosed (#702
   phase 2, rfc-1.0 §4.5).** Each compiled without a word and misbehaved
