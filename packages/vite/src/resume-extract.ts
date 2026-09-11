@@ -876,6 +876,7 @@ function findComponents(program: Node, scan: ModuleScan, errors: ContractError[]
 function findCtxSlots(node: Node, ctxName: string): Node | null {
     if (
         node.type === 'MemberExpression' &&
+        node.computed !== true && // `ctx[slots]` is a dynamic key, not a slots read
         (node.object as Node).type === 'Identifier' &&
         ((node.object as Node).name as string) === ctxName &&
         isNode(node.property) &&

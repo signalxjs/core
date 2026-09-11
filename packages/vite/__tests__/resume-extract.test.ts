@@ -625,6 +625,19 @@ export const Frame = component((ctx) => {
         expect(result.components[0]).toMatchObject({ mode: 'resume', siteCount: 0, signalCount: 1 });
     });
 
+    it('a computed key that happens to be named slots is not a slots read', () => {
+        const result = extractResumeHandlers(`
+import { component } from 'sigx';
+export const Dyn = component((ctx) => {
+    const n = ctx.signal(0);
+    const slots = 'title';
+    return () => <div onClick={() => { n.value++; }}>{(ctx as any)[slots]}{ctx[slots]}</div>;
+});
+`, '/src/Dyn.resume.tsx');
+        expect(result.errors).toHaveLength(0);
+        expect(result.components[0].mode).toBe('resume');
+    });
+
     it('a handler prop on a component tag is a build ERROR — delegation only sees host elements', () => {
         const code = `
 import { component } from 'sigx';
