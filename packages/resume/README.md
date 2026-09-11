@@ -209,8 +209,9 @@ is a build error (below).
 handler body, `e.preventDefault()` on the event parameter itself. The loader
 cancels the native default synchronously from a `data-sigx-pd` stamp — before
 any JavaScript loads, and for the page's lifetime — so a guarded or indirect
-call (inside `if` / `?:` / `&&`, a nested function, after a `return`, `throw`
-or `await`; an alias, a destructured `preventDefault`, or the event handed
+call (inside `if` / `?:` / `&&` / `try`, a nested function, after a
+`return`, `throw`, `await` or `yield`; an alias, a destructured
+`preventDefault`, or the event handed
 to a helper) can neither be stamped nor left unstamped on an element with a
 native default (`<form>` submit, `<a href>` click, a submit button, a
 checkbox, `keydown`, …): the component falls back to wake-on-interaction
