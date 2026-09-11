@@ -1732,6 +1732,12 @@ export function extractResumeHandlers(
         return arg && arg.type === 'Identifier' ? (arg.name as string) : '…';
     }
 
+    /** `(x as T)`, `x!`, `x satisfies T`, `<T>x` → `x`: the value under TS wrappers. */
+    function unwrapTsValue(node: Node): Node {
+        while (TS_VALUE_WRAPPERS.has(node.type) && isNode(node.expression)) node = node.expression as Node;
+        return node;
+    }
+
     /** A static property name: `.x`, `['x']`, or a literal/identifier pattern key; null when dynamic. */
     function staticKey(node: Node, computed: boolean): string | null {
         if (!computed && node.type === 'Identifier') return node.name as string;
@@ -1749,7 +1755,7 @@ export function extractResumeHandlers(
         let found: { name: string; called: boolean } | null = null;
         (function walk(node: Node, parent: Node | null): void {
             if (found) return;
-            if (node.type === 'MemberExpression' && node.object === member && isNode(node.property)) {
+            if (node.type === 'MemberExpression' && isNode(node.object) && unwrapTsValue(node.object as Node) === member && isNode(node.property)) {
                 const name = staticKey(node.property as Node, node.computed === true);
                 if (name !== null) {
                     found = {
@@ -1759,7 +1765,7 @@ export function extractResumeHandlers(
                 }
                 return;
             }
-            if (node.type === 'VariableDeclarator' && node.init === member && (node.id as Node).type === 'ObjectPattern') {
+            if (node.type === 'VariableDeclarator' && isNode(node.init) && unwrapTsValue(node.init as Node) === member && (node.id as Node).type === 'ObjectPattern') {
                 for (const prop of ((node.id as Node).properties as Node[]) ?? []) {
                     if (prop.type !== 'Property') continue;
                     const name = staticKey(prop.key as Node, prop.computed === true);
