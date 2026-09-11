@@ -130,7 +130,7 @@ try {
             'post-upgrade click runs the live listener exactly once (8 → 9, and it STAYS at 9)');
         if (DEV) {
             assert(trace.some((l) => /boundary \d+ \(Counter\): replaying "Counter_click_/.test(l)), 'dev trace: the replay was logged');
-            assert(trace.some((l) => /\(Counter\): first write to "hits" — upgrading/.test(l)), 'dev trace: the first write was logged');
+            assert(trace.some((l) => /\(Counter\): first write to "count" — upgrading/.test(l)), 'dev trace: the first write was logged');
             assert(trace.some((l) => /\(Counter\): upgraded — real listeners now own the element/.test(l)), 'dev trace: the upgrade was logged');
         }
 
