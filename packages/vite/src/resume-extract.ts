@@ -182,6 +182,12 @@ const TS_VALUE_WRAPPERS = new Set([
     'TSInstantiationExpression'
 ]);
 
+/** `(x as T)`, `x!`, `x satisfies T`, `<T>x` → `x`: the value under TS wrappers. */
+function unwrapTsValue(node: Node): Node {
+    while (TS_VALUE_WRAPPERS.has(node.type) && isNode(node.expression)) node = node.expression as Node;
+    return node;
+}
+
 /** Child nodes in source order, skipping TS type-space subtrees. */
 function childNodes(node: Node): Node[] {
     const out: Node[] = [];
@@ -783,6 +789,11 @@ function isSignalDecl(decl: Node, ctxName: string): boolean {
 
 /** Usage-site keys `serializeBoundaryProps` never carries into the snapshot. */
 const STRIPPED_PROPS = new Set(['children', 'slots', 'ref', 'key', '$models']);
+
+/** The predicate `serializeBoundaryProps` drops event props by — `on` + an uppercase third character, unicode-aware. */
+function isCallbackKey(name: string): boolean {
+    return name.length > 2 && name.startsWith('on') && name[2] === name[2].toUpperCase();
+}
 
 const NAMED_EXPORTS_ONLY = 'resume components must be named exports';
 const CTX_PARAM_ONLY = 'resume components must take the setup context as a single identifier parameter';
@@ -1523,7 +1534,7 @@ export function extractResumeHandlers(
                         if (access) {
                             const { name: prop, called } = access;
                             const structural = STRIPPED_PROPS.has(prop);
-                            const callback = /^on[A-Z]/.test(prop);
+                            const callback = isCallbackKey(prop);
                             if (called) {
                                 reason =
                                     `handler calls ${comp.ctxName}.props.${prop} — functions never serialize into the ` +
@@ -1763,12 +1774,6 @@ export function extractResumeHandlers(
         return arg && arg.type === 'Identifier' ? (arg.name as string) : '…';
     }
 
-    /** `(x as T)`, `x!`, `x satisfies T`, `<T>x` → `x`: the value under TS wrappers. */
-    function unwrapTsValue(node: Node): Node {
-        while (TS_VALUE_WRAPPERS.has(node.type) && isNode(node.expression)) node = node.expression as Node;
-        return node;
-    }
-
     /** A static property name: `.x`, `['x']`, or a literal/identifier pattern key; null when dynamic. */
     function staticKey(node: Node, computed: boolean): string | null {
         if (!computed && node.type === 'Identifier') return node.name as string;
@@ -1784,15 +1789,23 @@ export function extractResumeHandlers(
      */
     function propsAccessOf(member: Node, handlerFn: Node): { name: string; called: boolean } | null {
         let found: { name: string; called: boolean } | null = null;
+        /** Locals holding a props member — `const { cb } = ctx.props`, `const f = ctx.props.cb` — by prop name. */
+        const aliases = new Map<string, string>();
+        const bind = (local: Node, name: string): void => {
+            const id = local.type === 'AssignmentPattern' ? (local.left as Node) : local;
+            if (id.type === 'Identifier') aliases.set(id.name as string, name);
+        };
         (function walk(node: Node, parent: Node | null): void {
             if (found) return;
             if (node.type === 'MemberExpression' && isNode(node.object) && unwrapTsValue(node.object as Node) === member && isNode(node.property)) {
                 const name = staticKey(node.property as Node, node.computed === true);
                 if (name !== null) {
-                    found = {
-                        name,
-                        called: parent !== null && parent.type === 'CallExpression' && parent.callee === node
-                    };
+                    const called = parent !== null && parent.type === 'CallExpression' && parent.callee === node;
+                    if (called || isCallbackKey(name) || STRIPPED_PROPS.has(name)) {
+                        found = { name, called };
+                        return;
+                    }
+                    if (parent !== null && parent.type === 'VariableDeclarator' && parent.init === node) bind(parent.id as Node, name);
                 }
                 return;
             }
@@ -1800,15 +1813,32 @@ export function extractResumeHandlers(
                 for (const prop of ((node.id as Node).properties as Node[]) ?? []) {
                     if (prop.type !== 'Property') continue;
                     const name = staticKey(prop.key as Node, prop.computed === true);
-                    if (name !== null && (STRIPPED_PROPS.has(name) || /^on[A-Z]/.test(name))) {
+                    if (name === null) continue;
+                    if (STRIPPED_PROPS.has(name) || isCallbackKey(name)) {
                         found = { name, called: false };
                         return;
                     }
+                    bind(prop.value as Node, name);
                 }
                 return;
             }
             for (const child of childNodes(node)) walk(child, node);
         })(handlerFn, null);
+        if (found || aliases.size === 0) return found;
+        // A call through an alias is a call on the props member: functions
+        // never serialize whatever their key, so `const { cb } = ctx.props;
+        // cb()` is the `ctx.props.cb()` hazard under another name.
+        (function calls(node: Node): void {
+            if (found) return;
+            if (node.type === 'CallExpression' && isNode(node.callee) && (node.callee as Node).type === 'Identifier') {
+                const name = aliases.get((node.callee as Node).name as string);
+                if (name !== undefined) {
+                    found = { name, called: true };
+                    return;
+                }
+            }
+            for (const child of childNodes(node)) calls(child);
+        })(handlerFn);
         return found;
     }
 
