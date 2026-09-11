@@ -3,10 +3,10 @@
  * ships. It must import nothing (size-limit enforces this: the entry is
  * checked with no `ignore` list) and do nothing until the user interacts.
  *
- * One capture-phase document listener per handled event type — non-passive
- * only for the types some element cancels (`data-sigx-pd`, the build-wide
- * list the entry passes), so touch/wheel delegation never costs the page
- * a scroll-blocking listener it does not need. On the first
+ * One capture-phase document listener per handled event type — explicitly
+ * non-passive only for the types some element cancels (`data-sigx-pd`, the
+ * build-wide list the entry passes); the rest leave `passive` unspecified
+ * so a UA's scroll-performance intervention can apply. On the first
  * interaction with a QRL-carrying element it lazy-imports the registry and
  * runtime (cached), then REPLAYS the triggering event through the resolved
  * handler — late invocation is well-defined for a pure `(scope, event)`
@@ -65,11 +65,13 @@ let state: LoaderState | null = null;
  * for new event types and update the lazy registry/runtime references.
  *
  * `pdEvents` — the types some element carries a `data-sigx-pd` stamp for —
- * are registered `passive: false` (the loader must be allowed to cancel);
- * every other type takes the browser default, which for `touchstart`,
- * `touchmove` and `wheel` on the document is passive. An entry built by an
- * older `@sigx/vite` passes no list, and then every listener stays
- * non-passive: a stamp must never lose its `preventDefault`.
+ * are registered `passive: false` (the loader must be allowed to cancel).
+ * For every other type `passive` is left unspecified: the spec default is
+ * `false`, but a UA may then apply its own intervention — Chrome treats
+ * `touchstart`/`touchmove`/`wheel` listeners on the document as passive
+ * when the option is omitted — and the loader deliberately lets it. An
+ * entry built by an older `@sigx/vite` passes no list, and then every
+ * listener stays non-passive: a stamp must never lose its `preventDefault`.
  */
 export function initResume(
     events: string[],

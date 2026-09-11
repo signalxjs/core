@@ -154,7 +154,7 @@ describe('initResume — delegation', () => {
         const options = (type: string) => add.mock.calls.find((c) => c[0] === type)?.[2];
         expect(options('submit')).toEqual({ capture: true, passive: false });
         expect(options('click')).toEqual({ capture: true });
-        expect(options('touchstart')).toEqual({ capture: true }); // browser default: passive on the document
+        expect(options('touchstart')).toEqual({ capture: true }); // `passive` unspecified: the UA may intervene
 
         // An entry from an older @sigx/vite passes no list — every listener
         // stays non-passive so a stamp never loses its preventDefault.
