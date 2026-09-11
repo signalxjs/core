@@ -296,6 +296,9 @@ declared parameter is `undefined` on replay just as it is after upgrade):
   handler is itself a no-op (too late).
 - `event.stopPropagation()` ends the synthetic bubble only; native
   propagation already happened.
+- A non-bubbling event (`focus`, `blur`, `mouseenter`, `scroll`, …) replays
+  only on its target's carrier — a live listener on an ancestor would never
+  have seen it.
 - `event.eventPhase` is `0` and `event.composedPath()` is `[]` — the
   post-dispatch values. Read the element from `currentTarget`.
 
