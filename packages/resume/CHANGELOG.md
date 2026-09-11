@@ -4,6 +4,21 @@
 
 ### Added
 
+- **Dev trace (#702 phase 7, closes #414).** `@sigx/resume/client` logs one
+  `[sigx resume]` line per replay (`boundary N (X): replaying "<symbol>"
+  (click)`), first write (`first write to "count" — upgrading`), completed
+  upgrade (`upgraded — real listeners now own the element`) and wake
+  (`woke (hydrate mode) — the triggering event is not replayed`), all
+  `__DEV__`-gated and stripped from the prod dist. #414 asked for a dev
+  flag that strips the original `on*` props to "exercise delegation in
+  dev" — but dev already runs the same ladder (the transform has no
+  environment gate, the dev server serves the handlers virtuals, the
+  registry lazily imports the component modules), and stripping `on*`
+  would kill post-upgrade dispatch, which IS the hydrated listener. What
+  was missing was visibility (this trace), a dev smoke in CI
+  (`pnpm smoke:resume`, `examples/resume/smoke.mjs --dev`) and a reload on
+  handler-symbol change (`@sigx/vite`, root CHANGELOG).
+
 - **Handler chunks are modulepreloaded — `ResumeManifest.handlers` does what
   it says (#410, rfc-1.0 §4.8).** `resumePlugin` now implements the pack
   `assets()` hook (the `islandsPlugin` precedent): for every boundary a

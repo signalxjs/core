@@ -185,6 +185,12 @@ async function runUpgrade(scope: InternalScope): Promise<void> {
     }
     scope._pendingWrites.length = 0;
     scope._status = 'upgraded';
+    if (__DEV__) {
+        console.log(
+            `%c[sigx resume] boundary ${scope._id} (${record.component ?? '?'}): upgraded — real listeners now own the element`,
+            'color: #4caf50'
+        );
+    }
 }
 
 /**
@@ -196,5 +202,12 @@ export async function wake(boundaryId: number): Promise<void> {
     const scope = getScope(boundaryId);
     if (scope._status !== 'resumed') return; // already upgrading/upgraded
     scope._status = 'upgrading';
+    if (__DEV__) {
+        console.log(
+            `%c[sigx resume] boundary ${boundaryId} (${scope._record?.component ?? '?'}): woke (hydrate mode) — ` +
+            `the triggering event is not replayed`,
+            'color: #ff9800'
+        );
+    }
     await scheduleUpgrade(scope);
 }

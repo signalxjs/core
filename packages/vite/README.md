@@ -259,6 +259,15 @@ exported from two resume modules (the error names both files), and a
 handler that binds or references `$scope` / `$el`. The full contract is in
 `@sigx/resume`'s README, "Writing resumable components".
 
+Under `vite dev` the ladder is the same as prod: the transform runs for the
+dev SSR render, the handlers modules are served as `virtual:sigx-resume:…`
+modules, the registry lazily imports the component modules, and no manifest
+is needed. The original `on*` prop is kept in every environment — the
+hydrated listener is what dispatches after an upgrade. An edit that changes
+a handler symbol (they are content-hashed) reloads the page, since the
+rendered attributes and the evaluated registry hold the old names; a
+markup-only edit keeps in-place HMR.
+
 ## Deployment artifacts — `ssr.adapter` and `virtual:sigx-app`
 
 The build seam of the deployment RFC (`docs/rfc-deploy.md` §3). `ssr.adapter`

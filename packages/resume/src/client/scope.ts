@@ -59,6 +59,13 @@ function makeFacade(scope: InternalScope, name: string): { value: unknown } {
             // don't schedule attempts that have nothing to hydrate.
             if (scope._status === 'resumed' && scope._id >= 0) {
                 scope._status = 'upgrading';
+                if (__DEV__) {
+                    console.log(
+                        `%c[sigx resume] boundary ${scope._id} (${scope._record?.component ?? '?'}): ` +
+                        `first write to "${name}" — upgrading (loading the component chunk)`,
+                        'color: #ff9800'
+                    );
+                }
                 scheduleUpgrade(scope).catch((error) => {
                     console.error(`[sigx resume] upgrade of boundary ${scope._id} failed:`, error);
                 });

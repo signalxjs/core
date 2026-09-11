@@ -144,6 +144,36 @@ jobs:
       - name: Hydration smoke
         run: pnpm smoke:hydration
 
+  resume-smoke:
+    # #702: the resumability ladder — loader-only boot, first-event replay,
+    # upgrade-on-write (exactly once), read-only handlers, single-flight
+    # refresh, wake-on-interaction — driven in Chromium against BOTH the
+    # prod build and the dev server of examples/resume. Dev runs the same
+    # ladder as prod (the transform has no environment gate); this is the
+    # job that keeps it that way. See scripts/resume-smoke.mjs.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+
+      - name: Install Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Resume smoke (prod + dev)
+        run: pnpm smoke:resume
+
   deploy-smoke-cloudflare:
     # rfc-deploy §6: the built reference apps under REAL workerd (Miniflare,
     # programmatic dispatchFetch — no ports, no login). Streamed document

@@ -60,6 +60,11 @@ export async function invoke(symbol: string, event: Event, element: Element): Pr
         if (scope._status === 'upgraded') return;
     }
 
+    if (__DEV__) {
+        const where = scope._id < 0 ? 'detached scope' : `boundary ${scope._id} (${scope._record?.component ?? '?'})`;
+        console.log(`%c[sigx resume] ${where}: replaying "${symbol}" (${event.type})`, 'color: #2196f3');
+    }
+
     // Replay runs after native dispatch has ended, so `currentTarget` is
     // null — and `e.currentTarget.value` is the input idiom runtime-dom's own
     // README recommends. Point it at the delegated element for exactly the
