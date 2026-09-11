@@ -491,6 +491,29 @@ export const Parent = component((ctx) => {
         }
     });
 
+    it('ctx.slots in a component with handlers fails the transform with file:line:col', () => {
+        const code = `
+import { component } from 'sigx';
+export const Card = component((ctx) => {
+    const open = ctx.signal(false);
+    return () => <div onClick={() => { open.value = true; }}>{ctx.slots.default?.()}</div>;
+});
+`;
+        const { plugin, root } = makeProject({ 'src/resume/Card.tsx': code });
+        try {
+            let message = '';
+            try {
+                plugin.transform.call(failing, code, join(root, 'src/resume/Card.tsx'));
+            } catch (e) {
+                message = (e as Error).message;
+            }
+            expect(message).toContain('resumable components cannot consume slots');
+            expect(message).toMatch(/src\/resume\/Card\.tsx:5:\d+/);
+        } finally {
+            rmSync(root, { recursive: true, force: true });
+        }
+    });
+
     it('a handler binding $scope / $el fails the transform', () => {
         const code = `
 import { component } from 'sigx';

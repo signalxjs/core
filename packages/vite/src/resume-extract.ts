@@ -88,7 +88,7 @@ export interface ResumeComponent {
     local: string;
     /** Export name — the `__resumeId` registry key. */
     exported: string;
-    /** 'resume' iff every handler extracted and the component uses no slots. */
+    /** 'resume' iff every handler extracted (a slot consumer with handlers is a build error). */
     mode: 'resume' | 'hydrate';
     /** Extracted handler count (always 0 in 'hydrate' mode — all-or-nothing). */
     handlerCount: number;
@@ -767,7 +767,8 @@ interface ComponentInfo {
     namedSignals: Set<string>;
     /** All other setup-body top-level bindings (capture ⇒ ineligible). */
     setupLocals: Set<string>;
-    usesSlots: boolean;
+    /** The first `<ctx>.slots` access (or a destructuring that takes it), if any. */
+    slotsAccess: Node | null;
 }
 
 /** `const x = <ctx>.signal(…)` — mirrors `SIGNAL_DECL_RE`'s criteria. */
@@ -873,7 +874,7 @@ function findComponents(program: Node, scan: ModuleScan, errors: ContractError[]
                 setupFn,
                 namedSignals,
                 setupLocals,
-                usesSlots: ctxName !== null && usesCtxSlots(setupFn, ctxName)
+                slotsAccess: ctxName !== null ? findCtxSlots(setupFn, ctxName) : null
             });
         }
     }
@@ -881,30 +882,36 @@ function findComponents(program: Node, scan: ModuleScan, errors: ContractError[]
 }
 
 /**
- * Any `<ctx>.slots` access — data-driven upgrade can't rebuild slots. Also
- * catches destructuring consumption (`const { slots } = ctx`).
+ * The first `<ctx>.slots` access — the data-driven upgrade rebuilds the
+ * component from its serialized record, which carries no slots, so a
+ * consumer with handler sites is a §4.5 error (located here). Also catches
+ * destructuring consumption (`const { slots } = ctx`).
  */
-function usesCtxSlots(node: Node, ctxName: string): boolean {
-    if (
-        node.type === 'MemberExpression' &&
-        (node.object as Node).type === 'Identifier' &&
-        ((node.object as Node).name as string) === ctxName &&
-        isNode(node.property) &&
-        ((node.property as Node).name as string) === 'slots'
-    ) {
-        return true;
+function findCtxSlots(node: Node, ctxName: string): Node | null {
+    const isCtx = (n: Node): boolean => n.type === 'Identifier' && (n.name as string) === ctxName;
+    if (node.type === 'MemberExpression' && isNode(node.object) && isCtx(unwrapTsValue(node.object as Node)) && isNode(node.property)) {
+        const property = node.property as Node;
+        // `ctx.slots` and `ctx['slots']` read slots; `ctx[slots]` is a dynamic
+        // key and is not judged. `(ctx as any).slots` is still `ctx.slots`.
+        const key = node.computed === true
+            ? (property.type === 'Literal' && typeof property.value === 'string' ? property.value : null)
+            : (property.name as string);
+        if (key === 'slots') return node;
     }
     if (
         node.type === 'VariableDeclarator' &&
         (node.id as Node).type === 'ObjectPattern' &&
         isNode(node.init) &&
-        (node.init as Node).type === 'Identifier' &&
-        ((node.init as Node).name as string) === ctxName &&
+        isCtx(unwrapTsValue(node.init as Node)) &&
         patternTakesSlots(node.id as Node)
     ) {
-        return true;
+        return node;
     }
-    return childNodes(node).some((child) => usesCtxSlots(child, ctxName));
+    for (const child of childNodes(node)) {
+        const hit = findCtxSlots(child, ctxName);
+        if (hit) return hit;
+    }
+    return null;
 }
 
 /**
@@ -1377,6 +1384,26 @@ export function extractResumeHandlers(
             });
             continue;
         }
+        // §4.5: a slot consumer with handler sites. Both modes end in the
+        // data-driven upgrade (`wake` uses it too), which mounts the component
+        // from its serialized record — no children, no slots — so on first
+        // interaction the slotted content is orphaned and any fallback
+        // renders over it. No runtime can rebuild vnodes that were never
+        // serialized; a consumer with no handler site never upgrades and is
+        // left alone.
+        if (comp.slotsAccess && sites.length > 0) {
+            errors.push({
+                offset: comp.slotsAccess.start,
+                message:
+                    `resumable components cannot consume slots — <${comp.exported}> reads ` +
+                    `${comp.ctxName}.slots (directly or by destructuring ${comp.ctxName}), and the ` +
+                    `boundary upgrade rebuilds the component from its serialized record, which ` +
+                    `carries no children or slots: on first interaction the slot content would be ` +
+                    `orphaned and any fallback rendered over it. Move the slot host out of the ` +
+                    `resume module, or take the content as serializable props.`
+            });
+            continue;
+        }
 
         for (const site of sites) {
             // Resolve the handler expression to a function we can analyze.
@@ -1584,7 +1611,7 @@ export function extractResumeHandlers(
             });
         }
 
-        const mode: 'resume' | 'hydrate' = anyIneligible || comp.usesSlots ? 'hydrate' : 'resume';
+        const mode: 'resume' | 'hydrate' = anyIneligible ? 'hydrate' : 'resume';
 
         const stampBoundary = (site: HandlerSite): string => {
             if (stampedElements.has(site.element) || !comp.ctxName) return '';

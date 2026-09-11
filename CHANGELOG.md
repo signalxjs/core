@@ -118,6 +118,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- **`@sigx/vite/resume`: `ctx.slots` in a component with handlers is a
+  build error (#702 phase 6).** It used to fall back to wake-on-interaction
+  — whose wake goes through the same data-driven upgrade, which mounts the
+  component from its serialized record with no children and no slots: on
+  first interaction the slotted content was orphaned and any fallback
+  rendered over it. No runtime can rebuild vnodes that were never
+  serialized, so `resumable components cannot consume slots` is now a
+  located build error (direct, destructured, aliased or rest access). A
+  slot consumer with no handler site never upgrades and is left alone.
+  `ResumeComponent.mode` is `'hydrate'` for ineligible handlers only.
+
 - **`@sigx/vite/resume`: a handler that reads what the props snapshot
   cannot carry is ineligible (#702 phase 4).** `$scope.props` is the
   boundary record's serialized data — `serializeBoundaryProps` drops

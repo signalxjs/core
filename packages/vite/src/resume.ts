@@ -10,7 +10,7 @@
  *    handlers module of `($scope, …) => …` exports.
  * 2. **Stable identity** — stamps `__resumeId` (export name, the registry key),
  *    `__resumeMode` ('resume', or 'hydrate' when any handler was
- *    ineligible / the component consumes slots) and `__resumeQrls` (the
+ *    ineligible) and `__resumeQrls` (the
  *    component's handler symbols — what `resumePlugin`'s `assets()` hook
  *    turns into modulepreload links via the manifest, #410) on exported
  *    factories, and keys named signals via `injectSignalNames` (shared with

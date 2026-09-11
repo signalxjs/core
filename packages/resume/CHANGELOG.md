@@ -4,6 +4,14 @@
 
 ### Added
 
+- **Dev warning on a lossy-record upgrade (#702 phase 6).** `runUpgrade`
+  warns `Boundary N (X) was rendered with usage-site props the snapshot
+  cannot carry (children, slots, render props)` when the record it mounts
+  from is stamped `refreshable: false` — the same snapshot the §6.3 refresh
+  declines, and the component is about to render without those props. The
+  transform now refuses `ctx.slots` in a component with handlers
+  (`@sigx/vite`, root CHANGELOG); this is the net for what it cannot see.
+
 - **Dev trace (#702 phase 7, closes #414).** `@sigx/resume/client` logs one
   `[sigx resume]` line per replay (`boundary N (X): replaying "<symbol>"
   (click)`), first write (`first write to "count" — upgrading`), completed
