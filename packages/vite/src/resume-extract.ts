@@ -471,7 +471,8 @@ function scanHandler(fn: Node): HandlerScan {
         result.preventDefault = 'always';
     } else if (pdSeen) {
         result.preventDefault = 'conditional';
-        result.preventDefaultNote = 'the call is guarded, inside a nested function, or after a return, throw or await';
+        result.preventDefaultNote =
+            'the call is guarded (if / ?: / && / try), inside a nested function, or after a return, throw, await or yield';
     } else if (pdIndirect !== null) {
         result.preventDefault = 'conditional';
         result.preventDefaultNote = pdIndirect;
@@ -1478,7 +1479,7 @@ export function extractResumeHandlers(
                     `the loader must cancel <${tagNameOf(site.element)}>'s native ${site.event} default ` +
                     `synchronously, before any JavaScript loads, so the call has to be an unconditional ` +
                     `top-level statement of the handler body: \`${evName}.preventDefault()\` not inside ` +
-                    `if / ?: / && / a nested function, and not after a return, throw or await`
+                    `if / ?: / && / try / a nested function, and not after a return, throw, await or yield`
                 );
                 continue;
             }
