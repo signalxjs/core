@@ -326,11 +326,19 @@ export const Mixed = component((ctx) => {
         }
     });
 
-    it('hotUpdate never sends from the ssr environment', async () => {
+    it('hotUpdate never sends from the ssr environment — but the client still reloads when ssr re-extracted first', async () => {
         const { plugin, root } = makeProject({ [COUNTER_FILE]: COUNTER }, 'serve');
         try {
-            const { send } = await hot(plugin, join(root, COUNTER_FILE), 'ssr', COUNTER.replace('count.value++', 'count.value += 2'));
-            expect(send).not.toHaveBeenCalled();
+            const edited = COUNTER.replace('count.value++', 'count.value += 2');
+            const ssr = await hot(plugin, join(root, COUNTER_FILE), 'ssr', edited);
+            expect(ssr.send).not.toHaveBeenCalled();
+            // The shared extraction cache already holds the new symbols, so
+            // the client's own diff sees nothing — the pending flag carries it.
+            const client = await hot(plugin, join(root, COUNTER_FILE), 'client', edited);
+            expect(client.send).toHaveBeenCalledWith({ type: 'full-reload' });
+            // …and only once: a later markup-only client update is quiet.
+            const again = await hot(plugin, join(root, COUNTER_FILE), 'client', edited);
+            expect(again.send).not.toHaveBeenCalled();
         } finally {
             rmSync(root, { recursive: true, force: true });
         }

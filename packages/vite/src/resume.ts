@@ -101,6 +101,13 @@ export function sigxResume(options: SigxResumeOptions = {}): Plugin {
      */
     /** Files already warned about an unstampable form — dev re-transforms. */
     const warnedForms = new Set<string>();
+    /**
+     * A registration change seen by ANY environment's hotUpdate that the
+     * client environment has not yet turned into a reload. `extractions` is
+     * shared, so when the ssr environment re-extracts first, the client's
+     * own before/after diff would see no change.
+     */
+    let reloadPending = false;
 
     let serverApi: {
         role?: string;
@@ -459,6 +466,7 @@ export function sigxResume(options: SigxResumeOptions = {}): Plugin {
                 extractInto(file, await read());
             }
             const after = registrationsOf(extractions.get(key));
+            if (before !== after) reloadPending = true;
             const graph = this.environment.moduleGraph;
             for (const vid of [RESOLVED_VIRTUAL_ID, RESOLVED_ENTRY_ID, RESOLVED_HANDLERS_PREFIX + relPath(file) + HANDLERS_SUFFIX]) {
                 const mod = graph.getModuleById(vid);
@@ -466,7 +474,8 @@ export function sigxResume(options: SigxResumeOptions = {}): Plugin {
             }
             // From the client environment only — its hot channel reaches the
             // browser (the sigx() plugin's precedent).
-            if (before !== after && this.environment.name === 'client') {
+            if (reloadPending && this.environment.name === 'client') {
+                reloadPending = false;
                 this.environment.hot.send({ type: 'full-reload' });
                 return [];
             }
