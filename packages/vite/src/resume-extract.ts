@@ -1761,7 +1761,7 @@ export function extractResumeHandlers(
      */
     function propsAccessOf(member: Node, handlerFn: Node): { name: string; called: boolean } | null {
         let found: { name: string; called: boolean } | null = null;
-        /** Locals holding a props member — `const { cb } = ctx.props`, `const f = ctx.props.cb` — by prop name. */
+        /** local name → prop name, for locals holding a props member (`const { cb } = ctx.props`, `const f = ctx.props.cb`). */
         const aliases = new Map<string, string>();
         const bind = (local: Node, name: string): void => {
             const id = local.type === 'AssignmentPattern' ? (local.left as Node) : local;
