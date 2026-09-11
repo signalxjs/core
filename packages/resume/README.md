@@ -262,9 +262,11 @@ exactly what live dispatch would have — the event, nothing else (a second
 declared parameter is `undefined` on replay just as it is after upgrade):
 
 - `event.target` is intact.
-- `event.currentTarget` is re-pointed at the delegated element for each
-  handler in the synthetic bubble, so `e.currentTarget.value` reads as it
-  would from a live listener.
+- `event.currentTarget` is the delegated element for the duration of each
+  handler's synchronous run in the synthetic bubble — `e.currentTarget.value`
+  reads as it would from a live listener — and `null` again the moment the
+  handler returns, as after native dispatch (an async continuation reading
+  it late sees what it would live).
 - `event.defaultPrevented` reflects the `data-sigx-pd` stamp: the loader
   cancels the default synchronously during native dispatch when the
   handler body calls `preventDefault()`, and the call inside the replayed

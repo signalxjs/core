@@ -37,23 +37,16 @@ const BOUNDARY_ATTR = 'data-sigx-b';
  * The handler is called as `(scope, event)` — the arity live dispatch gives
  * the original (`runtime-dom`'s invoker passes exactly the event), so a
  * second declared parameter is `undefined` before and after upgrade alike.
- * The element is not passed: it is `event.currentTarget`, re-pointed below.
+ * The element is not passed: it is `event.currentTarget` for the duration
+ * of the call (see below).
  */
 export async function invoke(symbol: string, event: Event, element: Element): Promise<void> {
     const handler = await resolveQrl(symbol);
     if (!handler) return;
 
-    // Replay runs after native dispatch has ended, so `currentTarget` is
-    // null — and `e.currentTarget.value` is the input idiom runtime-dom's own
-    // README recommends. Re-point it at the delegated element for THIS
-    // handler, exactly as native dispatch would have: an own property
-    // shadows the prototype accessor, `configurable` so the next carrier in
-    // the synthetic bubble redefines it. `eventPhase` and `composedPath()`
-    // keep their post-dispatch values (documented in the README).
-    Object.defineProperty(event, 'currentTarget', { value: element, configurable: true });
-
     const attr = element.getAttribute(BOUNDARY_ATTR);
     const id = attr === null ? NaN : parseInt(attr, 10);
+    let scope: ReturnType<typeof getScope>;
     if (isNaN(id)) {
         if (__DEV__) {
             console.warn(
@@ -61,11 +54,28 @@ export async function invoke(symbol: string, event: Event, element: Element): Pr
                 `running against a detached scope.`
             );
         }
-        await handler(getDetachedScope(), event);
-        return;
+        scope = getDetachedScope();
+    } else {
+        scope = getScope(id);
+        if (scope._status === 'upgraded') return;
     }
 
-    const scope = getScope(id);
-    if (scope._status === 'upgraded') return;
-    await handler(scope, event);
+    // Replay runs after native dispatch has ended, so `currentTarget` is
+    // null — and `e.currentTarget.value` is the input idiom runtime-dom's own
+    // README recommends. Point it at the delegated element for exactly the
+    // handler's synchronous run, as native dispatch would: an own property
+    // shadows the prototype accessor, restored the moment the handler returns
+    // so an async continuation (or the next carrier in the synthetic bubble)
+    // sees post-dispatch null, exactly as it would live. `eventPhase` and
+    // `composedPath()` keep their post-dispatch values throughout.
+    const prior = Object.getOwnPropertyDescriptor(event, 'currentTarget');
+    Object.defineProperty(event, 'currentTarget', { value: element, configurable: true });
+    let result: unknown;
+    try {
+        result = handler(scope, event);
+    } finally {
+        if (prior) Object.defineProperty(event, 'currentTarget', prior);
+        else delete (event as { currentTarget?: unknown }).currentTarget;
+    }
+    await result;
 }

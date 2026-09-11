@@ -26,10 +26,12 @@
   declaring a second parameter (`(e, step = 2) => …`) saw the *element* on
   replay and `undefined` (its default) once the hydrated listener owned the
   element — the same source behaving differently before and after upgrade.
-  `event.currentTarget` is now re-pointed at the delegated element for each
-  handler in the synthetic bubble: it was `null`, because the loader replays
-  the native event after dispatch has ended, and `e.currentTarget.value` is
-  the input idiom `runtime-dom`'s README recommends. `eventPhase` and
+  `event.currentTarget` is now the delegated element for the duration of
+  each handler's synchronous run (and `null` again the moment it returns, as
+  after native dispatch): it was `null` throughout, because the loader
+  replays the native event after dispatch has ended, and
+  `e.currentTarget.value` is the input idiom `runtime-dom`'s README
+  recommends. `eventPhase` and
   `composedPath()` keep their post-dispatch values; the README's new "What a
   replayed event looks like" section lists all of it. `$el` stays a reserved
   name but is documented as **not bound** — the README claimed it was the

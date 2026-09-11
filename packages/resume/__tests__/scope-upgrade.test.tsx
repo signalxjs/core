@@ -277,6 +277,25 @@ describe('invoke — replayed event parity', () => {
         await invoke('Counter_ct_test0003', event, button);
         await invoke('Counter_ct_test0003', event, container);
         expect(seen).toEqual([[button, button], [container, button]]);
+        // …and restored the moment each handler returned, as after native dispatch.
+        expect(event.currentTarget).toBeNull();
+    });
+
+    it('restores currentTarget when the handler returns — an async continuation sees post-dispatch null', async () => {
+        const Counter = makeCounter();
+        const { container } = await mount(<Counter initial={1} />);
+        const button = container.querySelector('button')!;
+
+        const seen: unknown[] = [];
+        __registerResumeQrl('Counter_async_test0006', () =>
+            Promise.resolve(async ($scope: any, e: Event) => {
+                seen.push(e.currentTarget);
+                await Promise.resolve();
+                seen.push(e.currentTarget); // a live listener's continuation sees null too
+            })
+        );
+        await invoke('Counter_async_test0006', new Event('click'), button);
+        expect(seen).toEqual([button, null]);
     });
 
     it('passes exactly (scope, event) — a second declared parameter is undefined, as under live dispatch', async () => {
@@ -295,9 +314,9 @@ describe('invoke — replayed event parity', () => {
     });
 
     it('an imported-identifier wrapper forwards only the event (detached scope included)', async () => {
-        const spy = vi.fn();
+        const spy = vi.fn((e: Event) => e.currentTarget);
         __registerResumeQrl('Counter_wrap_test0005', () =>
-            Promise.resolve(($scope: any, ...$args: unknown[]) => spy(...$args))
+            Promise.resolve(($scope: any, ...$args: [Event]) => spy(...$args))
         );
         // No data-sigx-b: the detached-scope branch takes the same arity.
         const orphan = document.createElement('button');
@@ -306,6 +325,7 @@ describe('invoke — replayed event parity', () => {
         await invoke('Counter_wrap_test0005', event, orphan);
         expect(spy).toHaveBeenCalledTimes(1);
         expect(spy.mock.calls[0]).toEqual([event]);
-        expect(event.currentTarget).toBe(orphan);
+        expect(spy.mock.results[0].value).toBe(orphan); // at call time
+        expect(event.currentTarget).toBeNull();          // after
     });
 });
