@@ -55,7 +55,12 @@ not at render time.**
 4. **No CSP nonce anywhere.** `emitBoundaryTable`, `boundaryPatchJs`, and the
    streaming scripts emit bare `<script>` tags — strict-CSP apps can't use
    islands or resume. *Proposed seam: `SSRContextOptions.nonce` threaded
-   through `serialize.ts` and `streaming.ts`.*
+   through `serialize.ts` and `streaming.ts`.* **Resolved** (#256, then
+   #702 phase 8): `SSRContextOptions.nonce` is stamped on every
+   renderer-emitted `<script>` (`scriptOpen`) and on every
+   `<link rel="modulepreload">` (`script-src` governs those too). Still
+   true: no example passes a nonce, and `createBoundaryRefresh` renders
+   without one — harmless while refresh entries are JSON.
 5. **The tracking/restoring signal pair is duplicated.** The capture/restore
    mechanism is strategy-agnostic, but it lives in `@sigx/ssr-islands`, so
    resume carries a copy. *Proposed seam: hoist into `@sigx/server-renderer`
@@ -65,6 +70,11 @@ not at render time.**
    that's right (the chunk will load); for resume it's a speculative warm —
    acceptable as a prefetch hint (bytes, not execution — the browser smoke
    asserts execution), but packs may want to opt out per record.
+   **Resolved** (#281, #410): `hydrate: 'never'` records are skipped by the
+   shell-time pass, and a pack warms what it wants through the `assets()`
+   hook — resume preloads its handler chunks and never the upgrade chunk.
+   Streamed boundaries still never reach the shell-time pass (by
+   construction).
 
 ## Transform-layer findings (for future pack authors)
 

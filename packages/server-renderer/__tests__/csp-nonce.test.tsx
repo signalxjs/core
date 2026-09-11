@@ -119,6 +119,36 @@ describe('CSP nonce — streaming render', () => {
     });
 });
 
+describe('CSP nonce — modulepreload links', () => {
+    const template = '<html><head></head><body><div id="app"><!--ssr-outlet--></div></body></html>';
+    const pack: SSRPlugin = {
+        name: 'preload-pack',
+        server: { assets: () => ({ modulepreload: ['/assets/pack.js'] }) }
+    };
+
+    it('stamps the nonce on every modulepreload link — script-src governs module preloads', async () => {
+        const html = await createSSR({ plugins: [pack] }).renderDocument((Plain as any)({}), {
+            template,
+            nonce: 'abc123',
+            assets: { stylesheets: ['/assets/app.css'], modulepreload: ['/assets/entry.js'] }
+        });
+        expect(html).toContain('<link rel="modulepreload" href="/assets/entry.js" nonce="abc123">');
+        expect(html).toContain('<link rel="modulepreload" href="/assets/pack.js" nonce="abc123">');
+        // style-src is a different policy: stylesheets stay as they were.
+        expect(html).toContain('<link rel="stylesheet" href="/assets/app.css">');
+    });
+
+    it('emits the historical bare links without a nonce', async () => {
+        const html = await createSSR({ plugins: [pack] }).renderDocument((Plain as any)({}), {
+            template,
+            assets: { modulepreload: ['/assets/entry.js'] }
+        });
+        expect(html).toContain('<link rel="modulepreload" href="/assets/entry.js">');
+        expect(html).toContain('<link rel="modulepreload" href="/assets/pack.js">');
+        expect(html).not.toContain('nonce=');
+    });
+});
+
 describe('CSP nonce — absent', () => {
     it('emits plain <script> tags with no nonce attribute anywhere', async () => {
         const Async = makeAsyncComponent('no-nonce-async');

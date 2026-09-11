@@ -117,6 +117,15 @@ mutation already succeeded, and declined boundaries converge through
 (children/slots/render props) are stamped `refreshable: false` at initial
 SSR and decline the same way.
 
+**"Converges through `$cache` invalidation" needs a cache client.**
+`cachePlugin()` installs on an `App` (`app.use`), and an app-less resumable
+page — `examples/resume`, `examples/storefront`, any page whose only script
+is the loader entry — has none (rfc-1.0 §4.4). There, a declined or dropped
+refresh leaves the boundary exactly as rendered until the next navigation;
+nothing converges later. Wire `refreshComponents` in both places and keep
+the usage-site props serializable so the refresh is honoured in the first
+place. The app-less cache surface is tracked in #415.
+
 The client half is automatic: `@sigx/resume/client` stamps the
 `__SIGX_SERVERFN_BOUNDARIES__` seam when it loads, so any
 `invalidates`-declaring mutation sends the page's boundary inventory
