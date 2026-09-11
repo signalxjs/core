@@ -320,13 +320,16 @@ export const P = component<{ onSelect?: (id: number) => void; items: number[]; c
         }
     });
 
-    it('reading an on* prop is ineligible, directly, by computed string key, or by destructuring', () => {
+    it('reading an on* prop is ineligible, directly, by computed string key, by destructuring, or under a TS wrapper', () => {
         for (const body of [
             'const cb = ctx.props.onSelect; n.value++;',
             "const cb = ctx.props['onSelect']; n.value++;",
             "ctx.props['onSelect'](n.value);",
             'const { onSelect } = ctx.props; n.value++;',
-            "const { ['onSelect']: cb } = ctx.props; n.value++;"
+            "const { ['onSelect']: cb } = ctx.props; n.value++;",
+            '(ctx.props as any).onSelect(n.value);',
+            'const cb = ctx.props!.onSelect; n.value++;',
+            'const { onSelect } = (ctx.props as any); n.value++;'
         ]) {
             const result = handler(body);
             expect(result.components[0].mode, body).toBe('hydrate');
