@@ -20,6 +20,23 @@
 
 ### Changed
 
+- **The loader registers `passive: false` only where a `data-sigx-pd` stamp
+  exists (#702 phase 5).** `initResume` takes a fourth argument — the
+  build-wide list of stamped event types, which `@sigx/vite`'s entry now
+  passes — and every other type takes the browser default: a page whose
+  only `touchstart`/`touchmove`/`wheel` handlers never cancel no longer
+  forces a scroll-blocking document listener for the page's lifetime. An
+  entry from an older `@sigx/vite` passes no list, and then every listener
+  stays non-passive, exactly as before.
+
+- **Non-bubbling events replay only on the target element's carrier.**
+  `focus`, `blur`, `mouseenter`, `scroll`, … reach the capture-phase
+  document listener like any event, but the synthetic bubble used to walk
+  every ancestor `data-sigx-on:*` / `data-sigx-wake:*` carrier — invoking
+  handlers (and waking boundaries) a live listener there would never have
+  seen. The walk now stops at the target for an event with
+  `bubbles === false`.
+
 - **Replayed handlers receive exactly what live dispatch gives them (#702
   phase 1).** `invoke` now calls a QRL handler as `(scope, event)`. The
   delegated element used to ride along as a third argument, so a handler
