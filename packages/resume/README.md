@@ -211,13 +211,12 @@ cancels the native default synchronously from a `data-sigx-pd` stamp — before
 any JavaScript loads, and for the page's lifetime — so a guarded or indirect
 call (inside `if` / `?:` / `&&` / `try`, a nested function, after a
 `return`, `throw`, `await` or `yield`; an alias, a destructured
-`preventDefault`, or the event handed
-to a helper) can neither be stamped nor left unstamped on an element with a
-native default (`<form>` submit, `<a href>` click, a submit button, a
-checkbox, `keydown`, …): the component falls back to wake-on-interaction
-with a reason. On an element with no native default it extracts without a
-stamp. An imported handler on such an element falls back the same way — the
-call cannot be seen across modules.
+`preventDefault`, or the event handed to a helper) can neither be stamped
+nor left unstamped on an element with a native default (`<form>` submit,
+`<a href>` click, a submit button, a checkbox, `keydown`, …): the component
+falls back to wake-on-interaction with a reason. On an element with no
+native default it extracts without a stamp. An imported handler on such an
+element falls back the same way — the call cannot be seen across modules.
 
 `$scope.props` is a snapshot, and a public one. It is the usage-site props
 as serialized into the boundary table — minus `children`, `slots`,
@@ -264,11 +263,13 @@ because a throw in the browser would take the page down.
   prop never reaches the client through the boundary table. Handle the
   event on a host element inside the child, or render the element here.
 - **`$scope` and `$el` are reserved.** Inside a resumable handler, `$scope`
-  *is* the resumed scope (handlers are re-emitted as `($scope, …) => …`)
-  and `$el` the delegated element. A handler that binds either — as a
-  parameter, a local, a named signal or a destructured prop — or reads it
-  as a free reference is a build error. `obj.$scope` and `{ $scope: 1 }`
-  (member and key positions) are not references and stay allowed.
+  *is* the resumed scope (handlers are re-emitted as `($scope, …) => …`);
+  `$el` is reserved for the runtime and **not bound** — the delegated
+  element is `event.currentTarget` (see "What a replayed event looks like"
+  below). A handler that binds either — as a parameter, a local, a named
+  signal or a destructured prop — or reads it as a free reference is a
+  build error. `obj.$scope` and `{ $scope: 1 }` (member and key positions)
+  are not references and stay allowed.
 
 **Dev warnings (runtime, `@sigx/resume/client`):**
 
@@ -293,6 +294,26 @@ because a throw in the browser would take the page down.
   after hydration. If the first click must count, keep the handler
   resumable (see `DealOfTheDay` in `examples/storefront` for the pattern),
   or design the first interaction to be harmless to lose.
+
+**What a replayed event looks like.** The loader replays the *same* native
+`Event` object, after native dispatch has ended, and calls the handler with
+exactly what live dispatch would have — the event, nothing else (a second
+declared parameter is `undefined` on replay just as it is after upgrade):
+
+- `event.target` is intact.
+- `event.currentTarget` is the delegated element for the duration of each
+  handler's synchronous run in the synthetic bubble — `e.currentTarget.value`
+  reads as it would from a live listener — and `null` again the moment the
+  handler returns, as after native dispatch (an async continuation reading
+  it late sees what it would live).
+- `event.defaultPrevented` reflects the `data-sigx-pd` stamp: the loader
+  cancels the default synchronously during native dispatch when the
+  handler body calls `preventDefault()`, and the call inside the replayed
+  handler is itself a no-op (too late).
+- `event.stopPropagation()` ends the synthetic bubble only; native
+  propagation already happened.
+- `event.eventPhase` is `0` and `event.composedPath()` is `[]` — the
+  post-dispatch values. Read the element from `currentTarget`.
 
 Server-side, `refreshComponents` must be wired in both the dev and the prod
 refresh entry — see "Single-flight boundary refresh" above.
