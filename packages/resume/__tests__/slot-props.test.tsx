@@ -28,8 +28,10 @@ import { createSSR } from '../../server-renderer/src/ssr';
 import { hydrate } from '../../server-renderer/src/client/hydrate-core';
 import { cleanupPendingHydrations, invalidateMarkerIndex } from '../../server-renderer/src/client/scheduler';
 import { clearClientPlugins } from '../../server-renderer/src/client/hydrate-context';
+import { registerComponent } from '@sigx/server-renderer/client';
 import { resumePlugin } from '../src/plugin';
 import { createBoundaryRefresh } from '../src/server/refresh';
+import { wake, resetResumeScopes } from '../src/client/index';
 
 const BASE = 1 << 20;
 
@@ -165,6 +167,73 @@ describe('createBoundaryRefresh — slots-prop declines (omission, never a throw
             BASE
         );
         expect(entries.map((e) => e.for)).toEqual([4]);
+    });
+});
+
+describe('wake of a slot host — the hazard the transform now refuses (#702 phase 6)', () => {
+    let el: HTMLDivElement | null = null;
+
+    beforeEach(() => {
+        delete (window as any).__SIGX_BOUNDARIES__;
+        clearClientPlugins();
+        cleanupPendingHydrations();
+        invalidateMarkerIndex();
+    });
+
+    afterEach(() => {
+        el?.remove();
+        el = null;
+        delete (window as any).__SIGX_BOUNDARIES__;
+        clearClientPlugins();
+        cleanupPendingHydrations();
+        invalidateMarkerIndex();
+        resetResumeScopes();
+        vi.restoreAllMocks();
+    });
+
+    it('cannot rebuild slot content: the upgraded render sees no slot, and dev warns', async () => {
+        const sawSlot: boolean[] = [];
+        const WakeSlotCard = component<Define.Slot<'default'>>((ctx) => {
+            return () => {
+                sawSlot.push(typeof ctx.slots.default === 'function');
+                return (
+                    <section
+                        class="card"
+                        {...({ 'data-sigx-wake:click': '', 'data-sigx-b': (ctx as any).$sigxB } as any)}
+                    >
+                        {ctx.slots.default ? ctx.slots.default() : <p class="empty">empty</p>}
+                    </section>
+                );
+            };
+        }, { name: 'WakeSlotCard' });
+        (WakeSlotCard as any).__resumeId = 'WakeSlotCard';
+        (WakeSlotCard as any).__resumeMode = 'hydrate';
+
+        const html = await createSSR({ plugins: [resumePlugin()] }).render(
+            <WakeSlotCard><em class="slotted">slotted</em></WakeSlotCard>
+        );
+        expect(html).toContain('slotted');
+        const table = parseBoundaryTable(html);
+        const id = parseInt(Object.keys(table)[0], 10);
+        expect(table[id].refreshable).toBe(false); // the usage site is lossy — the record says so
+
+        el = document.createElement('div');
+        el.innerHTML = html.replace(/<script>[\s\S]*?<\/script>/g, '');
+        document.body.appendChild(el);
+        (window as any).__SIGX_BOUNDARIES__ = Object.assign(Object.create(null), table);
+        registerComponent('WakeSlotCard', WakeSlotCard);
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        sawSlot.length = 0;
+
+        await wake(id);
+        await new Promise((r) => setTimeout(r, 0));
+
+        // The record carries no children or slots, so the upgrade mounted the
+        // component with none: what the server slotted in is gone from the
+        // component's tree — the fallback renders instead.
+        expect(sawSlot).toEqual([false]);
+        expect(el.querySelector('p.empty')).toBeTruthy();
+        expect(warn.mock.calls.some((c) => /usage-site props the snapshot cannot carry/.test(String(c[0])))).toBe(true);
     });
 });
 

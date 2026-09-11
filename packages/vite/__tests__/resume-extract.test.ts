@@ -584,20 +584,37 @@ export const Mixed = component((ctx) => {
         });
     });
 
-    it('bails the whole component to hydrate mode when it consumes slots', () => {
-        const result = extractResumeHandlers(`
+    it('a slot consumer with handler sites is a build ERROR — the upgrade cannot rebuild slots', () => {
+        const code = `
 import { component } from 'sigx';
 export const Wrapper = component((ctx) => {
     const open = ctx.signal(false);
     return () => <div onClick={() => { open.value = true; }}>{ctx.slots.default()}</div>;
 });
-`, '/src/Wrapper.resume.tsx');
-        // The handler was analyzable, but a slots consumer cannot
-        // data-remount — all-or-nothing: wake attributes only.
+`;
+        const result = extractResumeHandlers(code, '/src/Wrapper.resume.tsx');
+        // It used to fall back to hydrate mode — whose wake goes through the
+        // same data-driven upgrade, orphaning the slot content on first click.
+        expect(result.errors).toHaveLength(1);
+        expect(result.errors[0].message).toContain('resumable components cannot consume slots');
+        expect(result.errors[0].message).toContain('<Wrapper> reads ctx.slots');
+        expect(result.errors[0].offset).toBe(code.indexOf('ctx.slots'));
         expect(result.handlers).toHaveLength(0);
-        expect(result.code).toContain('data-sigx-wake:click=""');
-        expect(result.code).not.toContain('data-sigx-on:');
-        expect(result.components[0].mode).toBe('hydrate');
+        expect(result.ineligible).toHaveLength(0);
+        expect(result.code).not.toContain('data-sigx-');
+        expect(result.components).toHaveLength(0);
+    });
+
+    it('a slot consumer with no handler sites is left alone — nothing ever upgrades it', () => {
+        const result = extractResumeHandlers(`
+import { component } from 'sigx';
+export const Frame = component((ctx) => {
+    const n = ctx.signal(0);
+    return () => <div>{ctx.slots.default?.()}</div>;
+});
+`, '/src/Frame.resume.tsx');
+        expect(result.errors).toHaveLength(0);
+        expect(result.components[0]).toMatchObject({ mode: 'resume', siteCount: 0, signalCount: 1 });
     });
 
     it('a handler prop on a component tag is a build ERROR — delegation only sees host elements', () => {
@@ -905,17 +922,20 @@ export const UsesEnum = component((ctx) => {
 });
 
 describe('destructured slots consumption', () => {
-    it('bails to hydrate mode for `const { slots } = ctx` too', () => {
-        const result = extractResumeHandlers(`
+    it('is the same build error for `const { slots } = ctx`', () => {
+        const code = `
 import { component } from 'sigx';
 export const Destructured = component((ctx) => {
     const { slots } = ctx;
     const open = ctx.signal(false);
     return () => <div onClick={() => { open.value = true; }}>{slots.default()}</div>;
 });
-`, '/src/Destructured.resume.tsx');
-        expect(result.components[0].mode).toBe('hydrate');
-        expect(result.code).not.toContain('data-sigx-on:');
+`;
+        const result = extractResumeHandlers(code, '/src/Destructured.resume.tsx');
+        expect(result.errors).toHaveLength(1);
+        expect(result.errors[0].message).toContain('cannot consume slots');
+        expect(result.errors[0].offset).toBe(code.indexOf('{ slots } = ctx'));
+        expect(result.code).not.toContain('data-sigx-');
     });
 });
 
@@ -933,7 +953,7 @@ export const ParamCapture = component((ctx) => {
         expect(result.ineligible[0].reason).toContain('"helper"');
     });
 
-    it('aliased and rest destructuring of slots bail to hydrate mode', () => {
+    it('aliased and rest destructuring of slots are the same build error', () => {
         for (const decl of ['const { slots: s } = ctx;', 'const { ...rest } = ctx;']) {
             const result = extractResumeHandlers(`
 import { component } from 'sigx';
@@ -943,7 +963,8 @@ export const Aliased = component((ctx) => {
     return () => <div onClick={() => { open.value = true; }}>x</div>;
 });
 `, '/src/Aliased.resume.tsx');
-            expect(result.components[0].mode).toBe('hydrate');
+            expect(result.errors, decl).toHaveLength(1);
+            expect(result.errors[0].message, decl).toContain('cannot consume slots');
         }
     });
 });

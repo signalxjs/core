@@ -257,6 +257,14 @@ because a throw in the browser would take the page down.
   build error: `signal(…)` declarations can only be keyed by name through
   `ctx.signal`, handled elements carry `data-sigx-b={ctx.$sigxB}`, and
   without the name the transform cannot tell a setup capture from a global.
+- **No slots.** A component with handler sites that reads `ctx.slots`
+  (directly, or by destructuring `ctx`) is a build error. Both modes end in
+  the data-driven upgrade, which mounts the component from its serialized
+  record — no children, no slots — so on first interaction the slotted
+  content would be orphaned and any fallback rendered over it. Move the
+  slot host out of the resume module, or take the content as serializable
+  props. (A slot consumer with no handler site never upgrades and is left
+  alone.)
 - **Handlers live on host elements.** `<Child onClick={…} />` is a build
   error: delegation only sees host-element attributes, so nothing in the
   child's DOM could run the handler or wake the boundary, and a function
@@ -286,8 +294,15 @@ because a throw in the browser would take the page down.
   name (renamed since the page was rendered — a deploy in between), the
   buffered value is dropped; dev warns `Buffered write to "x" has no live
   signal after upgrade`.
+- **Lossy usage sites.** Dev warns
+  `Boundary N (X) was rendered with usage-site props the snapshot cannot
+  carry` when an upgrade mounts a boundary whose usage site passed
+  children, slots or render props — the transform refuses `ctx.slots`
+  in a component with handlers, and this is the net for what it cannot
+  see (a helper reading slots through a passed ctx, a usage site handing
+  children to a component that ignores them).
 - **Wake swallows the triggering event.** A component in wake-on-interaction
-  mode (any ineligible handler, or `ctx.slots`) fully hydrates on its first
+  mode (any ineligible handler) fully hydrates on its first
   interaction and does **not** replay that event — its listeners only exist
   after hydration. If the first click must count, keep the handler
   resumable (see `DealOfTheDay` in `examples/storefront` for the pattern),

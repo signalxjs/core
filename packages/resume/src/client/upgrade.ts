@@ -114,6 +114,20 @@ async function runUpgrade(scope: InternalScope): Promise<void> {
     if (!scope._record) scope._record = getBoundaryRecord(scope._id) ?? null;
     const record = scope._record;
     if (!record) return; // detached scope — nothing to upgrade
+    if (__DEV__ && record.refreshable === false) {
+        // The server stamps this for children/slots/render-prop usage sites
+        // (the §6.3 decline). The same snapshot is what this upgrade mounts
+        // from, so the component is about to render without them. The
+        // transform refuses `ctx.slots` in a component with handlers; this
+        // is the net for what it cannot see (a helper reading slots through
+        // a passed ctx, a usage site handing children to a component that
+        // ignores them).
+        console.warn(
+            `[sigx resume] Boundary ${scope._id} (${record.component ?? '?'}) was rendered with ` +
+            `usage-site props the snapshot cannot carry (children, slots, render props) — the ` +
+            `upgraded component sees none of them.`
+        );
+    }
 
     const component = await loadBoundaryComponent(record);
     if (!component) {
