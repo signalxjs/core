@@ -141,6 +141,11 @@ function escapeAttrValue(s: string): string {
 function renderAssetLinks(assets: DocumentOptions['assets'], ctx: SSRContext): string {
     const links: string[] = [];
     const preloaded = new Set<string>();
+    // `script-src` governs module preloads: under a nonce-only policy a bare
+    // <link rel="modulepreload"> is blocked (and logged), so every preload
+    // carries the request's nonce like every <script> does. Stylesheets are
+    // `style-src` — a different policy, left alone.
+    const nonce = ctx._nonce ? ` nonce="${escapeAttrValue(ctx._nonce)}"` : '';
 
     for (const href of assets?.stylesheets ?? []) {
         links.push(`<link rel="stylesheet" href="${escapeAttrValue(href)}">`);
@@ -148,7 +153,7 @@ function renderAssetLinks(assets: DocumentOptions['assets'], ctx: SSRContext): s
     for (const href of assets?.modulepreload ?? []) {
         if (preloaded.has(href)) continue;
         preloaded.add(href);
-        links.push(`<link rel="modulepreload" href="${escapeAttrValue(href)}">`);
+        links.push(`<link rel="modulepreload" href="${escapeAttrValue(href)}"${nonce}>`);
     }
     // Boundary chunks: every boundary CORE will schedule gets its chunk
     // warmed from the shell. `hydrate: 'never'` records are skipped (#281):
@@ -161,7 +166,7 @@ function renderAssetLinks(assets: DocumentOptions['assets'], ctx: SSRContext): s
         const url = record.chunk?.url;
         if (!url || preloaded.has(url)) return;
         preloaded.add(url);
-        links.push(`<link rel="modulepreload" href="${escapeAttrValue(url)}">`);
+        links.push(`<link rel="modulepreload" href="${escapeAttrValue(url)}"${nonce}>`);
     });
     // Pack-contributed preloads (the `assets` plugin hook): packs whose
     // runtime loads lazily keep the fetch off the critical path here — core
@@ -171,7 +176,7 @@ function renderAssetLinks(assets: DocumentOptions['assets'], ctx: SSRContext): s
         for (const href of contributed?.modulepreload ?? []) {
             if (preloaded.has(href)) continue;
             preloaded.add(href);
-            links.push(`<link rel="modulepreload" href="${escapeAttrValue(href)}">`);
+            links.push(`<link rel="modulepreload" href="${escapeAttrValue(href)}"${nonce}>`);
         }
     }
 
