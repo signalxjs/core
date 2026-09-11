@@ -141,6 +141,24 @@ export const Saver = component((ctx) => {
         expect(result.components[0].mode).toBe('resume');
     });
 
+    it('emits extra declared parameters verbatim — the runtime passes only the event', () => {
+        const code = `
+import { component } from 'sigx';
+export const Stepper = component((ctx) => {
+    const n = ctx.signal(0);
+    return () => <button onClick={(e, step = 1) => { n.value += step; }}>+</button>;
+});
+`;
+        const result = extractResumeHandlers(code, '/src/Stepper.resume.tsx');
+        expect(result.handlers).toHaveLength(1);
+        // `invoke()` calls the handler as `(scope, event)` — the arity live
+        // dispatch gives the original — so `step` takes its default on replay
+        // exactly as it does after upgrade. The element is never a positional
+        // argument; it is `event.currentTarget`.
+        expect(result.handlers[0].exportSource).toContain('($scope, e, step = 1) =>');
+        expect(result.components[0].mode).toBe('resume');
+    });
+
     it('is idempotent — already-stamped events are not extracted again', () => {
         const first = extractResumeHandlers(COUNTER, '/src/Counter.resume.tsx');
         const second = extractResumeHandlers(first.code, '/src/Counter.resume.tsx');
