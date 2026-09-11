@@ -662,6 +662,33 @@ export const Frame = component((ctx) => {
         expect(result.components[0]).toMatchObject({ mode: 'resume', siteCount: 0, signalCount: 1 });
     });
 
+    it('a literal computed key and a TS-wrapped ctx are still slots reads', () => {
+        for (const view of [
+            "<div onClick={() => { n.value++; }}>{ctx['slots'].default?.()}</div>",
+            '<div onClick={() => { n.value++; }}>{(ctx as any).slots.default()}</div>',
+            '<div onClick={() => { n.value++; }}>{ctx!.slots.default?.()}</div>'
+        ]) {
+            const result = extractResumeHandlers(`
+import { component } from 'sigx';
+export const Wrapped = component((ctx) => {
+    const n = ctx.signal(0);
+    return () => ${view};
+});
+`, '/src/Wrapped.resume.tsx');
+            expect(result.errors, view).toHaveLength(1);
+            expect(result.errors[0].message, view).toContain('cannot consume slots');
+        }
+        const destructured = extractResumeHandlers(`
+import { component } from 'sigx';
+export const Wrapped = component((ctx) => {
+    const { slots } = ctx as any;
+    const n = ctx.signal(0);
+    return () => <div onClick={() => { n.value++; }}>{slots.default()}</div>;
+});
+`, '/src/Wrapped.resume.tsx');
+        expect(destructured.errors).toHaveLength(1);
+    });
+
     it('a computed key that happens to be named slots is not a slots read', () => {
         const result = extractResumeHandlers(`
 import { component } from 'sigx';

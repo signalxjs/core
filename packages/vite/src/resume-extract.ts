@@ -888,22 +888,21 @@ function findComponents(program: Node, scan: ModuleScan, errors: ContractError[]
  * destructuring consumption (`const { slots } = ctx`).
  */
 function findCtxSlots(node: Node, ctxName: string): Node | null {
-    if (
-        node.type === 'MemberExpression' &&
-        node.computed !== true && // `ctx[slots]` is a dynamic key, not a slots read
-        (node.object as Node).type === 'Identifier' &&
-        ((node.object as Node).name as string) === ctxName &&
-        isNode(node.property) &&
-        ((node.property as Node).name as string) === 'slots'
-    ) {
-        return node;
+    const isCtx = (n: Node): boolean => n.type === 'Identifier' && (n.name as string) === ctxName;
+    if (node.type === 'MemberExpression' && isNode(node.object) && isCtx(unwrapTsValue(node.object as Node)) && isNode(node.property)) {
+        const property = node.property as Node;
+        // `ctx.slots` and `ctx['slots']` read slots; `ctx[slots]` is a dynamic
+        // key and is not judged. `(ctx as any).slots` is still `ctx.slots`.
+        const key = node.computed === true
+            ? (property.type === 'Literal' && typeof property.value === 'string' ? property.value : null)
+            : (property.name as string);
+        if (key === 'slots') return node;
     }
     if (
         node.type === 'VariableDeclarator' &&
         (node.id as Node).type === 'ObjectPattern' &&
         isNode(node.init) &&
-        (node.init as Node).type === 'Identifier' &&
-        ((node.init as Node).name as string) === ctxName &&
+        isCtx(unwrapTsValue(node.init as Node)) &&
         patternTakesSlots(node.id as Node)
     ) {
         return node;
