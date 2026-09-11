@@ -341,6 +341,30 @@ export default Hidden;
         }
     });
 
+    it('a handler prop on a component tag fails the transform with file:line:col', () => {
+        const code = `
+import { component } from 'sigx';
+import { Child } from './child';
+export const Parent = component((ctx) => {
+    const n = ctx.signal(0);
+    return () => <Child onClick={() => { n.value++; }} />;
+});
+`;
+        const { plugin, root } = makeProject({ 'src/resume/Parent.tsx': code });
+        try {
+            let message = '';
+            try {
+                plugin.transform.call(failing, code, join(root, 'src/resume/Parent.tsx'));
+            } catch (e) {
+                message = (e as Error).message;
+            }
+            expect(message).toContain('onclick of <Parent> is passed to <Child> as a component prop');
+            expect(message).toMatch(/src\/resume\/Parent\.tsx:6:25/);
+        } finally {
+            rmSync(root, { recursive: true, force: true });
+        }
+    });
+
     it('a handler binding $scope / $el fails the transform', () => {
         const code = `
 import { component } from 'sigx';

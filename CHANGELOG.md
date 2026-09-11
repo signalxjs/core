@@ -118,6 +118,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- **`@sigx/vite/resume`: five more silent shapes are diagnosed (#702
+  phase 2, rfc-1.0 §4.5).** Each compiled without a word and misbehaved
+  only in the prod build:
+
+  | In a resume module | Was | Now |
+  |---|---|---|
+  | setup context destructured (`({ signal, props }) => …`) or absent, in a component with handler sites | captures misread as globals, no `data-sigx-b` stamp — the handler chunk referenced undefined names | build error `resume components must take the setup context as a single identifier parameter` |
+  | an `on*` handler passed to a child **component** tag | silently kept in resume mode; the handler was dead on the client | build error naming the tag |
+  | spread props (`{...rest}`) on a host element | silently resume mode, whatever the spread carried | ineligible (wake-on-interaction) with a reason; a handler-free object literal — inline or a setup-scope `const` — is exempt |
+  | `onUpdate:modelValue` / any namespaced `on*:*` on a host element | silently ignored; a QRL next to it read the stale server value | ineligible with a reason (`not a DOM event`) |
+  | a generator handler | re-emitted as an arrow; the build died inside type-stripping, unattributed | ineligible with a reason |
+
+  Setup-scope locals are now collected even for a ctx-less component, so a
+  capture there can never fall through to "unresolved ⇒ global" again.
+
 - **The app owns the copy: every package except `sigx` now PEERS on the
   sigx family (#633 phase 2, rfc-1.0 §3.2).** `sigx` still brings
   `@sigx/reactivity`, `@sigx/runtime-core` and `@sigx/runtime-dom` in as

@@ -383,6 +383,17 @@ export const PropsWrite = component((ctx) => {
         expect(reason).toContain('read-only');
     });
 
+    it('rejects generator handlers — re-emitted as an arrow, yield would not parse', () => {
+        const reason = firstReason(`
+import { component } from 'sigx';
+export const Gen = component((ctx) => {
+    const n = ctx.signal(0);
+    return () => <button onClick={function* () { n.value++; yield 1; }}>x</button>;
+});
+`);
+        expect(reason).toContain('generator');
+    });
+
     it('mixed eligibility is all-or-nothing: wake attributes only, no QRL exports', () => {
         const result = extractResumeHandlers(`
 import { component } from 'sigx';
@@ -426,21 +437,83 @@ export const Wrapper = component((ctx) => {
         expect(result.components[0].mode).toBe('hydrate');
     });
 
-    it('ignores component-tag props and namespaced on* attributes', () => {
-        const result = extractResumeHandlers(`
+    it('a handler prop on a component tag is a build ERROR — delegation only sees host elements', () => {
+        const code = `
 import { component } from 'sigx';
 import { Child } from './child.island';
 export const Parent = component((ctx) => {
     const n = ctx.signal(0);
     return () => <div>
         <Child onClick={() => { n.value++; }} />
-        <input onUpdate:modelValue={() => { n.value++; }} />
     </div>;
 });
-`, '/src/Parent.resume.tsx');
+`;
+        const result = extractResumeHandlers(code, '/src/Parent.resume.tsx');
+        // It used to stay silently in resume mode with a dead handler.
         expect(result.handlers).toHaveLength(0);
         expect(result.ineligible).toHaveLength(0);
-        expect(result.components[0].mode).toBe('resume');
+        expect(result.errors).toHaveLength(1);
+        expect(result.errors[0].message).toContain('onclick of <Parent> is passed to <Child> as a component prop');
+        expect(result.errors[0].message).toContain('never reaches the client');
+        // Located at the attribute, like every §4.5 error.
+        expect(result.errors[0].offset).toBe(code.indexOf('onClick={'));
+    });
+
+    it('names a member-expression component tag in the error', () => {
+        const result = extractResumeHandlers(`
+import { component } from 'sigx';
+import * as Ui from './ui';
+export const Parent = component((ctx) => {
+    return () => <Ui.Button onClick={() => { console.log('x'); }} />;
+});
+`, '/src/Parent.resume.tsx');
+        expect(result.errors).toHaveLength(1);
+        expect(result.errors[0].message).toContain('passed to <Ui.Button>');
+    });
+
+    it('a namespaced onUpdate:* attribute on a host element is ineligible with a reason', () => {
+        const result = extractResumeHandlers(`
+import { component } from 'sigx';
+export const Bound = component((ctx) => {
+    const text = ctx.signal('');
+    return () => <div>
+        <input onUpdate:modelValue={(v) => { text.value = v; }} />
+        <button onClick={() => { text.value = ''; }}>clear</button>
+    </div>;
+});
+`, '/src/Bound.resume.tsx');
+        // It used to be silently ignored — the QRL submit next to it read the
+        // stale server value from $scope.signals.
+        expect(result.errors).toHaveLength(0);
+        expect(result.handlers).toHaveLength(0);
+        expect(result.components[0].mode).toBe('hydrate');
+        const miss = result.ineligible.find((m) => m.event === 'Update:modelValue')!;
+        expect(miss.reason).toContain('not a DOM event');
+        // The analyzable click still gets its wake attribute.
+        expect(result.code).toContain('data-sigx-wake:click=""');
+    });
+
+    it('spread props on a host element are ineligible unless the spread is a handler-free object literal', () => {
+        const spread = (expr: string, decl = '') => extractResumeHandlers(`
+import { component } from 'sigx';
+export const Spread = component((ctx) => {
+    const n = ctx.signal(0);
+    ${decl}
+    return () => <button {...${expr}} onClick={() => { n.value++; }}>x</button>;
+});
+`, '/src/Spread.resume.tsx');
+
+        const opaque = spread('ctx.props.attrs');
+        expect(opaque.components[0].mode).toBe('hydrate');
+        expect(opaque.ineligible[0].event).toBe('*');
+        expect(opaque.ineligible[0].reason).toContain('spread props');
+
+        // Handler-free literals are provably safe: inline, or a setup-scope const.
+        expect(spread("{ class: 'x', title: 'y' }").components[0].mode).toBe('resume');
+        expect(spread('extra', "const extra = { class: 'x' };").components[0].mode).toBe('resume');
+        // …but a literal carrying a handler is not.
+        expect(spread('{ onClick: () => {} }').components[0].mode).toBe('hydrate');
+        expect(spread('extra', 'const extra = { onInput: () => {} };').components[0].mode).toBe('hydrate');
     });
 });
 
@@ -686,6 +759,54 @@ export const Aliased = component((ctx) => {
     });
 });
 
+describe('setup-context parameter (§4.5)', () => {
+    const CTX_MSG = 'resume components must take the setup context as a single identifier parameter';
+
+    it('a destructured setup parameter is a build ERROR when the component has handler sites', () => {
+        const code = `
+import { component } from 'sigx';
+export const Pattern = component<{ label: string }>(({ signal, props }) => {
+    const count = signal(0);
+    return () => <button onClick={() => { count.value++; }}>{props.label}</button>;
+});
+`;
+        const result = extractResumeHandlers(code, '/src/Pattern.resume.tsx');
+        expect(result.errors).toHaveLength(1);
+        expect(result.errors[0].message).toContain(CTX_MSG);
+        expect(result.errors[0].message).toContain('<Pattern>');
+        expect(result.errors[0].offset).toBe(code.indexOf('{ signal, props }'));
+        // Never silently extracted: `count` used to fall through as a "global"
+        // and the element carried no data-sigx-b.
+        expect(result.handlers).toHaveLength(0);
+        expect(result.code).not.toContain('data-sigx-on:');
+        expect(result.components).toHaveLength(0);
+    });
+
+    it('a missing setup parameter is a build ERROR when the component has handler sites', () => {
+        const code = `
+import { component } from 'sigx';
+export const NoCtx = component(() => {
+    return () => <button onClick={() => { console.log('hi'); }}>x</button>;
+});
+`;
+        const result = extractResumeHandlers(code, '/src/NoCtx.resume.tsx');
+        expect(result.errors).toHaveLength(1);
+        expect(result.errors[0].message).toContain(CTX_MSG);
+        expect(result.errors[0].message).toContain('declares none');
+        expect(result.errors[0].offset).toBe(code.indexOf('() => {'));
+        expect(result.handlers).toHaveLength(0);
+    });
+
+    it('a ctx-less component with no handler sites is left alone', () => {
+        const result = extractResumeHandlers(`
+import { component } from 'sigx';
+export const Static = component(() => () => <p>static</p>);
+`, '/src/Static.resume.tsx');
+        expect(result.errors).toHaveLength(0);
+        expect(result.components[0]).toMatchObject({ exported: 'Static', mode: 'resume', siteCount: 0 });
+    });
+});
+
 describe('JSX in handler bodies (#283)', () => {
     it('is ineligible — the handlers chunk carries no jsx runtime', () => {
         const result = extractResumeHandlers(`
@@ -777,7 +898,7 @@ export const Feedback = component((ctx) => {
         const result = extractResumeHandlers(`
 import { component } from 'sigx';
 const helper = () => 1;
-export const Plain = component(() => {
+export const Plain = component((ctx) => {
     return () => (
         <form onSubmit={(e) => { e.preventDefault(); helper(); }}>
             <input name="q" />
