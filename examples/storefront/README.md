@@ -13,9 +13,11 @@ node smoke.mjs                               # browser verification (after build
 node smoke.mjs --dev                         # behavioral verification against the dev server
 ```
 
-> **Measuring it**: judge payload in a **production** build — dev mode serves
-> dozens of unbundled modules (Vite), which the HUD labels accordingly. The
-> zero-execution claim is about `build` + `start`.
+> **Measuring it**: *behaviour* — replay, upgrade-on-write, wake, synchronous
+> `preventDefault` — is identical in dev, and `node smoke.mjs --dev` proves
+> it against the dev server. *Payload* is a **production** question: dev
+> mode serves dozens of unbundled modules (Vite), which the HUD labels
+> accordingly. The zero-execution claim is about `build` + `start`.
 
 Open the network/console panels and watch the JS HUD (bottom right):
 

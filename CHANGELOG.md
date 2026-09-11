@@ -345,6 +345,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- **`@sigx/vite/resume`: editing a resume module's handler in dev reloads
+  the page (#702 phase 7).** Handler symbols are content-hashed, so after
+  an edit the rendered page's `data-sigx-on` attributes and the
+  already-evaluated registry held the OLD names and the old handlers kept
+  running silently. `hotUpdate` now diffs the module's registrations
+  (symbols, stamped components and their mode) and sends `full-reload`
+  from the client environment when they changed; a markup-only edit keeps
+  Vite's in-place HMR. New `pnpm smoke:resume` (CI job `resume-smoke`)
+  drives `examples/resume/smoke.mjs` in prod AND dev mode; the plugin
+  tests gain a serve-mode describe (the `on*` prop is kept in every
+  environment — a guard against ever stripping it).
+
 - **`@sigx/runtime-core`: the JSX base namespace ships in the emitted types
   (#529).** `JSX.Element`, `IntrinsicAttributes` (`key`) and
   `ElementChildrenAttribute` were declared in a hand-written `src/jsx-types.d.ts`

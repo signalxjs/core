@@ -255,6 +255,13 @@ because a throw in the browser would take the page down.
   build error. `obj.$scope` and `{ $scope: 1 }` (member and key positions)
   are not references and stay allowed.
 
+**Dev trace (`@sigx/resume/client`, `__DEV__` only).** The console shows the
+ladder as it happens: `boundary N (X): replaying "<symbol>" (click)`,
+`first write to "count" — upgrading (loading the component chunk)`,
+`upgraded — real listeners now own the element`, and
+`woke (hydrate mode) — the triggering event is not replayed`. Stripped from
+the prod dist.
+
 **Dev warnings (runtime, `@sigx/resume/client`):**
 
 - **Single-element root.** The upgrade hydrates the element immediately
@@ -310,10 +317,25 @@ refresh entry — see "Single-flight boundary refresh" above.
 The full ladder is verified in a real browser: `examples/resume/smoke.mjs`
 asserts (via JS coverage — execution, not fetches) that only the loader
 executes on load, the first click replays through its QRL and upgrades on
-write, read-only handlers never execute their component chunk, and
-wake-on-interaction hydrates without replay. The server half is
-WinterCG-clean: after `pnpm build`, `pnpm test:edge` renders a resumable
-boundary from the prod dist with `node:` imports forbidden.
+write (exactly once — the #266 double-fire regression), read-only handlers
+never execute their component chunk, the single-flight refresh patches
+fresh HTML with no component chunk, and wake-on-interaction hydrates
+without replay. `pnpm smoke:resume` runs it in **both** modes (CI job
+`resume-smoke`): `node smoke.mjs` against the prod build, and
+`node smoke.mjs --dev` against the dev server.
+
+**Dev is the same ladder.** The transform runs for the dev SSR render, so
+the served HTML carries the same QRL/wake/pd/b attributes; the dev server
+serves the handlers modules as virtuals and the registry lazily imports
+the component modules; the loader entry is what boots; and the dev trace
+above narrates every replay, upgrade and wake in the console. What is
+prod-only is bundle *shape* — chunk files, the manifest, modulepreload
+hints — never behaviour. Editing a resume module's handler in dev reloads
+the page (handler symbols are content-hashed; the rendered attributes and
+the evaluated registry hold the old ones); a markup-only edit keeps
+in-place HMR. The server half is WinterCG-clean: after `pnpm build`,
+`pnpm test:edge` renders a resumable boundary from the prod dist with
+`node:` imports forbidden.
 
 Platform findings from building this pack: `docs/resume-stress-test-findings.md`.
 
