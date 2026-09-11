@@ -562,7 +562,10 @@ interface ComponentInfo {
     local: string;
     exported: string;
     node: Node;
-    /** Setup function's ctx param name, or null (no ctx ⇒ no signals/props). */
+    /**
+     * Setup function's ctx param name — null when there is no parameter OR it
+     * is a pattern (see `ctxParam`); either way nothing can resume through it.
+     */
     ctxName: string | null;
     /** The raw first parameter — a pattern when `ctxName` is null but one exists (§4.5 error location). */
     ctxParam: Node | null;
@@ -1114,20 +1117,33 @@ export function extractResumeHandlers(
                 continue;
             }
             if (hazard.kind === 'spread' && spreadIsHandlerFree(comp, hazard)) continue;
-            anyIneligible = true;
-            ineligible.push({
-                component: comp.exported,
-                event: hazard.event,
-                offset: hazard.attr.start,
-                reason:
-                    hazard.kind === 'spread'
-                        ? `<${hazard.tag}> carries spread props ({...${spreadText(hazard)}}) that may include ` +
-                          `event handlers — a spread cannot be analyzed, so the element gets no delegation ` +
-                          `attributes; spread a handler-free object literal (inline, or a setup-scope const) instead`
-                        : `on${hazard.event} of <${hazard.tag}> is not a DOM event — an \`onUpdate:*\` ` +
-                          `model-binding callback is invoked by the runtime with a value, so delegation ` +
-                          `cannot replay it; bind the value through a named signal and a DOM event instead`
-            });
+            const reason =
+                hazard.kind === 'spread'
+                    ? `<${hazard.tag}> carries spread props ({...${spreadText(hazard)}}) that may include ` +
+                      `event handlers — a spread cannot be analyzed, so the element gets no delegation ` +
+                      `attributes; spread a handler-free object literal (inline, or a setup-scope const) instead`
+                    : `on${hazard.event} of <${hazard.tag}> is not a DOM event — an \`onUpdate:*\` ` +
+                      `model-binding callback is invoked by the runtime with a value, so delegation ` +
+                      `cannot replay it; bind the value through a named signal and a DOM event instead`;
+            if (sites.length > 0) {
+                // The other handler sites give hydrate mode its wake carriers.
+                anyIneligible = true;
+                ineligible.push({ component: comp.exported, event: hazard.event, offset: hazard.attr.start, reason });
+                continue;
+            }
+            // No host-element handler site at all: nothing could ever wake the
+            // boundary, so hydrate mode would be just as dead. That is a §4.5
+            // error when the component IS a boundary (named signals stamp it);
+            // one with neither is never stamped and behaves as a plain component.
+            if (comp.namedSignals.size > 0) {
+                errors.push({
+                    offset: hazard.attr.start,
+                    message:
+                        `${reason} — and <${comp.exported}> has no host-element handler delegation could ` +
+                        `wake it through, so the boundary could never hydrate. Handle an event on a host ` +
+                        `element, or move the component out of the resume module.`
+                });
+            }
         }
         // §4.5: the setup context must be one identifier. A pattern
         // (`({ signal })`) leaves `signal(…)` declarations unkeyed and every

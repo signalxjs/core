@@ -515,6 +515,32 @@ export const Spread = component((ctx) => {
         expect(spread('{ onClick: () => {} }').components[0].mode).toBe('hydrate');
         expect(spread('extra', 'const extra = { onInput: () => {} };').components[0].mode).toBe('hydrate');
     });
+
+    it('a hazard with no host-element handler site is a build ERROR on a boundary, nothing on a plain component', () => {
+        const only = (view: string, signal = "const n = ctx.signal(0);") => extractResumeHandlers(`
+import { component } from 'sigx';
+export const Only = component((ctx) => {
+    ${signal}
+    return () => ${view};
+});
+`, '/src/Only.resume.tsx');
+        // Named signals make it a boundary; with no wake carrier hydrate mode
+        // would be just as dead as resume mode — so neither is offered.
+        for (const view of [
+            '<button {...ctx.props.attrs}>x</button>',
+            "<input onUpdate:modelValue={(v) => { n.value = v; }} />"
+        ]) {
+            const result = only(view);
+            expect(result.errors, view).toHaveLength(1);
+            expect(result.errors[0].message, view).toContain('could never hydrate');
+            expect(result.ineligible, view).toHaveLength(0);
+        }
+        // No signals and no handler: never stamped, so nothing to diagnose.
+        const plain = only('<button {...ctx.props.attrs}>x</button>', '');
+        expect(plain.errors).toHaveLength(0);
+        expect(plain.ineligible).toHaveLength(0);
+        expect(plain.components[0]).toMatchObject({ mode: 'resume', siteCount: 0, signalCount: 0 });
+    });
 });
 
 describe('extractResumeHandlers — determinism', () => {
