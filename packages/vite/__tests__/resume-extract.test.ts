@@ -320,8 +320,14 @@ export const P = component<{ onSelect?: (id: number) => void; items: number[]; c
         }
     });
 
-    it('reading an on* prop is ineligible, directly or by destructuring', () => {
-        for (const body of ['const cb = ctx.props.onSelect; n.value++;', 'const { onSelect } = ctx.props; n.value++;']) {
+    it('reading an on* prop is ineligible, directly, by computed string key, or by destructuring', () => {
+        for (const body of [
+            'const cb = ctx.props.onSelect; n.value++;',
+            "const cb = ctx.props['onSelect']; n.value++;",
+            "ctx.props['onSelect'](n.value);",
+            'const { onSelect } = ctx.props; n.value++;',
+            "const { ['onSelect']: cb } = ctx.props; n.value++;"
+        ]) {
             const result = handler(body);
             expect(result.components[0].mode, body).toBe('hydrate');
             expect(result.ineligible[0].reason, body).toContain('onSelect');
@@ -337,10 +343,12 @@ export const P = component<{ onSelect?: (id: number) => void; items: number[]; c
         }
     });
 
-    it('plain data reads still rewrite to $scope.props', () => {
+    it('plain data reads still rewrite to $scope.props — a dynamic computed key is not judged', () => {
         const result = handler('n.value = ctx.props.items.length;');
         expect(result.components[0].mode).toBe('resume');
         expect(result.handlers[0].exportSource).toContain('$scope.props.items.length');
+        const dynamic = handler('const k = "items"; n.value = (ctx.props as any)[k].length;');
+        expect(dynamic.components[0].mode).toBe('resume');
     });
 });
 
@@ -649,6 +657,19 @@ export const Parent = component((ctx) => {
 `, '/src/Parent.resume.tsx');
         expect(result.errors).toHaveLength(1);
         expect(result.errors[0].message).toContain('passed to <Ui.Button>');
+    });
+
+    it('a namespaced tag is a host element — its handler is an ordinary site', () => {
+        const result = extractResumeHandlers(`
+import { component } from 'sigx';
+export const Icon = component((ctx) => {
+    const n = ctx.signal(0);
+    return () => <svg:rect onClick={() => { n.value++; }} />;
+});
+`, '/src/Icon.resume.tsx');
+        expect(result.errors).toHaveLength(0);
+        expect(result.handlers).toHaveLength(1);
+        expect(result.code).toContain('data-sigx-on:click=');
     });
 
     it('a namespaced onUpdate:* attribute on a host element is ineligible with a reason', () => {
