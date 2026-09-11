@@ -147,6 +147,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   | an `on*` handler passed to a child **component** tag | silently kept in resume mode; the handler was dead on the client | build error naming the tag |
   | spread props (`{...rest}`) on a host element | silently resume mode, whatever the spread carried | ineligible (wake-on-interaction) with a reason; a handler-free object literal — inline or a setup-scope `const` — is exempt |
   | `onUpdate:modelValue` / any namespaced `on*:*` on a host element | silently ignored; a QRL next to it read the stale server value | ineligible with a reason (`not a DOM event`) |
+  | either of the two above on a component with named signals but **no** host-element handler | silently resume mode | build error — with no wake carrier, hydrate mode would be just as dead |
   | a generator handler | re-emitted as an arrow; the build died inside type-stripping, unattributed | ineligible with a reason |
 
   Setup-scope locals are now collected even for a ctx-less component, so a
