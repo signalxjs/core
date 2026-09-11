@@ -98,6 +98,15 @@
       "verify": { "unit": "pnpm test", "browser": "pnpm dev:basic" }
     },
     {
+      "repo": "three",
+      "tier": 1,
+      "publishes": ["@sigx/runtime-three", "@sigx/three", "@sigx/three-rapier"],
+      "consumesCore": ["@sigx/reactivity", "@sigx/runtime-core", "@sigx/runtime-dom", "@sigx/vite", "sigx"],
+      "consumesSiblings": [],
+      "catalog": "complete",
+      "verify": { "unit": "pnpm test", "browser": "examples/game-hud — pnpm dev:hud after pnpm build; the scene renders, WASD moves the ship, the HUD score updates" }
+    },
+    {
       "repo": "cli",
       "tier": 2,
       "publishes": ["@sigx/cli", "@sigx/create"],
