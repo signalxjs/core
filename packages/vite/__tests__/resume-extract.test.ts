@@ -634,6 +634,19 @@ export const Parent = component((ctx) => {
         expect(result.errors[0].message).toContain('passed to <Ui.Button>');
     });
 
+    it('a namespaced tag is a host element — its handler is an ordinary site', () => {
+        const result = extractResumeHandlers(`
+import { component } from 'sigx';
+export const Icon = component((ctx) => {
+    const n = ctx.signal(0);
+    return () => <svg:rect onClick={() => { n.value++; }} />;
+});
+`, '/src/Icon.resume.tsx');
+        expect(result.errors).toHaveLength(0);
+        expect(result.handlers).toHaveLength(1);
+        expect(result.code).toContain('data-sigx-on:click=');
+    });
+
     it('a namespaced onUpdate:* attribute on a host element is ineligible with a reason', () => {
         const result = extractResumeHandlers(`
 import { component } from 'sigx';
