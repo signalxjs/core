@@ -793,7 +793,12 @@ function findHandlerSites(setupFn: Node, hazards: SiteHazard[]): HandlerSite[] {
         }
         if (node.type === 'JSXOpeningElement') {
             const tag = node.name as Node;
-            const isHost = tag.type === 'JSXIdentifier' && /^[a-z]/.test(tag.name as string);
+            // Host: a lowercase identifier, or a namespaced tag (`svg:rect`)
+            // — never a component. Member expressions and capitalized
+            // identifiers are components.
+            const isHost =
+                tag.type === 'JSXNamespacedName' ||
+                (tag.type === 'JSXIdentifier' && /^[a-z]/.test(tag.name as string));
             const tagText = jsxTagText(tag);
             if (isHost) {
                 // Idempotency: events already carrying a QRL or wake
