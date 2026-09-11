@@ -221,6 +221,9 @@ export const F = component((ctx) => {
         // So are an expression body and an optional call.
         expect(form('(e) => e.preventDefault()').handlers[0].preventDefault).toBe(true);
         expect(form('(e) => { e?.preventDefault(); }').handlers[0].preventDefault).toBe(true);
+        // Every part of a sequence runs unconditionally — wherever the call sits.
+        expect(form('(e) => (n.value++, e.preventDefault())').handlers[0].preventDefault).toBe(true);
+        expect(form('(e) => { (e.preventDefault(), n.value++); }').handlers[0].preventDefault).toBe(true);
     });
 
     it('a guarded call on an element with a native default is ineligible and stamps nothing', () => {
