@@ -6,8 +6,9 @@
  * One capture-phase document listener per handled event type. On the first
  * interaction with a QRL-carrying element it lazy-imports the registry and
  * runtime (cached), then REPLAYS the triggering event through the resolved
- * handler — late invocation is well-defined for a pure
- * `(scope, event, element)` function, and dropping the first interaction is
+ * handler — late invocation is well-defined for a pure `(scope, event)`
+ * function (the runtime re-points `event.currentTarget` at the carrier,
+ * since native dispatch has ended), and dropping the first interaction is
  * precisely the failure resumability exists to fix. Two event effects cannot
  * be replayed and are handled explicitly:
  *

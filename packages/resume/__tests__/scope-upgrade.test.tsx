@@ -257,3 +257,55 @@ describe('nested components inside an upgraded boundary', () => {
         expect(container.querySelector('em')!.textContent).toBe('100'); // child kept its own initial
     });
 });
+
+describe('invoke — replayed event parity', () => {
+    it('re-points event.currentTarget at the delegated element for each handler in the synthetic bubble', async () => {
+        const Counter = makeCounter();
+        const { container } = await mount(<Counter initial={1} />);
+        const button = container.querySelector('button')!;
+
+        const seen: Array<[EventTarget | null, EventTarget | null]> = [];
+        __registerResumeQrl('Counter_ct_test0003', () =>
+            Promise.resolve(($scope: any, e: Event) => { seen.push([e.currentTarget, e.target]); })
+        );
+
+        // The loader replays the SAME native event after dispatch has ended —
+        // `target` is set, `currentTarget` is not.
+        const event = new Event('click', { bubbles: true });
+        button.dispatchEvent(event);
+
+        await invoke('Counter_ct_test0003', event, button);
+        await invoke('Counter_ct_test0003', event, container);
+        expect(seen).toEqual([[button, button], [container, button]]);
+    });
+
+    it('passes exactly (scope, event) — a second declared parameter is undefined, as under live dispatch', async () => {
+        const Counter = makeCounter();
+        const { container } = await mount(<Counter initial={1} />);
+        const button = container.querySelector('button')!;
+
+        const calls: unknown[] = [];
+        __registerResumeQrl('Counter_args_test0004', () =>
+            Promise.resolve(function ($scope: any, _e: Event, extra?: unknown) { calls.push([arguments.length, extra]); })
+        );
+        await invoke('Counter_args_test0004', new Event('click'), button);
+        // `($scope, e, step = 2)` takes its default on replay exactly as it
+        // does once the hydrated listener owns the element.
+        expect(calls).toEqual([[2, undefined]]);
+    });
+
+    it('an imported-identifier wrapper forwards only the event (detached scope included)', async () => {
+        const spy = vi.fn();
+        __registerResumeQrl('Counter_wrap_test0005', () =>
+            Promise.resolve(($scope: any, ...$args: unknown[]) => spy(...$args))
+        );
+        // No data-sigx-b: the detached-scope branch takes the same arity.
+        const orphan = document.createElement('button');
+        document.body.appendChild(orphan);
+        const event = new Event('click');
+        await invoke('Counter_wrap_test0005', event, orphan);
+        expect(spy).toHaveBeenCalledTimes(1);
+        expect(spy.mock.calls[0]).toEqual([event]);
+        expect(event.currentTarget).toBe(orphan);
+    });
+});

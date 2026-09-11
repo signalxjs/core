@@ -224,11 +224,13 @@ because a throw in the browser would take the page down.
   two resume modules exporting the same name is a build error naming both
   files. Rename one. (Names in non-resume files don't count.)
 - **`$scope` and `$el` are reserved.** Inside a resumable handler, `$scope`
-  *is* the resumed scope (handlers are re-emitted as `($scope, …) => …`)
-  and `$el` the delegated element. A handler that binds either — as a
-  parameter, a local, a named signal or a destructured prop — or reads it
-  as a free reference is a build error. `obj.$scope` and `{ $scope: 1 }`
-  (member and key positions) are not references and stay allowed.
+  *is* the resumed scope (handlers are re-emitted as `($scope, …) => …`);
+  `$el` is reserved for the runtime and **not bound** — the delegated
+  element is `event.currentTarget` (see "What a replayed event looks like"
+  below). A handler that binds either — as a parameter, a local, a named
+  signal or a destructured prop — or reads it as a free reference is a
+  build error. `obj.$scope` and `{ $scope: 1 }` (member and key positions)
+  are not references and stay allowed.
 
 **Dev warnings (runtime, `@sigx/resume/client`):**
 
@@ -253,6 +255,24 @@ because a throw in the browser would take the page down.
   after hydration. If the first click must count, keep the handler
   resumable (see `DealOfTheDay` in `examples/storefront` for the pattern),
   or design the first interaction to be harmless to lose.
+
+**What a replayed event looks like.** The loader replays the *same* native
+`Event` object, after native dispatch has ended, and calls the handler with
+exactly what live dispatch would have — the event, nothing else (a second
+declared parameter is `undefined` on replay just as it is after upgrade):
+
+- `event.target` is intact.
+- `event.currentTarget` is re-pointed at the delegated element for each
+  handler in the synthetic bubble, so `e.currentTarget.value` reads as it
+  would from a live listener.
+- `event.defaultPrevented` reflects the `data-sigx-pd` stamp: the loader
+  cancels the default synchronously during native dispatch when the
+  handler body calls `preventDefault()`, and the call inside the replayed
+  handler is itself a no-op (too late).
+- `event.stopPropagation()` ends the synthetic bubble only; native
+  propagation already happened.
+- `event.eventPhase` is `0` and `event.composedPath()` is `[]` — the
+  post-dispatch values. Read the element from `currentTarget`.
 
 Server-side, `refreshComponents` must be wired in both the dev and the prod
 refresh entry — see "Single-flight boundary refresh" above.

@@ -33,10 +33,24 @@ const BOUNDARY_ATTR = 'data-sigx-b';
  * delegation loader for every `data-sigx-on:*` carrier in the event chain.
  * After the boundary upgrades, its real listeners own the element — the
  * delegated QRL steps aside (double-fire guard).
+ *
+ * The handler is called as `(scope, event)` — the arity live dispatch gives
+ * the original (`runtime-dom`'s invoker passes exactly the event), so a
+ * second declared parameter is `undefined` before and after upgrade alike.
+ * The element is not passed: it is `event.currentTarget`, re-pointed below.
  */
 export async function invoke(symbol: string, event: Event, element: Element): Promise<void> {
     const handler = await resolveQrl(symbol);
     if (!handler) return;
+
+    // Replay runs after native dispatch has ended, so `currentTarget` is
+    // null — and `e.currentTarget.value` is the input idiom runtime-dom's own
+    // README recommends. Re-point it at the delegated element for THIS
+    // handler, exactly as native dispatch would have: an own property
+    // shadows the prototype accessor, `configurable` so the next carrier in
+    // the synthetic bubble redefines it. `eventPhase` and `composedPath()`
+    // keep their post-dispatch values (documented in the README).
+    Object.defineProperty(event, 'currentTarget', { value: element, configurable: true });
 
     const attr = element.getAttribute(BOUNDARY_ATTR);
     const id = attr === null ? NaN : parseInt(attr, 10);
@@ -47,11 +61,11 @@ export async function invoke(symbol: string, event: Event, element: Element): Pr
                 `running against a detached scope.`
             );
         }
-        await handler(getDetachedScope(), event, element);
+        await handler(getDetachedScope(), event);
         return;
     }
 
     const scope = getScope(id);
     if (scope._status === 'upgraded') return;
-    await handler(scope, event, element);
+    await handler(scope, event);
 }
