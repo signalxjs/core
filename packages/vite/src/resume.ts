@@ -103,6 +103,13 @@ export function sigxResume(options: SigxResumeOptions = {}): Plugin {
      */
     /** Files already warned about an unstampable form — dev re-transforms. */
     const warnedForms = new Set<string>();
+    /**
+     * A registration change seen by ANY environment's hotUpdate that the
+     * client environment has not yet turned into a reload. `extractions` is
+     * shared, so when the ssr environment re-extracts first, the client's
+     * own before/after diff would see no change.
+     */
+    let reloadPending = false;
 
     let serverApi: {
         role?: string;
@@ -229,6 +236,15 @@ export function sigxResume(options: SigxResumeOptions = {}): Plugin {
     /** Components worth stamping/registering: they own state or handler sites. */
     const stampable = (extraction: ResumeExtraction) =>
         extraction.components.filter((c) => c.siteCount > 0 || c.signalCount > 0);
+
+    /** What the registry and a rendered page's attributes depend on: symbols, and stamped components with their mode. */
+    const registrationsOf = (extraction: ResumeExtraction | undefined): string =>
+        extraction
+            ? [
+                  ...extraction.handlers.map((h) => h.symbol),
+                  ...stampable(extraction).map((c) => `${c.exported}:${c.mode}`)
+              ].sort().join('\n')
+            : '';
 
     /**
      * Component export names are app-wide registry/manifest keys (like island
@@ -426,19 +442,47 @@ export function sigxResume(options: SigxResumeOptions = {}): Plugin {
             return { code: `${injectSignalNames(extraction.code)}\n;${stamps}\n`, map: null };
         },
 
+        /**
+         * Dev runs the same ladder as prod: the transform above has no
+         * environment gate, so the dev SSR render serves the very same
+         * QRL/wake/pd/b attributes; the registry lazily imports the handlers
+         * virtuals and the component modules; and the loader entry is what
+         * boots (`@sigx/resume`'s README, "Verification"). The original
+         * `on*` prop is KEPT in every environment and must be: post-upgrade
+         * dispatch IS the real listener (`invoke` steps aside once the
+         * boundary is upgraded), so stripping it would leave every upgraded
+         * boundary dead after its first write.
+         *
+         * What dev needs beyond that is this hook. Handler symbols are
+         * content-hashed, so after an edit the rendered page's
+         * `data-sigx-on` attributes and the already-evaluated registry hold
+         * the OLD names — anything less than a reload keeps the old handlers
+         * running silently. A markup-only edit changes no registration and
+         * keeps Vite's in-place HMR.
+         */
         async hotUpdate({ type, file, read }) {
             if (!filter(file)) return;
+            const key = normalizePath(file);
+            const before = registrationsOf(extractions.get(key));
             if (type === 'delete') {
-                const key = normalizePath(file);
                 extractions.delete(key);
                 contractErrors.delete(key); // a deleted violation must not keep failing the registry
             } else {
                 extractInto(file, await read());
             }
+            const after = registrationsOf(extractions.get(key));
+            if (before !== after) reloadPending = true;
             const graph = this.environment.moduleGraph;
             for (const vid of [RESOLVED_VIRTUAL_ID, RESOLVED_ENTRY_ID, RESOLVED_HANDLERS_PREFIX + relPath(file) + HANDLERS_SUFFIX]) {
                 const mod = graph.getModuleById(vid);
                 if (mod) graph.invalidateModule(mod);
+            }
+            // From the client environment only — its hot channel reaches the
+            // browser (the sigx() plugin's precedent).
+            if (reloadPending && this.environment.name === 'client') {
+                reloadPending = false;
+                this.environment.hot.send({ type: 'full-reload' });
+                return [];
             }
         },
 

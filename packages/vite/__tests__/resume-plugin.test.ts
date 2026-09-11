@@ -28,14 +28,14 @@ export const Counter = component<{ label: string }>((ctx) => {
 `;
 
 /** A configured plugin instance with discovery run against a tmp project. */
-function makeProject(files: Record<string, string>): { plugin: any; root: string } {
+function makeProject(files: Record<string, string>, command: 'build' | 'serve' = 'build'): { plugin: any; root: string } {
     const root = mkdtempSync(join(tmpdir(), 'sigx-resume-'));
     for (const [rel, content] of Object.entries(files)) {
         mkdirSync(join(root, rel, '..'), { recursive: true });
         writeFileSync(join(root, rel), content);
     }
     const plugin = sigxResume() as any;
-    plugin.configResolved({ root, command: 'build' });
+    plugin.configResolved({ root, command });
     return { plugin, root };
 }
 
@@ -254,6 +254,114 @@ const failing = {
         throw new Error(m);
     }
 };
+
+describe('sigxResume — serve mode (dev, #702 phase 7)', () => {
+    const COUNTER_FILE = 'src/resume/Counter.tsx';
+
+    it('keeps the original on* prop next to the QRL attributes in every environment', () => {
+        const { plugin, root } = makeProject({ [COUNTER_FILE]: COUNTER }, 'serve');
+        try {
+            for (const name of ['client', 'ssr']) {
+                const result = plugin.transform.call({ warn: () => {}, environment: { name } }, COUNTER, join(root, COUNTER_FILE));
+                // `invoke` steps aside once a boundary is upgraded: the hydrated
+                // component's own listener dispatches from then on. Stripping
+                // on* (as #414 proposed) would leave every upgraded boundary dead.
+                expect(result.code, name).toMatch(/onClick=\{\(e\) => \{ count\.value\+\+; track\('hit'\); \}\} data-sigx-on:click="/);
+            }
+        } finally {
+            rmSync(root, { recursive: true, force: true });
+        }
+    });
+
+    it('warns per ineligible handler with file:line:col in serve mode', () => {
+        const code = `
+import { component } from 'sigx';
+const STEP = 2;
+export const Mixed = component((ctx) => {
+    const n = ctx.signal(0);
+    return () => <button onClick={() => { n.value += STEP; }}>x</button>;
+});
+`;
+        const { plugin, root } = makeProject({ 'src/resume/Mixed.tsx': code }, 'serve');
+        try {
+            const warnings: string[] = [];
+            plugin.transform.call({ warn: (m: string) => warnings.push(m) }, code, join(root, 'src/resume/Mixed.tsx'));
+            expect(warnings).toHaveLength(1);
+            expect(warnings[0]).toMatch(
+                /src\/resume\/Mixed\.tsx:6:\d+ onclick of <Mixed> is not resumable — handler captures module-scope binding "STEP"/
+            );
+        } finally {
+            rmSync(root, { recursive: true, force: true });
+        }
+    });
+
+    it('is idempotent over its own output: the registry lists each symbol once', () => {
+        const { plugin, root } = makeProject({ [COUNTER_FILE]: COUNTER }, 'serve');
+        try {
+            const ctx = { warn: () => {} };
+            const once = plugin.transform.call(ctx, COUNTER, join(root, COUNTER_FILE));
+            plugin.transform.call(ctx, once.code, join(root, COUNTER_FILE)); // rolldown's echo pass
+            const registry = plugin.load.call(failing, '\0virtual:sigx-resume');
+            expect(registry.split('__registerResumeQrl(').length - 1).toBe(1);
+            expect(registry.split('registerComponentChunk(').length - 1).toBe(1);
+        } finally {
+            rmSync(root, { recursive: true, force: true });
+        }
+    });
+
+    async function hot(plugin: any, file: string, env: string, edited: string) {
+        const send = vi.fn();
+        const environment = {
+            name: env,
+            moduleGraph: { getModuleById: () => undefined, invalidateModule: vi.fn() },
+            hot: { send }
+        };
+        const result = await plugin.hotUpdate.call({ environment }, { type: 'update', file, read: async () => edited });
+        return { send, result };
+    }
+
+    it('hotUpdate sends full-reload from the client environment when a handler symbol changes', async () => {
+        const { plugin, root } = makeProject({ [COUNTER_FILE]: COUNTER }, 'serve');
+        try {
+            const { send, result } = await hot(plugin, join(root, COUNTER_FILE), 'client', COUNTER.replace('count.value++', 'count.value += 2'));
+            // The page's data-sigx-on attributes and the evaluated registry
+            // hold the old content-hashed symbol — only a reload re-syncs them.
+            expect(send).toHaveBeenCalledWith({ type: 'full-reload' });
+            expect(result).toEqual([]);
+        } finally {
+            rmSync(root, { recursive: true, force: true });
+        }
+    });
+
+    it('hotUpdate leaves a markup-only edit to in-place HMR', async () => {
+        const { plugin, root } = makeProject({ [COUNTER_FILE]: COUNTER }, 'serve');
+        try {
+            const { send, result } = await hot(plugin, join(root, COUNTER_FILE), 'client', COUNTER.replace('{ctx.props.label}: {count.value}', 'Count {count.value}'));
+            expect(send).not.toHaveBeenCalled();
+            expect(result).toBeUndefined();
+        } finally {
+            rmSync(root, { recursive: true, force: true });
+        }
+    });
+
+    it('hotUpdate never sends from the ssr environment — but the client still reloads when ssr re-extracted first', async () => {
+        const { plugin, root } = makeProject({ [COUNTER_FILE]: COUNTER }, 'serve');
+        try {
+            const edited = COUNTER.replace('count.value++', 'count.value += 2');
+            const ssr = await hot(plugin, join(root, COUNTER_FILE), 'ssr', edited);
+            expect(ssr.send).not.toHaveBeenCalled();
+            // The shared extraction cache already holds the new symbols, so
+            // the client's own diff sees nothing — the pending flag carries it.
+            const client = await hot(plugin, join(root, COUNTER_FILE), 'client', edited);
+            expect(client.send).toHaveBeenCalledWith({ type: 'full-reload' });
+            // …and only once: a later markup-only client update is quiet.
+            const again = await hot(plugin, join(root, COUNTER_FILE), 'client', edited);
+            expect(again.send).not.toHaveBeenCalled();
+        } finally {
+            rmSync(root, { recursive: true, force: true });
+        }
+    });
+});
 
 describe('sigxResume — duplicate component names are a build error (§4.5)', () => {
     it('transform of either file fails naming BOTH files', () => {

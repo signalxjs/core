@@ -3,7 +3,10 @@
  * ships. It must import nothing (size-limit enforces this: the entry is
  * checked with no `ignore` list) and do nothing until the user interacts.
  *
- * One capture-phase document listener per handled event type. On the first
+ * One capture-phase document listener per handled event type — explicitly
+ * non-passive only for the types some element cancels (`data-sigx-pd`, the
+ * build-wide list the entry passes); the rest leave `passive` unspecified
+ * so a UA's scroll-performance intervention can apply. On the first
  * interaction with a QRL-carrying element it lazy-imports the registry and
  * runtime (cached), then REPLAYS the triggering event through the resolved
  * handler — late invocation is well-defined for a pure `(scope, event)`
@@ -15,6 +18,10 @@
  * - `preventDefault` fires synchronously during native dispatch for elements
  *   carrying `data-sigx-pd:<event>` (the transform stamps it when the
  *   handler body calls preventDefault).
+ * - A non-bubbling event (focus, blur, mouseenter, scroll, …) reaches the
+ *   document listener in the capture phase like any other, but only its
+ *   TARGET's carrier is invoked or woken — a live listener on an ancestor
+ *   would never have seen it, and the bubble walk must not invent one.
  * - `stopPropagation` is scoped to the synthetic bubble (`cancelBubble`
  *   checked between handlers); native propagation has already happened —
  *   capture-at-document saw the event first, so nothing user-visible
@@ -56,11 +63,21 @@ let state: LoaderState | null = null;
  * Install delegation for `events` (the build-wide union emitted into
  * `virtual:sigx-resume/entry`). Idempotent: repeat calls add listeners only
  * for new event types and update the lazy registry/runtime references.
+ *
+ * `pdEvents` — the types some element carries a `data-sigx-pd` stamp for —
+ * are registered `passive: false` (the loader must be allowed to cancel).
+ * For every other type `passive` is left unspecified: the spec default is
+ * `false`, but a UA may then apply its own intervention — Chrome treats
+ * `touchstart`/`touchmove`/`wheel` listeners on the document as passive
+ * when the option is omitted — and the loader deliberately lets it. An
+ * entry built by an older `@sigx/vite` passes no list, and then every
+ * listener stays non-passive: a stamp must never lose its `preventDefault`.
  */
 export function initResume(
     events: string[],
     loadRegistry: () => Promise<unknown>,
-    loadRuntime: () => Promise<ResumeRuntime>
+    loadRuntime: () => Promise<ResumeRuntime>,
+    pdEvents?: string[]
 ): void {
     if (!state) {
         state = { listeners: new Map(), loadRegistry, loadRuntime, ready: null };
@@ -74,7 +91,8 @@ export function initResume(
         if (state.listeners.has(type)) continue;
         const listener = (ev: Event): void => dispatch(type, ev);
         state.listeners.set(type, listener);
-        document.addEventListener(type, listener, { capture: true, passive: false });
+        const passive = pdEvents !== undefined && pdEvents.indexOf(type) < 0;
+        document.addEventListener(type, listener, passive ? { capture: true } : { capture: true, passive: false });
     }
 }
 
@@ -112,6 +130,8 @@ function dispatch(type: string, ev: Event): void {
             if (!isNaN(id) && wakeIds.indexOf(id) < 0) wakeIds.push(id);
             if (node.hasAttribute(PD_PREFIX + type)) ev.preventDefault();
         }
+        // Non-bubbling: only the target's own carrier would have fired live.
+        if (!ev.bubbles) break;
         node = node.parentElement;
     }
     if (chain.length === 0 && wakeIds.length === 0) return;

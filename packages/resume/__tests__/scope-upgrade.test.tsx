@@ -62,6 +62,7 @@ const tick = () => new Promise((r) => setTimeout(r, 0));
 
 beforeEach(() => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.spyOn(console, 'log').mockImplementation(() => {}); // the dev trace
 });
 
 afterEach(() => {
@@ -327,5 +328,37 @@ describe('invoke — replayed event parity', () => {
         expect(spy.mock.calls[0]).toEqual([event]);
         expect(spy.mock.results[0].value).toBe(orphan); // at call time
         expect(event.currentTarget).toBeNull();          // after
+    });
+});
+
+describe('dev trace (#702 phase 7)', () => {
+    const lines = (): string[] => (console.log as any).mock.calls.map((c: unknown[]) => String(c[0]));
+
+    it('logs the replay, the first write, and the upgrade — one [sigx resume] line each', async () => {
+        const Counter = makeCounter();
+        const { id, container } = await mount(<Counter initial={3} />);
+        registerComponent('Counter', Counter);
+        __registerResumeQrl('Counter_click_test0001', () =>
+            Promise.resolve(($scope: any) => { $scope.signals.count.value++; })
+        );
+        await invoke('Counter_click_test0001', new Event('click'), container.querySelector('button')!);
+        await tick();
+        await tick();
+
+        const seen = lines();
+        expect(seen.some((l) => l.includes(`boundary ${id} (Counter): replaying "Counter_click_test0001" (click)`))).toBe(true);
+        expect(seen.some((l) => l.includes(`boundary ${id} (Counter): first write to "count" — upgrading`))).toBe(true);
+        expect(seen.some((l) => l.includes(`boundary ${id} (Counter): upgraded — real listeners now own the element`))).toBe(true);
+    });
+
+    it('logs a wake', async () => {
+        const Woken = makeCounter();
+        Woken.__resumeId = 'WokenCounter';
+        Woken.__resumeMode = 'hydrate';
+        const { id } = await mount(<Woken initial={1} />);
+        registerComponent('WokenCounter', Woken);
+        await wake(id);
+        await tick();
+        expect(lines().some((l) => l.includes(`boundary ${id} (WokenCounter): woke (hydrate mode) — the triggering event is not replayed`))).toBe(true);
     });
 });
