@@ -214,6 +214,19 @@ hydrates it, with a build-time warning naming the capture. Handlers are only
 ever found on **host elements**: an `on*` prop passed to a child component
 is a build error (below).
 
+`preventDefault` has one shape: an unconditional top-level statement of the
+handler body, `e.preventDefault()` on the event parameter itself. The loader
+cancels the native default synchronously from a `data-sigx-pd` stamp — before
+any JavaScript loads, and for the page's lifetime — so a guarded or indirect
+call (inside `if` / `?:` / `&&` / `try`, a nested function, after a
+`return`, `throw`, `await` or `yield`; an alias, a destructured
+`preventDefault`, or the event handed to a helper) can neither be stamped
+nor left unstamped on an element with a native default (`<form>` submit,
+`<a href>` click, a submit button, a checkbox, `keydown`, …): the component
+falls back to wake-on-interaction with a reason. On an element with no
+native default it extracts without a stamp. An imported handler on such an
+element falls back the same way — the call cannot be seen across modules.
+
 ### The contract
 
 These are the rules the transform and the runtime rely on. Transform-time

@@ -225,7 +225,25 @@ describe('sigxResume — virtual modules', () => {
         expect(entry).toContain("import { initResume } from '@sigx/resume/loader';");
         expect(entry).toContain('initResume(["click"]');
         expect(entry).toContain("() => import(\"virtual:sigx-resume\")");
-        expect(entry).toContain("() => import('@sigx/resume/client')");
+        expect(entry).toContain("() => import('@sigx/resume/client'), []);");
+    });
+
+    it('passes the build-wide list of pd-stamped event types as the fourth argument', () => {
+        const code = `
+import { component } from 'sigx';
+export const Form = component((ctx) => {
+    const n = ctx.signal(0);
+    return () => <form onSubmit={(e) => { e.preventDefault(); n.value++; }}><button>go</button></form>;
+});
+`;
+        const { plugin: p, root: r } = makeProject({ 'src/resume/Form.tsx': code });
+        try {
+            const entry = p.load.call({}, p.resolveId.call({}, 'virtual:sigx-resume/entry', undefined));
+            expect(entry).toContain('initResume(["submit"]');
+            expect(entry).toContain("() => import('@sigx/resume/client'), [\"submit\"]);");
+        } finally {
+            rmSync(r, { recursive: true, force: true });
+        }
     });
 });
 

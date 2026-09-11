@@ -118,6 +118,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- **`@sigx/vite/resume`: `data-sigx-pd` is stamped only for an
+  unconditional top-level `preventDefault()` (#702 phase 3).** The loader
+  applies the stamp on every event for the page's lifetime, so a guarded
+  call was cancelling the default always (a `keydown` handler cancelling
+  Enter conditionally cancelled all typing on that input), and an indirect
+  one — the event aliased, destructured, or handed to a helper — or an
+  imported handler got no stamp at all, so a `<form>` submitted natively
+  before the handler chunk loaded. Now: on an element with a native
+  default (`form` submit/reset; `click` on `a[href]`, a non-`type="button"`
+  button, submit/reset/checkbox/radio/image/file inputs, `label`,
+  `summary`; `keydown`, `wheel`, `touch*`, `drop`, … anywhere) a guarded or
+  indirect call and an imported handler make the component ineligible with
+  a reason (wake-on-interaction restores the author's semantics exactly);
+  on any other element a guarded call extracts without a stamp.
+  `ExtractedHandler.preventDefault` means "unconditional"; new
+  `ResumeExtraction.pdEvents` (the stamped types) rides into
+  `virtual:sigx-resume/entry` as `initResume`'s fourth argument. The
+  native-default table is `hasDefaultAction` in `resume-extract.ts` (an
+  internal module, exported for the tests — not a `@sigx/vite/resume` API).
+
 - **`@sigx/vite/resume`: five more silent shapes are diagnosed (#702
   phase 2, rfc-1.0 §4.5).** Each compiled without a word and misbehaved
   only in the prod build:
