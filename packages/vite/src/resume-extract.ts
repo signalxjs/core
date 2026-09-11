@@ -564,8 +564,13 @@ interface ComponentInfo {
     local: string;
     exported: string;
     node: Node;
-    /** Setup function's ctx param name, or null (no ctx ⇒ no signals/props). */
+    /**
+     * Setup function's ctx param name — null when there is no parameter OR it
+     * is a pattern (see `ctxParam`); either way nothing can resume through it.
+     */
     ctxName: string | null;
+    /** The raw first parameter — a pattern when `ctxName` is null but one exists (§4.5 error location). */
+    ctxParam: Node | null;
     setupFn: Node;
     /** Declaration-name-keyed signals (what `injectSignalNames` will key). */
     namedSignals: Set<string>;
@@ -591,6 +596,7 @@ function isSignalDecl(decl: Node, ctxName: string): boolean {
 }
 
 const NAMED_EXPORTS_ONLY = 'resume components must be named exports';
+const CTX_PARAM_ONLY = 'resume components must take the setup context as a single identifier parameter';
 
 function findComponents(program: Node, scan: ModuleScan, errors: ContractError[]): ComponentInfo[] {
     const components: ComponentInfo[] = [];
@@ -643,14 +649,18 @@ function findComponents(program: Node, scan: ModuleScan, errors: ContractError[]
             const namedSignals = new Set<string>();
             const setupLocals = new Set<string>();
             const body = setupFn.body as Node;
-            if (body.type === 'BlockStatement' && ctxName) {
+            // Setup locals are collected whether or not the ctx is nameable —
+            // a component without one cannot resume (a §4.5 error in the
+            // extraction loop when it has handler sites), and its captures
+            // must never fall through to "unresolved ⇒ global".
+            if (body.type === 'BlockStatement') {
                 for (const s of body.body as Node[]) {
                     if (s.type !== 'VariableDeclaration') {
                         for (const n of statementBindings(s)) setupLocals.add(n);
                         continue;
                     }
                     for (const d of s.declarations as Node[]) {
-                        if (isSignalDecl(d, ctxName)) namedSignals.add((d.id as Node).name as string);
+                        if (ctxName && isSignalDecl(d, ctxName)) namedSignals.add((d.id as Node).name as string);
                         else for (const n of patternNames(d.id as Node)) setupLocals.add(n);
                     }
                 }
@@ -660,6 +670,7 @@ function findComponents(program: Node, scan: ModuleScan, errors: ContractError[]
                 exported,
                 node: init,
                 ctxName,
+                ctxParam: firstParam ?? null,
                 setupFn,
                 namedSignals,
                 setupLocals,
@@ -738,7 +749,40 @@ function eventOf(attr: Node): string | null {
     return text.slice(2).toLowerCase();
 }
 
-function findHandlerSites(setupFn: Node): HandlerSite[] {
+/**
+ * A JSX shape delegation can never reach, reported next to the sites so the
+ * component is not silently left in resume mode around it: an `on*` prop on
+ * a component tag (a function the boundary table cannot carry and host-only
+ * delegation cannot see), a spread on a host element (unanalyzable), or a
+ * namespaced `on*:*` model-binding callback (not a DOM event).
+ */
+interface SiteHazard {
+    kind: 'component-prop' | 'spread' | 'namespaced';
+    /** The attribute node (`onClick=…`, `{...rest}`, `onUpdate:x=…`). */
+    attr: Node;
+    /** The element's tag as written (`Child`, `Ui.Button`, `input`). */
+    tag: string;
+    /** What the warning names: `click`, `*` for a spread, `Update:modelValue`. */
+    event: string;
+    /** The spread's argument expression (kind === 'spread'). */
+    argument: Node | null;
+    /** Function scopes between the setup body and the element (spread resolution). */
+    intermediateScopes: Set<string>[];
+}
+
+/** `Child`, `Ui.Button`, `svg:rect` — a JSX tag as written. */
+function jsxTagText(tag: Node): string {
+    if (tag.type === 'JSXIdentifier') return tag.name as string;
+    if (tag.type === 'JSXMemberExpression') {
+        return `${jsxTagText(tag.object as Node)}.${jsxTagText(tag.property as Node)}`;
+    }
+    if (tag.type === 'JSXNamespacedName') {
+        return `${jsxTagText(tag.namespace as Node)}:${jsxTagText(tag.name as Node)}`;
+    }
+    return '?';
+}
+
+function findHandlerSites(setupFn: Node, hazards: SiteHazard[]): HandlerSite[] {
     const sites: HandlerSite[] = [];
 
     function visit(node: Node, scopes: Set<string>[]): void {
@@ -751,7 +795,13 @@ function findHandlerSites(setupFn: Node): HandlerSite[] {
         }
         if (node.type === 'JSXOpeningElement') {
             const tag = node.name as Node;
-            const isHost = tag.type === 'JSXIdentifier' && /^[a-z]/.test(tag.name as string);
+            // Host: a lowercase identifier, or a namespaced tag (`svg:rect`)
+            // — never a component. Member expressions and capitalized
+            // identifiers are components.
+            const isHost =
+                tag.type === 'JSXNamespacedName' ||
+                (tag.type === 'JSXIdentifier' && /^[a-z]/.test(tag.name as string));
+            const tagText = jsxTagText(tag);
             if (isHost) {
                 // Idempotency: events already carrying a QRL or wake
                 // attribute (a previous pass over this source) are not
@@ -768,7 +818,36 @@ function findHandlerSites(setupFn: Node): HandlerSite[] {
                     }
                 }
                 for (const attr of node.attributes as Node[]) {
+                    if (attr.type === 'JSXSpreadAttribute') {
+                        hazards.push({
+                            kind: 'spread',
+                            attr,
+                            tag: tagText,
+                            event: '*',
+                            argument: attr.argument as Node,
+                            intermediateScopes: nextScopes
+                        });
+                        continue;
+                    }
                     if (attr.type !== 'JSXAttribute') continue;
+                    const attrName = attr.name as Node;
+                    if (attrName.type === 'JSXNamespacedName') {
+                        // `onUpdate:modelValue` and friends: the runtime invokes
+                        // these with a VALUE, never a DOM event — nothing to
+                        // delegate. (`data-sigx-*` namespaces never match.)
+                        const ns = ((attrName.namespace as Node).name as string) ?? '';
+                        if (/^on[A-Z]/.test(ns)) {
+                            hazards.push({
+                                kind: 'namespaced',
+                                attr,
+                                tag: tagText,
+                                event: `${ns.slice(2)}:${((attrName.name as Node).name as string) ?? ''}`,
+                                argument: null,
+                                intermediateScopes: nextScopes
+                            });
+                        }
+                        continue;
+                    }
                     const event = eventOf(attr);
                     if (!event || alreadyStamped.has(event) || !isNode(attr.value)) continue;
                     const container = attr.value as Node;
@@ -778,6 +857,24 @@ function findHandlerSites(setupFn: Node): HandlerSite[] {
                         event,
                         expr: container.expression as Node,
                         element: node,
+                        intermediateScopes: nextScopes
+                    });
+                }
+            } else {
+                // Component tag: an `on*` prop here is a function the boundary
+                // table cannot carry and delegation (host attributes only)
+                // cannot see — dead in both modes, so a §4.5 error upstream.
+                for (const attr of node.attributes as Node[]) {
+                    if (attr.type !== 'JSXAttribute') continue;
+                    const event = eventOf(attr);
+                    if (!event || !isNode(attr.value)) continue;
+                    if ((attr.value as Node).type !== 'JSXExpressionContainer') continue;
+                    hazards.push({
+                        kind: 'component-prop',
+                        attr,
+                        tag: tagText,
+                        event,
+                        argument: null,
                         intermediateScopes: nextScopes
                     });
                 }
@@ -986,6 +1083,8 @@ export function extractResumeHandlers(
 
     for (const comp of components) {
         let anyIneligible = false;
+        const hazards: SiteHazard[] = [];
+        const sites = findHandlerSites(comp.setupFn, hazards);
         /** Elements that already got their `data-sigx-b` this pass. */
         const stampedElements = new Set<Node>();
         /**
@@ -1010,7 +1109,70 @@ export function extractResumeHandlers(
             ineligible.push({ component: comp.exported, event: site.event, offset: site.expr.start, reason });
         };
 
-        for (const site of findHandlerSites(comp.setupFn)) {
+        for (const hazard of hazards) {
+            if (hazard.kind === 'component-prop') {
+                errors.push({
+                    offset: hazard.attr.start,
+                    message:
+                        `on${hazard.event} of <${comp.exported}> is passed to <${hazard.tag}> as a component ` +
+                        `prop, not set on a host element — resume delegation only sees host-element ` +
+                        `attributes, so nothing in <${hazard.tag}>'s DOM can run this handler or wake ` +
+                        `the boundary, and a function prop never reaches the client through the ` +
+                        `boundary table. Handle the event on a host element inside <${hazard.tag}>, ` +
+                        `or render the element in <${comp.exported}> directly.`
+                });
+                continue;
+            }
+            if (hazard.kind === 'spread' && spreadIsHandlerFree(comp, hazard)) continue;
+            const reason =
+                hazard.kind === 'spread'
+                    ? `<${hazard.tag}> carries spread props ({...${spreadText(hazard)}}) that may include ` +
+                      `event handlers — a spread cannot be analyzed, so the element gets no delegation ` +
+                      `attributes; spread a handler-free object literal (inline, or a setup-scope const) instead`
+                    : `on${hazard.event} of <${hazard.tag}> is not a DOM event — an \`onUpdate:*\` ` +
+                      `model-binding callback is invoked by the runtime with a value, so delegation ` +
+                      `cannot replay it; bind the value through a named signal and a DOM event instead`;
+            if (sites.length > 0) {
+                // The other handler sites give hydrate mode its wake carriers.
+                anyIneligible = true;
+                ineligible.push({ component: comp.exported, event: hazard.event, offset: hazard.attr.start, reason });
+                continue;
+            }
+            // No host-element handler site at all: nothing could ever wake the
+            // boundary, so hydrate mode would be just as dead. That is a §4.5
+            // error when the component IS a boundary (named signals stamp it);
+            // one with neither is never stamped and behaves as a plain component.
+            if (comp.namedSignals.size > 0) {
+                errors.push({
+                    offset: hazard.attr.start,
+                    message:
+                        `${reason} — and <${comp.exported}> has no host-element handler delegation could ` +
+                        `wake it through, so the boundary could never hydrate. Handle an event on a host ` +
+                        `element, or move the component out of the resume module.`
+                });
+            }
+        }
+        // §4.5: the setup context must be one identifier. A pattern
+        // (`({ signal })`) leaves `signal(…)` declarations unkeyed and every
+        // capture indistinguishable from a global; no parameter leaves handled
+        // elements without `data-sigx-b`. Either way the handler chunk would
+        // reference names that do not exist in prod — in both modes.
+        if (sites.length > 0 && !comp.ctxName) {
+            errors.push({
+                offset: (comp.ctxParam ?? comp.setupFn).start,
+                message: comp.ctxParam
+                    ? `${CTX_PARAM_ONLY} — <${comp.exported}> takes it as a pattern ` +
+                      `(\`({ signal, props }) => …\`), so \`signal(…)\` declarations cannot be keyed by ` +
+                      `name and handler captures cannot be told from globals. Write ` +
+                      `\`component((ctx) => …)\` and read \`ctx.signal\` / \`ctx.props\`.`
+                    : `${CTX_PARAM_ONLY} — <${comp.exported}> declares none, so its handled elements ` +
+                      `cannot carry \`data-sigx-b={ctx.$sigxB}\` and setup-scope captures cannot be told ` +
+                      `from globals. Write \`component((ctx) => …)\`.`
+            });
+            continue;
+        }
+
+        for (const site of sites) {
             // Resolve the handler expression to a function we can analyze.
             let fn = site.expr;
             if (fn.type === 'Identifier') {
@@ -1039,6 +1201,14 @@ export function extractResumeHandlers(
             if (fn.type !== 'ArrowFunctionExpression' && fn.type !== 'FunctionExpression') {
                 allSites.push({ site, preventDefault: false });
                 fail(site, 'handler is not a statically analyzable function expression');
+                continue;
+            }
+
+            if (fn.generator === true) {
+                // Re-emitted as an arrow, `yield` would not parse — and the
+                // failure used to surface inside type-stripping, unattributed.
+                allSites.push({ site, preventDefault: false });
+                fail(site, 'handler is a generator function (re-emitted as an arrow, `yield` would not parse)');
                 continue;
             }
 
@@ -1261,6 +1431,49 @@ export function extractResumeHandlers(
             }
         }
         return null;
+    }
+
+    /** `{ class: 'x' }` — only plain, non-computed, non-`on*` keys and no spread. */
+    function handlerFreeLiteral(node: Node): boolean {
+        if (node.type !== 'ObjectExpression') return false;
+        for (const prop of (node.properties as Node[]) ?? []) {
+            if (prop.type !== 'Property' || prop.computed === true) return false;
+            const key = prop.key as Node;
+            const name = key.type === 'Identifier' ? (key.name as string) : key.type === 'Literal' ? String(key.value) : null;
+            if (name === null || /^on[A-Z]/.test(name)) return false;
+        }
+        return true;
+    }
+
+    /**
+     * A spread is provably handler-free when its argument is a handler-free
+     * object literal — inline, or a setup-body top-level `const` holding one
+     * (not shadowed by a view/loop scope). Anything else is opaque.
+     */
+    function spreadIsHandlerFree(comp: ComponentInfo, hazard: SiteHazard): boolean {
+        const arg = hazard.argument;
+        if (!arg) return false;
+        if (handlerFreeLiteral(arg)) return true;
+        if (arg.type !== 'Identifier') return false;
+        const name = arg.name as string;
+        if (hazard.intermediateScopes.some((s) => s.has(name))) return false;
+        const body = comp.setupFn.body as Node;
+        if (body.type !== 'BlockStatement') return false;
+        for (const stmt of body.body as Node[]) {
+            if (stmt.type !== 'VariableDeclaration' || stmt.kind !== 'const') continue;
+            for (const decl of stmt.declarations as Node[]) {
+                if ((decl.id as Node).type === 'Identifier' && ((decl.id as Node).name as string) === name) {
+                    return isNode(decl.init) && handlerFreeLiteral(decl.init as Node);
+                }
+            }
+        }
+        return false;
+    }
+
+    /** The spread argument as the warning shows it: an identifier's name, else `…`. */
+    function spreadText(hazard: SiteHazard): string {
+        const arg = hazard.argument;
+        return arg && arg.type === 'Identifier' ? (arg.name as string) : '…';
     }
 
     /** Assignment targeting anything rooted at this ctx.props member chain? */

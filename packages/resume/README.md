@@ -198,9 +198,12 @@ transferred: signals declared as `const x = ctx.signal(…)` are keyed by their
 declaration name and serialized; anything else stays local. A handler is
 resumable when its captures can be expressed through the resumed scope (named
 signals, `ctx.props` reads, imports, globals); anything else (loop variables,
-setup helpers, `ctx.emit`, …) makes the whole component fall back to
-wake-on-interaction — first interaction hydrates it, with a build-time
-warning naming the capture.
+setup helpers, `ctx.emit`, a spread of unanalyzable props on a host element,
+an `onUpdate:*` model-binding callback, a generator handler, …) makes the
+whole component fall back to wake-on-interaction — first interaction
+hydrates it, with a build-time warning naming the capture. Handlers are only
+ever found on **host elements**: an `on*` prop passed to a child component
+is a build error (below).
 
 ### The contract
 
@@ -223,6 +226,17 @@ because a throw in the browser would take the page down.
   — the registry key on the client and the manifest key on the server — so
   two resume modules exporting the same name is a build error naming both
   files. Rename one. (Names in non-resume files don't count.)
+- **The setup context is one identifier.** A component with handler sites
+  must take its context as a plain parameter — `component((ctx) => …)`.
+  Destructuring it (`({ signal, props }) => …`) or declaring none is a
+  build error: `signal(…)` declarations can only be keyed by name through
+  `ctx.signal`, handled elements carry `data-sigx-b={ctx.$sigxB}`, and
+  without the name the transform cannot tell a setup capture from a global.
+- **Handlers live on host elements.** `<Child onClick={…} />` is a build
+  error: delegation only sees host-element attributes, so nothing in the
+  child's DOM could run the handler or wake the boundary, and a function
+  prop never reaches the client through the boundary table. Handle the
+  event on a host element inside the child, or render the element here.
 - **`$scope` and `$el` are reserved.** Inside a resumable handler, `$scope`
   *is* the resumed scope (handlers are re-emitted as `($scope, …) => …`);
   `$el` is reserved for the runtime and **not bound** — the delegated
