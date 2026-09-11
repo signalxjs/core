@@ -218,6 +218,18 @@ with a reason. On an element with no native default it extracts without a
 stamp. An imported handler on such an element falls back the same way — the
 call cannot be seen across modules.
 
+`$scope.props` is a snapshot, and a public one. It is the usage-site props
+as serialized into the boundary table — minus `children`, `slots`,
+`$models`, `key`, `ref`, every function, symbol and `undefined`, and every
+`on*` key — passed through the app's type handlers; the same object the
+upgrade mounts with. A handler that calls a props member
+(`ctx.props.onSelect(id)`), reads an `on*` prop, or reads one of the
+stripped keys (directly or by destructuring) falls back to
+wake-on-interaction with a reason: the value cannot exist in a resumed
+scope. And because the table ships in the HTML, every serialized prop of
+every resumable component is readable by anyone who views source — pass a
+resumable component only what the page may show.
+
 ### The contract
 
 These are the rules the transform and the runtime rely on. Transform-time

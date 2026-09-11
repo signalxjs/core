@@ -776,6 +776,9 @@ function isSignalDecl(decl: Node, ctxName: string): boolean {
     );
 }
 
+/** Usage-site keys `serializeBoundaryProps` never carries into the snapshot. */
+const STRIPPED_PROPS = new Set(['children', 'slots', 'ref', 'key', '$models']);
+
 const NAMED_EXPORTS_ONLY = 'resume components must be named exports';
 const CTX_PARAM_ONLY = 'resume components must take the setup context as a single identifier parameter';
 
@@ -1475,6 +1478,35 @@ export function extractResumeHandlers(
                             reason = 'handler writes to ctx.props (props are read-only in a resumed scope)';
                             break;
                         }
+                        // `$scope.props` is the boundary record's serialized
+                        // snapshot: functions, `on*` keys and the structural
+                        // keys never reach it, so a read of one is `undefined`
+                        // in a resumed scope — and a call throws.
+                        const access = propsAccessOf(member, fn);
+                        if (access) {
+                            const { name: prop, called } = access;
+                            const structural = STRIPPED_PROPS.has(prop);
+                            const callback = /^on[A-Z]/.test(prop);
+                            if (called) {
+                                reason =
+                                    `handler calls ${comp.ctxName}.props.${prop} — functions never serialize into the ` +
+                                    `props snapshot ($scope.props is the boundary record's data), so it is undefined ` +
+                                    `in a resumed scope`;
+                                break;
+                            }
+                            if (callback) {
+                                reason =
+                                    `handler reads ${comp.ctxName}.props.${prop} — \`on*\` props are event callbacks ` +
+                                    `and never serialize into the props snapshot`;
+                                break;
+                            }
+                            if (structural) {
+                                reason =
+                                    `handler reads ${comp.ctxName}.props.${prop} — children, slots, ref, key and ` +
+                                    `$models are stripped from the props snapshot`;
+                                break;
+                            }
+                        }
                         splices.push({ start: member.start, end: member.end, text: '$scope.props' });
                         continue;
                     }
@@ -1692,6 +1724,39 @@ export function extractResumeHandlers(
     function spreadText(hazard: SiteHazard): string {
         const arg = hazard.argument;
         return arg && arg.type === 'Identifier' ? (arg.name as string) : '…';
+    }
+
+    /**
+     * The `.x` read off this `ctx.props` node — through a member access or a
+     * destructuring declarator — and whether it is called (`ctx.props.x(…)`,
+     * `ctx.props.x?.()`). Computed access and whole-object uses return null.
+     */
+    function propsAccessOf(member: Node, handlerFn: Node): { name: string; called: boolean } | null {
+        let found: { name: string; called: boolean } | null = null;
+        (function walk(node: Node, parent: Node | null): void {
+            if (found) return;
+            if (node.type === 'MemberExpression' && node.object === member && node.computed !== true && isNode(node.property)) {
+                found = {
+                    name: (node.property as Node).name as string,
+                    called: parent !== null && parent.type === 'CallExpression' && parent.callee === node
+                };
+                return;
+            }
+            if (node.type === 'VariableDeclarator' && node.init === member && (node.id as Node).type === 'ObjectPattern') {
+                for (const prop of ((node.id as Node).properties as Node[]) ?? []) {
+                    if (prop.type !== 'Property' || prop.computed === true) continue;
+                    const key = prop.key as Node;
+                    const name = key.type === 'Identifier' ? (key.name as string) : key.type === 'Literal' ? String(key.value) : null;
+                    if (name !== null && (STRIPPED_PROPS.has(name) || /^on[A-Z]/.test(name))) {
+                        found = { name, called: false };
+                        return;
+                    }
+                }
+                return;
+            }
+            for (const child of childNodes(node)) walk(child, node);
+        })(handlerFn, null);
+        return found;
     }
 
     /** Assignment targeting anything rooted at this ctx.props member chain? */
