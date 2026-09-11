@@ -182,6 +182,12 @@ const TS_VALUE_WRAPPERS = new Set([
     'TSInstantiationExpression'
 ]);
 
+/** `(x as T)`, `x!`, `x satisfies T`, `<T>x` → `x`: the value under TS wrappers. */
+function unwrapTsValue(node: Node): Node {
+    while (TS_VALUE_WRAPPERS.has(node.type) && isNode(node.expression)) node = node.expression as Node;
+    return node;
+}
+
 /** Child nodes in source order, skipping TS type-space subtrees. */
 function childNodes(node: Node): Node[] {
     const out: Node[] = [];
@@ -778,6 +784,14 @@ function isSignalDecl(decl: Node, ctxName: string): boolean {
         isNode(callee.property) &&
         ((callee.property as Node).name as string) === 'signal'
     );
+}
+
+/** Usage-site keys `serializeBoundaryProps` never carries into the snapshot. */
+const STRIPPED_PROPS = new Set(['children', 'slots', 'ref', 'key', '$models']);
+
+/** The predicate `serializeBoundaryProps` drops event props by — `on` + an uppercase third character, unicode-aware. */
+function isCallbackKey(name: string): boolean {
+    return name.length > 2 && name.startsWith('on') && name[2] === name[2].toUpperCase();
 }
 
 const NAMED_EXPORTS_ONLY = 'resume components must be named exports';
@@ -1484,6 +1498,35 @@ export function extractResumeHandlers(
                             reason = 'handler writes to ctx.props (props are read-only in a resumed scope)';
                             break;
                         }
+                        // `$scope.props` is the boundary record's serialized
+                        // snapshot: functions, `on*` keys and the structural
+                        // keys never reach it, so a read of one is `undefined`
+                        // in a resumed scope — and a call throws.
+                        const access = propsAccessOf(member, fn);
+                        if (access) {
+                            const { name: prop, called } = access;
+                            const structural = STRIPPED_PROPS.has(prop);
+                            const callback = isCallbackKey(prop);
+                            if (called) {
+                                reason =
+                                    `handler calls ${comp.ctxName}.props.${prop} — functions never serialize into the ` +
+                                    `props snapshot ($scope.props is the boundary record's data), so it is undefined ` +
+                                    `in a resumed scope`;
+                                break;
+                            }
+                            if (callback) {
+                                reason =
+                                    `handler reads ${comp.ctxName}.props.${prop} — \`on*\` props are event callbacks ` +
+                                    `and never serialize into the props snapshot`;
+                                break;
+                            }
+                            if (structural) {
+                                reason =
+                                    `handler reads ${comp.ctxName}.props.${prop} — children, slots, ref, key and ` +
+                                    `$models are stripped from the props snapshot`;
+                                break;
+                            }
+                        }
                         splices.push({ start: member.start, end: member.end, text: '$scope.props' });
                         continue;
                     }
@@ -1701,6 +1744,74 @@ export function extractResumeHandlers(
     function spreadText(hazard: SiteHazard): string {
         const arg = hazard.argument;
         return arg && arg.type === 'Identifier' ? (arg.name as string) : '…';
+    }
+
+    /** A static property name: `.x`, `['x']`, or a literal/identifier pattern key; null when dynamic. */
+    function staticKey(node: Node, computed: boolean): string | null {
+        if (!computed && node.type === 'Identifier') return node.name as string;
+        if (node.type === 'Literal' && typeof node.value === 'string') return node.value;
+        return null;
+    }
+
+    /**
+     * The `.x` read off this `ctx.props` node — through a member access
+     * (`.x` or `['x']`) or a destructuring declarator — and whether it is
+     * called (`ctx.props.x(…)`, `ctx.props.x?.()`). Dynamic computed access
+     * and whole-object uses return null.
+     */
+    function propsAccessOf(member: Node, handlerFn: Node): { name: string; called: boolean } | null {
+        let found: { name: string; called: boolean } | null = null;
+        /** local name → prop name, for locals holding a props member (`const { cb } = ctx.props`, `const f = ctx.props.cb`). */
+        const aliases = new Map<string, string>();
+        const bind = (local: Node, name: string): void => {
+            const id = local.type === 'AssignmentPattern' ? (local.left as Node) : local;
+            if (id.type === 'Identifier') aliases.set(id.name as string, name);
+        };
+        (function walk(node: Node, parent: Node | null): void {
+            if (found) return;
+            if (node.type === 'MemberExpression' && isNode(node.object) && unwrapTsValue(node.object as Node) === member && isNode(node.property)) {
+                const name = staticKey(node.property as Node, node.computed === true);
+                if (name !== null) {
+                    const called = parent !== null && parent.type === 'CallExpression' && parent.callee === node;
+                    if (called || isCallbackKey(name) || STRIPPED_PROPS.has(name)) {
+                        found = { name, called };
+                        return;
+                    }
+                    if (parent !== null && parent.type === 'VariableDeclarator' && parent.init === node) bind(parent.id as Node, name);
+                }
+                return;
+            }
+            if (node.type === 'VariableDeclarator' && isNode(node.init) && unwrapTsValue(node.init as Node) === member && (node.id as Node).type === 'ObjectPattern') {
+                for (const prop of ((node.id as Node).properties as Node[]) ?? []) {
+                    if (prop.type !== 'Property') continue;
+                    const name = staticKey(prop.key as Node, prop.computed === true);
+                    if (name === null) continue;
+                    if (STRIPPED_PROPS.has(name) || isCallbackKey(name)) {
+                        found = { name, called: false };
+                        return;
+                    }
+                    bind(prop.value as Node, name);
+                }
+                return;
+            }
+            for (const child of childNodes(node)) walk(child, node);
+        })(handlerFn, null);
+        if (found || aliases.size === 0) return found;
+        // A call through an alias is a call on the props member: functions
+        // never serialize whatever their key, so `const { cb } = ctx.props;
+        // cb()` is the `ctx.props.cb()` hazard under another name.
+        (function calls(node: Node): void {
+            if (found) return;
+            if (node.type === 'CallExpression' && isNode(node.callee) && (node.callee as Node).type === 'Identifier') {
+                const name = aliases.get((node.callee as Node).name as string);
+                if (name !== undefined) {
+                    found = { name, called: true };
+                    return;
+                }
+            }
+            for (const child of childNodes(node)) calls(child);
+        })(handlerFn);
+        return found;
     }
 
     /** Assignment targeting anything rooted at this ctx.props member chain? */

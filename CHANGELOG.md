@@ -118,6 +118,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- **`@sigx/vite/resume`: a handler that reads what the props snapshot
+  cannot carry is ineligible (#702 phase 4).** `$scope.props` is the
+  boundary record's serialized data — `serializeBoundaryProps` drops
+  `children`/`slots`/`$models`/`key`/`ref`, every function, symbol and
+  `undefined`, and every `on*` key — so `ctx.props.onSelect(id)` compiled
+  to a call on `undefined` and `ctx.props.children` to nothing. Calling a
+  props member (directly, or through a local it was bound to), reading an
+  `on*` prop, or reading a stripped key (directly, by computed string key,
+  by destructuring, or under a TS wrapper) now makes the component
+  ineligible with a reason naming why the value never arrives. Plain data
+  reads rewrite as before. The README now states that the snapshot is a
+  public payload.
+
 - **`@sigx/vite/resume`: `data-sigx-pd` is stamped only for an
   unconditional top-level `preventDefault()` (#702 phase 3).** The loader
   applies the stamp on every event for the page's lifetime, so a guarded

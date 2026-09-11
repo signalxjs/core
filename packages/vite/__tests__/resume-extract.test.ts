@@ -323,6 +323,72 @@ export const B = component((ctx) => {
     });
 });
 
+describe('ctx.props is a serialized snapshot', () => {
+    const handler = (body: string) => extractResumeHandlers(`
+import { component } from 'sigx';
+export const P = component<{ onSelect?: (id: number) => void; items: number[]; children?: unknown }>((ctx) => {
+    const n = ctx.signal(0);
+    return () => <button onClick={() => { ${body} }}>x</button>;
+});
+`, '/src/P.resume.tsx');
+
+    it('calling a props member is ineligible — functions never serialize, whatever the key', () => {
+        for (const body of [
+            'ctx.props.onSelect(n.value);',
+            'ctx.props.onSelect?.(n.value);',
+            'const { onSelect } = ctx.props; onSelect(n.value);',
+            'const { cb } = ctx.props; cb(n.value);',
+            'const { cb = () => {} } = ctx.props; cb();',
+            'const f = ctx.props.cb; f();'
+        ]) {
+            const result = handler(body);
+            expect(result.components[0].mode, body).toBe('hydrate');
+            expect(result.ineligible[0].reason, body).toMatch(/(calls ctx\.props\.(onSelect|cb)|reads ctx\.props\.onSelect)/);
+            expect(result.ineligible[0].reason, body).toContain('never serialize');
+        }
+    });
+
+    it('uses the serializer\'s own on* predicate — unicode-aware', () => {
+        const result = handler('const x = ctx.props.onΔelta; n.value++;');
+        expect(result.components[0].mode).toBe('hydrate');
+        expect(result.ineligible[0].reason).toContain('never serialize');
+    });
+
+    it('reading an on* prop is ineligible, directly, by computed string key, by destructuring, or under a TS wrapper', () => {
+        for (const body of [
+            'const cb = ctx.props.onSelect; n.value++;',
+            "const cb = ctx.props['onSelect']; n.value++;",
+            "ctx.props['onSelect'](n.value);",
+            'const { onSelect } = ctx.props; n.value++;',
+            "const { ['onSelect']: cb } = ctx.props; n.value++;",
+            '(ctx.props as any).onSelect(n.value);',
+            'const cb = ctx.props!.onSelect; n.value++;',
+            'const { onSelect } = (ctx.props as any); n.value++;'
+        ]) {
+            const result = handler(body);
+            expect(result.components[0].mode, body).toBe('hydrate');
+            expect(result.ineligible[0].reason, body).toContain('onSelect');
+            expect(result.ineligible[0].reason, body).toContain('never serialize');
+        }
+    });
+
+    it('reading children / slots / ref / key / $models off props is ineligible', () => {
+        for (const key of ['children', 'slots', 'ref', 'key', '$models']) {
+            const result = handler(`console.log(ctx.props.${key}); n.value++;`);
+            expect(result.components[0].mode, key).toBe('hydrate');
+            expect(result.ineligible[0].reason, key).toContain('stripped from the props snapshot');
+        }
+    });
+
+    it('plain data reads still rewrite to $scope.props — a dynamic computed key is not judged', () => {
+        const result = handler('n.value = ctx.props.items.length;');
+        expect(result.components[0].mode).toBe('resume');
+        expect(result.handlers[0].exportSource).toContain('$scope.props.items.length');
+        const dynamic = handler('const k = "items"; n.value = (ctx.props as any)[k].length;');
+        expect(dynamic.components[0].mode).toBe('resume');
+    });
+});
+
 describe('extractResumeHandlers — eligibility', () => {
     function firstReason(code: string): string {
         const result = extractResumeHandlers(code, '/src/X.resume.tsx');
