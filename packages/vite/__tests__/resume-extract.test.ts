@@ -320,8 +320,14 @@ export const P = component<{ onSelect?: (id: number) => void; items: number[]; c
         }
     });
 
-    it('reading an on* prop is ineligible, directly or by destructuring', () => {
-        for (const body of ['const cb = ctx.props.onSelect; n.value++;', 'const { onSelect } = ctx.props; n.value++;']) {
+    it('reading an on* prop is ineligible, directly, by computed string key, or by destructuring', () => {
+        for (const body of [
+            'const cb = ctx.props.onSelect; n.value++;',
+            "const cb = ctx.props['onSelect']; n.value++;",
+            "ctx.props['onSelect'](n.value);",
+            'const { onSelect } = ctx.props; n.value++;',
+            "const { ['onSelect']: cb } = ctx.props; n.value++;"
+        ]) {
             const result = handler(body);
             expect(result.components[0].mode, body).toBe('hydrate');
             expect(result.ineligible[0].reason, body).toContain('onSelect');
@@ -337,10 +343,12 @@ export const P = component<{ onSelect?: (id: number) => void; items: number[]; c
         }
     });
 
-    it('plain data reads still rewrite to $scope.props', () => {
+    it('plain data reads still rewrite to $scope.props — a dynamic computed key is not judged', () => {
         const result = handler('n.value = ctx.props.items.length;');
         expect(result.components[0].mode).toBe('resume');
         expect(result.handlers[0].exportSource).toContain('$scope.props.items.length');
+        const dynamic = handler('const k = "items"; n.value = (ctx.props as any)[k].length;');
+        expect(dynamic.components[0].mode).toBe('resume');
     });
 });
 

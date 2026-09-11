@@ -1731,27 +1731,37 @@ export function extractResumeHandlers(
         return arg && arg.type === 'Identifier' ? (arg.name as string) : '…';
     }
 
+    /** A static property name: `.x`, `['x']`, or a literal/identifier pattern key; null when dynamic. */
+    function staticKey(node: Node, computed: boolean): string | null {
+        if (!computed && node.type === 'Identifier') return node.name as string;
+        if (node.type === 'Literal' && typeof node.value === 'string') return node.value;
+        return null;
+    }
+
     /**
-     * The `.x` read off this `ctx.props` node — through a member access or a
-     * destructuring declarator — and whether it is called (`ctx.props.x(…)`,
-     * `ctx.props.x?.()`). Computed access and whole-object uses return null.
+     * The `.x` read off this `ctx.props` node — through a member access
+     * (`.x` or `['x']`) or a destructuring declarator — and whether it is
+     * called (`ctx.props.x(…)`, `ctx.props.x?.()`). Dynamic computed access
+     * and whole-object uses return null.
      */
     function propsAccessOf(member: Node, handlerFn: Node): { name: string; called: boolean } | null {
         let found: { name: string; called: boolean } | null = null;
         (function walk(node: Node, parent: Node | null): void {
             if (found) return;
-            if (node.type === 'MemberExpression' && node.object === member && node.computed !== true && isNode(node.property)) {
-                found = {
-                    name: (node.property as Node).name as string,
-                    called: parent !== null && parent.type === 'CallExpression' && parent.callee === node
-                };
+            if (node.type === 'MemberExpression' && node.object === member && isNode(node.property)) {
+                const name = staticKey(node.property as Node, node.computed === true);
+                if (name !== null) {
+                    found = {
+                        name,
+                        called: parent !== null && parent.type === 'CallExpression' && parent.callee === node
+                    };
+                }
                 return;
             }
             if (node.type === 'VariableDeclarator' && node.init === member && (node.id as Node).type === 'ObjectPattern') {
                 for (const prop of ((node.id as Node).properties as Node[]) ?? []) {
-                    if (prop.type !== 'Property' || prop.computed === true) continue;
-                    const key = prop.key as Node;
-                    const name = key.type === 'Identifier' ? (key.name as string) : key.type === 'Literal' ? String(key.value) : null;
+                    if (prop.type !== 'Property') continue;
+                    const name = staticKey(prop.key as Node, prop.computed === true);
                     if (name !== null && (STRIPPED_PROPS.has(name) || /^on[A-Z]/.test(name))) {
                         found = { name, called: false };
                         return;
