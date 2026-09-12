@@ -25,7 +25,7 @@
         "@sigx/server": "workspace:*",
         "@sigx/server-renderer": "workspace:*",
         "@sigx/ssr-islands": "workspace:*",
-        "@types/node": "^26.4.0",
+        "@types/node": "^26.5.0",
         "@vue/server-renderer": "^3.5.42",
         "mitata": "^1.0.0",
         "preact": "^10.29.8",
