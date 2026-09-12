@@ -67,15 +67,16 @@ every repo publishing a package it consumes.
 ```
 Tier 0   core                                        14 packages
 ─────────── barrier: all 14 live on npm ───────────
-Tier 1   router · store · use · terminal · daisyui · monaco-editor      (core-only)
+Tier 1   router · store · use · terminal · daisyui · monaco-editor · three · markdown      (core-only)
 ─────────── barrier: tier 1 live on npm ───────────
 Tier 2   cli        ← @sigx/args, @sigx/terminal
          i18n       ← @sigx/store
          live-code  ← @sigx/daisyui, @sigx/monaco-editor, @sigx/router, @sigx/store
          pulse      ← @sigx/router, @sigx/store, @sigx/daisyui   (private app, publishes nothing)
+         ai         ← @sigx/markdown   (examples-only; the packages peer core alone)
 ─────────── barrier: tier 2 live on npm ───────────
 Tier 3   ssg        ← @sigx/router, @sigx/cli, @sigx/args
-         lynx       ← @sigx/cli, @sigx/terminal
+         lynx       ← @sigx/cli, @sigx/terminal, @sigx/markdown
 ─────────── barrier: tier 3 live on npm ───────────
 Tier 4   mermaid    ← @sigx/router, @sigx/ssg
 ```
@@ -174,7 +175,9 @@ manifest. Unit tests run on `happy-dom` — they do not prove a real browser ren
 |---|---|---|
 | `pulse` | `pnpm test` | **`pnpm smoke`** — playwright, the only real e2e suite in the ecosystem |
 | `monaco-editor` | `pnpm test` | **`pnpm dev:basic`** — drive it in a browser |
+| `markdown` | `pnpm test` | **`pnpm --filter playground-example e2e`** — playwright: streaming keeps block identity, Shiki, copy, onLink |
 | `i18n`, `ssg` | `pnpm test` | run an app from `examples/` and drive it in a browser |
+| `ai` | `pnpm test` | `examples/chat` — `pnpm --filter chat-example dev` with the mock model |
 | `terminal` | `pnpm test` | `pnpm showcase` — a TUI, not a browser surface |
 | `lynx` | `pnpm test` | native (iOS/Android); no browser surface |
 | `router`, `store`, `use`, `daisyui`, `cli`, `live-code` | `pnpm test` | none — unit tests are the verification |
