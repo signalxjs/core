@@ -176,6 +176,8 @@ manifest. Unit tests run on `happy-dom` — they do not prove a real browser ren
 | `pulse` | `pnpm test` | **`pnpm smoke`** — playwright, the only real e2e suite in the ecosystem |
 | `monaco-editor` | `pnpm test` | **`pnpm dev:basic`** — drive it in a browser |
 | `markdown` | `pnpm test` | **`pnpm --filter playground-example e2e`** — playwright: streaming keeps block identity, Shiki, copy, onLink |
+| `three` | `pnpm test` | `examples/game-hud` — `pnpm dev:hud` after `pnpm build`; the scene renders, WASD moves the ship, the HUD score updates |
+| `mermaid` | `pnpm test` | `examples/basic` — build and serve; diagrams render and the theme toggle re-renders them |
 | `i18n`, `ssg` | `pnpm test` | run an app from `examples/` and drive it in a browser |
 | `ai` | `pnpm test` | `examples/chat` — `pnpm --filter chat-example dev` with the mock model |
 | `terminal` | `pnpm test` | `pnpm showcase` — a TUI, not a browser surface |
