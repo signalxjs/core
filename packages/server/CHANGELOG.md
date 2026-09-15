@@ -42,6 +42,19 @@
 
 ### Changed
 
+- **Dev only: a stub sends the page's NEWEST version tag for its key, not
+  its own closure's (#716).** Under `vite dev`, an edited server module
+  re-evaluates its stub module with a fresh tag, but every reference the
+  page already holds — the fn a mounted `useData(fn)` captured — is the
+  old stub, and its tag is what the endpoint 409s. `__serverFnStub` /
+  `__serverStreamStub` now record their tag per key at construction (last
+  wins; one file mints a key) and `send` reads that table at call time, so
+  a hot-updated function is callable through every reference. `__DEV__`-gated
+  throughout — the production entry is byte-identical, and a production
+  page never mints a key twice. Observable only in dev or in a test that
+  constructs two same-key stubs with different tags and calls the older
+  one: it now sends the newer tag.
+
 - **One route per function; version skew is a 409 (#692, rfc-server-v5
   §1.3/§3).** The stub sends the build's version tag with every call —
   `"v"` in the POST envelope (fn and stream), `?v=` on a GET read (a new

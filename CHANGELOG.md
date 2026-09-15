@@ -25,6 +25,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- **`@sigx/vite/server`: server-function HMR — the browser half (#716).**
+  The backend half was already live (`vite dev` resolves every call through
+  the SSR module runner per request); now an open page follows: save a
+  `*.server.ts` module, an inline `serverFn` carrier, or a server-only module
+  behind one (`db.ts`), and every mounted `useData(fn)` cell on the affected
+  keys refetches in place — no reload, client state kept, no 409. Every dev
+  client stub module self-accepts and, on re-evaluation, hands its keys to
+  the new `serverFnHotUpdate(hot, keys)` export of `@sigx/vite/hmr` (sweeps
+  the SSR blob, refreshes mounted cells — via the `@sigx/cache` seam when
+  installed — and hands the update back to Vite with `hot.invalidate()` when
+  nothing on the page reads the keys live). A server-only dependency edit is
+  routed to the stubs behind it by walking the SSR graph upward (a walk that
+  reaches a rendered root keeps the `sigx()` full reload); `sigx()`'s
+  server-only reload consults `sigx:server`'s `api.hotStubModulesBehind`
+  first, so either plugin order routes the edit identically. Pages that hold
+  no stub for the edit — the module graph is per server, Vite's HMR per
+  page — hear a broadcast `sigx:server-fn-update` event through a listener
+  the plugin injects into every dev document, and reload as before. Limits:
+  server-rendered HTML with no live reader stays until a reload; `serverApp`
+  edits keep the full reload; module-level state resets on re-evaluation.
+  README: "Dev HMR — what refreshes in place".
+
+- **`@sigx/runtime-core/internals`: `mountedKeys()` (#716).** The canonical
+  keys with at least one mounted `useData` cell — the live readers, as
+  opposed to `restoredKeys()` (what the SSR blob holds whether or not
+  anything reads it). What a caller deciding "refresh in place, or reload?"
+  needs; `invalidateKeys`'s touched count cannot answer it, since the blob
+  carries keys on resume/islands pages that have no live cell. Size limit
+  for the `runtime-core (incl. renderer internals)` entry: 14.3 → 14.35 KB.
+
 - **`useData` tuple keys accept JSON-object elements (#694).** A tuple
   element may now be an array or a plain object of JSON values, not only a
   primitive, so `useData(() => [getCart, { userId }])` keys directly — the
@@ -117,6 +147,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   handlers without `/internals`. `TYPE_HANDLER_TOKEN` stays internal.
 
 ### Changed
+
+- **`@sigx/server/client`, dev only: a stub sends the page's newest version
+  tag for its key (#716).** A mounted `useData(fn)` holds the stub from
+  before an edit; it now calls the hot-updated function instead of 409ing.
+  `__DEV__`-gated — the production entry is byte-identical. Details in
+  `packages/server/CHANGELOG.md`.
 
 - **`@sigx/vite/resume`: `ctx.slots` in a component with handlers is a
   build error (#702 phase 6).** It used to fall back to wake-on-interaction

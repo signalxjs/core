@@ -1111,6 +1111,37 @@ describe('useData', () => {
         await settle();
         expect(cell.value).toBe('item-1');
     });
+
+    // ========================================================================
+    // mountedKeys() — the live readers, distinct from the SSR blob (#716)
+    // ========================================================================
+
+    it('mountedKeys() lists the canonical keys with a mounted cell and empties on unmount', async () => {
+        const { mountedKeys } = await import('sigx/internals');
+        const getVotes = stamped('src/hmr.server.ts/liveReader', async () => 3);
+        const show = signal(true);
+        const Reader = component(() => {
+            useData(getVotes);
+            useData('hmr-plain', async () => 'x');
+            return () => <div />;
+        });
+        const App = component(() => () => (show.value ? jsx(Reader, {}) : null));
+        mount(jsx(App, {}));
+        await settle();
+        expect([...mountedKeys()]).toEqual(
+            expect.arrayContaining(['["src/hmr.server.ts/liveReader"]', 'hmr-plain'])
+        );
+
+        // A blob entry is NOT a mounted reader: the blob can hold keys nothing
+        // reads (the resume/islands page shape) and must not show up here.
+        (globalThis as any).__SIGX_ASYNC__ = { orphan: 1 };
+        expect([...mountedKeys()]).not.toContain('orphan');
+
+        show.value = false;
+        await settle();
+        expect([...mountedKeys()]).not.toContain('["src/hmr.server.ts/liveReader"]');
+        expect([...mountedKeys()]).not.toContain('hmr-plain');
+    });
 });
 
 describe('tuple keys with object elements (#694)', () => {

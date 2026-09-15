@@ -21,19 +21,25 @@ type ComponentPlugin = {
 // (setCurrentInstance & co.) stays real so module-level lifecycle hooks
 // behave as they do in an app. vi.hoisted: the mock factory is hoisted
 // above the static `sigx/internals` import, so its state must be too.
-const { registeredPlugins, registerComponentPluginMock } = vi.hoisted(() => {
+const { registeredPlugins, registerComponentPluginMock, invalidateKeysMock, mounted } = vi.hoisted(() => {
     const registeredPlugins: ComponentPlugin[] = [];
     return {
         registeredPlugins,
         registerComponentPluginMock: vi.fn((plugin: ComponentPlugin) => {
             registeredPlugins.push(plugin);
-        })
+        }),
+        // The server-fn HMR helper's two core seams (#716): what it sweeps,
+        // and what it reads to decide in-place vs propagate.
+        invalidateKeysMock: vi.fn((_patterns: ReadonlyArray<string | readonly unknown[]>) => 0),
+        mounted: [] as string[]
     };
 });
 
 vi.mock('sigx/internals', async (importOriginal) => ({
     ...await importOriginal<typeof import('sigx/internals')>(),
-    registerComponentPlugin: registerComponentPluginMock
+    registerComponentPlugin: registerComponentPluginMock,
+    invalidateKeys: invalidateKeysMock,
+    mountedKeys: () => mounted[Symbol.iterator]()
 }));
 
 function makeCtx(): ComponentSetupContext & { update: ReturnType<typeof vi.fn>; onUnmounted: ReturnType<typeof vi.fn>; renderFn: any; unmountCbs: Array<() => void> } {
@@ -326,5 +332,63 @@ describe('hmr — HMR update path', () => {
         plugin.onDefine!('Cmp', {} as any, setup3);
         expect(ctx.__hmrReload).toHaveBeenCalledTimes(2);
         expect(ctx.__hmrReload).toHaveBeenLastCalledWith(setup3);
+    });
+});
+
+describe('hmr — serverFnHotUpdate (server-function stub re-evaluated, #716)', () => {
+    type Seam = { __SIGX_SERVERFN_CACHE__?: (d: { invalidates?: readonly unknown[] }) => void };
+    const seam = globalThis as Seam;
+
+    beforeEach(() => {
+        invalidateKeysMock.mockClear();
+        mounted.length = 0;
+        delete seam.__SIGX_SERVERFN_CACHE__;
+    });
+
+    async function helper() {
+        const { serverFnHotUpdate } = await import('../src/hmr');
+        return serverFnHotUpdate;
+    }
+
+    it('with a mounted reader: sweeps the keys through invalidateKeys and does NOT invalidate the module', async () => {
+        mounted.push('["src/api.server.ts/getVotes",7]', 'unrelated');
+        const hot = { invalidate: vi.fn() };
+        await (await helper())(hot, ['src/api.server.ts/getVotes', 'src/api.server.ts/other']);
+        // One tuple-prefix pattern per key: matches useData(fn) AND
+        // useData(() => [fn, input]) cells alike.
+        expect(invalidateKeysMock).toHaveBeenCalledTimes(1);
+        expect(invalidateKeysMock).toHaveBeenCalledWith([
+            ['src/api.server.ts/getVotes'],
+            ['src/api.server.ts/other']
+        ]);
+        expect(hot.invalidate).not.toHaveBeenCalled();
+    });
+
+    it('with no mounted reader: still sweeps (a later mount must fetch fresh), then hands the update back to Vite', async () => {
+        mounted.push('["src/api.server.ts/getVotesX"]', '["src/api.server.ts/getVote"]');
+        const hot = { invalidate: vi.fn() };
+        await (await helper())(hot, ['src/api.server.ts/getVotes']);
+        expect(invalidateKeysMock).toHaveBeenCalledWith([['src/api.server.ts/getVotes']]);
+        // Element-boundary matching: "getVote" and "getVotesX" are not readers
+        // of "getVotes".
+        expect(hot.invalidate).toHaveBeenCalledTimes(1);
+    });
+
+    it('prefers the cache seam when a pack stamped it — one delivery, core not called twice', async () => {
+        mounted.push('["src/api.server.ts/getVotes"]');
+        const hook = vi.fn();
+        seam.__SIGX_SERVERFN_CACHE__ = hook;
+        const hot = { invalidate: vi.fn() };
+        await (await helper())(hot, ['src/api.server.ts/getVotes']);
+        expect(hook).toHaveBeenCalledWith({ invalidates: [['src/api.server.ts/getVotes']] });
+        expect(invalidateKeysMock).not.toHaveBeenCalled();
+        expect(hot.invalidate).not.toHaveBeenCalled();
+    });
+
+    it('a module with no data keys (streams only) is a no-op', async () => {
+        const hot = { invalidate: vi.fn() };
+        await (await helper())(hot, []);
+        expect(invalidateKeysMock).not.toHaveBeenCalled();
+        expect(hot.invalidate).not.toHaveBeenCalled();
     });
 });

@@ -231,7 +231,7 @@ package being extended, and the **caller** is the one with no import path to it.
 | | |
 |---|---|
 | **Stamped by** | `cache/src/index.ts:119` at plugin install (non-enumerable; disposal deletes it at :129) |
-| **Called by** | `server/src/client/index.ts:193` when a response carries `$cache` |
+| **Called by** | `server/src/client/index.ts:193` when a response carries `$cache`; `vite/src/hmr.ts` → `serverFnHotUpdate` (#716) with `{ invalidates: [[key], …] }` when a dev stub module re-evaluates — the same delivery a server-declared `invalidates` gets, so the pack drops its own entries and delegates the mounted refresh to `invalidateKeys`; absent the seam, the helper calls `invalidateKeys` itself |
 | **Contract** | `(directives: { invalidates?: ReadonlyArray<string \| readonly unknown[]> }) => void` |
 
 Server-declared cache directives (rfc-server §6.2) reach the cache pack with no

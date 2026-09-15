@@ -186,7 +186,11 @@ Wire it up once:
 
 - **Dev** — `sigxServer({ serverApp: '/src/server-app.ts' })`: the plugin
   loads the module eagerly through the SSR module runner and re-evaluates it
-  after edits, so pipeline changes apply without a restart.
+  after edits, so pipeline changes apply without a restart. (Function bodies
+  are live the same way, and since #716 so is the browser: an open page's
+  `useData(fn)` cells refetch in place after a save, and its stubs send the
+  page's newest version tag rather than 409ing — see the `@sigx/vite` README,
+  "Dev HMR — what refreshes in place".)
 - **Prod** — the build injects one side-effect import of the module at the
   top of `virtual:sigx-server-fns`, so any entry importing the registry
   evaluates it before serving. A hand-wired entry just imports the module
