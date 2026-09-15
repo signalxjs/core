@@ -1368,6 +1368,21 @@ export const Search = () => search('x');
         }
     });
 
+    it('the listener URL honours a configured base, with or without its trailing slash', () => {
+        for (const base of ['/app', '/app/']) {
+            const root = mkdtempSync(join(tmpdir(), 'sigx-server-fn-'));
+            try {
+                const plugin = sigxServer({ requireAuthorization: false }) as any;
+                plugin.configResolved({ root, command: 'serve', base });
+                expect(plugin.transformIndexHtml.call({}, '<html></html>', {})[0].attrs.src).toBe(
+                    '/app/@id/__x00__virtual:sigx-server-fn-hmr'
+                );
+            } finally {
+                rmSync(root, { recursive: true, force: true });
+            }
+        }
+    });
+
     it('no page listener in a build, nor under role: "client" (no server to hear from)', () => {
         const built = makeProject({ 'src/cart.server.ts': CART }, 'build');
         const remote = makeProject({ 'src/cart.server.ts': CART }, 'serve', { role: 'client' });

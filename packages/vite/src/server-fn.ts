@@ -662,7 +662,10 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
             // #512: the spelling the module graph will use, so discovery keys
             // and transform ids agree under a symlinked root.
             root = resolveRoot(config);
-            viteBase = config.base ?? '/';
+            // Vite resolves `base` with a trailing slash; normalize anyway (a
+            // test's bare config, a hand-built one) — `mountPrefix` is the same
+            // one-slash guarantee the mount path gets.
+            viteBase = mountPrefix(config.base ?? '/');
             isServe = config.command === 'serve';
             // The sigx plugin's adapter seam (mirror of our api.role): in a
             // BUNDLED server build the registry inlines into the one worker
