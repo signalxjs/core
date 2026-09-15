@@ -82,6 +82,21 @@ export interface ServerFnTransport {
 
 let transport: ServerFnTransport | null = null;
 
+/**
+ * DEV ONLY (#716): the newest version tag minted per key in this page.
+ *
+ * Under `vite dev` an edited server module re-evaluates its stub module
+ * with a fresh version, but every reference the page already holds — the
+ * fn a mounted `useData(fn)` captured in its key tuple — is the OLD stub,
+ * and its closure's tag is what the endpoint 409s. One file mints a key, so
+ * the latest construction is by definition the newest build of it: stubs
+ * record their tag here at construction (last wins) and `send` reads it at
+ * call time, so a hot-updated function is callable through every reference,
+ * old or new. `__DEV__`-gated throughout: production never re-evaluates,
+ * and this entry's size guard must not pay for dev plumbing.
+ */
+const liveVersions = __DEV__ ? new Map<string, string>() : undefined;
+
 /** Set (or with `null` clear) the transport every stub resolves at call time. */
 export function configureServerFn(config: ServerFnTransport | null): void {
     transport = config;
@@ -99,6 +114,9 @@ async function send(
     options?: ServerFnCallOptions,
     boundaries?: { base: number; refresh: unknown[] }
 ): Promise<Response> {
+    // The page's newest tag for this key wins over the closure's (dev HMR,
+    // above); in production the two are one and the same.
+    if (__DEV__ && liveVersions) version = liveVersions.get(key) ?? version;
     const config = transport;
     const target = config?.endpoint ?? endpoint;
     const prefix = target.endsWith('/') ? target.slice(0, -1) : target;
@@ -274,6 +292,7 @@ export function __serverFnStub(
 } {
     const get = (flags & FLAG_GET) !== 0;
     const invalidates = (flags & FLAG_INVALIDATES) !== 0;
+    if (__DEV__ && liveVersions) liveVersions.set(key, version);
     const call = async (args: unknown[], options?: ServerFnCallOptions): Promise<unknown> => {
         // §6.3 sidecar — only invalidates-declaring mutations pay the
         // inventory, and only when the pack has stamped the seam. Seam
@@ -373,6 +392,7 @@ export function __serverStreamStub(
 ): ((...args: unknown[]) => AsyncIterable<unknown>) & {
     with(options?: ServerStreamCallOptions): (...args: unknown[]) => AsyncIterable<unknown>;
 } {
+    if (__DEV__ && liveVersions) liveVersions.set(key, version);
     const call = (args: unknown[], options?: ServerStreamCallOptions): AsyncIterable<unknown> => {
         const controller = new AbortController();
         // A caller's signal is ADDITIVE: the internal controller still aborts

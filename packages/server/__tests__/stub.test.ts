@@ -574,6 +574,30 @@ describe('__serverFnStub — version tag on the wire (rfc-server-v5 §3.2)', () 
             '{"args":[1],"v":"deadbeef","$boundaries":{"base":4,"refresh":[{"id":3,"component":"T"}]}}'
         );
     });
+
+    // Dev HMR (#716): a re-evaluated stub module mints the same key with a
+    // new tag, but a mounted `useData(fn)` still holds the OLD stub. The tag
+    // is resolved at call time from the newest construction, so that old
+    // reference calls the hot-updated function instead of 409ing.
+    it('an older same-key stub sends the tag of the NEWEST construction (dev HMR, #716)', async () => {
+        const mock = stubFetch(200, { data: 1 });
+        const old = __serverFnStub('api/hot', 'hot', '/_sigx/fn', 'aaaaaaaa');
+        const oldRead = __serverFnStub('api/hotRead', 'hotRead', '/_sigx/fn', 'aaaaaaaa', 1);
+        __serverFnStub('api/hot', 'hot', '/_sigx/fn', 'bbbbbbbb');
+        __serverFnStub('api/hotRead', 'hotRead', '/_sigx/fn', 'bbbbbbbb', 1);
+        await old(1);
+        await oldRead();
+        expect((mock.mock.calls[0][1] as RequestInit).body).toBe('{"args":[1],"v":"bbbbbbbb"}');
+        expect(mock.mock.calls[1][0]).toBe('/_sigx/fn/api/hotRead?v=bbbbbbbb');
+    });
+
+    it('the newest construction wins even when it is unstamped — "" then sends no "v"', async () => {
+        const mock = stubFetch(200, { data: 1 });
+        const old = __serverFnStub('api/hot2', 'hot2', '/_sigx/fn', 'aaaaaaaa');
+        __serverFnStub('api/hot2', 'hot2', '/_sigx/fn', '');
+        await old(1);
+        expect((mock.mock.calls[0][1] as RequestInit).body).toBe('{"args":[1]}');
+    });
 });
 
 describe('__serverFnStub — flags bitmask', () => {

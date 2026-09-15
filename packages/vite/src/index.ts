@@ -1,5 +1,5 @@
 // Vite plugin for sigx with HMR support
-import type { DevEnvironment, HotUpdateOptions, Plugin, ResolvedConfig, UserConfig, ViteBuilder } from 'vite';
+import type { DevEnvironment, EnvironmentModuleNode, HotUpdateOptions, Plugin, ResolvedConfig, UserConfig, ViteBuilder } from 'vite';
 import { fileURLToPath } from 'url';
 import * as fs from 'fs';
 import * as net from 'net';
@@ -755,6 +755,18 @@ if (import.meta.hot) {
         // components) show up in the client graph — `modules` is non-empty —
         // and are left to Vite's own HMR (the `import.meta.hot.accept()` the
         // transform injects, CSS HMR): in-place updates stay untouched.
+        //
+        // One class of server-only source is NOT a render change (#716): a
+        // module that only server functions depend on (`db.ts` behind
+        // `api.server.ts`). The dev endpoint already `ssrLoadModule`s per
+        // call; what the browser needs is a refetch through the stubs it
+        // holds, not a new document. `sigx:server` knows which modules those
+        // are — ask it (its `api.hotStubModulesBehind`) and return its stub
+        // modules for Vite to HMR-update instead of reloading. Asked from
+        // HERE because every `@sigx/vite` plugin is `enforce: 'pre'`: config
+        // order decides whose `hotUpdate` runs first, and a reload sent first
+        // cannot be taken back. `undefined` (the edit reaches a rendered
+        // root) or `[]` (no stub loaded — a zero-JS page) reloads as before.
         hotUpdate(
             this: { environment: DevEnvironment },
             { file, modules, server }: HotUpdateOptions
@@ -782,6 +794,20 @@ if (import.meta.hot) {
             // watcher — the rest of the codebase treats these as optional too.
             const ssrModules = server.environments?.ssr?.moduleGraph?.getModulesByFile(file);
             if (ssrModules && ssrModules.size > 0) {
+                // `config` is unset when a test drives the hook without
+                // `configResolved`; the dev server carries the same object.
+                const plugins = (config ?? server.config)?.plugins ?? [];
+                const serverApi = plugins.find((p) => p.name === 'sigx:server')?.api as
+                    | {
+                          hotStubModulesBehind?: (
+                              file: string,
+                              server: HotUpdateOptions['server'],
+                              clientGraph: DevEnvironment['moduleGraph']
+                          ) => EnvironmentModuleNode[] | undefined;
+                      }
+                    | undefined;
+                const stubs = serverApi?.hotStubModulesBehind?.(file, server, this.environment.moduleGraph);
+                if (stubs && stubs.length > 0) return stubs;
                 this.environment.hot.send({ type: 'full-reload' });
             }
         }
@@ -793,7 +819,7 @@ if (import.meta.hot) {
 // ============================================================================
 
 // Re-export the HMR runtime functions for manual use if needed
-export { installHMRPlugin, registerHMRModule } from './hmr.js';
+export { installHMRPlugin, registerHMRModule, serverFnHotUpdate } from './hmr.js';
 
 // Deployment build seam (rfc-deploy §3)
 export { nodeAdapter } from './adapter.js';

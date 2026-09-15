@@ -30,6 +30,17 @@
  * A function's version changes when its definition changes, so `hotUpdate`
  * re-extracts and invalidates the registry virtual module.
  *
+ * 5. **Dev HMR, the browser half** (#716) — the endpoint above makes the
+ *    BACKEND live (every call `ssrLoadModule`s the edited module), but a page
+ *    that is already open holds the old stubs and the old data. In serve, every
+ *    client stub module gets a self-accepting tail: on re-evaluation it hands
+ *    its keys to `serverFnHotUpdate` (`@sigx/vite/hmr`), which refetches the
+ *    mounted `useData(fn)` cells in place — or, with nothing live reading
+ *    them, hands the update back to Vite to propagate (the pre-#716 full
+ *    reload). And an edit to a server-ONLY module behind a server module
+ *    (`db.ts`, absent from the client graph) is routed to those stub modules
+ *    instead of reloading the page, by walking the SSR graph upward.
+ *
  * rev 2 (native clients, #320): keys use ROOT-INDEPENDENT stable ids
  * (package-qualified — every app build of one solution mints identical keys
  * for shared server modules), so backend redeploys never break installed
@@ -40,7 +51,7 @@
  * as the version tag the stub sends and the endpoint 409s on.
  */
 
-import type { Plugin, ViteDevServer } from 'vite';
+import type { EnvironmentModuleNode, Plugin, ViteDevServer } from 'vite';
 import { createFilter, normalizePath } from 'vite';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -177,6 +188,33 @@ const VIRTUAL_ID = 'virtual:sigx-server-fns';
 const RESOLVED_VIRTUAL_ID = '\0' + VIRTUAL_ID;
 const REGISTRY_FILE = 'sigx-server-fns.js';
 
+/**
+ * The dev page listener (#716): a virtual module injected into every dev
+ * document, so a page that holds NONE of an edit's stub modules still
+ * learns about it. See {@link HMR_EVENT} and {@link pageListenerCode}.
+ */
+const HMR_PAGE_VIRTUAL_ID = 'virtual:sigx-server-fn-hmr';
+const RESOLVED_HMR_PAGE_VIRTUAL_ID = '\0' + HMR_PAGE_VIRTUAL_ID;
+/**
+ * The custom hot event announcing "these stub sources changed" to every
+ * connected page (#716). Vite's module-level HMR reaches only pages that
+ * have the module loaded — its `hotModulesMap` is per page, while the
+ * server's module graph is per SERVER: once any page has loaded a stub,
+ * a later zero-JS page finds it "in the client graph" and gets neither a
+ * `js-update` it can act on nor the #450 reload. (Vite's own multi-tab
+ * hole; before #716 it already swallowed `*.server.ts` edits for such
+ * pages.) The event closes it: the page listener reloads unless a loaded
+ * stub module for one of `files` CLAIMS the event — that page is being
+ * updated in place (or bubbled by Vite) already.
+ */
+const HMR_EVENT = 'sigx:server-fn-update';
+/** The event's payload: absolute, normalized stub-source paths. */
+interface ServerFnUpdateData {
+    files: string[];
+    /** Set by a loaded stub module's listener — the page handles this itself. */
+    claimed?: boolean;
+}
+
 const DEFAULT_INCLUDE = ['**/*.server.ts', '**/*.server.tsx', '**/*.server.mts', '**/*.server.js', '**/*.server.mjs'];
 const DEFAULT_EXCLUDE = ['**/node_modules/**', '**/dist/**'];
 const DEFAULT_BASE = '/_sigx/fn';
@@ -189,6 +227,51 @@ const DEFAULT_BASE = '/_sigx/fn';
  * `/rpc`, `/rpc/` and `/rpc//` mean one thing on both sides.
  */
 const mountPrefix = (base: string): string => base.replace(/\/+$/, '') + '/';
+
+/**
+ * The dev-only tail appended to every CLIENT stub module (#716): self-accept
+ * (a stub is a key-addressed fetch — re-evaluating it invalidates nothing an
+ * importer holds), and on the SECOND and later evaluations hand the module's
+ * data keys to the browser helper. `hot.data` persists across a module's
+ * re-evaluations, so the first load — page boot — runs nothing and imports
+ * nothing: the resume dev smoke's "only the loader executes on load" holds.
+ * Streams are not `useData` targets and carry no key; a stream-only module
+ * still self-accepts (the helper is then a no-op).
+ */
+function devHotTail(file: string, fns: ReadonlyArray<{ key: string; stream: boolean }>): string {
+    const keys = fns.filter((fn) => !fn.stream).map((fn) => fn.key);
+    return (
+        `\nif (import.meta.hot) {\n` +
+        `    import.meta.hot.accept();\n` +
+        // This page holds the stub: the page listener must not reload it.
+        `    import.meta.hot.on(${JSON.stringify(HMR_EVENT)}, (d) => { if (d.files.includes(${JSON.stringify(file)})) d.claimed = true; });\n` +
+        `    if (import.meta.hot.data.sigxServerFn) {\n` +
+        `        import('@sigx/vite/hmr').then((m) => m.serverFnHotUpdate(import.meta.hot, ${JSON.stringify(keys)}));\n` +
+        `    }\n` +
+        `    import.meta.hot.data.sigxServerFn = true;\n` +
+        `}\n`
+    );
+}
+
+/**
+ * The page listener's body ({@link HMR_PAGE_VIRTUAL_ID}). Vite's client
+ * hands ONE payload object to every listener, synchronously in
+ * registration order; this listener registers first (it rides the
+ * document head), so it defers one macrotask to let every loaded stub
+ * module's listener claim the event. Unclaimed ⇒ this page holds no stub
+ * for the changed source, so nothing on it can refetch: reload, the
+ * pre-#716 behaviour. The safe direction if Vite ever cloned payloads is
+ * an extra reload, never a stale page.
+ */
+function pageListenerCode(): string {
+    return (
+        `if (import.meta.hot) {\n` +
+        `    import.meta.hot.on(${JSON.stringify(HMR_EVENT)}, (d) => {\n` +
+        `        setTimeout(() => { if (!d.claimed) location.reload(); }, 0);\n` +
+        `    });\n` +
+        `}\n`
+    );
+}
 
 /** `import … from '@sigx/server'` (not -renderer), excluding type-only.
  *  The lookahead sits directly after `import` — a backtrackable `\s*` before
@@ -268,6 +351,72 @@ function matchesServerFnDefaulted(code: string): boolean {
     return false;
 }
 
+/**
+ * A server-only edit's browser consequence (#716): the client stub modules
+ * whose functions sit behind FILE, or `undefined` when the edit may have
+ * changed a rendered document.
+ *
+ * Called from the CLIENT environment's `hotUpdate` when the edited file is
+ * absent from the client graph (`modules.length === 0`) — the case the
+ * `sigx()` plugin's #450 rule turns into a full page reload. That rule is
+ * right for a server-rendered component, and wrong for `db.ts`: the SSR
+ * graph is already invalidated, the dev endpoint `ssrLoadModule`s per call,
+ * so all the browser needs is a refetch through the stubs that reach it.
+ *
+ * The walk goes UP the SSR graph from FILE through `importers`:
+ *   - a server module / inline carrier is a TERMINAL: its stubs are the
+ *     browser's view of everything below it; collect it, do not ascend.
+ *     (FILE itself counts — a `*.server.ts` whose stub never loaded in the
+ *     browser terminates immediately and yields no stub modules.)
+ *   - a non-terminal node with NO importers is an SSR root that renders or
+ *     configures (`entry-server.tsx`, the `serverApp` module,
+ *     `virtual:sigx-ssr-node`): the document may have changed ⇒ `undefined`,
+ *     leaving `modules` empty for #450 to reload as before.
+ * All paths terminal ⇒ the terminals' files and their client-graph nodes.
+ * Returned to Vite, the nodes are invalidated and sent as `js-update`s;
+ * their dev tail self-accepts and calls `serverFnHotUpdate`. EMPTY nodes
+ * (no stub in the browser — a zero-JS page) leave `modules` empty, so #450
+ * reloads: exactly today's behaviour where in-place is impossible. The
+ * files feed the {@link HMR_EVENT} broadcast, for pages the graph cannot
+ * speak for.
+ *
+ * Structural over the two graphs on purpose: only `getModulesByFile`,
+ * `file` and `importers` are read, and a dev server without an `ssr`
+ * environment simply has no walk to make.
+ */
+export function stubModulesBehind(
+    file: string,
+    server: {
+        environments?: {
+            ssr?: { moduleGraph?: { getModulesByFile(f: string): Set<EnvironmentModuleNode> | undefined } };
+        };
+    },
+    clientGraph: { getModulesByFile(f: string): Set<EnvironmentModuleNode> | undefined },
+    isStubSource: (f: string) => boolean
+): { files: string[]; modules: EnvironmentModuleNode[] } | undefined {
+    const start = server.environments?.ssr?.moduleGraph?.getModulesByFile(file);
+    if (!start || start.size === 0) return undefined;
+    const seen = new Set<EnvironmentModuleNode>();
+    const terminals = new Set<string>();
+    const stack = [...start];
+    while (stack.length > 0) {
+        const mod = stack.pop()!;
+        if (seen.has(mod)) continue;
+        seen.add(mod);
+        if (mod.file && isStubSource(mod.file)) {
+            terminals.add(mod.file);
+            continue;
+        }
+        if (mod.importers.size === 0) return undefined;
+        for (const importer of mod.importers) stack.push(importer);
+    }
+    const modules: EnvironmentModuleNode[] = [];
+    for (const terminal of terminals) {
+        for (const mod of clientGraph.getModulesByFile(terminal) ?? []) modules.push(mod);
+    }
+    return { files: [...terminals].map((f) => normalizePath(f)).sort(), modules };
+}
+
 export function sigxServer(options: SigxServerOptions = {}): Plugin {
     const filter = createFilter(options.include ?? DEFAULT_INCLUDE, options.exclude ?? DEFAULT_EXCLUDE);
     /** Everything the dev endpoint forwards — minus the registry fields the plugin owns. */
@@ -280,6 +429,8 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
     const role = options.role ?? 'auto';
 
     let root = process.cwd();
+    /** `config.base`, for the injected page listener's URL. */
+    let viteBase = '/';
     let isServe = false;
     let bundledServerBuild = false;
     /** The dev server, for the hotUpdate serverApp re-load (§3.4). */
@@ -292,6 +443,33 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
     const pkgCache = new Map<string, PackageProbe>();
     /** Files already warned about a defaulted `matchesServerFn` base (#563). */
     const warnedBase = new Set<string>();
+    /** Is FILE a server module or an inline carrier — a stub source? */
+    const isStubSource = (f: string): boolean => filter(f) || inline.has(normalizePath(f));
+    /**
+     * The #716 cross-plugin seam: `sigx()`'s #450 hook asks this before it
+     * full-reloads a server-only edit — every `@sigx/vite` plugin is
+     * `enforce: 'pre'`, so config order decides which `hotUpdate` runs first,
+     * and a reload sent first cannot be taken back. Answered by the same
+     * walk our own hook makes, so both orders route the edit identically.
+     */
+    const hotStubModulesBehind = (
+        file: string,
+        server: Parameters<typeof stubModulesBehind>[1] & {
+            environments?: { client?: { hot?: { send(payload: unknown): void } } };
+        },
+        clientGraph: Parameters<typeof stubModulesBehind>[2]
+    ): EnvironmentModuleNode[] | undefined => {
+        const routed = stubModulesBehind(file, server, clientGraph, isStubSource);
+        if (!routed) return undefined;
+        announce(server.environments?.client?.hot, routed.files);
+        return routed.modules;
+    };
+    /** Broadcast {@link HMR_EVENT} to every connected page. */
+    const announce = (hot: { send(payload: unknown): void } | undefined, files: string[]): void => {
+        if (files.length === 0) return;
+        const data: ServerFnUpdateData = { files };
+        hot?.send({ type: 'custom', event: HMR_EVENT, data });
+    };
 
     const relPath = (file: string): string => path.relative(root, file).replace(/\\/g, '/');
     const extractOptions = (file: string): ServerFnExtractOptions => ({
@@ -478,12 +656,16 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
         // build with no server in it, so an adapter (which shapes the server
         // build) cannot apply. The error lands with `adapter`; the seam
         // lands with `role` (here).
-        api: { role, base, endpoint, resolveServerFn },
+        api: { role, base, endpoint, resolveServerFn, hotStubModulesBehind },
 
         configResolved(config) {
             // #512: the spelling the module graph will use, so discovery keys
             // and transform ids agree under a symlinked root.
             root = resolveRoot(config);
+            // Vite resolves `base` with a trailing slash; normalize anyway (a
+            // test's bare config, a hand-built one) — `mountPrefix` is the same
+            // one-slash guarantee the mount path gets.
+            viteBase = mountPrefix(config.base ?? '/');
             isServe = config.command === 'serve';
             // The sigx plugin's adapter seam (mirror of our api.role): in a
             // BUNDLED server build the registry inlines into the one worker
@@ -500,9 +682,27 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
 
         resolveId(id) {
             if (id === VIRTUAL_ID) return RESOLVED_VIRTUAL_ID;
+            if (id === HMR_PAGE_VIRTUAL_ID) return RESOLVED_HMR_PAGE_VIRTUAL_ID;
+        },
+
+        /**
+         * Inject the page listener into every dev document (#716). Dev only,
+         * and only where there is a server to hear from: a `role: 'client'`
+         * build's functions live on a remote backend no edit here touches.
+         */
+        transformIndexHtml() {
+            if (!isServe || role === 'client') return;
+            return [
+                {
+                    tag: 'script',
+                    attrs: { type: 'module', src: `${viteBase}@id/__x00__${HMR_PAGE_VIRTUAL_ID}` },
+                    injectTo: 'head'
+                }
+            ];
         },
 
         load(id) {
+            if (id === RESOLVED_HMR_PAGE_VIRTUAL_ID) return pageListenerCode();
             if (id !== RESOLVED_VIRTUAL_ID) return;
             // Server environments only (the `virtual:sigx-app` posture): a
             // client import would yield a registry of dynamic imports of the
@@ -651,7 +851,15 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
                     // (server body included) reach the browser — last good
                     // client output, else a loud refusal.
                     if (isClientOut(this)) {
-                        const cached = inline.get(clean)?.clientModule;
+                        const last = inline.get(clean);
+                        // The last good output keeps its dev tail (#716): the
+                        // page must still self-accept and claim the broadcast
+                        // for the fix that follows the typo, or that edit is
+                        // the one that reloads it.
+                        const cached =
+                            last?.clientModule !== undefined && isServe
+                                ? last.clientModule + devHotTail(clean, last.fns)
+                                : last?.clientModule;
                         return {
                             code:
                                 cached ??
@@ -678,8 +886,15 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
                     this.warn(`[sigx:server] ${relPath(clean)}: ${warning}`);
                 }
                 if (extraction.fns.length === 0) return null;
-                const out = isClientOut(this) ? extraction.clientModule : extraction.ssrModule;
-                return out ? { code: out, map: null } : null;
+                if (isClientOut(this)) {
+                    const out = extraction.clientModule;
+                    if (!out) return null;
+                    // The dev tail rides the RETURNED code only — the cached
+                    // `clientModule` (the mid-edit fallback above) stays as
+                    // extracted, and build output is untouched.
+                    return { code: isServe ? out + devHotTail(clean, extraction.fns) : out, map: null };
+                }
+                return extraction.ssrModule ? { code: extraction.ssrModule, map: null } : null;
             }
             // Rolldown can run the transform more than once per module (scan
             // + build phases), the later pass over our OWN stub output —
@@ -731,16 +946,21 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
                 // NEVER serve the real module to the browser — on a failed
                 // extraction (mid-edit syntax error) fall back to the last
                 // good stub, and failing that, to a loud refusal.
-                const stub = (extraction ?? extractions.get(clean))?.stubModule;
-                return {
-                    code:
-                        stub ??
-                        `throw new Error(${JSON.stringify(
+                const good = extraction ?? extractions.get(clean);
+                const stub = good?.stubModule;
+                if (stub === undefined) {
+                    return {
+                        code: `throw new Error(${JSON.stringify(
                             `[sigx:server] could not extract ${relPath(clean)} (syntax error?) — ` +
                             `refusing to serve the server module to the browser.`
                         )});`,
-                    map: null
-                };
+                        map: null
+                    };
+                }
+                // Serve only: the self-accepting HMR tail (#716). Appended to
+                // the returned code, never stored in the extraction, so build
+                // output is unchanged.
+                return { code: isServe ? stub + devHotTail(clean, good!.fns) : stub, map: null };
             }
             // SSR/server environments keep the REAL module — plus appended
             // `__sigxKey` stamps, so the wrapper carries the same stable key
@@ -754,7 +974,7 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
             return null;
         },
 
-        async hotUpdate({ type, file, read }) {
+        async hotUpdate({ type, file, read, modules, server }) {
             const key = normalizePath(file);
             if (filter(file)) {
                 if (type === 'delete') extractions.delete(key);
@@ -764,8 +984,27 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
             } else {
                 const code = await read();
                 // Re-extract when the file is (or was) an inline carrier.
-                if (!inline.has(key) && !inlineCandidate(file, code)) return;
+                if (!inline.has(key) && !inlineCandidate(file, code)) {
+                    // Not a stub source. A server-ONLY module (absent from
+                    // the client graph) that only server functions depend on
+                    // is still this plugin's edit to route (#716): the SSR
+                    // side is already invalidated, and the stubs in the
+                    // browser are what need to hear about it. (When `sigx()`
+                    // runs first it has already asked `api.hotStubModulesBehind`
+                    // and returned the same modules — then `modules` is
+                    // non-empty here and this is a no-op.)
+                    return this.environment.name === 'client' && modules.length === 0
+                        ? hotStubModulesBehind(file, server, this.environment.moduleGraph)
+                        : undefined;
+                }
                 extractInlineInto(file, code);
+            }
+            // A stub source itself changed: Vite's own HMR carries the
+            // `js-update` to pages holding its stub; the broadcast reaches
+            // the pages that do not (#716). Client environment only — its
+            // channel is the one the browser hears.
+            if (this.environment.name === 'client' && type !== 'delete') {
+                announce(this.environment.hot, [key]);
             }
             const mod = this.environment.moduleGraph.getModuleById(RESOLVED_VIRTUAL_ID);
             if (mod) this.environment.moduleGraph.invalidateModule(mod);

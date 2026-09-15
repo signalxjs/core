@@ -74,6 +74,20 @@ function unregisterMounted(key: string, run: (force: boolean) => void): void {
 }
 
 /**
+ * The canonical keys with at least one MOUNTED `useData` cell — the live
+ * readers, as opposed to `restoredKeys()` (`restore.ts`), which lists what
+ * the SSR blob holds whether or not anything reads it. The distinction is
+ * what a caller deciding "refresh in place, or reload?" needs (#716): the
+ * blob carries keys on resume/islands pages that have no live cell at all,
+ * so `invalidateKeys`'s touched count cannot answer that question.
+ *
+ * @internal
+ */
+export function mountedKeys(): IterableIterator<string> {
+    return mountedByKey.keys();
+}
+
+/**
  * Refresh every mounted `useData` cell whose canonical key matches any of
  * `patterns`, and drop the matching entries from the SSR transfer blob.
  *

@@ -92,7 +92,7 @@ export { peekRestored, invalidateRestored, writeBack, reviveFromServer, restored
 // Key-addressable refresh of mounted useData cells (#484) — what an engine
 // pack's `invalidate(pattern)` delegates to, and the canonical meaning of an
 // `invalidates` declaration.
-export { invalidateKeys } from './async/cell.js';
+export { invalidateKeys, mountedKeys } from './async/cell.js';
 export { preparePattern, keyMatches, type PatternMatcher } from './async/key-match.js';
 export { canonicalKeyJson } from './async/key.js';
 // Live-client declaration (for non-web platform-identity modules — lynx/terminal;

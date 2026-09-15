@@ -84,8 +84,11 @@ export default [
     // two-pass key bucketing that keeps a handler-shaped key out of both the
     // handler group and the plain map (returning it twice from `ownKeys`
     // throws on any spread). @sigx/server-renderer drops 13.67 → 13.51 KB for
-    // the same move.
-    limit: '14.3 KB',
+    // the same move. 14.3 → 14.35 KB with #716: `mountedKeys()` on
+    // /internals (~10 B), the live-reader query the dev server-function HMR
+    // helper decides in-place-vs-reload on — the blob's key list cannot
+    // answer it. Sat at exactly the limit before.
+    limit: '14.35 KB',
     // Not redundant: the fixture's imports are relative, but the dist files
     // themselves import @sigx/reactivity as bare specifiers.
     ignore: ['@sigx/*'],

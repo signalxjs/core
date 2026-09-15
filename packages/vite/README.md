@@ -74,6 +74,9 @@ sigx({
   // full-reload for server-only pages: a zero-JS / resumable route never
   // loads its components in the browser, so an edit has no client HMR
   // boundary — the plugin reloads the page instead so the change shows.
+  // (A server-only module that only server FUNCTIONS depend on is the
+  // exception: with sigxServer() installed it refreshes in place — see
+  // "Dev HMR — what refreshes in place".)
   hmr: true,
 
   // Port for Vite's HMR websocket. Only relevant in middleware mode (the
@@ -231,6 +234,39 @@ imports used only inside extracted bodies**, so a server-only dependency never
 loads in the browser (dev included — there is no tree-shaking there). Captured
 free variables are a hard build error: the rule is imports-only, and the message
 tells you to pass the value as an argument.
+
+### Dev HMR — what refreshes in place
+
+The backend half of a server function is live in `vite dev` by construction:
+every call resolves its module through the SSR module runner at request
+time, so the next RPC after a save runs the new body — no restart. Since
+#716 the **browser half** is live too:
+
+| You save… | An open page that reads it (`useData(fn)`) | An open page that does not |
+|---|---|---|
+| a `*.server.ts` module, or an inline `serverFn` carrier | refetches the affected `useData` cells in place — no reload, client state kept; the old stubs it holds send the **new** version tag, so nothing 409s | reloads, unless it never loaded the stub and has nothing to show for it |
+| a server-only module they import (`db.ts` behind `api.server.ts`) | same — the edit is routed to the stubs behind it by walking the SSR graph | reloads (the pre-#716 behaviour, the `sigx()` server-only full reload) |
+| a server-only module a **rendered** component imports too | reloads — the document may have changed | reloads |
+
+Mechanically: every client stub module self-accepts in dev and, when Vite
+re-evaluates it, hands its function keys to `serverFnHotUpdate`
+(`@sigx/vite/hmr`), which sweeps the SSR data blob and refreshes every
+mounted cell on those keys — through the `@sigx/cache` seam when that pack
+is installed, so its entries drop too. A page with **no live reader** for the
+keys hands the update back to Vite (`import.meta.hot.invalidate()`): an
+accepting component module re-runs, a non-accepting importer (a resume
+handler chunk) means the full reload the page got before. And because
+Vite's module graph is per *server* while its HMR reaches only pages that
+hold the module, the plugin also broadcasts `sigx:server-fn-update` to every
+connected page; a small listener it injects into each dev document reloads
+unless a loaded stub for the changed source claims the event.
+
+Known limits, on purpose: server-rendered HTML that used a function with no
+live reader on the page (static islands content, an in-process call in the
+SSR entry) stays until a reload; a `serverApp` middleware edit keeps the full
+reload (the server side re-evaluates either way); and module-level state in
+a server module (`let votes = 3`) resets when the module re-evaluates —
+exactly as a restart would.
 
 ### Extraction outside Vite — `@sigx/vite/server-extract`
 

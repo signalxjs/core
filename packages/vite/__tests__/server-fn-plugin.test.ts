@@ -10,7 +10,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { sigxServer } from '../src/server-fn';
+import { sigxServer, stubModulesBehind } from '../src/server-fn';
 
 const CART = `
 import { serverFn } from '@sigx/server';
@@ -647,7 +647,8 @@ describe('sigxServer — rev 2: role, endpoint, stable keys, scan (#320)', () =>
             role: 'auto',
             base: '/_sigx/fn',
             endpoint: '/_sigx/fn',
-            resolveServerFn: expect.any(Function)
+            resolveServerFn: expect.any(Function),
+            hotStubModulesBehind: expect.any(Function)
         });
         const client = sigxServer({
             role: 'client',
@@ -658,7 +659,8 @@ describe('sigxServer — rev 2: role, endpoint, stable keys, scan (#320)', () =>
             role: 'client',
             base: '/rpc',
             endpoint: 'https://api.example.com/rpc',
-            resolveServerFn: expect.any(Function)
+            resolveServerFn: expect.any(Function),
+            hotStubModulesBehind: expect.any(Function)
         });
     });
 
@@ -1256,6 +1258,334 @@ const search = serverFn({ handler: async ({ input: q }: { input: string }) => q 
                     { type: 'update', file, read: async () => INLINE }
                 )
             ).resolves.toBeUndefined();
+        } finally {
+            rmSync(root, { recursive: true, force: true });
+        }
+    });
+});
+
+describe('sigxServer — dev HMR: self-accepting stubs + server-only dependency routing (#716)', () => {
+    const STREAMS_ONLY = `
+import { serverStream } from '@sigx/server';
+export const ticks = serverStream({ handler: async function* () { yield 1; } });
+`;
+    const INLINE = `
+import { serverFn } from '@sigx/server';
+const search = serverFn({ handler: async ({ input: q }: { input: string }) => q });
+export const Search = () => search('x');
+`;
+    const clientCtx = { environment: { name: 'client' }, warn: () => {} };
+    const ssrCtx = { environment: { name: 'ssr' }, warn: () => {} };
+    /** The tail's fixed shape: self-accept, helper on re-evaluation only. */
+    const TAIL_RE =
+        /if \(import\.meta\.hot\) \{\n\s+import\.meta\.hot\.accept\(\);\n\s+import\.meta\.hot\.on\("sigx:server-fn-update", \(d\) => \{ if \(d\.files\.includes\(("[^"]+")\)\) d\.claimed = true; \}\);\n\s+if \(import\.meta\.hot\.data\.sigxServerFn\) \{\n\s+import\('@sigx\/vite\/hmr'\)\.then\(\(m\) => m\.serverFnHotUpdate\(import\.meta\.hot, (\[[^\]]*\])\)\);\n\s+\}\n\s+import\.meta\.hot\.data\.sigxServerFn = true;\n\}/;
+
+    it('in serve, the client stub module ends with a self-accepting tail carrying its data keys', () => {
+        const { plugin, root } = makeProject({ 'src/cart.server.ts': CART }, 'serve');
+        try {
+            const result = plugin.transform.call(clientCtx, CART, join(root, 'src/cart.server.ts'));
+            const match = TAIL_RE.exec(result.code);
+            expect(match).not.toBeNull();
+            expect(JSON.parse(match![2])).toEqual(['src/cart.server.ts/addToCart']);
+            // The claim names the stub source by the same normalized absolute
+            // path the broadcast carries.
+            expect(JSON.parse(match![1])).toBe(join(root, 'src/cart.server.ts').replace(/\\/g, '/'));
+            // The echo guard still keys on the first line — the tail is appended.
+            expect(result.code.startsWith('import { __serverFnStub')).toBe(true);
+            // The cached extraction is untouched: the tail rides the RETURNED
+            // code only (build output and the mid-edit fallback stay as extracted).
+            expect(result.code.endsWith(match![0] + '\n')).toBe(true);
+        } finally {
+            rmSync(root, { recursive: true, force: true });
+        }
+    });
+
+    it('a stream-only module still self-accepts, with no data keys (streams are not useData targets)', () => {
+        const { plugin, root } = makeProject({ 'src/live.server.ts': STREAMS_ONLY }, 'serve');
+        try {
+            const result = plugin.transform.call(clientCtx, STREAMS_ONLY, join(root, 'src/live.server.ts'));
+            const match = TAIL_RE.exec(result.code);
+            expect(match).not.toBeNull();
+            expect(JSON.parse(match![2])).toEqual([]);
+        } finally {
+            rmSync(root, { recursive: true, force: true });
+        }
+    });
+
+    it('an inline carrier\'s client module carries the tail with its keys, in serve', () => {
+        const { plugin, root } = makeProject({ 'src/Search.tsx': INLINE }, 'serve');
+        try {
+            const result = plugin.transform.call(clientCtx, INLINE, join(root, 'src/Search.tsx'));
+            const match = TAIL_RE.exec(result.code);
+            expect(match).not.toBeNull();
+            expect(JSON.parse(match![2])).toEqual(['src/Search.tsx/search']);
+
+            // The mid-edit fallback (a syntax error after a good pass) serves
+            // the LAST GOOD client module — still tailed: the page must keep
+            // self-accepting and claiming the broadcast, or the fix that
+            // follows the typo is the edit that reloads it.
+            const fallback = plugin.transform.call(clientCtx, INLINE + '\nconst oops = {', join(root, 'src/Search.tsx'));
+            expect(fallback.code).toContain('__serverFnStub');
+            const again = TAIL_RE.exec(fallback.code);
+            expect(again).not.toBeNull();
+            expect(JSON.parse(again![2])).toEqual(['src/Search.tsx/search']);
+            // …and appended once, not accumulated across fallbacks.
+            expect(fallback.code.match(/import\.meta\.hot\.accept\(\)/g)).toHaveLength(1);
+        } finally {
+            rmSync(root, { recursive: true, force: true });
+        }
+    });
+
+    it('no tail in a build, and none in the SSR environment — the server keeps the real module', () => {
+        const built = makeProject({ 'src/cart.server.ts': CART, 'src/Search.tsx': INLINE }, 'build');
+        const served = makeProject({ 'src/cart.server.ts': CART, 'src/Search.tsx': INLINE }, 'serve');
+        try {
+            for (const [ctx, project] of [
+                [clientCtx, built],
+                [ssrCtx, built],
+                [ssrCtx, served]
+            ] as const) {
+                const stub = project.plugin.transform.call(ctx, CART, join(project.root, 'src/cart.server.ts'));
+                expect(stub?.code ?? '').not.toContain('import.meta.hot');
+                const carrier = project.plugin.transform.call(ctx, INLINE, join(project.root, 'src/Search.tsx'));
+                expect(carrier?.code ?? '').not.toContain('import.meta.hot');
+            }
+        } finally {
+            rmSync(built.root, { recursive: true, force: true });
+            rmSync(served.root, { recursive: true, force: true });
+        }
+    });
+
+    // --- the page listener -----------------------------------------------------
+
+    it('injects the page-listener virtual into every dev document, and serves it', () => {
+        const { plugin, root } = makeProject({ 'src/cart.server.ts': CART }, 'serve');
+        try {
+            expect(plugin.transformIndexHtml.call({}, '<html></html>', {})).toEqual([
+                {
+                    tag: 'script',
+                    attrs: { type: 'module', src: '/@id/__x00__virtual:sigx-server-fn-hmr' },
+                    injectTo: 'head'
+                }
+            ]);
+            const id = plugin.resolveId('virtual:sigx-server-fn-hmr');
+            expect(id).toBe('\0virtual:sigx-server-fn-hmr');
+            const code = plugin.load.call({ environment: { name: 'client' } }, id);
+            // Reload unless a loaded stub module claimed the event — after a
+            // macrotask, so every stub listener has had its turn.
+            expect(code).toContain('import.meta.hot.on("sigx:server-fn-update"');
+            expect(code).toContain('setTimeout(() => { if (!d.claimed) location.reload(); }, 0)');
+        } finally {
+            rmSync(root, { recursive: true, force: true });
+        }
+    });
+
+    it('the listener URL honours a configured base, with or without its trailing slash', () => {
+        for (const base of ['/app', '/app/']) {
+            const root = mkdtempSync(join(tmpdir(), 'sigx-server-fn-'));
+            try {
+                const plugin = sigxServer({ requireAuthorization: false }) as any;
+                plugin.configResolved({ root, command: 'serve', base });
+                expect(plugin.transformIndexHtml.call({}, '<html></html>', {})[0].attrs.src).toBe(
+                    '/app/@id/__x00__virtual:sigx-server-fn-hmr'
+                );
+            } finally {
+                rmSync(root, { recursive: true, force: true });
+            }
+        }
+    });
+
+    it('no page listener in a build, nor under role: "client" (no server to hear from)', () => {
+        const built = makeProject({ 'src/cart.server.ts': CART }, 'build');
+        const remote = makeProject({ 'src/cart.server.ts': CART }, 'serve', { role: 'client' });
+        try {
+            expect(built.plugin.transformIndexHtml.call({}, '<html></html>', {})).toBeUndefined();
+            expect(remote.plugin.transformIndexHtml.call({}, '<html></html>', {})).toBeUndefined();
+        } finally {
+            rmSync(built.root, { recursive: true, force: true });
+            rmSync(remote.root, { recursive: true, force: true });
+        }
+    });
+
+    // --- the SSR-graph walk ---------------------------------------------------
+
+    type Node = { file: string | null; importers: Set<Node> };
+    const node = (file: string | null): Node => ({ file, importers: new Set() });
+    const imports = (importer: Node, imported: Node): void => { imported.importers.add(importer); };
+    const graphOf = (nodes: Node[]) => ({
+        getModulesByFile: (f: string) => {
+            const hits = new Set(nodes.filter((n) => n.file === f));
+            return hits.size ? hits : undefined;
+        }
+    });
+    const isStubSource = (f: string): boolean => /\.server\.ts$/.test(f) || f.endsWith('Search.tsx');
+
+    it('a dependency reached only through server modules resolves to their client stub modules', () => {
+        // db.ts ← repo.ts ← cart.server.ts (terminal); db.ts ← inventory.server.ts (terminal)
+        const db = node('/app/src/db.ts');
+        const repo = node('/app/src/repo.ts');
+        const cart = node('/app/src/cart.server.ts');
+        const inventory = node('/app/src/inventory.server.ts');
+        imports(repo, db);
+        imports(cart, repo);
+        imports(inventory, db);
+        // The SSR root above the terminal must NOT be consulted: the walk stops
+        // at the server module even though entry-server.tsx imports it.
+        const entry = node('/app/src/entry-server.tsx');
+        imports(entry, cart);
+        const ssr = graphOf([db, repo, cart, inventory, entry]);
+        const cartStub = node('/app/src/cart.server.ts');
+        const cartStubQuery = node('/app/src/cart.server.ts');
+        const client = graphOf([cartStub, cartStubQuery]); // inventory's stub never loaded
+
+        const out = stubModulesBehind('/app/src/db.ts', { environments: { ssr: { moduleGraph: ssr } } } as any, client as any, isStubSource);
+        expect(out).toEqual({
+            files: ['/app/src/cart.server.ts', '/app/src/inventory.server.ts'],
+            modules: [cartStub, cartStubQuery]
+        });
+    });
+
+    it('a dependency that also feeds a rendered SSR root is left to the #450 full reload (undefined)', () => {
+        const db = node('/app/src/db.ts');
+        const cart = node('/app/src/cart.server.ts');
+        const page = node('/app/src/Page.tsx'); // server-rendered, not a stub source
+        const entry = node('/app/src/entry-server.tsx');
+        imports(cart, db);
+        imports(page, db);
+        imports(entry, page);
+        const ssr = graphOf([db, cart, page, entry]);
+        const client = graphOf([node('/app/src/cart.server.ts')]);
+
+        expect(stubModulesBehind('/app/src/db.ts', { environments: { ssr: { moduleGraph: ssr } } } as any, client as any, isStubSource)).toBeUndefined();
+    });
+
+    it('a dependency that is itself an SSR root (nothing imports it) is undefined too', () => {
+        const orphan = node('/app/src/orphan.ts');
+        const ssr = graphOf([orphan]);
+        expect(stubModulesBehind('/app/src/orphan.ts', { environments: { ssr: { moduleGraph: ssr } } } as any, graphOf([]) as any, isStubSource)).toBeUndefined();
+    });
+
+    it('a server module whose stub never loaded in the browser yields [] — #450 reloads the zero-JS page', () => {
+        const cart = node('/app/src/cart.server.ts');
+        const entry = node('/app/src/entry-server.tsx');
+        imports(entry, cart);
+        const ssr = graphOf([cart, entry]);
+        expect(stubModulesBehind('/app/src/cart.server.ts', { environments: { ssr: { moduleGraph: ssr } } } as any, graphOf([]) as any, isStubSource)).toEqual({
+            files: ['/app/src/cart.server.ts'],
+            modules: []
+        });
+    });
+
+    it('an inline carrier is a terminal like a server module', () => {
+        const db = node('/app/src/db.ts');
+        const search = node('/app/src/Search.tsx');
+        imports(search, db);
+        const ssr = graphOf([db, search]);
+        const searchClient = node('/app/src/Search.tsx');
+        expect(stubModulesBehind('/app/src/db.ts', { environments: { ssr: { moduleGraph: ssr } } } as any, graphOf([searchClient]) as any, isStubSource)).toEqual({
+            files: ['/app/src/Search.tsx'],
+            modules: [searchClient]
+        });
+    });
+
+    it('no SSR environment, or a file the SSR graph does not know: nothing to route', () => {
+        expect(stubModulesBehind('/app/src/db.ts', {} as any, graphOf([]) as any, isStubSource)).toBeUndefined();
+        expect(stubModulesBehind('/app/src/db.ts', { environments: { ssr: { moduleGraph: graphOf([]) } } } as any, graphOf([]) as any, isStubSource)).toBeUndefined();
+    });
+
+    it('a cycle in the SSR graph terminates', () => {
+        const a = node('/app/src/a.ts');
+        const b = node('/app/src/b.ts');
+        const cart = node('/app/src/cart.server.ts');
+        imports(a, b);
+        imports(b, a);
+        imports(cart, a);
+        const ssr = graphOf([a, b, cart]);
+        const stub = node('/app/src/cart.server.ts');
+        expect(stubModulesBehind('/app/src/a.ts', { environments: { ssr: { moduleGraph: ssr } } } as any, graphOf([stub]) as any, isStubSource)).toEqual({
+            files: ['/app/src/cart.server.ts'],
+            modules: [stub]
+        });
+    });
+
+    // --- wired through the hook ---------------------------------------------
+
+    it('hotUpdate (client env, file absent from the client graph) returns the stub modules behind a server-only edit', async () => {
+        const { plugin, root } = makeProject(
+            { 'src/cart.server.ts': CART, 'src/db.ts': 'export const db = { cart: { add: async (id: string) => id } };' },
+            'serve'
+        );
+        try {
+            const dbFile = join(root, 'src/db.ts');
+            const cartFile = join(root, 'src/cart.server.ts');
+            const db = node(dbFile);
+            const cart = node(cartFile);
+            imports(cart, db);
+            const stub = node(cartFile);
+            const clientGraph = { ...graphOf([stub]), getModuleById: () => undefined, invalidateModule: () => {} };
+            const sent: unknown[] = [];
+            const hot = { send: (payload: unknown) => sent.push(payload) };
+            const ctx = { environment: { name: 'client', moduleGraph: clientGraph, hot } };
+            const server = { environments: { ssr: { moduleGraph: graphOf([db, cart]) }, client: { hot } } };
+            const out = await plugin.hotUpdate.call(ctx, {
+                type: 'update',
+                file: dbFile,
+                read: async () => readFileSync(dbFile, 'utf-8'),
+                modules: [],
+                server
+            });
+            expect(out).toEqual([stub]);
+            // …and every connected page hears which stub sources changed, so
+            // one holding no such stub can reload itself (the graph is per
+            // server, not per page).
+            const cartNorm = cartFile.replace(/\\/g, '/');
+            expect(sent).toEqual([
+                { type: 'custom', event: 'sigx:server-fn-update', data: { files: [cartNorm] } }
+            ]);
+            sent.length = 0;
+
+            // A direct edit of the stub source broadcasts too (Vite's own
+            // js-update carries the module; the event carries the news).
+            await plugin.hotUpdate.call(ctx, {
+                type: 'update',
+                file: cartFile,
+                read: async () => CART,
+                modules: [stub],
+                server
+            });
+            expect(sent).toEqual([
+                { type: 'custom', event: 'sigx:server-fn-update', data: { files: [cartNorm] } }
+            ]);
+            sent.length = 0;
+            // A delete announces nothing — there is no stub to refetch through.
+            await plugin.hotUpdate.call(ctx, { type: 'delete', file: cartFile, read: async () => '', modules: [], server });
+            expect(sent).toEqual([]);
+
+            // In the client graph already (`modules` non-empty): Vite's own HMR
+            // owns it — the walk is not made.
+            const own = await plugin.hotUpdate.call(ctx, {
+                type: 'update',
+                file: dbFile,
+                read: async () => readFileSync(dbFile, 'utf-8'),
+                modules: [stub],
+                server
+            });
+            expect(own).toBeUndefined();
+            expect(sent).toEqual([]);
+
+            // The SSR environment's pass never routes anything to the browser.
+            const ssrPass = await plugin.hotUpdate.call(
+                { environment: { name: 'ssr', moduleGraph: clientGraph, hot } },
+                {
+                    type: 'update',
+                    file: dbFile,
+                    read: async () => readFileSync(dbFile, 'utf-8'),
+                    modules: [],
+                    server
+                }
+            );
+            expect(ssrPass).toBeUndefined();
+            expect(sent).toEqual([]);
         } finally {
             rmSync(root, { recursive: true, force: true });
         }

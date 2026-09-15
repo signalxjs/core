@@ -294,7 +294,10 @@ describe('hotUpdate — full-reload for server-only source (#450)', () => {
         inSsrGraph?: boolean;
         noSsrEnv?: boolean;
         pluginOptions?: Parameters<typeof sigxPlugin>[0];
-    }): { sent: unknown[] } {
+        /** What a co-installed `sigx:server` answers for the edit (#716). */
+        serverStubs?: unknown[] | undefined;
+        serverPluginPresent?: boolean;
+    }): { sent: unknown[]; returned: unknown } {
         const sent: unknown[] = [];
         const plugin: any = sigxPlugin(opts.pluginOptions ?? {});
         const ssrModuleGraph = {
@@ -306,8 +309,17 @@ describe('hotUpdate — full-reload for server-only source (#450)', () => {
             hot: { send: (payload: unknown) => sent.push(payload) }
         };
         // noSsrEnv models a dev server with no `ssr` environment.
-        const server = { environments: opts.noSsrEnv ? {} : { ssr: { moduleGraph: ssrModuleGraph } } };
-        plugin.hotUpdate.call({ environment }, {
+        const server = {
+            environments: opts.noSsrEnv ? {} : { ssr: { moduleGraph: ssrModuleGraph } },
+            // The resolved config the hook reads `sigx:server`'s api from
+            // (#716) — the same object `configResolved` would have kept.
+            config: {
+                plugins: opts.serverPluginPresent === false
+                    ? []
+                    : [{ name: 'sigx:server', api: { hotStubModulesBehind: () => opts.serverStubs } }]
+            }
+        };
+        const returned = plugin.hotUpdate.call({ environment }, {
             type: 'update',
             file: opts.file,
             timestamp: 0,
@@ -315,7 +327,7 @@ describe('hotUpdate — full-reload for server-only source (#450)', () => {
             read: () => '',
             server
         });
-        return { sent };
+        return { sent, returned };
     }
 
     it('full-reloads a server-only source module (in SSR graph, absent from the client graph)', () => {
@@ -323,6 +335,44 @@ describe('hotUpdate — full-reload for server-only source (#450)', () => {
             file: '/proj/src/App.tsx',
             clientModules: [],
             inSsrGraph: true
+        });
+        expect(sent).toEqual([{ type: 'full-reload' }]);
+    });
+
+    // #716: a server-only module that only server functions depend on is not
+    // a render change — `sigx:server` answers with the stub modules to
+    // HMR-update, and the hook returns them instead of reloading.
+    it('returns sigx:server\'s stub modules for a server-only edit behind server functions — no reload (#716)', () => {
+        const stub = { id: '/proj/src/api.server.ts' };
+        const { sent, returned } = runHotUpdate({
+            file: '/proj/src/db.ts',
+            clientModules: [],
+            inSsrGraph: true,
+            serverStubs: [stub]
+        });
+        expect(sent).toEqual([]);
+        expect(returned).toEqual([stub]);
+    });
+
+    it('still reloads when sigx:server answers undefined (a rendered root) or [] (no stub loaded — zero-JS page)', () => {
+        for (const serverStubs of [undefined, []]) {
+            const { sent, returned } = runHotUpdate({
+                file: '/proj/src/db.ts',
+                clientModules: [],
+                inSsrGraph: true,
+                serverStubs
+            });
+            expect(sent).toEqual([{ type: 'full-reload' }]);
+            expect(returned).toBeUndefined();
+        }
+    });
+
+    it('reloads as before with no sigx:server plugin installed', () => {
+        const { sent } = runHotUpdate({
+            file: '/proj/src/db.ts',
+            clientModules: [],
+            inSsrGraph: true,
+            serverPluginPresent: false
         });
         expect(sent).toEqual([{ type: 'full-reload' }]);
     });

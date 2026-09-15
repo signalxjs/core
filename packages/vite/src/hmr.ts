@@ -138,6 +138,69 @@ export async function installHMRPlugin(): Promise<void> {
     });
 }
 
+/**
+ * The `__SIGX_SERVERFN_CACHE__` seam at this (calling) end — the same shape
+ * `@sigx/server/client` calls when a response carries `$cache`, and
+ * `@sigx/cache` stamps at install; `docs/seams.md` carries the contract.
+ */
+type ServerFnCacheSeamGlobal = {
+    __SIGX_SERVERFN_CACHE__?: (d: { invalidates?: ReadonlyArray<string | readonly unknown[]> }) => void;
+};
+
+/** The slice of Vite's `ImportMetaHot` a stub module hands us. */
+interface StubHotContext {
+    invalidate(message?: string): void;
+}
+
+/**
+ * A server-function stub module re-evaluated under dev HMR (#716) — the
+ * `*.server.ts` (or inline-carrier) file, or a server-only module behind
+ * it, was edited. `keys` are the module's fn stable keys.
+ *
+ * Called from the tail `@sigx/vite/server` appends to every dev stub
+ * module, on its SECOND and later evaluations only. The backend half is
+ * already live (the dev endpoint `ssrLoadModule`s per request); this is
+ * the browser half: every mounted `useData(fn)` cell on one of these keys
+ * refetches in place, and the SSR blob entries are swept so a later mount
+ * does not restore the stale value.
+ *
+ * Delivered through the same path a server-declared `invalidates` takes —
+ * the cache seam when a pack stamped it (its handler drops the pack's own
+ * entries AND delegates the mounted refresh to `invalidateKeys`), core's
+ * `invalidateKeys` otherwise — so one edit means one refetch per key.
+ *
+ * Then the decision the helper exists for: is anything on this page reading
+ * these keys LIVE? If not — a zero-JS resume page whose handler chunk
+ * imported the stub, server-rendered HTML with no cell, a route that is not
+ * mounted — an in-place refresh changes nothing the user can see, so the
+ * update is handed back to Vite (`hot.invalidate()`) to propagate through
+ * the importers: an accepting component module re-runs, a non-accepting one
+ * means the full reload the page got before #716. The blob sweep above has
+ * already run either way. `mountedKeys()` answers this, not the sweep's
+ * touched count: the blob holds keys nothing reads on exactly those pages.
+ */
+export async function serverFnHotUpdate(hot: StubHotContext, keys: readonly string[]): Promise<void> {
+    if (keys.length === 0) return;
+    const patterns: readonly (readonly string[])[] = keys.map((key) => [key]);
+    const { invalidateKeys, mountedKeys, preparePattern } = await import('sigx/internals');
+    // Decide BEFORE sweeping: a refetch that settles synchronously could
+    // re-register, and the answer must describe the page as the edit found it.
+    const matchers = patterns.map(preparePattern);
+    let live = false;
+    // `sigx` is a "*" peer: a core predating `mountedKeys` cannot say what is
+    // live, and "nothing" is the answer that never leaves a page stale.
+    for (const key of typeof mountedKeys === 'function' ? mountedKeys() : []) {
+        if (matchers.some((m) => m.match(key))) {
+            live = true;
+            break;
+        }
+    }
+    const seam = (globalThis as ServerFnCacheSeamGlobal).__SIGX_SERVERFN_CACHE__;
+    if (seam) seam({ invalidates: patterns });
+    else invalidateKeys(patterns);
+    if (!live) hot.invalidate('[sigx] no mounted reader for a hot-updated server function');
+}
+
 // Auto-install when this module is loaded — the injected BROWSER runtime
 // path (the transform only injects into client transforms). Skipped
 // server-side: the node plugin re-exports from this module, and a
