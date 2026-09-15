@@ -851,7 +851,15 @@ export function sigxServer(options: SigxServerOptions = {}): Plugin {
                     // (server body included) reach the browser — last good
                     // client output, else a loud refusal.
                     if (isClientOut(this)) {
-                        const cached = inline.get(clean)?.clientModule;
+                        const last = inline.get(clean);
+                        // The last good output keeps its dev tail (#716): the
+                        // page must still self-accept and claim the broadcast
+                        // for the fix that follows the typo, or that edit is
+                        // the one that reloads it.
+                        const cached =
+                            last?.clientModule !== undefined && isServe
+                                ? last.clientModule + devHotTail(clean, last.fns)
+                                : last?.clientModule;
                         return {
                             code:
                                 cached ??

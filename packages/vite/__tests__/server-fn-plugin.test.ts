@@ -1319,6 +1319,18 @@ export const Search = () => search('x');
             const match = TAIL_RE.exec(result.code);
             expect(match).not.toBeNull();
             expect(JSON.parse(match![2])).toEqual(['src/Search.tsx/search']);
+
+            // The mid-edit fallback (a syntax error after a good pass) serves
+            // the LAST GOOD client module — still tailed: the page must keep
+            // self-accepting and claiming the broadcast, or the fix that
+            // follows the typo is the edit that reloads it.
+            const fallback = plugin.transform.call(clientCtx, INLINE + '\nconst oops = {', join(root, 'src/Search.tsx'));
+            expect(fallback.code).toContain('__serverFnStub');
+            const again = TAIL_RE.exec(fallback.code);
+            expect(again).not.toBeNull();
+            expect(JSON.parse(again![2])).toEqual(['src/Search.tsx/search']);
+            // …and appended once, not accumulated across fallbacks.
+            expect(fallback.code.match(/import\.meta\.hot\.accept\(\)/g)).toHaveLength(1);
         } finally {
             rmSync(root, { recursive: true, force: true });
         }
