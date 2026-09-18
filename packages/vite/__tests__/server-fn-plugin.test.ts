@@ -1276,9 +1276,48 @@ export const Search = () => search('x');
 `;
     const clientCtx = { environment: { name: 'client' }, warn: () => {} };
     const ssrCtx = { environment: { name: 'ssr' }, warn: () => {} };
-    /** The tail's fixed shape: self-accept, helper on re-evaluation only. */
+    /** The tail's fixed shape: self-accept, helper on re-evaluation only — and
+     *  only when the hot context carries `data` at all (#726). */
     const TAIL_RE =
-        /if \(import\.meta\.hot\) \{\n\s+import\.meta\.hot\.accept\(\);\n\s+import\.meta\.hot\.on\("sigx:server-fn-update", \(d\) => \{ if \(d\.files\.includes\(("[^"]+")\)\) d\.claimed = true; \}\);\n\s+if \(import\.meta\.hot\.data\.sigxServerFn\) \{\n\s+import\('@sigx\/vite\/hmr'\)\.then\(\(m\) => m\.serverFnHotUpdate\(import\.meta\.hot, (\[[^\]]*\])\)\);\n\s+\}\n\s+import\.meta\.hot\.data\.sigxServerFn = true;\n\}/;
+        /if \(import\.meta\.hot\) \{\n\s+import\.meta\.hot\.accept\(\);\n\s+import\.meta\.hot\.on\("sigx:server-fn-update", \(d\) => \{ if \(d\.files\.includes\(("[^"]+")\)\) d\.claimed = true; \}\);\n\s+if \(import\.meta\.hot\.data\) \{\n\s+if \(import\.meta\.hot\.data\.sigxServerFn\) \{\n\s+import\('@sigx\/vite\/hmr'\)\.then\(\(m\) => m\.serverFnHotUpdate\(import\.meta\.hot, (\[[^\]]*\])\)\);\n\s+\}\n\s+import\.meta\.hot\.data\.sigxServerFn = true;\n\s+\}\n\}/;
+
+    /**
+     * Run the tail the way a module runner would, against a given hot
+     * context: `import.meta.hot` → the object, the dynamic import → a spy.
+     */
+    function runTail(tail: string, hot: unknown): { imported: string[] } {
+        const imported: string[] = [];
+        const body = tail.replace(/import\.meta\.hot/g, '__hot').replace(/\bimport\(/g, '__import(');
+        new Function('__hot', '__import', body)(hot, (spec: string) => {
+            imported.push(spec);
+            return Promise.resolve({ serverFnHotUpdate: () => {} });
+        });
+        return { imported };
+    }
+
+    it('the tail survives a hot context without `data` — vitest 4 hands every module one (#726)', () => {
+        const { plugin, root } = makeProject({ 'src/cart.server.ts': CART }, 'serve');
+        try {
+            const result = plugin.transform.call(clientCtx, CART, join(root, 'src/cart.server.ts'));
+            const tail = TAIL_RE.exec(result.code)![0];
+            // Vitest's module runner: accept/on/… present, no `data`. Used to
+            // throw "Cannot read properties of undefined (reading 'sigxServerFn')"
+            // at module evaluation — the stub's importer never got its module.
+            const noData = { accept() {}, on() {} };
+            expect(() => runTail(tail, noData)).not.toThrow();
+            expect(runTail(tail, noData).imported).toEqual([]);
+            // Vite's real client context: first evaluation stamps the flag and
+            // loads nothing; the re-evaluation (an HMR update) loads the helper.
+            const hot = { accept() {}, on() {}, data: {} as Record<string, unknown> };
+            expect(runTail(tail, hot).imported).toEqual([]);
+            expect(hot.data.sigxServerFn).toBe(true);
+            expect(runTail(tail, hot).imported).toEqual(['@sigx/vite/hmr']);
+            // No hot context at all (a production-shaped runner): a no-op.
+            expect(() => runTail(tail, undefined)).not.toThrow();
+        } finally {
+            rmSync(root, { recursive: true, force: true });
+        }
+    });
 
     it('in serve, the client stub module ends with a self-accepting tail carrying its data keys', () => {
         const { plugin, root } = makeProject({ 'src/cart.server.ts': CART }, 'serve');
