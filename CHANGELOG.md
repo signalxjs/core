@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.0.1] — 2026-09-18
+
 ### Fixed
 
 - **`@sigx/vite/server`: the dev client-stub HMR tail no longer crashes under
@@ -2137,7 +2139,8 @@ Initial public release of the SignalX (`sigx`) ecosystem on npm. Six packages pu
 - Node `^20.19.0 || >=22.12.0`
 - `@sigx/vite` peer-depends on `vite >=8.0.0`
 
-[Unreleased]: https://github.com/signalxjs/core/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/signalxjs/core/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/signalxjs/core/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/signalxjs/core/compare/v0.15.6...v1.0.0
 [0.15.6]: https://github.com/signalxjs/core/compare/v0.15.5...v0.15.6
 [0.15.5]: https://github.com/signalxjs/core/compare/v0.15.4...v0.15.5
