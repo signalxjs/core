@@ -82,7 +82,7 @@
     "devDependencies": {
         "@sigx/vite": "workspace:^",
         "typescript": "^7.0.2",
-        "vite": "^8.2.2",
+        "vite": "^8.3.0",
         "esbuild": "^0.28.2"
     },
     "publishConfig": {
