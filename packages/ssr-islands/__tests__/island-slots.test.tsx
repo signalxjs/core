@@ -17,23 +17,26 @@
  *    record, cannot be reconstructed client-side. Pinned as intended.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { component, signal, type Define } from 'sigx';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { component, defineApp, signal, type Define } from 'sigx';
 import { createSSR } from '@sigx/server-renderer';
 import { hydrate } from '../../server-renderer/src/client/hydrate-core';
 import {
+    ssrClientPlugin,
     registerClientPlugin,
     clearClientPlugins,
     cleanupPendingHydrations,
     invalidateMarkerIndex
 } from '@sigx/server-renderer/client';
 import { islandsPlugin } from '../src/plugin';
+import { registerComponent } from '../src/client/registry';
 import '../src/client-directives';
 import {
     createSSRContainer,
     cleanupContainer,
     cleanupScripts,
     parseBoundaryTable,
+    setBoundaryTable,
     nextTick
 } from './test-utils';
 
@@ -126,6 +129,72 @@ describe('islands × slots (#583 area 3)', () => {
             const records = parseBoundaryTable(html);
             expect(records['1'].props).toBeUndefined();
             expect(JSON.stringify(records['1'])).not.toContain('slot-prop fill');
+        });
+
+        it('stamps the record refreshable: false — the snapshot cannot reproduce this render (#709)', async () => {
+            const html = await createSSR({ plugins: [islandsPlugin()] }).render(
+                <>
+                    <SlotIsland client:load label="greeting">
+                        <span class="slotted">from server</span>
+                    </SlotIsland>
+                    <InnerIsland client:load start={1} />
+                </>
+            );
+            const records = parseBoundaryTable(html);
+            expect(records['1'].refreshable).toBe(false);
+            // A props-only island carries no verdict at all.
+            expect(records['2']).not.toHaveProperty('refreshable');
+        });
+
+        it('explicit-mode (record-driven) hydration cannot rebuild the slot content, and dev warns (#709)', async () => {
+            // The islands APP hydrates in boundaries: 'explicit' — no root
+            // walk, every island mounts from its record. That record has
+            // props and nothing structural, so the component renders with
+            // no slot at all: the server-rendered nodes stay in the DOM
+            // unowned (until anything re-renders over them). This is the
+            // hazard `@sigx/vite`'s islands transform now refuses at build
+            // time; the warning is the runtime net for what it cannot see.
+            const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+            const sawSlot: boolean[] = [];
+            const SlotProbe = component<Define.Slot<'default'>>((ctx) => {
+                const n = signal(0);
+                return () => {
+                    sawSlot.push(typeof ctx.slots.default === 'function');
+                    return (
+                        <div class="probe">
+                            <button class="bump" onClick={() => n.value++}>{n.value}</button>
+                            <section class="slot-out">{ctx.slots.default?.()}</section>
+                        </div>
+                    );
+                };
+            }, { name: 'SlotProbe' });
+
+            const html = await createSSR({ plugins: [islandsPlugin()] }).render(
+                <SlotProbe client:load>
+                    <span class="slotted">from server</span>
+                </SlotProbe>
+            );
+            expect(sawSlot).toEqual([true]); // the server render had the slot
+            const records = parseBoundaryTable(html);
+            expect(records['1'].refreshable).toBe(false);
+
+            registerComponent('SlotProbe', SlotProbe as any);
+            container = createSSRContainer(html.slice(0, html.indexOf('<script>')));
+            setBoundaryTable(records);
+            const Root = component(() => () => <div>never walked</div>, { name: 'Root' });
+            const app = defineApp((Root as any)({}));
+            app.use(ssrClientPlugin).use(islandsPlugin());
+            (app as any).hydrate(container);
+            await nextTick();
+
+            // Interactive — but the hydrated render never saw a slot.
+            (container.querySelector('.bump') as HTMLElement).click();
+            await nextTick();
+            expect(container.querySelector('.bump')!.textContent).toBe('1');
+            expect(sawSlot).toEqual([true, false, false]);
+            expect(warn).toHaveBeenCalledWith(expect.stringMatching(
+                /\[Hydrate\] Boundary "SlotProbe" was rendered with usage-site props its record cannot carry/
+            ));
         });
 
         it('hydration keeps the server-rendered slot content — no loss, no duplication', async () => {

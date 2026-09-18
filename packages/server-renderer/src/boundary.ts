@@ -109,7 +109,13 @@ export interface SSRBoundaryRecord {
  * What a plugin's `resolveBoundary` returns. `id` is core-derived (the
  * component-id scheme); `props` defaults to a core-derived snapshot of
  * `vnode.props` — packs override it to strip their directive vocabulary.
+ * `refreshable: false` is the pack's verdict that the snapshot it just
+ * built cannot reproduce this render (the usage site passed children,
+ * slots or render props the snapshot drops) — core copies it onto the
+ * record, and the client hydrator warns in dev when it mounts from such a
+ * record (#709).
  */
 export type ResolvedBoundary = Partial<
-    Pick<SSRBoundary, 'flush' | 'hydrate' | 'media' | 'fallback' | 'chunk' | 'component' | 'props'>
+    Pick<SSRBoundary, 'flush' | 'hydrate' | 'media' | 'fallback' | 'chunk' | 'component' | 'props'> &
+    Pick<SSRBoundaryRecord, 'refreshable'>
 >;

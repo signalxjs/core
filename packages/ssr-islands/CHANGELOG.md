@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- **An island that reads `ctx.slots` is a build error; slot-carrying usage
+  sites stamp `refreshable: false` (#709).** Islands hydrate from their
+  boundary record (serializable props, nothing structural), so a slot
+  consumer rendered its outlet empty on the client and orphaned the
+  server-rendered slot nodes — silently. `@sigx/vite`'s `sigxIslands()`
+  now refuses the module at transform time; `islandsPlugin().resolveBoundary`
+  returns `refreshable: false` when the usage site passed
+  `children`/`slots`/`$models`, and the core hydrator warns in dev when
+  it mounts from such a record. Pass the content as data props, or make
+  the slot-providing parent the island.
+
 ## [0.15.0] - 2026-08-04
 
 ### Added

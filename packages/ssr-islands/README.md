@@ -107,6 +107,17 @@ transfer through their own request-global key in `__SIGX_ASYNC__`, shared and
 deduped across all components. Island state keys cover the rest — per-instance
 state that isn't a fetch result.
 
+**Islands take props, not slots.** An island hydrates from its boundary
+record, which carries serializable props and nothing structural — so an
+island that reads `ctx.slots` would render its outlet empty on the client
+and orphan the server-rendered slot content. `sigxIslands()` refuses such
+a module at build time (`island <Name> reads ctx.slots`). Pass the content
+as data props and render it inside the island, or make the slot-providing
+parent the island; a plain (non-island) component may of course wrap
+islands in its slots. The runtime net: when a usage site hands an island
+`children` anyway, its record is stamped `refreshable: false` and the
+hydrator warns in dev.
+
 See the [docs](https://sigx.dev/server/) for the Vite plugin setup and the full list of hydration strategies.
 
 ## Run the example

@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **`ResolvedBoundary.refreshable` — a pack's `resolveBoundary` may return
+  `refreshable: false` (#709).** Core copies it onto the record, so a pack
+  can stamp the lossy-snapshot verdict where it already splits the props,
+  instead of reaching for the record in a later hook. The client hydrator
+  now warns under `__DEV__` when it mounts a component from a record
+  stamped this way (`[Hydrate] Boundary "<name>" was rendered with
+  usage-site props its record cannot carry …`) — the component is about to
+  render without the children/slots/render props the server render had.
+
 ### Fixed
 
 - **`<link rel="modulepreload">` carries the request's CSP nonce (#702

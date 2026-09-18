@@ -25,12 +25,21 @@
  * component factories are islands, keyed by export name (names must be
  * unique across island files). Default match: `*.island.tsx?` anywhere, or
  * anything under an `islands/` directory.
+ *
+ * One contract check rides the transform (#709): an island that reads
+ * `ctx.slots` is a build error. The islands app hydrates in `boundaries:
+ * 'explicit'` mode — every island mounts from its boundary record, which
+ * carries serializable props and nothing structural — so a slot consumer
+ * would hydrate with an empty outlet and orphan the server-rendered slot
+ * nodes. Same rule, same detector as the resume transform's (rfc-1.0 §4.5:
+ * transform-time problems are build errors).
  */
 
 import type { Plugin } from 'vite';
 import { createFilter } from 'vite';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { findSlotConsumers, offsetToLoc } from './resume-extract.js';
 
 export interface SigxIslandsOptions {
     /**
@@ -180,6 +189,38 @@ export function sigxIslands(options: SigxIslandsOptions = {}): Plugin {
     /** Discovered islands: export name → absolute module path. */
     const islands = new Map<string, string>();
 
+    /**
+     * The #709 violations in an island module, as `this.error` messages —
+     * one per slot-consuming island, all at once (no fix-one-rebuild loop).
+     * Only the module's ISLANDS are judged (`exported` names from
+     * `scanIslandExports`): a non-exported helper component beside them
+     * may consume slots freely, nothing hydrates it from a record. Source
+     * the parser rejects (mid-edit) is not judged either — the stamping
+     * regexes below tolerate it, and the check re-runs on the next
+     * transform.
+     */
+    function slotViolations(code: string, file: string, exported: string[]): string[] {
+        let consumers: ReturnType<typeof findSlotConsumers>;
+        try {
+            consumers = findSlotConsumers(code, file);
+        } catch {
+            return [];
+        }
+        const rel = path.relative(root, file).replace(/\\/g, '/');
+        return consumers
+            .filter((c) => exported.includes(c.exported))
+            .map(({ exported, offset }) => {
+                const { line, column } = offsetToLoc(code, offset);
+                return (
+                    `[sigx:islands] ${rel}:${line}:${column}: island <${exported}> reads ctx.slots — ` +
+                    `an island hydrates from its boundary record (serializable props only), so slotted ` +
+                    `content never reaches the client and the server-rendered slot nodes are orphaned. ` +
+                    `Pass the content as data props and render it inside the island, or make the ` +
+                    `slot-providing parent the island.`
+                );
+            });
+    }
+
     function discover(): void {
         islands.clear();
         for (const file of walkFiles(root)) {
@@ -234,6 +275,8 @@ export function sigxIslands(options: SigxIslandsOptions = {}): Plugin {
             if (!filter(clean)) return null;
             const exports = scanIslandExports(code);
             if (exports.length === 0) return null;
+            const violations = slotViolations(code, clean, exports.map((e) => e.exported));
+            if (violations.length > 0) this.error(violations.join('\n'));
             // Stamp the stable island identity on every exported component
             // factory — referenced via the LOCAL binding (an aliased export's
             // public name is not a local identifier and would throw at module

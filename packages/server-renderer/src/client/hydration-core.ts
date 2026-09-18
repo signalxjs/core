@@ -66,6 +66,21 @@ type PendingCarrier = { __sigxPendingBoundary?: PendingBoundary };
 
 /** Build the mount vnode for a data-driven boundary (props from the table). */
 function recordVNode(component: ComponentFactory, record: SSRBoundaryRecord): VNode {
+    if (__DEV__ && record.refreshable === false) {
+        // The pack stamped this at SSR: the usage site passed children,
+        // slots or render props the record cannot carry, and this vnode —
+        // props from the table, no children — is what the component mounts
+        // from. A `ctx.slots` consumer renders its outlet empty and the
+        // server-rendered slot nodes are orphaned (#709). `@sigx/vite`'s
+        // islands transform refuses such a component at build time; this
+        // is the net for what it cannot see (a slot read through a helper,
+        // a usage site handing children to a component that ignores them).
+        console.warn(
+            `[Hydrate] Boundary "${record.component ?? '?'}" was rendered with usage-site props ` +
+            `its record cannot carry (children, slots, render props) — the hydrated component ` +
+            `sees none of them.`
+        );
+    }
     return markVNode({
         type: component as any,
         props: (reviveFromServer(record.props) as Record<string, unknown>) || {},
