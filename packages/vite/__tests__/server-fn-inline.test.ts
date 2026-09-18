@@ -382,6 +382,21 @@ const sum = serverFn({ handler: async ({ input: items }: { input: number[] }) =>
         expect(result.fns).toHaveLength(1);
     });
 
+    it('an expression-bodied arrow whose body is another arrow does not throw (#717)', () => {
+        // `component(() => () => null)`: the outer arrow's body is the inner
+        // ArrowFunctionExpression, whose `.body` is an expression, not a
+        // statement array — the scope walk used to iterate it and throw.
+        const result = extract(`
+import { serverFn } from '@sigx/server';
+import { component } from 'sigx';
+const search = serverFn({ handler: async ({ input: q }: { input: string }) => q });
+export const Search = component(() => () => null);
+export const Inline = component(() => <div>{search}</div>);
+`);
+        expect(result.errors).toHaveLength(0);
+        expect(result.fns).toHaveLength(1);
+    });
+
     it('namespace-import call sites extract too', () => {
         const code = `
 import * as srv from '@sigx/server';
