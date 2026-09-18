@@ -21,9 +21,12 @@
  *      makes "release tier N, then tier N+1" correct rather than folklore.
  *   5. Every `consumesCore` entry is a real core package.
  *
- * With `--remote` it additionally hits the GitHub API to confirm each repo exists and
- * actually publishes what the manifest claims. Not run in CI (network + rate limits) —
- * use it when editing the manifest by hand.
+ * With `--remote` it additionally hits the GitHub API to confirm each repo exists
+ * UNDER THE NAME THE MANIFEST USES and actually publishes what the manifest claims.
+ * Not run in CI (network + rate limits) — use it when editing the manifest by hand.
+ * The name check matters: GitHub redirects a renamed repo's old slug, so a stale
+ * entry keeps "existing" while every rollout step keyed on it (the tier barrier's
+ * `npm view`, the sibling-bump instructions) points at packages nobody ships (#724).
  */
 
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
@@ -115,6 +118,19 @@ for (const c of consumers) {
 // Optional: confirm the repos exist and ship what we claim.
 if (remote) {
     for (const c of consumers) {
+        try {
+            const fullName = execFileSync('gh', ['api', `repos/signalxjs/${c.repo}`, '--jq', '.full_name'], {
+                encoding: 'utf8',
+                stdio: ['ignore', 'pipe', 'pipe'],
+            }).trim();
+            if (fullName !== `signalxjs/${c.repo}`) {
+                errors.push(`--remote: "${c.repo}" resolves to ${fullName} — the repo was renamed; update the manifest entry (and its publishes) to the new name.`);
+                continue;
+            }
+        } catch {
+            errors.push(`--remote: cannot read signalxjs/${c.repo} (repo missing or gh unauthenticated).`);
+            continue;
+        }
         let dirs;
         try {
             const out = execFileSync(

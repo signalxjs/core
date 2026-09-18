@@ -107,9 +107,10 @@
       "verify": { "unit": "pnpm test", "browser": "examples/game-hud — pnpm dev:hud after pnpm build; the scene renders, WASD moves the ship, the HUD score updates" }
     },
     {
-      "repo": "markdown",
+      "repo": "richtext",
+      "repoNote": "renamed from signalxjs/markdown (the GitHub redirect keeps the old slug resolving — do not trust it, #724)",
       "tier": 1,
-      "publishes": ["@sigx/markdown"],
+      "publishes": ["@sigx/richtext", "@sigx/richtext-markdown", "@sigx/richtext-html", "@sigx/richtext-shiki"],
       "consumesCore": ["@sigx/reactivity", "@sigx/runtime-core", "@sigx/runtime-dom", "@sigx/server-renderer", "@sigx/vite", "sigx"],
       "consumesSiblings": [],
       "catalog": "complete",
@@ -165,7 +166,18 @@
     {
       "repo": "ai",
       "tier": 2,
-      "publishes": ["@sigx/ai", "@sigx/ai-anthropic", "@sigx/ai-openai"],
+      "publishes": [
+        "@sigx/ai",
+        "@sigx/ai-anthropic",
+        "@sigx/ai-openai",
+        "@sigx/ai-agent",
+        "@sigx/ai-agent-acp",
+        "@sigx/ai-agent-node",
+        "@sigx/ai-agent-claude-code",
+        "@sigx/ai-agent-codex-cli",
+        "@sigx/ai-agent-copilot-cli",
+        "@sigx/json-ui"
+      ],
       "consumesCore": [
         "@sigx/reactivity",
         "@sigx/runtime-core",
@@ -176,8 +188,8 @@
         "@sigx/vite",
         "sigx"
       ],
-      "consumesSiblings": ["@sigx/markdown"],
-      "consumesNote": "the packages peer only @sigx/reactivity and @sigx/runtime-core. @sigx/markdown is examples-only — examples/chat renders assistant text through @sigx/markdown/dom (signalxjs/ai#32); the published packages do not depend on it. @sigx/serialize and @sigx/server are examples-only too. Hence the tier, not just the pins.",
+      "consumesSiblings": ["@sigx/richtext", "@sigx/richtext-markdown"],
+      "consumesNote": "the packages peer only @sigx/reactivity and @sigx/runtime-core. @sigx/richtext + @sigx/richtext-markdown are examples-only — examples/chat renders assistant text through them (signalxjs/ai#32); the published packages do not depend on them. @sigx/serialize and @sigx/server are examples-only too. Hence the tier, not just the pins.",
       "catalog": "complete",
       "unpublished": true,
       "verify": { "unit": "pnpm test", "browser": "examples/chat — pnpm --filter chat-example dev with the mock model" }
@@ -199,7 +211,7 @@
       "publishesNote": "60+ @sigx/lynx-* packages ship from this repo, all lockstep-versioned; only the roots are listed. check-ecosystem.mjs treats `publishes` as a subset check for this repo.",
       "publishesIsSubset": true,
       "consumesCore": ["@sigx/reactivity", "@sigx/runtime-core"],
-      "consumesSiblings": ["@sigx/cli", "@sigx/terminal", "@sigx/markdown"],
+      "consumesSiblings": ["@sigx/cli", "@sigx/terminal", "@sigx/richtext", "@sigx/richtext-markdown"],
       "catalog": "complete",
       "verify": { "unit": "pnpm test", "browser": null, "manual": "native (iOS/Android) — no browser surface" }
     },
