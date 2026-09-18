@@ -425,6 +425,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- **`@sigx/vite/server`: inline extraction no longer throws on an
+  expression-bodied arrow whose body is another arrow (#717).** A
+  non-`*.server.ts` module with a module-scope `serverFn` and a
+  `component(() => () => null)` crashed the scope walk
+  (`TypeError: object is not iterable`): the outer arrow's body is the
+  inner `ArrowFunctionExpression`, whose `body` is an expression, not a
+  statement list. In dev the transform logged `inline extraction failed`
+  and served the last good client module (or a throwing one); in a build
+  it failed outright. An expression body has no top-level function
+  declarations to hoist, so the walk now skips the hoist pass for it.
+
 - **`@sigx/vite/resume`: editing a resume module's handler in dev reloads
   the page (#702 phase 7).** Handler symbols are content-hashed, so after
   an edit the rendered page's `data-sigx-on` attributes and the

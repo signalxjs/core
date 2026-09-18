@@ -186,10 +186,15 @@ function functionScopeBindings(fn: Node): Set<string> {
     if (!isNode(body)) return bindings;
     // Function declarations hoist to the function scope only from the BODY
     // TOP LEVEL — in ES modules (strict mode) a block-level function
-    // declaration is block-scoped (lexicalBindings covers those).
-    for (const stmt of (body.body as Node[]) ?? []) {
-        if (stmt.type === 'FunctionDeclaration' && isNode(stmt.id)) {
-            bindings.add((stmt.id as Node).name as string);
+    // declaration is block-scoped (lexicalBindings covers those). An
+    // expression-bodied arrow (`() => () => null`, `() => <div />`) has no
+    // statement list to hoist from — its `body.body` is the inner
+    // expression's own body, not an array (#717).
+    if (Array.isArray(body.body)) {
+        for (const stmt of body.body as Node[]) {
+            if (stmt.type === 'FunctionDeclaration' && isNode(stmt.id)) {
+                bindings.add((stmt.id as Node).name as string);
+            }
         }
     }
     walk(body, (node) => {
