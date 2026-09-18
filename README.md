@@ -12,7 +12,7 @@
 
 </div>
 
-> 🚧 SignalX is pre-1.0 — the API surface is small and stabilising, and breaking changes ship without compat shims. Feedback is very welcome. The badge above shows the current release; see [CHANGELOG.md](./CHANGELOG.md) for what's new.
+> ✅ SignalX is **1.0**: the public API of all fourteen packages is a semver promise — breaking changes only at a major, deprecations one minor ahead. The contract is [`docs/rfc-1.0.md`](./docs/rfc-1.0.md); upgrading from 0.15? The one migration is [`docs/migrations/1.0-serverfn.md`](./docs/migrations/1.0-serverfn.md). The badge above shows the current release; see [CHANGELOG.md](./CHANGELOG.md) for what's new.
 
 ## What is SignalX?
 

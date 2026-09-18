@@ -2,9 +2,20 @@
 
 All notable changes to SignalX (`sigx`) will be documented in this file.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). While SignalX is on a `0.x` line, breaking changes may land in minor releases — they will always be called out here.
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). From `1.0.0` on, all fourteen packages ship one version line under one contract (`docs/rfc-1.0.md`): breaking changes only at a major — anything that makes an existing, non-deprecated public usage fail to compile, throw, or observably do something different, including a stricter type, a warn that becomes a throw, and a changed return value for an input that already worked. A public API slated for removal is marked `@deprecated` with its replacement named, warns once in dev, and keeps working through at least one minor before the next major removes it. Raising the Node, TypeScript or Vite floor is a minor, announced one minor ahead; security fixes may tighten behaviour in a patch under `### Security`. Every user-facing change lands here under `[Unreleased]` in the PR that makes it.
 
 ## [Unreleased]
+
+## [1.0.0] — 2026-09-18
+
+> **1.0.0 is the stability contract** (`docs/rfc-1.0.md`, #676, #633): all
+> fourteen packages on one version line, breaking changes only at a major
+> from here on, and every package except `sigx` peers on the family at
+> `^1.0.0` — an app owns the single copy of `@sigx/reactivity` /
+> `@sigx/runtime-core`, and a second copy is named at runtime. Upgrading
+> from 0.15: `docs/migrations/1.0-serverfn.md` is the one migration; the
+> other breaking entries below are each marked with the issue that decided
+> them.
 
 > **rfc-server-v5 (#692) — the 1.0 server-function consolidation** is every
 > entry marked #692 below (`Removed` / `Changed` / `Added`); the design is
@@ -446,6 +457,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   `@sigx/*` package) and the files they pin to are what they were.
 
 ### Fixed
+
+- **`@sigx/resume`: the loader registers `passive: false` only where a
+  `data-sigx-pd` stamp exists; non-bubbling events replay on the target
+  only (#702 phase 5, #708).** `initResume` takes the build-wide list of
+  pd-stamped event types (`@sigx/vite`'s entry passes it) and leaves
+  `passive` unspecified for every other type, so a page whose
+  `touchstart`/`touchmove`/`wheel` handlers never cancel no longer
+  forces a scroll-blocking document listener for its lifetime; an entry
+  from an older `@sigx/vite` passes no list and every listener stays
+  non-passive as before. And `focus`, `blur`, `mouseenter`, `scroll`, …
+  (`bubbles === false`) no longer walk every ancestor carrier on replay —
+  handlers a live listener would never have seen are no longer invoked,
+  and boundaries there are no longer woken.
+
+- **`@sigx/server-renderer`: `<link rel="modulepreload">` carries the
+  request's CSP nonce (#702 phase 8, #713).** `script-src` governs module
+  preloads, so under a nonce-only policy every preload `renderDocument`
+  emitted — the app's `assets`, the boundary chunks, and the
+  pack-contributed ones (`@sigx/ssr-islands`, `@sigx/resume`'s handler
+  chunks) — was blocked and logged while the `<script>` tags next to them
+  carried the nonce. All three now stamp `SSRContextOptions.nonce` like
+  `scriptOpen` does; byte-identical output without one, stylesheets
+  (`style-src`) untouched.
 
 - **`@sigx/vite/server`: inline extraction no longer throws on an
   expression-bodied arrow whose body is another arrow (#717).** A
@@ -2089,7 +2123,8 @@ Initial public release of the SignalX (`sigx`) ecosystem on npm. Six packages pu
 - Node `^20.19.0 || >=22.12.0`
 - `@sigx/vite` peer-depends on `vite >=8.0.0`
 
-[Unreleased]: https://github.com/signalxjs/core/compare/v0.15.6...HEAD
+[Unreleased]: https://github.com/signalxjs/core/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/signalxjs/core/compare/v0.15.6...v1.0.0
 [0.15.6]: https://github.com/signalxjs/core/compare/v0.15.5...v0.15.6
 [0.15.5]: https://github.com/signalxjs/core/compare/v0.15.4...v0.15.5
 [0.15.4]: https://github.com/signalxjs/core/compare/v0.15.3...v0.15.4

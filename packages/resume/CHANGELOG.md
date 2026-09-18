@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-09-18
+
 ### Added
 
 - **Dev warning on a lossy-record upgrade (#702 phase 6).** `runUpgrade`

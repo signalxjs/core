@@ -1,7 +1,7 @@
 # RFC: 1.0 — the stability contract
 
-Status: **proposed**. Tracking: signalxjs/core#633 (phase 3), umbrella
-signalxjs/core#676.
+Status: **shipped in v1.0.0** (2026-09-18). Tracking: signalxjs/core#633
+(phase 3), umbrella signalxjs/core#676.
 Ends the "pre-1.0, no-compat" stance every earlier RFC opens with: from
 `v1.0.0` on, what a package exports is a promise, and the promise is
 semver's.
@@ -395,13 +395,15 @@ the #692 series — #693, #695, #696, #697, #698 — before rc.0.
 2. **Phase 2 PRs** (after this RFC merges): #274; #529 per §4.1; #501;
    §3.4 guard; §3.2 peer shape + `verify-pack` + repo-template; the
    rfc-server-v5 series per §4.9 (#692).
-3. **`v1.0.0-rc.0`**, published under the `next` dist-tag: README banner,
-   `CHANGELOG.md:5` replaced by §2's policy, `release.yml` passes
-   `--tag next` for prerelease tags. The ecosystem-release workflow runs
-   in `dryRun` against it — every consumer aligns (with §3.3's peer
-   migration) and reports; core fixes what surfaces.
+3. ~~**`v1.0.0-rc.0`** under the `next` dist-tag~~ — **skipped by
+   decision (#676, 2026-09-18)**: what ends the per-minor ecosystem lockstep is
+   1.0.0 itself (§2 + §3's `^1.0.0` peer ranges), not an rc, and each rc
+   would have been one more exact-pin alignment. The tooling stays
+   (`publish.js` derives `next` from a prerelease version) for a future
+   2.0. The README banner and `CHANGELOG.md:5` changes ship with 1.0.0.
 4. **`v1.0.0`** under `latest`; the ecosystem-release workflow tier by
-   tier; release comments on every open docs-site issue.
+   tier — the first rollout whose alignment PRs move consumers to §3.3's
+   peer shape; release comments on every open docs-site issue.
 
 ## §6 Non-goals
 
