@@ -171,14 +171,21 @@ export function islandsPlugin(options?: IslandsPluginOptions): SSRPack {
                 // own snapshot (it would re-include the directives).
                 const { children: _children, slots: _slots, $models: _models, ...propsData } = filterClientDirectives(allProps);
                 const props = serializeBoundaryProps(propsData, getTypeHandlers(ctx));
+                // What was stripped shaped this render but cannot reach the
+                // client: the island hydrates from the record alone, so a
+                // slot consumer mounts with an empty outlet (#709). Stamp
+                // the record so the hydrator can say so in dev.
+                const lossy = _children !== undefined || _slots !== undefined || _models !== undefined;
 
                 // client:only decomposes into the two axes: skip the server
                 // render, mount immediately on the client (rfc-ssr-platform §1).
                 // Other directives set only the hydrate axis; flush is omitted —
                 // islands never overrides the async-flush default.
-                return hydration.strategy === 'only'
+                const resolved: ResolvedBoundary = hydration.strategy === 'only'
                     ? { flush: 'skip', hydrate: 'load', chunk, props }
                     : { hydrate: hydration.strategy, media: hydration.media, chunk, props };
+                if (lossy) resolved.refreshable = false;
+                return resolved;
             },
 
             transformComponentContext(

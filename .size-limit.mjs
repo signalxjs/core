@@ -127,7 +127,11 @@ export default [
     // at the fragment/text/boundary-root builders and on hydrateComponent's
     // entry, so a root a pack builds by hand is a runtime vnode too; sat at
     // 13.79 KB (main was 13.72 KB).
-    limit: '13.8 KB',
+    // 13.8 → 13.85 KB with #709: `ResolvedBoundary.refreshable` copied onto
+    // the record at the resolveBoundary consult (one line — a pack's
+    // lossy-snapshot verdict, stamped where it splits the props); sat at
+    // 13.81 KB (main was 13.78 KB).
+    limit: '13.85 KB',
     ignore: ['sigx', 'sigx/*', '@sigx/*', 'node:stream'],
   },
   {

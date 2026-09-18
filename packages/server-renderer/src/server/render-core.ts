@@ -1064,6 +1064,7 @@ function* renderNode(
             if (boundary.hydrate !== undefined) record.hydrate = boundary.hydrate;
             if (boundary.media !== undefined) record.media = boundary.media;
             if (boundary.chunk !== undefined) record.chunk = boundary.chunk;
+            if (boundary.refreshable === false) record.refreshable = false;
             // The winner names its boundary; core derivation is the fallback.
             const registryName =
                 boundary.component || (vnode.type as any).__islandId || (vnode.type as any).__name;

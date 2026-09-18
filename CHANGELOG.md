@@ -148,6 +148,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- **`@sigx/vite` islands: an island that reads `ctx.slots` is a build
+  error (#709).** An islands app hydrates in `boundaries: 'explicit'` mode —
+  every island mounts from its boundary record, which carries serializable
+  props and nothing structural — so an island consuming its slot rendered
+  its outlet empty on the client while the server-rendered slot nodes sat
+  in the DOM unowned, to be rendered over by the next update. That was
+  silent; `sigxIslands()` now refuses the module
+  (`[sigx:islands] <file>:<line>:<col>: island <Name> reads ctx.slots — …`,
+  every offending island in one error), using the same detector as the
+  resume transform's rule (rfc-1.0 §4.5). Only the module's exported
+  islands are judged — a local helper component beside them may consume
+  slots freely. Pass the content as data props, or make the slot-providing
+  parent the island. Before: such an island built, and its slotted content
+  survived hydration only until the first re-render of the outlet.
+  `islandsPlugin()` also stamps `refreshable: false` on a record whose
+  usage site passed `children`/`slots`/`$models` (the shape resume
+  already used), and the core hydrator warns in dev when it mounts from
+  one — the net for what the transform cannot see (a slot read through a
+  helper, a usage site handing children to an island that ignores them).
+  `ResolvedBoundary` gains an optional `refreshable?: false` so any pack
+  can return that verdict from `resolveBoundary`.
+
 - **`@sigx/server/client`, dev only: a stub sends the page's newest version
   tag for its key (#716).** A mounted `useData(fn)` holds the stub from
   before an edit; it now calls the hot-updated function instead of 409ing.

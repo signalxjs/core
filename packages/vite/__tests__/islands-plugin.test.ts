@@ -80,6 +80,78 @@ describe('transform — aliased exports', () => {
     });
 });
 
+describe('transform — slot consumers are a build error (#709)', () => {
+    const ctx = { error(message: string): never { throw new Error(message); } };
+    const plugin = sigxIslands() as any;
+
+    it('refuses an island whose setup reads ctx.slots, located at the read', () => {
+        const code = [
+            "import { component } from 'sigx';",
+            'export const Card = component((ctx) => {',
+            '    return () => <section>{ctx.slots.default?.()}</section>;',
+            '});'
+        ].join('\n');
+        expect(() => plugin.transform.call(ctx, code, '/proj/src/islands/Card.tsx')).toThrow(
+            /\[sigx:islands\] .*Card\.tsx:3:28: island <Card> reads ctx\.slots/
+        );
+    });
+
+    it('catches a destructured consumption and an aliased export by its ISLAND name', () => {
+        const code = [
+            "import { component } from 'sigx';",
+            'const Inner = component((ctx) => {',
+            '    const { slots } = ctx;',
+            '    return () => <div>{slots.default?.()}</div>;',
+            '});',
+            'export { Inner as Panel };'
+        ].join('\n');
+        expect(() => plugin.transform.call(ctx, code, '/proj/src/islands/Panel.tsx')).toThrow(
+            /island <Panel> reads ctx\.slots/
+        );
+    });
+
+    it('reports every offending island in one error', () => {
+        const code = [
+            "import { component } from 'sigx';",
+            'export const A = component((ctx) => () => <i>{ctx.slots.default?.()}</i>);',
+            'export const B = component((ctx) => () => <b>{ctx.slots.default?.()}</b>);'
+        ].join('\n');
+        let message = '';
+        try { plugin.transform.call(ctx, code, '/proj/src/islands/two.tsx'); } catch (e) { message = (e as Error).message; }
+        expect(message).toContain('island <A> reads ctx.slots');
+        expect(message).toContain('island <B> reads ctx.slots');
+    });
+
+    it('a non-exported helper beside an island may consume slots — nothing hydrates it from a record', () => {
+        const code = [
+            "import { component } from 'sigx';",
+            'const Frame = component((ctx) => () => <div class="f">{ctx.slots.default?.()}</div>);',
+            'export const Widget = component((ctx) => {',
+            '    const n = ctx.signal(0);',
+            '    return () => <Frame><b>{n.value}</b></Frame>;',
+            '});'
+        ].join('\n');
+        const result = plugin.transform.call(ctx, code, '/proj/src/islands/Widget.tsx');
+        expect(result.code).toContain('Widget.__islandId = "Widget"');
+        expect(result.code).not.toContain('Frame.__islandId');
+    });
+
+    it('a props-only island passes, and unparsable source is stamped, not judged', () => {
+        const ok = [
+            "import { component } from 'sigx';",
+            'export const Counter = component((ctx) => {',
+            '    const count = ctx.signal(0);',
+            '    return () => <button>{count.value}</button>;',
+            '});'
+        ].join('\n');
+        expect(plugin.transform.call(ctx, ok, '/proj/src/islands/Counter.tsx').code).toContain('Counter.__islandId');
+        // Mid-edit source: the regex stamping keeps working (its own
+        // tolerance, pinned above); the slot check simply waits for a parse.
+        const broken = "import { component } from 'sigx';\nexport const Half = component((ctx) => {\n";
+        expect(plugin.transform.call(ctx, broken, '/proj/src/islands/Half.tsx').code).toContain('Half.__islandId');
+    });
+});
+
 describe('sigxIslands end-to-end (real vite build)', () => {
     let root: string;
 

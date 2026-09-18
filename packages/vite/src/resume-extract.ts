@@ -915,6 +915,24 @@ function findCtxSlots(node: Node, ctxName: string): Node | null {
 }
 
 /**
+ * The named `component(...)` exports of CODE whose setup reads `ctx.slots`
+ * (or destructures it), each located at the read. Shared with
+ * `sigxIslands()` (#709): an island hydrates from its boundary record —
+ * props only, no slots — so the same read resume refuses in a handler
+ * component is a build error there too. Parse errors propagate; resume's
+ * own §4.5 export-shape verdicts are not this caller's concern.
+ */
+export function findSlotConsumers(code: string, id: string): Array<{ exported: string; offset: number }> {
+    const clean = id.split('?')[0];
+    const ext = clean.slice(clean.lastIndexOf('.'));
+    const program = parseAst(code, { lang: LANG_BY_EXT[ext] ?? 'tsx' }, clean) as unknown as Node;
+    const errors: ContractError[] = [];
+    return findComponents(program, scanModule(program), errors)
+        .filter((c) => c.slotsAccess !== null)
+        .map((c) => ({ exported: c.exported, offset: c.slotsAccess!.start as number }));
+}
+
+/**
  * Does a destructuring pattern over ctx take `slots` — by PROPERTY KEY
  * (`{ slots }`, `{ slots: s }`) or via a rest element (`{ ...rest }`, which
  * reaches everything)?
