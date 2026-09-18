@@ -166,7 +166,18 @@
     {
       "repo": "ai",
       "tier": 2,
-      "publishes": ["@sigx/ai", "@sigx/ai-anthropic", "@sigx/ai-openai", "@sigx/ai-agent", "@sigx/ai-agent-acp", "@sigx/ai-agent-node", "@sigx/ai-agent-claude-code", "@sigx/ai-agent-codex-cli", "@sigx/ai-agent-copilot-cli", "@sigx/json-ui"],
+      "publishes": [
+        "@sigx/ai",
+        "@sigx/ai-anthropic",
+        "@sigx/ai-openai",
+        "@sigx/ai-agent",
+        "@sigx/ai-agent-acp",
+        "@sigx/ai-agent-node",
+        "@sigx/ai-agent-claude-code",
+        "@sigx/ai-agent-codex-cli",
+        "@sigx/ai-agent-copilot-cli",
+        "@sigx/json-ui"
+      ],
       "consumesCore": [
         "@sigx/reactivity",
         "@sigx/runtime-core",
