@@ -1,6 +1,6 @@
 {
     "name": "@sigx/netlify",
-    "version": "0.15.6",
+    "version": "1.0.0",
     "description": "Netlify deployment adapter for SigX",
     "type": "module",
     "main": "./dist/index.js",

@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-09-18
+
 > **rfc-server-v5 (#692) — the 1.0 consolidation** is every entry
 > marked #692 below; the design is `docs/rfc-server-v5.md` and the
 > migration `docs/migrations/1.0-serverfn.md`.
