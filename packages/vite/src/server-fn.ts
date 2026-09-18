@@ -245,10 +245,18 @@ function devHotTail(file: string, fns: ReadonlyArray<{ key: string; stream: bool
         `    import.meta.hot.accept();\n` +
         // This page holds the stub: the page listener must not reload it.
         `    import.meta.hot.on(${JSON.stringify(HMR_EVENT)}, (d) => { if (d.files.includes(${JSON.stringify(file)})) d.claimed = true; });\n` +
-        `    if (import.meta.hot.data.sigxServerFn) {\n` +
-        `        import('@sigx/vite/hmr').then((m) => m.serverFnHotUpdate(import.meta.hot, ${JSON.stringify(keys)}));\n` +
+        // `data` is where the "seen before" flag lives — Vite's client always
+        // has it, but a runner with a partial hot API does not: vitest 4's
+        // module runner hands every module a no-op `import.meta.hot` with
+        // accept/on/… and NO `data`, so an unguarded read threw at module
+        // evaluation in any test importing a *.server.ts stub (#726). Without
+        // `data` there is no re-evaluation to detect, so the helper never runs.
+        `    if (import.meta.hot.data) {\n` +
+        `        if (import.meta.hot.data.sigxServerFn) {\n` +
+        `            import('@sigx/vite/hmr').then((m) => m.serverFnHotUpdate(import.meta.hot, ${JSON.stringify(keys)}));\n` +
+        `        }\n` +
+        `        import.meta.hot.data.sigxServerFn = true;\n` +
         `    }\n` +
-        `    import.meta.hot.data.sigxServerFn = true;\n` +
         `}\n`
     );
 }

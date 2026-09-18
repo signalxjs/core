@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- **`@sigx/vite/server`: the dev client-stub HMR tail no longer crashes under
+  vitest (#726).** The tail that #716 appends to every client stub in serve
+  mode read `import.meta.hot.data` unguarded. Vite's client always has it; vitest
+  4's module runner hands every module a no-op `import.meta.hot` (accept, on,
+  …) with **no** `data`, so any test importing a `*.server.ts` module in a
+  client environment threw `Cannot read properties of undefined (reading
+  'sigxServerFn')` at module evaluation — found by the ecosystem alignment
+  (signalxjs/cli#115's scaffolded `--features server-fn,testing` project).
+  The tail now touches `data` only when the hot context has it; without
+  `data` there is no re-evaluation to detect, so the helper simply never
+  loads. Dev-server behaviour is unchanged.
+
 ## [1.0.0] — 2026-09-18
 
 > **1.0.0 is the stability contract** (`docs/rfc-1.0.md`, #676, #633): all
