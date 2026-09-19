@@ -100,7 +100,7 @@
     {
       "repo": "three",
       "tier": 1,
-      "publishes": ["@sigx/runtime-three", "@sigx/three", "@sigx/three-rapier"],
+      "publishes": ["@sigx/three-runtime", "@sigx/three", "@sigx/three-rapier"],
       "consumesCore": ["@sigx/reactivity", "@sigx/runtime-core", "@sigx/runtime-dom", "@sigx/vite", "sigx"],
       "consumesSiblings": [],
       "catalog": "complete",
@@ -205,13 +205,25 @@
       "verify": { "unit": "pnpm test", "browser": "examples/* — build and serve a generated site" }
     },
     {
-      "repo": "lynx",
+      "repo": "zero",
       "tier": 3,
+      "publishes": ["@sigx/zero", "@sigx/zero-kit", "@sigx/zero-daisyui", "@sigx/zero-basic", "@sigx/create-zero-ds"],
+      "publishesNote": "zero-brutalist, zero-carbon, zero-heroui, zero-material and zero-ext-example are private (in-repo design systems and the extension fixture).",
+      "consumesCore": ["@sigx/reactivity", "@sigx/runtime-core", "@sigx/runtime-dom", "@sigx/server-renderer", "@sigx/vite", "sigx"],
+      "consumesSiblings": ["@sigx/cli", "@sigx/args"],
+      "consumesNote": "@sigx/zero-kit (the design-system toolchain) drives @sigx/cli + @sigx/args, which puts this repo above cli (tier 2). lynx pins @sigx/zero and @sigx/zero-daisyui at an exact prerelease (0.2.0-beta.N) — until zero ships a stable, every zero release is a lynx catalog bump. Missing from this manifest until #731: the v1.0.0 rollout's tier barrier never saw the edge, and lynx could not install (two core lines) until zero published against core 1.0.",
+      "catalog": "complete",
+      "verify": { "unit": "pnpm test && pnpm test:types", "browser": "examples/playground — pnpm --filter zero-playground e2e (Playwright: chromium, firefox, webkit)" }
+    },
+    {
+      "repo": "lynx",
+      "tier": 4,
       "publishes": ["@sigx/lynx", "@sigx/lynx-core", "@sigx/lynx-runtime", "@sigx/lynx-cli"],
       "publishesNote": "60+ @sigx/lynx-* packages ship from this repo, all lockstep-versioned; only the roots are listed. check-ecosystem.mjs treats `publishes` as a subset check for this repo.",
       "publishesIsSubset": true,
       "consumesCore": ["@sigx/reactivity", "@sigx/runtime-core"],
-      "consumesSiblings": ["@sigx/cli", "@sigx/terminal", "@sigx/richtext", "@sigx/richtext-markdown"],
+      "consumesSiblings": ["@sigx/cli", "@sigx/terminal", "@sigx/richtext", "@sigx/richtext-markdown", "@sigx/zero", "@sigx/zero-daisyui"],
+      "consumesNote": "@sigx/zero / @sigx/zero-daisyui are pinned EXACTLY (0.2.0-beta.N) in the catalog — the lynx-target emitters in @sigx/zero-kit must match the zero runtime byte-for-byte — so a zero release is a lynx catalog bump, not a range that resolves on its own. Tier 4 because zero is tier 3.",
       "catalog": "complete",
       "verify": { "unit": "pnpm test", "browser": null, "manual": "native (iOS/Android) — no browser surface" }
     },

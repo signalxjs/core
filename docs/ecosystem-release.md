@@ -76,9 +76,10 @@ Tier 2   cli        ← @sigx/args, @sigx/terminal
          ai         ← @sigx/richtext, @sigx/richtext-markdown   (examples-only; the packages peer core alone)
 ─────────── barrier: tier 2 live on npm ───────────
 Tier 3   ssg        ← @sigx/router, @sigx/cli, @sigx/args
-         lynx       ← @sigx/cli, @sigx/terminal, @sigx/richtext, @sigx/richtext-markdown
+         zero       ← @sigx/cli, @sigx/args   (via @sigx/zero-kit)
 ─────────── barrier: tier 3 live on npm ───────────
 Tier 4   mermaid    ← @sigx/router, @sigx/ssg
+         lynx       ← @sigx/cli, @sigx/terminal, @sigx/richtext, @sigx/richtext-markdown, @sigx/zero, @sigx/zero-daisyui (exact prerelease pin)
 ```
 
 Everything **within** a tier is independent — align and release them in parallel.
@@ -176,6 +177,7 @@ manifest. Unit tests run on `happy-dom` — they do not prove a real browser ren
 | `pulse` | `pnpm test` | **`pnpm smoke`** — playwright, the only real e2e suite in the ecosystem |
 | `monaco-editor` | `pnpm test` | **`pnpm dev:basic`** — drive it in a browser |
 | `richtext` | `pnpm test` | **`pnpm --filter playground-example e2e`** — playwright: streaming keeps block identity, Shiki, copy, onLink |
+| `zero` | `pnpm test && pnpm test:types` | **`pnpm --filter zero-playground e2e`** — playwright across chromium, firefox and webkit |
 | `three` | `pnpm test` | `examples/game-hud` — `pnpm dev:hud` after `pnpm build`; the scene renders, WASD moves the ship, the HUD score updates |
 | `mermaid` | `pnpm test` | `examples/basic` — build and serve; diagrams render and the theme toggle re-renders them |
 | `i18n`, `ssg` | `pnpm test` | run an app from `examples/` and drive it in a browser |
