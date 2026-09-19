@@ -171,10 +171,13 @@ function getPackageInfo(packagePath) {
 /**
  * What the registry currently serves for `name` under `distTag` — or null
  * when the package/tag is unknown (never published, or `npm view` failed).
+ * `--prefer-online` bypasses npm's local metadata cache: without it, five
+ * reads a few seconds apart can all be the same cached packument, and the
+ * retry loop below measures the cache, not the registry (#723).
  */
 function publishedVersion(name, distTag) {
     try {
-        const result = execSync(`npm view ${name} dist-tags.${distTag}`, {
+        const result = execSync(`npm view ${name} dist-tags.${distTag} --prefer-online`, {
             encoding: 'utf-8',
             stdio: ['pipe', 'pipe', 'pipe'],
         }).trim();
@@ -189,25 +192,33 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 /**
  * Post-wave verification: the registry must agree with the local version for
  * EVERY package in the list — published or skipped-as-already-published alike.
- * A freshly published version can take a few seconds to show up in `npm view`,
- * so each package gets a handful of retries before it counts as a mismatch.
+ * A freshly published version takes a while to show up in `npm view`: the
+ * registry's read replicas lag the write, and on the v1.0.0 and v1.0.1 tag
+ * runs that lag exceeded the old 5 × 5 s budget for a handful of packages
+ * (#723) — the wave was complete, the dist-tag had moved, and the job still
+ * failed, skipping the GitHub release and the consumer fan-out. So each
+ * package now gets up to two minutes (12 × 10 s), with the elapsed time
+ * logged; a genuinely missing package still fails, just two minutes later.
  * Returns the list of mismatches (empty = the wave is verified).
  */
-async function verifyPublishedVersions(distTag, { attempts = 5, delayMs = 5000 } = {}) {
+async function verifyPublishedVersions(distTag, { attempts = 12, delayMs = 10_000 } = {}) {
     const mismatches = [];
     for (const packagePath of PACKAGES) {
         const pkg = getPackageInfo(packagePath);
         if (!pkg) continue;
         let seen = null;
-        for (let attempt = 1; attempt <= attempts; attempt++) {
+        const started = Date.now();
+        let attempt = 1;
+        for (; attempt <= attempts; attempt++) {
             seen = publishedVersion(pkg.name, distTag);
             if (seen === pkg.version) break;
             if (attempt < attempts) await sleep(delayMs);
         }
+        const elapsed = Math.round((Date.now() - started) / 1000);
         if (seen === pkg.version) {
-            console.log(`   ✅ ${pkg.name}@${distTag} = ${seen}`);
+            console.log(`   ✅ ${pkg.name}@${distTag} = ${seen}${attempt > 1 ? `  (visible after ${elapsed}s, ${attempt} reads)` : ''}`);
         } else {
-            console.error(`   ❌ ${pkg.name}@${distTag} = ${seen ?? '(not found)'}  — local is ${pkg.version}`);
+            console.error(`   ❌ ${pkg.name}@${distTag} = ${seen ?? '(not found)'}  — local is ${pkg.version} (gave up after ${elapsed}s, ${attempts} reads)`);
             mismatches.push({ name: pkg.name, expected: pkg.version, actual: seen });
         }
     }
@@ -216,7 +227,10 @@ async function verifyPublishedVersions(distTag, { attempts = 5, delayMs = 5000 }
 
 function isAlreadyPublished(name, version) {
     try {
-        const result = execSync(`npm view ${name}@${version} version`, { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
+        // `--prefer-online` for the same reason as publishedVersion: a re-run
+        // right after a wave must see the wave, not a cached packument, or it
+        // would try to republish an existing version and fail on E403 (#723).
+        const result = execSync(`npm view ${name}@${version} version --prefer-online`, { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
         return result === version;
     } catch {
         return false;

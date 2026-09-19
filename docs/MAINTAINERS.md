@@ -229,6 +229,15 @@ Settings → Rules → Rulesets → New branch ruleset:
   npm versions are immutable. Bump to the next patch (`1.2.3` → `1.2.4`) so the
   failed packages can publish at the new version while the succeeded
   packages move forward too.
+- **Everything published, the post-wave verification failed anyway**
+  (`✅ Published: 14 packages` followed by `❌ <pkg>@latest = <old>` for a
+  few): the registry's replicas were still catching up when the job read
+  them (#723 — v1.0.0 and v1.0.1 both did this). Confirm with
+  `npm view <pkg> dist-tags --prefer-online`, then re-run the failed job:
+  `gh run rerun <run-id> --failed`. `publish.js` skips every
+  already-published version, re-verifies, and the `github-release` and
+  `notify-consumers` jobs then run as designed. Do not re-tag and do not
+  bump.
 
 ### Prereleases
 
