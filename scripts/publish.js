@@ -227,7 +227,10 @@ async function verifyPublishedVersions(distTag, { attempts = 12, delayMs = 10_00
 
 function isAlreadyPublished(name, version) {
     try {
-        const result = execSync(`npm view ${name}@${version} version`, { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
+        // `--prefer-online` for the same reason as publishedVersion: a re-run
+        // right after a wave must see the wave, not a cached packument, or it
+        // would try to republish an existing version and fail on E403 (#723).
+        const result = execSync(`npm view ${name}@${version} version --prefer-online`, { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
         return result === version;
     } catch {
         return false;
