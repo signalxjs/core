@@ -436,6 +436,46 @@ describe('serverStream — endpoint NDJSON', () => {
         await vi.waitFor(() => expect(finallyRan).toBe(true));
     });
 
+    it('a cancel while the generator is suspended ends the stream quietly (#728)', async () => {
+        let release!: () => void;
+        const gate = new Promise<void>((resolve) => (release = resolve));
+        let suspended!: () => void;
+        const atGate = new Promise<void>((resolve) => (suspended = resolve));
+        let finallyRan = false;
+        const onError = vi.fn();
+        const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
+        const s = serverStream({
+            handler: async function* () {
+                try {
+                    yield 'first';
+                    suspended();
+                    await gate;
+                    yield 'late';
+                } finally {
+                    finallyRan = true;
+                }
+            }
+        });
+        const res = await handleServerFnRequest(
+            new Request(`${ORIGIN}/_sigx/fn/s_fn_00000001`, {
+                method: 'POST',
+                headers: { 'content-type': 'application/json', origin: ORIGIN },
+                body: '{"args":[]}'
+            }),
+            { resolve: () => s, onError }
+        );
+        const reader = res.body!.getReader();
+        await reader.read(); // first chunk — draining it triggers the next pull
+        await atGate; // pull is now suspended in gen.next()
+        await reader.cancel();
+        release(); // the late yield lands on a cancelled stream
+        await vi.waitFor(() => expect(finallyRan).toBe(true));
+        // Let any (wrongly) reported failure surface before asserting.
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        expect(errorLog).not.toHaveBeenCalled();
+        expect(onError).not.toHaveBeenCalled();
+    });
+
     it('app middleware still runs before a stream (a veto is a buffered error)', async () => {
         const s = serverStream({
             handler: async function* () {

@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **A client disconnecting mid-stream no longer logs a handler error (#728).**
+  When the response body of a `serverStream` was cancelled while the
+  endpoint was waiting on the generator's next value, the late value was
+  enqueued onto the already-closed stream, and the resulting
+  `ERR_INVALID_STATE: Controller is already closed` was reported as
+  `[sigx server] "<name>" threw: …` (and through `onError`) as if the
+  handler had failed. A cancel is now the normal end of the stream: the late
+  value is dropped, nothing is reported, and the generator is still returned
+  so its `finally` blocks run.
+
 ## [1.0.0] - 2026-09-18
 
 > **rfc-server-v5 (#692) — the 1.0 consolidation** is every entry
