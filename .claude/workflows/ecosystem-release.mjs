@@ -20,13 +20,14 @@ export const meta = {
     name: 'ecosystem-release',
     description: 'Align and release every sigx consumer repo against a new core version, in tier order',
     whenToUse:
-        'After core is tagged and all its packages are live on npm. Drives docs/ecosystem-release.md across all 12 consumer repos.',
+        'After core is tagged and all its packages are live on npm. Drives docs/ecosystem-release.md across every consumer repo in docs/ecosystem.json.',
     phases: [
         { title: 'Plan', detail: 'read docs/ecosystem.json + confirm core is fully published on npm' },
         { title: 'Preflight', detail: 'confirm the catalog machinery is on every consumer default branch (remote, not local)' },
         { title: 'Tier 1', detail: 'core-only consumers — align, verify, release' },
         { title: 'Tier 2', detail: 'consumers of tier-1 siblings' },
         { title: 'Tier 3', detail: 'consumers of tier-2 siblings' },
+        { title: 'Tier 4', detail: 'consumers of tier-3 siblings' },
         { title: 'Report', detail: 'hand-back report of everything left amber' },
     ],
 }
@@ -42,6 +43,12 @@ const MANIFEST_SCHEMA = {
             description: 'True only if EVERY package in corePackages reads coreVersion on npm',
         },
         unpublishedCorePackages: { type: 'array', items: { type: 'string' } },
+        downstreamChanges: {
+            type: 'array',
+            items: { type: 'string' },
+            description:
+                'Downstream-observable behaviour changes in core since the previous release, one line each, from CHANGELOG.md',
+        },
         consumers: {
             type: 'array',
             items: {
@@ -57,6 +64,11 @@ const MANIFEST_SCHEMA = {
                     catalogTodo: { type: 'string' },
                     verifyUnit: { type: 'string' },
                     verifyBrowser: { type: 'string', description: 'empty when the repo has no browser surface' },
+                    verifyBrowserRequired: {
+                        type: 'boolean',
+                        description:
+                            'true when the verification needs an interactive browser a rollout session cannot supply',
+                    },
                     verifyManual: {
                         type: 'string',
                         description:
@@ -85,7 +97,10 @@ const ALIGN_SCHEMA = {
         },
         summary: { type: 'string', description: 'One paragraph: what changed and what happened.' },
         prUrl: { type: 'string' },
-        releasedVersion: { type: 'string', description: 'Set only when status is green and the tag was pushed' },
+        releasedVersion: {
+            type: 'string',
+            description: 'Set only when status is green: the pushed version, or "none" when runbook §6 "Which version" called for no release',
+        },
         publishedPackages: { type: 'array', items: { type: 'string' } },
         amberReason: { type: 'string', description: 'Why a human is needed. Required when status is amber.' },
         sourceFilesChanged: { type: 'array', items: { type: 'string' } },
@@ -94,7 +109,9 @@ const ALIGN_SCHEMA = {
     },
 }
 
-const args_ = args ?? {}
+// `args` has reached this script as a JSON-encoded STRING rather than an object
+// (0.15.1 wave, #629): `args.onlyTiers` read as undefined and tier 1 silently re-ran.
+const args_ = typeof args === 'string' ? JSON.parse(args) : (args ?? {})
 const dryRun = args_.dryRun === true
 
 // ---------------------------------------------------------------- Phase: Plan
@@ -116,9 +133,16 @@ const plan = await agent(
    This matters: core tag runs have failed partially and silently before, and npm versions are
    immutable, so a half-published core must be fixed before any consumer moves.
 4. Return every consumer from the manifest, flattening \`verify.unit\` to \`verifyUnit\`,
-   \`verify.browser\` to \`verifyBrowser\` and \`verify.manual\` to \`verifyManual\` (empty
-   string when a field is null or absent). Do not drop \`verify.manual\` — it is how a repo
-   with no browser surface still says how it can be exercised.
+   \`verify.browser\` to \`verifyBrowser\`, \`verify.manual\` to \`verifyManual\` (empty
+   string when a field is null or absent) and \`verify.browserRequired\` to
+   \`verifyBrowserRequired\` (false when absent). Do not drop \`verify.manual\` — it is how a
+   repo with no browser surface still says how it can be exercised.
+5. Pre-flight the changelog (runbook §3): read every section of the root \`CHANGELOG.md\`
+   (and the per-package \`packages/*/CHANGELOG.md\`) newer than the core version the consumers
+   are currently on, and list in \`downstreamChanges\` every entry a consumer could OBSERVE —
+   \`Changed\`, \`Deprecated\`, \`Removed\`, \`Security\`, and any \`Fixed\` or \`Added\` entry
+   that changes a return value, a type, a warning or a serialized shape for an input that
+   already worked. One line each: package, the change, the kind of consumer code it hits.
 
 Return data only.`,
     { schema: MANIFEST_SCHEMA, label: 'read manifest + verify core on npm', phase: 'Plan' },
@@ -146,6 +170,9 @@ const consumers = plan.consumers.filter((c) => !wanted || wanted.includes(c.tier
 const tiers = [...new Set(consumers.map((c) => c.tier))].sort((a, b) => a - b)
 
 log(`Core ${plan.coreVersion} confirmed live on npm across every core package.`)
+const downstreamChanges = plan.downstreamChanges ?? []
+log(`Pre-flight: ${downstreamChanges.length} downstream-observable core change(s) in this release.`)
+for (const ch of downstreamChanges) log(`  - ${ch}`)
 log(`Rolling out to ${consumers.length} repos across ${tiers.length} tier(s): ${tiers.join(', ')}${dryRun ? ' — DRY RUN, nothing will be tagged' : ''}`)
 
 // ------------------------------------------------------------ Phase: Preflight
@@ -233,7 +260,11 @@ Repo facts from the ecosystem manifest:
 - consumes siblings: ${siblings}
 - catalog state: ${c.catalog ?? 'unknown'}${c.catalogTodo ? ` — ${c.catalogTodo}` : ''}
 - unit verification: ${c.verifyUnit || 'pnpm test'}
-- beyond unit: ${c.verifyBrowser || c.verifyManual || 'none — unit tests ARE the verification for this repo'}
+- beyond unit: ${c.verifyBrowser || c.verifyManual || 'none — unit tests ARE the verification for this repo'}${c.verifyBrowserRequired ? ' (INTERACTIVE — human queue, see step 6)' : ''}
+
+Downstream-observable core changes in this release (runbook §3 pre-flight) — expect these,
+do not rediscover them by test failure:
+${downstreamChanges.length ? downstreamChanges.map((ch) => `- ${ch}`).join('\n') : '- none listed'}
 
 Steps:
 1. **SYNC THE LOCAL CHECKOUT FIRST — before anything else.** Local checkouts of these
@@ -254,25 +285,36 @@ Steps:
    \`catalog:\` block on its default branch. **If your working copy disagrees, your
    working copy is stale — re-sync it. Do not report the machinery as missing.**
 
-2. Create the worktree: \`pnpm wt new <issue>-align-core-${coreMinor} --from main\`.
+   If core's release already opened a \`core-released\` bot PR in this repo (\`gh pr list\`),
+   ADOPT it instead of opening a duplicate: \`git fetch origin <bot-branch>\`,
+   \`pnpm wt new <name> --from origin/<bot-branch>\`, and push your work back with
+   \`git push origin HEAD:<bot-branch>\`. Bot PRs get no CI run until you push to them.
+
+2. Otherwise create the worktree: \`pnpm wt new <issue>-align-core-${coreMinor} --from main\`.
    NEVER work on main. \`pnpm wt new\` branches from the CURRENT HEAD, so \`--from main\`
    is load-bearing.
-3. \`pnpm sync:core ${coreMinor}\`, then \`pnpm install --no-frozen-lockfile\`.
+3. \`pnpm sync:core ${coreMinor}\`, then \`pnpm install --no-frozen-lockfile --prefer-online\`
+   (the npm registry serves stale dist-tags for minutes after a publish; a CI job that
+   resolved the old version is fixed with \`gh run rerun <id> --failed\`, not a code change).
    If \`sync:core\` or \`verify:catalog\` is genuinely absent AFTER a confirmed-fresh
    checkout, that is the finding — report status "failed" rather than hand-editing.
 4. Bump sibling pins by hand to the versions the previous tier just published (${siblings}).
    \`sync:core\` deliberately does not touch these.
 5. \`pnpm verify:catalog && pnpm build && pnpm typecheck && pnpm test\`.
 6. Verification per §5. ${
-        c.verifyBrowser
+        c.verifyBrowserRequired
+            ? `This repo's verification (\`${c.verifyBrowser}\`) needs an INTERACTIVE browser that a rollout session cannot supply (manifest \`verify.browserRequired\`). Do not attempt it. Run everything else, merge, then report status "amber" with amberReason starting "human queue: interactive browser verification" and the exact command a human should run and what to look for.`
+            : c.verifyBrowser
             ? `This repo HAS a browser surface — run \`${c.verifyBrowser}\` and drive it with the claude-in-chrome tools: load the page, read the console for errors, exercise the main interaction, screenshot it, attach the screenshot to the PR. On Windows verify the dev server PID actually changed after any restart.`
             : c.verifyManual
               ? `This repo has no BROWSER surface, but it is not unit-tests-only either: ${c.verifyManual}. Exercise it as far as the environment allows and say in \`verification\` exactly what you ran and what you could not. If it could not be exercised at all, that is an AMBER reason — do not treat the unit suite as sufficient.`
               : 'This repo has no browser surface and no manual verification; the unit suite IS the verification.'
     }
 7. Open the PR (reference the issue so it auto-closes), request Copilot review via the
-   requested_reviewers API, address every actionable comment, RESOLVE every inline thread
-   over GraphQL (unresolved threads block the merge), then \`gh pr merge --squash --auto\`.
+   requested_reviewers API (\`-f 'reviewers[]=copilot-pull-request-reviewer[bot]'\`), address
+   every actionable comment, RESOLVE every inline thread over GraphQL (unresolved threads
+   block the merge), then merge per the repo's AGENTS.md — consumer repos have no merge
+   queue: \`gh pr merge <pr> --squash --subject "<title> (#<pr>)" --body "<body>"\`.
 
 Then apply the autonomy rule EXACTLY:
 
@@ -280,9 +322,15 @@ GREEN — publish yourself. Only if ALL hold: \`sync:core\` changed nothing but
 \`pnpm-workspace.yaml\` and \`pnpm-lock.yaml\`; you edited no source file; verify:catalog,
 build, typecheck and test all passed on the FIRST run; verification passed; Copilot's review
 required no code change.${dryRun ? '\n  >>> DRY RUN IS ON: even on green, STOP after the merge. Do not bump, tag or push. Report status "amber" with amberReason "dry run". <<<' : `
+  Choose the version per runbook §6 "Which version": a change to any PUBLISHED core range
+  ships as a downstream minor (a core major in a repo already >= 1.0: major); a within-range
+  retarget (catalog + lockfile only — every core minor and patch from 1.0, since packages
+  peer \`^1.0.0\`) ships as a patch, or not at all when main has nothing else unreleased (then report green with releasedVersion "none").
   Then: bump the version, update CHANGELOG.md, refresh the lockfile, commit, tag and push;
-  watch release.yml; and CONFIRM with \`npm view <pkg> version\` for every package this repo
-  publishes — partial tag runs fail silently. Report status "green" with releasedVersion and
+  watch release.yml; and CONFIRM with \`npm view <pkg> version --prefer-online\` for every package
+  this repo publishes — partial tag runs fail silently. A release job that printed every package
+  as published and then failed its own read-back is registry lag: \`gh run rerun <id> --failed\`,
+  never a re-tag or a bump. Report status "green" with releasedVersion and
   publishedPackages.`}
 
 AMBER — stop after the merge, do NOT tag. Any of: a source file had to change; any check needed
@@ -303,16 +351,46 @@ for (const c of consumers) {
 }
 
 const all = []
-let haltedAt = null
+
+// The barrier is EDGE-WISE (runbook §6 "Amber and failed hold edge-wise", #629).
+// A repo that did not publish blocks exactly the repos that consume one of its
+// packages (`consumesSiblings`) — and, transitively, the consumers of THOSE, since
+// a held repo publishes nothing either. Everything else proceeds. The 0.15.1 wave
+// ran a blanket halt: i18n and live-code went amber, nothing downstream consumed
+// them, and tiers 3-4 sat idle anyway.
+const blocked = new Map() // npm package name -> the repo that did not publish it
+const held = [] // { repo, tier, blockedBy: [pkg (repo)] }
 
 for (const tier of tiers) {
-    const group = byTier.get(tier)
     const title = `Tier ${tier}`
     phase(title)
+
+    const group = []
+    for (const c of byTier.get(tier)) {
+        const hits = (c.consumesSiblings ?? []).filter((p) => blocked.has(p))
+        if (!hits.length) {
+            group.push(c)
+            continue
+        }
+        const blockedBy = hits.map((p) => `${p} (${blocked.get(p)})`)
+        held.push({ repo: c.repo, tier, blockedBy })
+        for (const p of c.publishes ?? []) blocked.set(p, c.repo)
+        all.push({
+            repo: c.repo,
+            status: 'held',
+            summary: `Not started: consumes ${blockedBy.join(', ')}, which did not publish.`,
+            blockedBy: blockedBy.join(', '),
+        })
+        log(`HOLD ${c.repo}: consumes ${blockedBy.join(', ')} — not published. Starting it would resolve two copies of @sigx/reactivity.`)
+    }
+    if (!group.length) {
+        log(`Tier ${tier}: every repo held — nothing to run.`)
+        continue
+    }
     log(`Tier ${tier}: ${group.map((c) => c.repo).join(', ')}`)
 
-    // A genuine barrier, not a stylistic one: a tier-N+1 repo cannot install until
-    // every package tier N publishes is live on npm, or it resolves two copies of
+    // A genuine barrier, not a stylistic one: a repo cannot install until every
+    // sibling package it consumes is live on npm, or it resolves two copies of
     // @sigx/reactivity and reactivity silently breaks.
     const results = await parallel(
         group.map((c) => () => agent(alignPrompt(c), { schema: ALIGN_SCHEMA, label: c.repo, phase: title })),
@@ -342,15 +420,14 @@ for (const tier of tiers) {
     const green = settled.filter((r) => r.status === 'green')
     log(`Tier ${tier} done — ${green.length} green, ${amber.length} amber, ${failed.length} failed.`)
 
-    // Anything not published blocks the tiers below: their sibling pins have nothing
-    // to point at. Halt rather than half-release the ecosystem.
+    // Anything not published blocks its consumers: their sibling pins have nothing
+    // to point at. Record its packages; the next tiers hold exactly those consumers.
     const unpublished = [...failed, ...amber].filter(
         (r) => !r._entry.private && (r._entry.publishes ?? []).length > 0,
     )
-    if (unpublished.length && tier !== tiers[tiers.length - 1]) {
-        haltedAt = { tier, repos: unpublished.map((r) => r.repo) }
-        log(`HALT after tier ${tier}: ${unpublished.map((r) => r.repo).join(', ')} did not publish. Later tiers would resolve two copies of @sigx/reactivity.`)
-        break
+    for (const r of unpublished) for (const p of r._entry.publishes) blocked.set(p, r.repo)
+    if (unpublished.length) {
+        log(`Tier ${tier}: ${unpublished.map((r) => r.repo).join(', ')} did not publish — their consumers in later tiers will be held.`)
     }
 }
 
@@ -364,15 +441,17 @@ const report = await agent(
 Per-repo results:
 ${JSON.stringify(all, null, 2)}
 
-${haltedAt ? `The rollout HALTED after tier ${haltedAt.tier} because these repos did not publish: ${haltedAt.repos.join(', ')}. Tiers below it were never started.` : 'Every planned tier ran.'}
+${held.length ? `These repos were HELD (never started) because a sibling they consume did not publish: ${held.map((h) => `${h.repo} (tier ${h.tier}) <- ${h.blockedBy.join(', ')}`).join('; ')}. Every other repo ran.` : 'Every planned repo ran.'}
 
 Write it for a maintainer who needs to finish the job. Structure:
 1. One-line state of the ecosystem (how many published, how many waiting on a human).
 2. **Needs a decision** — every amber repo: what changed beyond the catalog, why it is amber,
    what you would tag, and the exact next command. This is the part that matters; be specific.
+   List the "human queue: interactive browser verification" ambers separately, with the
+   command to run and what to look for.
 3. **Failed** — every failed repo and what blocked it.
 4. **Published** — a table of repo / version / packages confirmed on npm.
-5. **Not yet started** — any tier that never ran, and what unblocks it.
+5. **Held** — every held repo, which unpublished sibling holds it, and what unblocks it.
 6. Anything that should change in \`docs/ecosystem.json\` or \`docs/ecosystem-release.md\` as a
    result of what you saw (a stale catalog note, a wrong tier, a missing verification command).
 
@@ -381,14 +460,15 @@ Markdown. No preamble.`,
 )
 
 return {
-    ok: !haltedAt,
+    ok: held.length === 0 && all.every((r) => r.status === 'green'),
     dryRun,
     coreVersion: plan.coreVersion,
-    haltedAt,
+    held,
     counts: {
         green: all.filter((r) => r.status === 'green').length,
         amber: all.filter((r) => r.status === 'amber').length,
         failed: all.filter((r) => r.status === 'failed').length,
+        held: held.length,
     },
     repos: all,
     report,

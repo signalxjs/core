@@ -1,0 +1,3 @@
+# The Workflow tool's approval dialog rejects CRLF as "control characters" (#629),
+# so workflow scripts stay LF in every checkout, whatever core.autocrlf says.
+.claude/workflows/*.mjs text eol=lf

@@ -10,8 +10,8 @@
     "`tier` is the release wave. A repo's tier must be strictly greater than the tier of every",
     "repo publishing a package it lists in `consumesSiblings` — check-ecosystem.mjs enforces",
     "exactly that, so the ordering can never rot the way the hardcoded fan-out list did.",
-    "Everything in one tier can be aligned and released in parallel; the next tier may not",
-    "start until every package in the previous one is live on npm.",
+    "Everything in one tier can be aligned and released in parallel. The barrier is per edge: a repo",
+    "may not start until every sibling package it consumes is live on npm (docs/ecosystem-release.md §6).",
     "",
     "Deliberately absent: signalxjs/devtools (pins core ^0.5.0, v0.0.1, never published — a",
     "rewrite, not a bump) and signalxjs/signalxjs.github.io (the docs agent's queue; file an",
@@ -95,7 +95,8 @@
       "consumesCore": ["sigx", "@sigx/vite"],
       "consumesSiblings": [],
       "catalog": "complete",
-      "verify": { "unit": "pnpm test", "browser": "pnpm dev:basic" }
+      "verify": { "unit": "pnpm test", "browser": "pnpm dev:basic", "browserRequired": true },
+      "verifyNote": "browserRequired: the only real verification is interactive (type in the editor, watch completions and markers), which a headless rollout session cannot supply — the orchestrator routes this repo straight to the human queue (amber) instead of discovering that at the end of a tier (#629)."
     },
     {
       "repo": "three",
