@@ -158,9 +158,8 @@
         "@sigx/cache",
         "@sigx/vite"
       ],
-      "consumesSiblings": ["@sigx/router", "@sigx/store", "@sigx/daisyui"],
+      "consumesSiblings": ["@sigx/router", "@sigx/store"],
       "catalog": "complete",
-      "catalogTodo": "pins @sigx/daisyui to an exact stale 0.8.0 (current is 0.9.0) — a SIBLING, so sync:core leaves it alone; bump it by hand on this repo's tier",
       "verify": { "unit": "pnpm test", "browser": "pnpm smoke (playwright) — the only repo with a real e2e suite" }
     },
     {
@@ -201,7 +200,6 @@
       "consumesCore": ["@sigx/server-renderer", "@sigx/vite", "sigx"],
       "consumesSiblings": ["@sigx/router", "@sigx/cli", "@sigx/args"],
       "catalog": "complete",
-      "catalogTodo": "sibling pins are stale: @sigx/cli ^0.4.2 (current 0.6.0), @sigx/args ^0.6.1 (current 0.8.0) — SIBLINGS, so sync:core leaves them alone; bump by hand on this repo's tier",
       "verify": { "unit": "pnpm test", "browser": "examples/* — build and serve a generated site" }
     },
     {
