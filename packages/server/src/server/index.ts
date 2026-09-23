@@ -1306,7 +1306,9 @@ function wireErrorShape(
  * `rq.responseHeaders`/`rq.status()`, and a pre-yield throw propagates to
  * the caller's catch as an ordinary buffered JSON error. Client disconnect
  * cancels the body stream, which returns the generator (its `finally`
- * blocks run).
+ * blocks run). A cancel that lands while `pull` is suspended in the
+ * generator's `next()` is the normal end of the stream, not a handler
+ * failure: the late value is dropped, nothing is reported (#728).
  */
 /**
  * Contexts whose disposal a STREAM owns (rfc-server-v3 §2.6): stamped the
@@ -1389,6 +1391,11 @@ async function streamResponse(
     }
     const headers = new Headers(ctx.responseHeaders);
     headers.set('content-type', 'application/x-ndjson');
+    /** Set by `cancel()` (client disconnect). A `pull` suspended in
+     *  `gen.next()` when it lands resumes onto a closed controller — its
+     *  enqueue would throw ERR_INVALID_STATE, which is not the handler's
+     *  failure, so every post-cancel path below just stops (#728). */
+    let cancelled = false;
     const body = new ReadableStream<Uint8Array>({
         start(controller) {
             if (firstLine === null) {
@@ -1404,6 +1411,9 @@ async function streamResponse(
         async pull(controller) {
             try {
                 const next = await gen.next();
+                // Cancelled while suspended: `cancel()` already disposed —
+                // drop the late value and stop pulling.
+                if (cancelled) return;
                 if (next.done) {
                     controller.enqueue(line({ done: 1 }));
                     controller.close();
@@ -1412,6 +1422,12 @@ async function streamResponse(
                 }
                 controller.enqueue(chunkLine(next.value));
             } catch (error) {
+                // Anything thrown after a cancel — an enqueue onto the
+                // closed controller, or the generator failing as it is
+                // returned — is the end of a stream nobody reads any more,
+                // not a handler failure to report (#728). `cancel()` owns
+                // the disposal.
+                if (cancelled) return;
                 // The response has started — the error travels IN-BAND as
                 // the terminating NDJSON line (headers are long gone). The
                 // masked failure still reaches the observability seam
@@ -1433,6 +1449,7 @@ async function streamResponse(
             }
         },
         cancel() {
+            cancelled = true;
             disposeAll();
         }
     });
