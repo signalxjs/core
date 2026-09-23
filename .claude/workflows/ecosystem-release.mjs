@@ -111,7 +111,15 @@ const ALIGN_SCHEMA = {
 
 // `args` has reached this script as a JSON-encoded STRING rather than an object
 // (0.15.1 wave, #629): `args.onlyTiers` read as undefined and tier 1 silently re-ran.
-const args_ = typeof args === 'string' ? JSON.parse(args) : (args ?? {})
+let args_
+try {
+    args_ = typeof args === 'string' ? JSON.parse(args) : (args ?? {})
+} catch (e) {
+    return { ok: false, error: `args arrived as a string that is not valid JSON (${e.message}): ${String(args).slice(0, 200)}` }
+}
+if (!args_ || typeof args_ !== 'object' || Array.isArray(args_)) {
+    return { ok: false, error: `args must be an object (or a JSON string of one); got ${JSON.stringify(args_)}` }
+}
 const dryRun = args_.dryRun === true
 
 // ---------------------------------------------------------------- Phase: Plan
@@ -138,7 +146,7 @@ const plan = await agent(
    \`verifyBrowserRequired\` (false when absent). Do not drop \`verify.manual\` — it is how a
    repo with no browser surface still says how it can be exercised.
 5. Pre-flight the changelog (runbook §3): read every section of the root \`CHANGELOG.md\`
-   (and the per-package \`packages/*/CHANGELOG.md\`) newer than the core version the consumers
+   (and each package's own \`CHANGELOG.md\` under \`packages/\`) newer than the core version the consumers
    are currently on, and list in \`downstreamChanges\` every entry a consumer could OBSERVE —
    \`Changed\`, \`Deprecated\`, \`Removed\`, \`Security\`, and any \`Fixed\` or \`Added\` entry
    that changes a return value, a type, a warning or a serialized shape for an input that

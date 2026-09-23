@@ -71,11 +71,18 @@ if (/group\.find\(\s*\(?\s*g\s*\)?\s*=>\s*g\.repo\s*===\s*r\.repo/.test(src)) {
     );
 }
 
-// 3. The barrier must still exist and still break out of the tier loop.
-if (!/haltedAt\s*=\s*\{/.test(src) || !/\bbreak\b/.test(src)) {
+// 3. The barrier must still exist. It is edge-wise (#629): an unpublished repo's
+//    packages go into `blocked`, and a later repo consuming any of them is held
+//    (and its own packages blocked in turn) instead of started.
+if (
+    !/blocked\.set\(/.test(src) ||
+    !/consumesSiblings[^\n]*\.filter\(\s*\(?\s*p\s*\)?\s*=>\s*blocked\.has\(\s*p\s*\)\s*\)/.test(src) ||
+    !/held\.push\(/.test(src)
+) {
     errors.push(
-        'the between-tier halt (`haltedAt = {...}` + `break`) is gone. Without it a tier whose repos ' +
-            'never published does not stop the tiers below, and their sibling pins point at versions ' +
+        'the edge-wise barrier (`blocked.set(...)` for unpublished packages, consumers filtered by ' +
+            '`consumesSiblings.filter((p) => blocked.has(p))` and `held.push(...)`) is gone. Without it a ' +
+            "repo whose sibling never published is started anyway, and its sibling pins point at versions " +
             'that do not exist on npm.',
     );
 }
@@ -99,8 +106,23 @@ if (!/SYNC THE LOCAL CHECKOUT FIRST/.test(src)) {
     );
 }
 
+// 6. The Workflow tool's approval dialog rejects CRLF as "control characters" (#629);
+//    .gitattributes keeps the file LF — this catches a checkout that lost that.
+if (raw.includes('\r')) {
+    errors.push(
+        'the orchestrator has CR characters (CRLF line endings) — the Workflow approval dialog rejects it. ' +
+            'Keep the .gitattributes rule `.claude/workflows/*.mjs text eol=lf` and re-checkout the file.',
+    );
+}
+
+// 7. `args` has arrived as a JSON string rather than an object (#629); reading
+//    `args.onlyTiers` off a string silently ignores it.
+if (!/typeof args === 'string'/.test(src)) {
+    errors.push("the orchestrator no longer accepts `args` as a JSON string (`typeof args === 'string'` guard, #629).");
+}
+
 if (errors.length) {
     console.error('verify:orchestrator FAILED:\n' + errors.map((e) => '  - ' + e).join('\n'));
     process.exit(1);
 }
-console.log('verify:orchestrator OK — tier barrier attributes by index, halt + preflight + checkout-sync intact.');
+console.log('verify:orchestrator OK — tier barrier attributes by index, edge-wise hold + preflight + checkout-sync + LF + args guard intact.');
