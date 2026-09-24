@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Hydration removes server-rendered nodes no client vnode claims (#733).**
+  When the client's first render disagreed with the server's HTML inside an
+  element, the mismatch recoveries inserted the client's node and left the
+  server's in place, untracked by the renderer. The first patch then drew
+  the client's version next to it. The reported case was a code block that
+  the server rendered as highlighted token spans (a warm highlighter cache)
+  and the client hydrated as plain text: once the client highlight landed,
+  every line showed twice. Two changes fix it. After an element's children
+  hydrate, any server nodes left past the last claimed one are removed. A
+  server element skipped by the missing-element recovery is removed too,
+  but only within the current component's region. `__DEV__` warns when
+  the removed nodes include real content. What an existing page observes
+  changes only where SSR and client already disagreed: nodes that
+  previously stayed as orphans (duplicate text or elements) are now gone.
+  That includes anything a script or browser extension injected into a
+  sigx-rendered element before hydration ran.
+
 ## [1.0.0] - 2026-09-18
 
 ### Added

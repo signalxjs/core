@@ -345,10 +345,17 @@ export function hydrateNode(vnode: VNode, dom: Node | null, parent: Node, region
                     fixSelectValue(fresh as HTMLElement, vnode.props);
                 }
                 // Advance past both the inserted `fresh` and the original
-                // mismatched `dom` (now orphaned). Returning `dom` would let
-                // the next sibling VNode bind to the orphan, cascading the
-                // mismatch.
-                return dom ? dom.nextSibling : null;
+                // mismatched `dom`. Returning `dom` would let the next
+                // sibling VNode bind to it, cascading the mismatch — and no
+                // vnode claims it after this, so remove it rather than leave
+                // it as visible content the renderer never tracks (#733).
+                // Only inside this position's region: the comment skip above
+                // may have walked past the enclosing component's marker, and
+                // a node beyond it belongs to whoever hydrates next.
+                if (!dom) return null;
+                const next = dom.nextSibling;
+                if (withinRegion(dom, regionEnd)) parent.removeChild(dom);
+                return next;
             }
         }
 
@@ -393,6 +400,23 @@ export function hydrateNode(vnode: VNode, dom: Node | null, parent: Node, region
             childDom = hydrateNode(child, childDom, el);
         }
 
+        // Every child has claimed its nodes: whatever SSR left past the
+        // cursor belongs to no vnode. The mismatch recoveries above insert
+        // the client's node and keep the SSR node (a text vnode meeting an
+        // element, a missing element), so leaving the rest in place makes
+        // it visible content the renderer never tracks — the first patch
+        // then renders the client's version NEXT to it (#733: a highlighted
+        // code block SSR'd as token spans, hydrated as plain text, showed
+        // every line twice once the client highlight landed). Only when the
+        // client renders children at all: a childless vnode may own its
+        // content through a prop (innerHTML, textContent) instead.
+        if (childDom && vnode.children.length > 0) {
+            if (__DEV__ && hasRealContent(childDom)) {
+                console.warn('[Hydrate] Removing server-rendered child node(s) of <' + vnode.type + '> the client VNode tree does not render; SSR output does not match the client here.', childDom);
+            }
+            removeFrom(childDom);
+        }
+
         // Fix select value after children are hydrated
         if (vnode.type === 'select' && vnode.props) {
             fixSelectValue(el as HTMLElement, vnode.props);
@@ -402,6 +426,32 @@ export function hydrateNode(vnode: VNode, dom: Node | null, parent: Node, region
     }
 
     return dom;
+}
+
+/** Whether `node` lies before `regionEnd` (always, for an unbounded region). */
+function withinRegion(node: Node, regionEnd: Node | null): boolean {
+    if (!regionEnd) return true;
+    for (let n: Node | null = node; n; n = n.nextSibling) {
+        if (n === regionEnd) return true;
+    }
+    return false;
+}
+
+/** Whether `node` or a following sibling is content rather than a comment or formatting whitespace. */
+function hasRealContent(node: Node | null): boolean {
+    for (let n = node; n; n = n.nextSibling) {
+        if (n.nodeType !== Node.COMMENT_NODE && !isFormattingWhitespace(n)) return true;
+    }
+    return false;
+}
+
+/** Remove `node` and every sibling after it. */
+function removeFrom(node: Node | null): void {
+    while (node) {
+        const next: Node | null = node.nextSibling;
+        node.parentNode?.removeChild(node);
+        node = next;
+    }
 }
 
 /**
