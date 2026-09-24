@@ -113,6 +113,15 @@ for (const c of consumers) {
             errors.push(`${c.repo} lists core dep "${pkg}", which is not a core package.`);
         }
     }
+    // 6. verify.browserRequired routes a repo to the human queue — only meaningful
+    //    alongside the browser command a human would run.
+    if (c.verify?.browserRequired !== undefined) {
+        if (c.verify.browserRequired !== true) {
+            errors.push(`${c.repo}: verify.browserRequired must be \`true\` or absent (got ${JSON.stringify(c.verify.browserRequired)}).`);
+        } else if (typeof c.verify.browser !== 'string' || !c.verify.browser) {
+            errors.push(`${c.repo}: verify.browserRequired needs verify.browser — the command a human runs.`);
+        }
+    }
 }
 
 // Optional: confirm the repos exist and ship what we claim.

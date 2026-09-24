@@ -56,7 +56,8 @@ consumer's publishable packages, and `verify:catalog` asserts it.
 The consequence for releases: while an ecosystem package on npm still declares
 `^0.12.0` and a sibling has moved to `^0.13.0`, any app depending on both resolves
 **two** copies. The window is real but it closes as each tier publishes — which is
-why tiers are released in order and why a red tier halts everything below it.
+why tiers are released in order and why a repo that does not publish holds
+everything that consumes it (§6).
 
 ## 2. The tiers
 
@@ -83,6 +84,8 @@ Tier 4   mermaid    ← @sigx/router, @sigx/ssg
 ```
 
 Everything **within** a tier is independent — align and release them in parallel.
+The barriers are per edge, not per tier: a repo waits only for the siblings it
+consumes (§6 "Amber and failed hold edge-wise").
 Regenerate this at any time rather than trusting the copy above:
 
 ```sh
@@ -106,7 +109,20 @@ node -e "for (const p of require('./docs/ecosystem.json').corePackages) console.
   | xargs -I{} sh -c 'printf "%-24s %s\n" {} "$(npm view {} version)"'
 ```
 
-All 14 must read the new version. Only then does tier 1 begin.
+All 14 must read the new version. Only then does tier 1 begin. (Registry reads lag a
+publish by minutes; if one reads stale, re-check with `npm view <pkg> dist-tags
+--prefer-online` before concluding anything — MAINTAINERS.md → "If something fails".)
+
+### Pre-flight: what will downstream observe?
+
+Before tier 1, read `CHANGELOG.md` (and `packages/*/CHANGELOG.md`) for every version
+since the one the consumers are on, and **list every entry a consumer can observe** —
+`Changed`, `Deprecated`, `Removed`, `Security`, and any `Fixed`/`Added` entry that
+changes a return value, a type, a warning or a serialized shape for an input that
+already worked. Hand the list to every repo in the rollout. Both 0.15.0 surprises
+(store's `__proto__` revive contract, daisyui's widened `Define.Slot` return) were
+documented in core and still discovered downstream by test failure. The orchestrator
+does this in its Plan phase and puts the list in every repo agent's prompt.
 
 ## 4. Per repo — the procedure
 
@@ -129,8 +145,9 @@ cd <repo>/branches/<N>-align-core-X.Y
 #    devDependencies "catalog:" twin. Siblings are left alone.
 pnpm sync:core X.Y
 
-# 3. Install + prove it.
-pnpm install --no-frozen-lockfile
+# 3. Install + prove it. --prefer-online: npm serves stale metadata for minutes
+#    after a publish, and the previous tier just published.
+pnpm install --no-frozen-lockfile --prefer-online
 pnpm verify:catalog      # no inline core deps; every catalog core entry is ^X.Y.0;
                          # every publishable package peers on core at ^X.0.0
 pnpm build
@@ -158,9 +175,27 @@ pnpm test
 > gh api repos/signalxjs/<repo>/contents/.github/workflows/core-sync.yml --jq .name
 > ```
 
+> **Adopt the `core-released` bot PR — do not open a duplicate.** Core's release fans a
+> dispatch out and `core-sync.yml` opens a `chore: align with core X.Y` PR in every repo
+> whose build passes on the new core. If one is open (`gh pr list`), branch from it
+> instead of `main` — `git fetch origin <bot-branch>`, `pnpm wt new <name> --from
+> origin/<bot-branch>` — and push back with `git push origin HEAD:<bot-branch>`. A bot
+> PR gets **no CI run** until someone pushes to it.
+
 Then **verify the way the repo can be verified** (§5), open the PR with Copilot as
-reviewer, resolve every inline thread, and merge through the queue — the standard
-`AGENTS.md` flow. Sibling pins (`@sigx/router`, `@sigx/cli`, …) are *not* touched by
+reviewer, resolve every inline thread, and merge — the repo's own `AGENTS.md` flow,
+which differs from core's in two places:
+
+- `--reviewer @copilot` fails in several consumer repos. Request it over the API:
+  `gh api --method POST repos/signalxjs/<repo>/pulls/<pr>/requested_reviewers -f 'reviewers[]=copilot-pull-request-reviewer[bot]'`,
+  then watch `.reviews[]` (a bot request does not show under `reviewRequests`).
+- Consumer repos have **no merge queue**. Merge with an explicit message:
+  `gh pr merge <pr> --squash --subject "<title> (#<pr>)" --body "<body>"`.
+
+A CI job that resolved the previous version of a just-published sibling is registry
+lag, not a code problem: `gh run rerun <run-id> --failed`.
+
+Sibling pins (`@sigx/router`, `@sigx/cli`, …) are *not* touched by
 `sync:core`; bump those by hand in the same PR to the versions the previous tier
 just published.
 
@@ -175,7 +210,7 @@ manifest. Unit tests run on `happy-dom` — they do not prove a real browser ren
 | Repo | Unit | Beyond unit |
 |---|---|---|
 | `pulse` | `pnpm test` | **`pnpm smoke`** — playwright, the only real e2e suite in the ecosystem |
-| `monaco-editor` | `pnpm test` | **`pnpm dev:basic`** — drive it in a browser |
+| `monaco-editor` | `pnpm test` | **`pnpm dev:basic`** — interactive; `browserRequired`, so a human verifies it |
 | `richtext` | `pnpm test` | **`pnpm --filter playground-example e2e`** — playwright: streaming keeps block identity, Shiki, copy, onLink |
 | `zero` | `pnpm test && pnpm test:types` | **`pnpm --filter zero-playground e2e`** — playwright across chromium, firefox and webkit |
 | `three` | `pnpm test` | `examples/game-hud` — `pnpm dev:hud` after `pnpm build`; the scene renders, WASD moves the ship, the HUD score updates |
@@ -192,6 +227,13 @@ interaction, screenshot it, and attach the screenshot to the PR. On Windows,
 confirm the dev server's PID actually changed after a restart before trusting what
 you see — a stale process can keep serving the old port while the new one logs
 "listening".
+
+`"browserRequired": true` under a repo's `verify` in the manifest marks a verification
+only an interactive session can run (`monaco-editor`: type in the editor, watch
+completions and markers). A rollout agent does not attempt it: it aligns, merges and
+reports amber with a `human queue:` reason and the command to run — known up front
+instead of discovered at the end of a tier. `pnpm verify:ecosystem` requires
+`verify.browser` alongside it.
 
 ## 6. Autonomy — when to publish, when to stop
 
@@ -217,7 +259,7 @@ only then tag the merged commit:
 # 1. Bump on a branch, never on main.
 pnpm wt new <N>-release-vX.Y.Z --from main
 cd <repo>/branches/<N>-release-vX.Y.Z
-node scripts/bump-version.js minor      # or patch — match what actually changed
+node scripts/bump-version.js minor      # or patch — see "Which version" below
 # update CHANGELOG.md, then refresh the lockfile so CI's --frozen-lockfile passes:
 pnpm install --lockfile-only
 git commit -am "chore: release vX.Y.Z"
@@ -232,7 +274,7 @@ cd ../main && git pull --ff-only origin main
 git tag -a vX.Y.Z -m "vX.Y.Z" && git push origin vX.Y.Z
 
 gh run watch -R signalxjs/<repo>        # release.yml
-npm view <each published package> version   # confirm — partial tag runs are silent
+npm view <each published package> version --prefer-online   # confirm — partial tag runs are silent
 ```
 
 > **Why not `git push --follow-tags`.** On the 0.13.0 rollout an agent ran it against
@@ -253,6 +295,20 @@ npm view <each published package> version   # confirm — partial tag runs are s
 > else — `git push origin :refs/tags/vX.Y.Z` — and check npm, because a partially
 > succeeded publish cannot be undone and forces a version bump.
 
+### Which version
+
+The published manifest decides, not the size of the core bump:
+
+| What the align PR changed | Downstream release |
+|---|---|
+| a **published** core range — a 0.x core minor (`^0.15.0` → `^0.16.0`), a raised peer floor (`^1.0.0` → `^1.3.0` because the package now uses a 1.3 API), a core major | **minor** (a core major in a repo already ≥ 1.0: **major**) |
+| only the catalog and lockfile — every core minor and patch from 1.0, since packages peer `^1.0.0` | **patch**, or **none** when `main` has nothing else unreleased |
+
+In short: a core-minor catalog retarget that changes what users install ships as a
+downstream minor; a within-range lockfile refresh ships as a patch, or not at all. A
+repo that releases nothing still counts as published for the barrier — the version
+already on npm accepts the new core.
+
 ### Amber — stop after the merge and hand back
 
 **Any** of these:
@@ -267,19 +323,25 @@ npm view <each published package> version   # confirm — partial tag runs are s
 Merge the PR, then **stop before `git tag`**. Report: what changed beyond the
 catalog, which check failed and why, and what you'd tag. A human decides.
 
-### Failure
+### Amber and failed hold edge-wise
 
-A red repo **halts every tier below it** — do not start tier N+1 with tier N
-incomplete, or apps resolve two copies of `@sigx/reactivity` with no error to show
-for it. Report the tier state and stop.
+A publishing repo that did not publish (amber or failed) **holds exactly its
+consumers**: every later repo whose `consumesSiblings` names one of its packages,
+and — since a held repo publishes nothing either — their consumers in turn. Starting
+one of those would resolve two copies of `@sigx/reactivity` with no error to show for
+it. Every other repo in the later tiers **proceeds**; a private repo (`pulse`) never
+holds anyone. The 0.15.1 wave ran a blanket halt instead: `i18n` and `live-code` went
+amber with zero downstream edges, and tiers 3–4 sat idle for nothing. Report the held
+set — which repo, held by which sibling — alongside the ambers.
 
 ## 7. The orchestrator
 
 [`.claude/workflows/ecosystem-release.mjs`](../.claude/workflows/ecosystem-release.mjs)
 implements all of the above as a multi-subagent workflow: it reads `ecosystem.json`,
 confirms core is fully published, fans one agent out per repo **within** a tier,
-barriers between tiers, classifies each repo green or amber, halts the tiers below
-anything that failed to publish, and ends with a hand-back report. Run it rather than
+pre-flights the changelog (§3), barriers between tiers, classifies each repo green or
+amber, routes `browserRequired` repos to the human queue (§5), holds the consumers of
+anything that failed to publish (§6), and ends with a hand-back report. Run it rather than
 re-deriving the procedure by hand:
 
 ```
@@ -287,6 +349,9 @@ Workflow({ name: 'ecosystem-release' })
 Workflow({ name: 'ecosystem-release', args: { dryRun: true } })    # align + PR, never tag
 Workflow({ name: 'ecosystem-release', args: { onlyTiers: [1] } })  # one wave at a time
 ```
+
+The script is kept LF by `.gitattributes` — the Workflow tool's approval dialog rejects
+CRLF as "control characters" — and accepts `args` as an object or a JSON string.
 
 Start with `dryRun: true` on a release you have not driven before — it runs the whole
 procedure and stops every repo at amber, so you see the shape of the rollout without
