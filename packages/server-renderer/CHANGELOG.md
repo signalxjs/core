@@ -17,7 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   the server rendered as highlighted token spans (a warm highlighter cache)
   and the client hydrated as plain text: once the client highlight landed,
   every line showed twice. Two changes fix it. After an element's children
-  hydrate, any server nodes left past the last claimed one are removed. A
+  hydrate, any server nodes left past the last claimed one are removed,
+  unless a prop (`innerHTML`, `textContent`) wrote the element's content. A
   server element skipped by the missing-element recovery is removed too,
   but only within the current component's region. `__DEV__` warns when
   the removed nodes include real content. What an existing page observes

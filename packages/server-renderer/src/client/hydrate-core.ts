@@ -361,6 +361,9 @@ export function hydrateNode(vnode: VNode, dom: Node | null, parent: Node, region
 
         const el = dom as Element;
         vnode.dom = el;
+        // The SSR children as they stand before props apply — a prop that
+        // writes the content (innerHTML, textContent) replaces them.
+        const ssrFirst = el.firstChild;
 
         // Attach event handlers and props using patchProp from runtime-dom
         if (vnode.props) {
@@ -396,6 +399,7 @@ export function hydrateNode(vnode: VNode, dom: Node | null, parent: Node, region
 
         // Hydrate children
         let childDom: Node | null = el.firstChild;
+        const propsWroteContent = childDom !== ssrFirst;
         for (const child of vnode.children) {
             childDom = hydrateNode(child, childDom, el);
         }
@@ -407,10 +411,10 @@ export function hydrateNode(vnode: VNode, dom: Node | null, parent: Node, region
         // it visible content the renderer never tracks — the first patch
         // then renders the client's version NEXT to it (#733: a highlighted
         // code block SSR'd as token spans, hydrated as plain text, showed
-        // every line twice once the client highlight landed). Only when the
-        // client renders children at all: a childless vnode may own its
-        // content through a prop (innerHTML, textContent) instead.
-        if (childDom && vnode.children.length > 0) {
+        // every line twice once the client highlight landed). Not when a
+        // prop applied above rewrote the element's content (innerHTML,
+        // textContent under any spelling): those children are the prop's.
+        if (childDom && !propsWroteContent) {
             if (__DEV__ && hasRealContent(childDom)) {
                 console.warn('[Hydrate] Removing server-rendered child node(s) of <' + vnode.type + '> the client VNode tree does not render; SSR output does not match the client here.', childDom);
             }

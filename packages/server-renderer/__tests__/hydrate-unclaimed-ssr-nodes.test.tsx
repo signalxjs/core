@@ -39,7 +39,7 @@ describe('hydration removes unclaimed SSR nodes (#733)', () => {
         warn.mockRestore();
     });
 
-    it('SSR token spans hydrated as text, then patched to spans, render each line once', async () => {
+    it('SSR token spans hydrated as text, then patched to spans, renders each line once', async () => {
         let isClient = false;
         let highlight!: () => void;
         const Code = component(() => {
@@ -103,6 +103,37 @@ describe('hydration removes unclaimed SSR nodes (#733)', () => {
         highlight();
         await nextTick();
         expect(container.querySelectorAll('[data-line]').length).toBe(4);
+    });
+
+    it('removes SSR children of an element the client renders childless', async () => {
+        let isClient = false;
+        const Box = component(() => () => (
+            <div class="box">{isClient ? undefined : <span class="stale">stale</span>}</div>
+        ), { name: 'Box' });
+
+        container = createSSRContainer(await renderToString(<Box />));
+        expect(container.querySelector('.stale')).toBeTruthy();
+        isClient = true;
+        hydrate(<Box />, container);
+        await nextTick();
+
+        expect(container.querySelector('.stale')).toBeNull();
+    });
+
+    it('keeps the content of an element that owns it through innerHTML', async () => {
+        let isClient = false;
+        // SSR does not render innerHTML; the client sets it while hydrating
+        // the element's props, before the leftover sweep runs.
+        const Raw = component(() => () => (
+            isClient ? <div class="raw" {...{ innerHTML: '<b>bold</b>' }} /> : <div class="raw" />
+        ), { name: 'Raw' });
+
+        container = createSSRContainer(await renderToString(<Raw />));
+        isClient = true;
+        hydrate(<Raw />, container);
+        await nextTick();
+
+        expect(container.querySelector('.raw b')?.textContent).toBe('bold');
     });
 
     it('does not remove a following sibling past the component region on an element mismatch', async () => {
