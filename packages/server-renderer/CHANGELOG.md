@@ -20,8 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   hydrate, any server nodes left past the last claimed one are removed,
   unless a prop (`innerHTML`, `textContent`) wrote the element's content. A
   server element skipped by the missing-element recovery is removed too,
-  but only within the current component's region. `__DEV__` warns when
-  the removed nodes include real content. What an existing page observes
+  but only within the current component's region, and the element it
+  inserts in its place now stays inside that region too. `__DEV__` warns
+  when the removed nodes include real content. What an existing page observes
   changes only where SSR and client already disagreed: nodes that
   previously stayed as orphans (duplicate text or elements) are now gone.
   That includes anything a script or browser extension injected into a

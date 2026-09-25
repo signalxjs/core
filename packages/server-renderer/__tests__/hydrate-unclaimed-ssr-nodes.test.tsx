@@ -136,7 +136,7 @@ describe('hydration removes unclaimed SSR nodes (#733)', () => {
         expect(container.querySelector('.raw b')?.textContent).toBe('bold');
     });
 
-    it('does not remove a following sibling past the component region on an element mismatch', async () => {
+    it('keeps an element-mismatch recovery inside the component region', async () => {
         let isClient = false;
         // The client renders an extra <i> the server did not: its search walks
         // past Inner's marker onto the sibling <p>, which Inner must not take.
@@ -159,6 +159,10 @@ describe('hydration removes unclaimed SSR nodes (#733)', () => {
         hydrate(<App />, container);
         await nextTick();
 
+        // The fresh <i> stays inside Inner's range, before its marker.
+        const host = container.querySelector('.host')!;
+        const marker = Array.from(host.childNodes).find(n => n.nodeType === Node.COMMENT_NODE && (n as Comment).data.startsWith('$c:'))!;
+        expect(container.querySelector('i')!.compareDocumentPosition(marker) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
         expect(container.querySelector('p.after')).toBe(after);
         expect(container.querySelectorAll('p.after').length).toBe(1);
     });

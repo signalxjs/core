@@ -306,12 +306,14 @@ export function hydrateNode(vnode: VNode, dom: Node | null, parent: Node, region
                     const cls = vnode.props?.class || '';
                     console.warn('[Hydrate] Expected element but got:', dom, '| tag:', vnode.type, '| class:', cls, '| parent:', parent?.nodeName);
                 }
+                // The comment skip above may have walked past the enclosing
+                // component's marker: a node beyond it belongs to whoever
+                // hydrates next, so treat it as absent and keep the fresh
+                // element inside the region, before its end.
+                const bounded = regionEnd && regionEnd.parentNode === parent ? regionEnd : null;
+                const at = dom && withinRegion(dom, bounded) ? dom : bounded;
                 const fresh = document.createElement(vnode.type);
-                if (dom) {
-                    parent.insertBefore(fresh, dom);
-                } else {
-                    parent.appendChild(fresh);
-                }
+                parent.insertBefore(fresh, at);
                 vnode.dom = fresh;
                 let hasDirectives = false;
                 if (vnode.props) {
@@ -349,12 +351,11 @@ export function hydrateNode(vnode: VNode, dom: Node | null, parent: Node, region
                 // sibling VNode bind to it, cascading the mismatch — and no
                 // vnode claims it after this, so remove it rather than leave
                 // it as visible content the renderer never tracks (#733).
-                // Only inside this position's region: the comment skip above
-                // may have walked past the enclosing component's marker, and
-                // a node beyond it belongs to whoever hydrates next.
-                if (!dom) return null;
+                // Out of region, `at` is the region's end: the next sibling
+                // vnode resumes there and also stays inside the region.
+                if (!at || at !== dom) return at;
                 const next = dom.nextSibling;
-                if (withinRegion(dom, regionEnd)) parent.removeChild(dom);
+                parent.removeChild(dom);
                 return next;
             }
         }
