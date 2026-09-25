@@ -131,7 +131,9 @@ export default [
     // the record at the resolveBoundary consult (one line — a pack's
     // lossy-snapshot verdict, stamped where it splits the props); sat at
     // 13.81 KB (main was 13.78 KB).
-    limit: '13.85 KB',
+    // 13.85 → 13.9 KB with #733: the hydration sweep of SSR nodes no client
+    // vnode claims (see the client entry below); sat at 13.85 KB.
+    limit: '13.9 KB',
     ignore: ['sigx', 'sigx/*', '@sigx/*', 'node:stream'],
   },
   {
@@ -147,7 +149,12 @@ export default [
     // 5.75 → 5.8 KB with #523: the hydration path carries the peeled `ref`
     // through to the setup context, mirroring the client mount path so the
     // two cannot disagree on what props a component sees; sat at 5.76 KB.
-    limit: '5.8 KB',
+    // 5.8 → 5.9 KB with #733: hydration removes the SSR nodes no client vnode
+    // claims (the element-children sweep + the region-bounded removal in the
+    // missing-element recovery), so a mismatch cannot leave untracked
+    // duplicates, skipped where a prop wrote the element's content; sat at
+    // 5.86 KB after inlining the sweep.
+    limit: '5.9 KB',
     ignore: ['sigx', 'sigx/*', '@sigx/*'],
   },
   {
