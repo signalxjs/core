@@ -147,7 +147,12 @@ export default [
     // 5.75 → 5.8 KB with #523: the hydration path carries the peeled `ref`
     // through to the setup context, mirroring the client mount path so the
     // two cannot disagree on what props a component sees; sat at 5.76 KB.
-    limit: '5.8 KB',
+    // 5.8 → 5.9 KB with #733: hydration removes the SSR nodes no client vnode
+    // claims (the element-children sweep + the region-bounded removal in the
+    // missing-element recovery), so a mismatch cannot leave untracked
+    // duplicates; sat at 5.85 KB after inlining the sweep. The root entry
+    // absorbs the same bytes within its 13.85 KB limit.
+    limit: '5.9 KB',
     ignore: ['sigx', 'sigx/*', '@sigx/*'],
   },
   {

@@ -414,7 +414,11 @@ export function hydrateNode(vnode: VNode, dom: Node | null, parent: Node, region
             if (__DEV__ && hasRealContent(childDom)) {
                 console.warn('[Hydrate] Removing server-rendered child node(s) of <' + vnode.type + '> the client VNode tree does not render; SSR output does not match the client here.', childDom);
             }
-            removeFrom(childDom);
+            while (childDom) {
+                const next: Node | null = childDom.nextSibling;
+                el.removeChild(childDom);
+                childDom = next;
+            }
         }
 
         // Fix select value after children are hydrated
@@ -443,15 +447,6 @@ function hasRealContent(node: Node | null): boolean {
         if (n.nodeType !== Node.COMMENT_NODE && !isFormattingWhitespace(n)) return true;
     }
     return false;
-}
-
-/** Remove `node` and every sibling after it. */
-function removeFrom(node: Node | null): void {
-    while (node) {
-        const next: Node | null = node.nextSibling;
-        node.parentNode?.removeChild(node);
-        node = next;
-    }
 }
 
 /**
