@@ -391,6 +391,45 @@ describe('effect', () => {
             state.count = 2;
             expect(seen).toBe(2);
         });
+
+        it('a scheduler effect notified mid-run re-runs once after the run, never nested (#739)', () => {
+            const state = signal({ theme: 'light' });
+            const seen: string[] = [];
+            let depth = 0;
+            let maxDepth = 0;
+            let scheduled = 0;
+            let writeDuringRun = true;
+            effect(() => {
+                depth++;
+                maxDepth = Math.max(maxDepth, depth);
+                seen.push(state.theme);
+                if (writeDuringRun) {
+                    // A descendant's onMounted during the first render.
+                    writeDuringRun = false;
+                    state.theme = 'dark';
+                }
+                depth--;
+            }, { scheduler: (run) => { scheduled++; run(); } });
+            expect(seen).toEqual(['light', 'dark']);
+            expect(maxDepth).toBe(1);
+            expect(scheduled).toBe(1);
+        });
+
+        it('a scheduler effect stopped mid-run does not re-run', () => {
+            const state = signal({ v: 0 });
+            const runs = vi.fn();
+            let stopSelf = false;
+            const runner = effect(() => {
+                runs(state.v);
+                if (stopSelf) {
+                    state.v = 99;
+                    runner.stop();
+                }
+            }, { scheduler: (run) => run() });
+            stopSelf = true;
+            state.v = 1;
+            expect(runs).toHaveBeenCalledTimes(2);
+        });
     });
 
     describe('primitive signals', () => {
