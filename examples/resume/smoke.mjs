@@ -170,6 +170,17 @@ try {
         await settledText(legacy, 'total 1');
         assert(true, 'the woken component handles subsequent events live (total 1)');
 
+        // 6) Catalog: a cache-marked GET read whose result revives as LIVE
+        // instances in the browser — built-ins and the app's own Money
+        // (#595: serverPlugin({ types }) / registerWireTypeHandlers).
+        await page.locator('button', { hasText: 'fetch catalog' }).click();
+        await page.waitForFunction(
+            () => [...document.querySelectorAll('em')].some((e) => /live instances OK|lost their types/.test(e.textContent ?? ''))
+        );
+        const catalog = await page.locator('em', { hasText: /live instances OK|lost their types/ }).textContent();
+        assert(catalog.includes('live instances OK'), `the GET read revived live Date/Set/BigInt/Money instances (got "${catalog}")`);
+        assert(catalog.includes('price $19.99'), 'the custom Money type revived in the browser (price $19.99)');
+
         console.log(`✅ resume-smoke (${MODE}): the full resumability ladder verified in a real browser`);
     } finally {
         await browser.close();

@@ -17,6 +17,7 @@
         "sigx": "workspace:^",
         "@sigx/server-renderer": "workspace:^",
         "@sigx/resume": "workspace:^",
+        "@sigx/serialize": "workspace:^",
         "@sigx/server": "workspace:^",
         "@sigx/reactivity": "workspace:^",
         "@sigx/runtime-core": "workspace:^",

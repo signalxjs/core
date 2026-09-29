@@ -1,6 +1,6 @@
 import { resumePlugin } from '@sigx/resume';
 import { createBoundaryRefresh } from '@sigx/resume/server';
-import { refreshComponents } from './entry-server';
+import { refreshComponents, refreshApp } from './entry-server';
 
 /**
  * Dev half of single-flight boundary refresh (rfc-server §6.3): the
@@ -11,5 +11,6 @@ import { refreshComponents } from './entry-server';
  */
 export const renderBoundaries = createBoundaryRefresh({
     plugins: [resumePlugin()],
-    components: refreshComponents
+    components: refreshComponents,
+    app: () => refreshApp()
 });

@@ -17,7 +17,7 @@ import { resumeManifest } from 'virtual:sigx-manifests';
 // there via virtual:sigx-manifests; no SSR instance to build here. Boundary
 // refresh is the ENDPOINT's side of resume, not the document's, so it is
 // built below.
-import { createApp, refreshComponents } from './entry-server';
+import { createApp, refreshComponents, refreshApp } from './entry-server';
 
 const handler = createFetchHandler({
     template,
@@ -31,12 +31,15 @@ const handler = createFetchHandler({
 // skips the whole block and the client falls back to $cache revalidation —
 // a working page, one round trip slower, and the component chunk loads
 // after all. Built once per isolate; the re-render runs the same plugin set
-// the page rendered with, explicit like the registry. An app with app-level
-// DI the re-render must see (serverPlugin({ types }), provideTypeHandlers)
-// passes `app: (rq) => createApp(...)` instead, and the app's plugins win.
+// the page rendered with, explicit like the registry.
+// An app whose re-render must see app-level DI (here `serverPlugin({
+// types })`, #595) ALSO passes `app:` — explicit plugins still win, and the
+// app supplies the provides. `refreshApp` is the DI half of createApp,
+// without its per-request document work.
 const renderBoundaries = createBoundaryRefresh({
     plugins: [resumePlugin({ manifest: resumeManifest })],
-    components: refreshComponents
+    components: refreshComponents,
+    app: () => refreshApp()
 });
 
 export default {

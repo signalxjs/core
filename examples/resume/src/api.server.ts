@@ -1,4 +1,5 @@
 import { serverFn, ServerFnError, type StandardSchemaV1 } from '@sigx/server';
+import { Money } from './money';
 
 /**
  * A server module (rfc-server §1.1): this whole file only ever runs on the
@@ -47,7 +48,8 @@ export const requestSummary = serverFn({
  * it with GET and the endpoint answers with Cache-Control, so the browser
  * and any edge cache can absorb repeats without touching the origin. The
  * result carries rich types (#364) — the browser receives a live Date,
- * Set, and BigInt, not their JSON shadows.
+ * Set, and BigInt, not their JSON shadows — and a custom one (#595): `Money`
+ * survives because src/money.ts registers its handler (`appTypes`).
  */
 export const getCatalog = serverFn({
     allowAnonymous: true,
@@ -56,7 +58,8 @@ export const getCatalog = serverFn({
         section,
         total: 3n,
         tags: new Set(['resumable', 'zero-js']),
-        updatedAt: new Date()
+        updatedAt: new Date(),
+        price: new Money(1999)
     })
 });
 

@@ -3,7 +3,9 @@
 The resumability reference app (#241): seven resumable components, each one
 rung of the ladder — `Counter` (replay + upgrade-on-write), `Tracker`
 (read-only handler, no component chunk ever), `Quote` (a server function
-from a resumed handler), `Catalog` (rich types through the boundary codec),
+from a resumed handler), `Catalog` (rich types through the boundary codec, including the app's
+own `Money` registered once via `serverPlugin({ types })` — see
+`src/money.ts`),
 `Poll` (single-flight boundary refresh), `Feedback` (form submit with
 synchronous `preventDefault` and a zero-JS `action`), `Legacy` (the
 deliberate wake-on-interaction fallback).

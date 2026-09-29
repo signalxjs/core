@@ -122,6 +122,9 @@ importers:
       '@sigx/runtime-dom':
         specifier: workspace:^
         version: link:../../packages/runtime-dom
+      '@sigx/serialize':
+        specifier: workspace:^
+        version: link:../../packages/serialize
       '@sigx/server':
         specifier: workspace:^
         version: link:../../packages/server
