@@ -288,7 +288,10 @@ Decided:
   does now. The `any` index signature is deleted: it would make `<anything>`
   typecheck for every consumer and silently defeat runtime-dom's typing the
   moment it *did* reach them. runtime-core's own tests get a test-only
-  ambient `IntrinsicElements` (`__tests__/env.d.ts`, not in `files`).
+  ambient `IntrinsicElements` (`__tests__/env.d.ts`, not in `files`) —
+  later removed with the isolated `tsconfig.test.json` program it served
+  (#685); the root `pnpm typecheck` program, with runtime-dom in scope, is
+  the type gate for those tests.
 - Consumers configure `jsxImportSource: "sigx"` (apps) or
   `"@sigx/runtime-core"` (headless renderers), as the examples already do.
 
