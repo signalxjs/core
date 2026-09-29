@@ -9,7 +9,13 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { component, useData } from 'sigx';
-import { registerComponent, clearClientPlugins, getBoundaryRecord } from '@sigx/server-renderer/client';
+import {
+    registerComponent,
+    clearClientPlugins,
+    getBoundaryRecord,
+    findBoundaryMarker,
+    invalidateMarkerIndex
+} from '@sigx/server-renderer/client';
 import type { SSRBoundaryRecord } from '@sigx/server-renderer';
 import { createSSR } from '../../server-renderer/src/ssr';
 import { resumePlugin } from '../src/plugin';
@@ -294,6 +300,39 @@ describe('apply() — resumed boundary swap', () => {
             expect(getBoundaryRecord(freshId)).toBeTruthy();
         }
         expect(container.querySelectorAll('[data-sigx-b]').length).toBeGreaterThanOrEqual(1);
+    });
+
+    it('builds the marker index once for a multi-boundary envelope, not once per swap (#479)', async () => {
+        const A = makeCounter('A');
+        const B = makeCounter('B');
+        const C = makeCounter('C');
+        const { container } = await mount(
+            <div>
+                <A initial={1} />
+                <B initial={2} />
+                <C initial={3} />
+            </div>
+        );
+        const { entries } = await roundTrip({ A, B, C }, ['A', 'B', 'C'], (d) => {
+            const initial = ((d as { props?: { initial?: number } }).props?.initial ?? 0) + 10;
+            (d as { props?: unknown }).props = { initial };
+        });
+        expect(entries).toHaveLength(3);
+
+        invalidateMarkerIndex();
+        const walks = vi.spyOn(document, 'createTreeWalker');
+        seam().apply(entries as unknown[], 1);
+        // Full-body walks only — collectRetiredIds walks each removed element.
+        const indexBuilds = walks.mock.calls.filter(([root]) => root === document.body);
+        expect(indexBuilds).toHaveLength(1);
+
+        // Every swap landed on the right boundary.
+        const buttons = [...container.querySelectorAll('button')].map((b) => b.textContent);
+        expect(buttons).toEqual(['11', '12', '13']);
+        // The envelope leaves a fresh index behind: a fresh id resolves live.
+        for (const entry of entries) {
+            expect(findBoundaryMarker(entry.id)?.isConnected).toBe(true);
+        }
     });
 
     it('ignores malformed entries without throwing', async () => {

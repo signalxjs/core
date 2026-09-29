@@ -98,12 +98,21 @@ function collect(): { base: number; refresh: unknown[] } | null {
 
 function apply(entries: unknown[], seq: number): void {
     if (!Array.isArray(entries)) return;
-    for (const entry of entries) {
-        try {
-            applyEntry(entry as RefreshEntry, seq);
-        } catch (error) {
-            if (__DEV__) console.error('[sigx resume] boundary refresh apply failed:', error);
+    try {
+        for (const entry of entries) {
+            try {
+                applyEntry(entry as RefreshEntry, seq);
+            } catch (error) {
+                if (__DEV__) console.error('[sigx resume] boundary refresh apply failed:', error);
+            }
         }
+    } finally {
+        // Once per envelope, not per swap (#479): a per-swap invalidate made
+        // every later entry rebuild the index with a full-body walk —
+        // O(K×N) for K swaps. Mid-envelope, applySwap's own miss/detached
+        // check rebuilds only when a lookup actually lands on DOM a swap
+        // replaced; this leaves later readers a fresh index.
+        invalidateMarkerIndex();
     }
 }
 
@@ -216,7 +225,11 @@ function applySwap(forId: number, entry: RefreshEntry): void {
     if (isPlainShape(entry.records)) {
         installBoundaryRecords(entry.records as Record<string, SSRBoundaryRecord>);
     }
-    invalidateMarkerIndex();
+    // No invalidateMarkerIndex() here — apply() does it once per envelope.
+    // Until then the index is stale in exactly two ways, both caught by the
+    // lookup above: a retired id maps to a detached comment (fails
+    // isConnected), and a fresh id is absent (a miss). Every other entry
+    // still points at its live marker — ids are unique.
 
     // Best-effort refocus for non-text focus (the "user clicked the
     // mutating button" case) — by element id only.
