@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **A multi-boundary refresh builds the marker index once, not once per swap
+  (#479).** `apply()` invalidated the `<!--$c:N-->` index after every swapped
+  boundary, so each later entry rebuilt it with a full-body comment walk —
+  O(K×N) for a K-boundary envelope on an N-comment page. It now invalidates
+  once per envelope; mid-envelope lookups rebuild only when they land on a
+  retired (detached) or fresh (absent) marker.
+
 ## [1.0.0] - 2026-09-18
 
 ### Added
