@@ -64,17 +64,13 @@ export const nodeOps: RendererOptions<Node, Element> = {
     getActiveElement: () => document.activeElement as Element | null,
     restoreFocus: (el) => {
         if (el instanceof HTMLElement || el instanceof SVGElement) {
-            // Use preventScroll to avoid layout thrashing.
-            // Suppress focus/blur events to prevent re-triggering reactive updates.
-            const suppressEvent = (e: Event) => { e.stopImmediatePropagation(); };
-            el.addEventListener('focus', suppressEvent, { capture: true, once: true });
-            el.addEventListener('focusin', suppressEvent, { capture: true, once: true });
-            // Also suppress blur on the element that will lose focus
-            const current = document.activeElement;
-            if (current instanceof HTMLElement) {
-                current.addEventListener('blur', suppressEvent, { capture: true, once: true });
-                current.addEventListener('focusout', suppressEvent, { capture: true, once: true });
-            }
+            // Use preventScroll to avoid layout thrashing. The focus/blur
+            // events are NOT suppressed: the steal this undoes already fired
+            // the element's blur, and its focus handlers must see it regain
+            // focus or app state stays "blurred" on a focused element. The
+            // writes they make land mid-render and re-render it once after
+            // the patch (#739); that re-render is a no-op patch, so it
+            // cannot steal again.
             el.focus({ preventScroll: true });
         }
     },
