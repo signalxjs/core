@@ -109,7 +109,9 @@ export async function assertServerFn(fetchFn, { label, origin, symbol, args, exp
  * transport (no body, no content-type, no Origin — a browser's same-origin
  * GET sends none), the declared Cache-Control + Vary, and the #364 rich
  * types as their WIRE tags in the raw envelope (`$date`/`$set`/`$bigint` —
- * this probe reads JSON directly, no codec). The revived-instance check
+ * this probe reads JSON directly, no codec), plus the app's custom `$money`
+ * (#595: registered by examples/resume/src/money.ts, so its presence proves
+ * the endpoint saw the app's `types` even with no document rendered yet). The revived-instance check
  * (`instanceof Date/Set`, `typeof bigint`) lives in the example's Catalog
  * component, which runs the real stub in the browser.
  */
@@ -139,6 +141,10 @@ export async function assertCatalogGet(fetchFn, { label }) {
     assert(
         typeof data?.updatedAt?.$date === 'number',
         `${label}: Date survived as $date (got ${JSON.stringify(data?.updatedAt)})`
+    );
+    assert(
+        data?.price?.$money === 1999,
+        `${label}: custom Money survived as $money (got ${JSON.stringify(data?.price)})`
     );
 }
 

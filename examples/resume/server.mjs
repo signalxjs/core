@@ -52,7 +52,7 @@ async function createServer() {
         const { template, assets, resumeManifest } = await import(
             new URL('./dist/server/sigx-app.js', import.meta.url).href
         );
-        const { createApp, refreshComponents } = await import(
+        const { createApp, refreshComponents, refreshApp } = await import(
             new URL('./dist/server/entry-server.js', import.meta.url).href
         );
         const { serverFns } = await import(
@@ -62,12 +62,14 @@ async function createServer() {
         app.use(express.static(resolve(__dirname, 'dist/client'), { index: false }));
         // Single-flight boundary refreshes (rfc-server §6.3) re-render
         // through the same plugin set the page rendered with — explicit
-        // here, matching the endpoint's explicit-registry posture.
+        // here, matching the endpoint's explicit-registry posture — and
+        // under refreshApp(), so they see the app's `types` (#595).
         app.use(createServerFnHandler({
             functions: serverFns,
             renderBoundaries: createBoundaryRefresh({
                 plugins: [resumePlugin({ manifest: resumeManifest })],
-                components: refreshComponents
+                components: refreshComponents,
+                app: () => refreshApp()
             })
         }));
         app.use(createRequestHandler({
