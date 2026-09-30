@@ -44,9 +44,6 @@
     "scripts": {
         "build": "vite build && vite build --mode prod-dist && tsc --emitDeclarationOnly",
         "dev": "vite build --watch",
-        "test": "tsc --noEmit -p tsconfig.test.json && vitest run",
-        "test:watch": "vitest",
-        "test:types": "tsc --noEmit -p tsconfig.test.json",
         "prepublishOnly": "pnpm run build"
     },
     "keywords": [
