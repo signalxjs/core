@@ -76,9 +76,9 @@
         "@sigx/resume": "workspace:^",
         "@sigx/server": "workspace:^",
         "@sigx/vite": "workspace:^",
-        "@types/node": "^26.5.1",
+        "@types/node": "^26.6.3",
         "typescript": "^7.0.2",
-        "vite": "^8.3.0",
+        "vite": "^8.3.1",
         "sigx": "workspace:^"
     },
     "publishConfig": {
