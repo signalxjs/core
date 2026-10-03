@@ -1,0 +1,60 @@
+// @jsxImportSource ../sigx
+
+// Unit tests of the sigx provider's SSR output (the format @sigx/server-renderer produces).
+
+import { component, renderToString } from "../sigx/index";
+
+function Counter(props: { start: i64 }): JSX.Element {
+  return component(props, (ctx) => {
+    const count = ctx.signal(ctx.props.start);
+    const double = ctx.computed(() => count.value * 2, 0);
+    return () => <p>Count: {count.value} doubled {double.value}</p>;
+  });
+}
+
+function Plain(props: { label: string }): JSX.Element {
+  return <b>{props.label}</b>;
+}
+
+function Parent(props: { n: i64 }): JSX.Element {
+  return component(props, (ctx) => {
+    return () => (
+      <div>
+        <Counter start={ctx.props.n} />
+        <Counter start={ctx.props.n + 1} />
+      </div>
+    );
+  });
+}
+
+export function test_component_markers_are_pre_order() {
+  const html = renderToString(<section><Parent n={1} /><Plain label="x" /></section>);
+  assertEq(
+    html,
+    "<section><div><p>Count: <!--t-->1<!--t--> doubled <!--t-->2</p><!--$c:2-->"
+      + "<p>Count: <!--t-->2<!--t--> doubled <!--t-->4</p><!--$c:3--></div><!--$c:1-->"
+      + "<b>x</b></section>",
+  );
+}
+
+export function test_text_and_attributes_are_escaped() {
+  const v = "a<b>&\"c'";
+  assertEq(
+    renderToString(<p title={v}>{v}</p>),
+    "<p title=\"a&lt;b&gt;&amp;&quot;c&#39;\">a&lt;b&gt;&amp;&quot;c&#39;</p>",
+  );
+}
+
+export function test_booleans_and_null_render_placeholders() {
+  const n: string | null = null;
+  assertEq(
+    renderToString(<p hidden={false} title={n}>{true}{false}{n}x</p>),
+    "<p><!----><!----><!---->x</p>",
+  );
+  assertEq(renderToString(<input disabled={true} />), "<input disabled>");
+}
+
+export function test_text_separator_crosses_fragments() {
+  const a = "a";
+  assertEq(renderToString(<p>{a}<>{"b"}</>c</p>), "<p>a<!--t-->b<!--t-->c</p>");
+}

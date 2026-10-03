@@ -1,0 +1,48 @@
+// sigx/precompile/jsx-runtime: the sigx provider plus Velt's SSR precompile exports, so every
+// subtree of intrinsic elements compiles to one `jsxTemplate` call with text and attributes
+// folded into constant strings.
+//
+// Not hydration-safe in general: the compiler folds adjacent static and dynamic text
+// (`<p>Count: {n}</p>`) into one string, so the `<!--t-->` separator sigx's hydration expects
+// between them is missing. It renders byte-identically wherever no element has two adjacent
+// text children (all the benchmark scenarios). Exists to measure what precompile is worth; the
+// compiler change that makes it safe is described in ../../README.md.
+
+import { escapeHtml } from "velt:html";
+import { Element, Builder } from "../node";
+import type { AttrValue, Text } from "../node";
+import { attr, textOf } from "../jsx-runtime";
+
+export { Element } from "../node";
+export type { AttrValue, Child, Text } from "../node";
+export type { IntrinsicElements, ElementChildrenAttribute } from "../jsx-runtime";
+export { jsx, Fragment, jsxComponent } from "../jsx-runtime";
+
+// Text folded into a template; `true`, `false` and `null` are sigx's empty placeholder.
+export function jsxEscape(value: Text): string {
+  if (value == null) {
+    return "<!---->";
+  }
+  if (typeof value === "boolean") {
+    return "<!---->";
+  }
+  return textOf(value);
+}
+
+export function jsxAttr(name: string, value: AttrValue): string {
+  return attr(name, value);
+}
+
+// `strings[0] slots[0] strings[1] … strings[n]`. Template strings start and end with tags.
+export function jsxTemplate(strings: string[], slots: Element[]): Element {
+  if (slots.length == 0) {
+    return new Element(strings[0]);
+  }
+  const b = new Builder();
+  b.markup(strings[0]);
+  for (let i: usize = 0; i < slots.length; i++) {
+    b.element(slots[i]);
+    b.markup(strings[i + 1]);
+  }
+  return b.finish();
+}

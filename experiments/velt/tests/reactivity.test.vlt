@@ -1,0 +1,82 @@
+// Unit tests of sigx/reactivity: `velt test` from experiments/velt.
+
+import { Runtime } from "../sigx/reactivity";
+
+export function test_effect_runs_now_and_on_change() {
+  const rt = new Runtime();
+  const count = rt.signal(1);
+  const seen: i64[] = [];
+  rt.effect(() => {
+    seen.push(count.value);
+  });
+  count.value = 2;
+  count.value = 3;
+  assertEq(seen, [1, 2, 3]);
+}
+
+export function test_batch_runs_effects_once() {
+  const rt = new Runtime();
+  const a = rt.signal(1);
+  const b = rt.signal(10);
+  const sums: i64[] = [];
+  rt.effect(() => {
+    sums.push(a.value + b.value);
+  });
+  rt.batch(() => {
+    a.value = 2;
+    b.value = 20;
+  });
+  assertEq(sums, [11, 22]);
+}
+
+export function test_computed_is_lazy_and_cached() {
+  const rt = new Runtime();
+  const n = rt.signal(2);
+  const calls: i64[] = [];
+  const double = rt.computed(() => {
+    calls.push(n.value);
+    return n.value * 2;
+  }, 0);
+  assertEq(calls.length, 0);
+  assertEq(double.value, 4);
+  assertEq(double.value, 4);
+  assertEq(calls.length, 1);
+  n.value = 5;
+  assertEq(double.value, 10);
+  assertEq(calls.length, 2);
+}
+
+export function test_effect_through_computed() {
+  const rt = new Runtime();
+  const name = rt.signal("ada");
+  const greeting = rt.computed(() => `hello ${name.value}`, "");
+  const seen: string[] = [];
+  rt.effect(() => {
+    seen.push(greeting.value);
+  });
+  name.value = "grace";
+  assertEq(seen, ["hello ada", "hello grace"]);
+}
+
+export function test_stopped_effect_does_not_run() {
+  const rt = new Runtime();
+  const s = rt.signal(0);
+  const seen: i64[] = [];
+  const e = rt.effect(() => {
+    seen.push(s.value);
+  });
+  e.stop();
+  s.value = 1;
+  assertEq(seen, [0]);
+}
+
+export function test_peek_does_not_subscribe() {
+  const rt = new Runtime();
+  const s = rt.signal(0);
+  const seen: i64[] = [];
+  rt.effect(() => {
+    seen.push(s.peek());
+  });
+  s.value = 1;
+  assertEq(seen, [0]);
+}

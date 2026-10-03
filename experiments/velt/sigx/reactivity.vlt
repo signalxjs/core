@@ -1,0 +1,182 @@
+// sigx/reactivity: signals, computed values and effects (the shape of @sigx/reactivity's
+// primitive signals: `signal(0).value`).
+//
+// JavaScript sigx tracks dependencies through a module-level "active subscriber". Velt has no
+// mutable module state (and runs request handlers on many cores), so the tracking context is an
+// explicit `Runtime` that every signal holds: one per render or per app instance. Reading
+// `.value` inside an effect or computed subscribes it; writing notifies subscribers, which run
+// once the outermost `batch` ends.
+//
+// Known POC limits: dependencies are not swept when an effect stops reading a signal, and
+// signal <-> effect references form cycles that Velt does not free yet (planned `weak`
+// references, semantics stage 3).
+
+export class Runtime {
+  // The effect or computed currently running, which reads subscribe.
+  active: Reaction | null = null;
+  batchDepth: i64 = 0;
+  queue: Reaction[] = [];
+
+  // Runs `fn`, deferring effects until it returns (sigx `batch`).
+  batch(fn: () => void) {
+    this.batchDepth += 1;
+    fn();
+    this.batchDepth -= 1;
+    if (this.batchDepth == 0) {
+      this.flush();
+    }
+  }
+
+  // Schedules the reactions in `subs` (deduplicated) and runs them unless batching.
+  notify(subs: Reaction[]) {
+    for (const s of subs) {
+      if (s.stopped) {
+        continue;
+      }
+      if (s.isComputed) {
+        // A computed is pull-based: mark it, and pass the change on to its own subscribers.
+        if (!s.dirty) {
+          s.dirty = true;
+          this.notify(s.subs.slice(0));
+        }
+        continue;
+      }
+      if (!s.dirty) {
+        s.dirty = true;
+        this.queue.push(s);
+      }
+    }
+    if (this.batchDepth == 0) {
+      this.flush();
+    }
+  }
+
+  flush() {
+    // Index-based: running a reaction may queue more.
+    let i: usize = 0;
+    while (i < this.queue.length) {
+      const r = this.queue[i];
+      i += 1;
+      r.dirty = false;
+      if (!r.stopped) {
+        this.track(r);
+      }
+    }
+    this.queue.truncate(0);
+  }
+
+  // Runs `r` with reads subscribing it.
+  track(r: Reaction) {
+    const prev = this.active;
+    this.active = r;
+    const run = r.run;
+    run();
+    this.active = prev;
+  }
+
+  // Subscribes the active reaction to `subs` (sigx's `track`).
+  subscribe(subs: Reaction[]) {
+    const a = this.active;
+    if (a == null) {
+      return;
+    }
+    for (const s of subs) {
+      if (s == a) {
+        return;
+      }
+    }
+    subs.push(a);
+  }
+
+  // A writable signal (sigx `signal(v)` for a primitive; read and write through `.value`).
+  signal<T>(v: T): Signal<T> {
+    return new Signal<T>(this, v);
+  }
+
+  // A cached derived value, recomputed lazily after a dependency changed.
+  computed<T>(fn: () => T, initial: T): Computed<T> {
+    return new Computed<T>(this, fn, initial);
+  }
+
+  // Runs `fn` now and again whenever a signal it read changes; returns a handle to stop it.
+  effect(fn: () => void): Reaction {
+    const r = new Reaction(fn, false);
+    this.track(r);
+    return r;
+  }
+}
+
+// An effect, or the inner node of a computed.
+export class Reaction {
+  run: () => void;
+  isComputed: bool;
+  dirty: bool = false;
+  stopped: bool = false;
+  // A computed's own subscribers.
+  subs: Reaction[] = [];
+
+  constructor(run: () => void, isComputed: bool) {
+    this.run = run;
+    this.isComputed = isComputed;
+  }
+
+  stop() {
+    this.stopped = true;
+  }
+}
+
+export class Signal<T> {
+  private v: T;
+  private rt: Runtime;
+  private subs: Reaction[] = [];
+
+  constructor(rt: Runtime, v: T) {
+    this.rt = rt;
+    this.v = v;
+  }
+
+  get value(): T {
+    this.rt.subscribe(this.subs);
+    return this.v;
+  }
+
+  set value(next: T) {
+    this.v = next;
+    if (this.subs.length > 0) {
+      this.rt.notify(this.subs.slice(0));
+    }
+  }
+
+  // The value without subscribing (sigx `untrack(() => s.value)`).
+  peek(): T {
+    return this.v;
+  }
+}
+
+export class Computed<T> {
+  private cached: T;
+  private fn: () => T;
+  private rt: Runtime;
+  private node: Reaction;
+
+  constructor(rt: Runtime, fn: () => T, initial: T) {
+    this.rt = rt;
+    this.fn = fn;
+    this.cached = initial;
+    this.node = new Reaction(() => {}, true);
+    this.node.dirty = true;
+  }
+
+  get value(): T {
+    if (this.node.dirty) {
+      this.node.dirty = false;
+      const prev = this.rt.active;
+      this.rt.active = this.node;
+      const fn = this.fn;
+      this.cached = fn();
+      this.rt.active = prev;
+    }
+    this.rt.subscribe(this.node.subs);
+    return this.cached;
+  }
+}
