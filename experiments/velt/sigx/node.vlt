@@ -150,8 +150,8 @@ export class Builder {
 // Per-render state: the output, the next component id, the reactive runtime components create
 // their signals in.
 export class Renderer {
-  // Output pieces, joined once at the end (appending to one string field copies it when the
-  // renderer is shared with component closures).
+  // Output pieces, joined once at the end: `s += x` copies the whole string in Velt today, so
+  // appending to one string is quadratic (velt-lang/velt#379).
   out: string[] = [];
   nextId: i64 = 1;
   lastText: bool = false;

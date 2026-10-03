@@ -104,6 +104,10 @@ The setup and render bodies are the same code. The differences are the definitio
 
 ## The road from here: what is missing
 
+Tracked in signalxjs/core#745 (the sigx side) and velt-lang/velt#379 (the Velt side, with a
+minimal repro for every item). Last verified against Velt `d382199`: still byte-identical, same
+speedups. Velt can rerun `run.sh` after a change to check an item.
+
 ### Velt compiler and language (to raise upstream; ordered by impact for sigx)
 
 1. **Precompile loses text-node boundaries.** The precompile mode folds `<p>Count: {n}</p>` into one
@@ -139,10 +143,10 @@ The setup and render bodies are the same code. The differences are the definitio
    server sigx drops handlers, or turns them into resumable `data-sigx-on:*` references.
 8. **Style objects.** `style={{ color }}` needs an object type in `AttrValue`; the POC uses
    string styles.
-9. Smaller items found on the way: `out += s` on a field of an object shared with closures
-   copies the whole string (quadratic; the deep tree took 8 minutes until the renderer switched
-   to `string[]` plus `join`). This trap deserves a lint or an optimizer fix. There is no
-   `Array.shift`. `typeof x === "object"` narrowing does not reach a later `else` branch.
+9. **`s += x` is quadratic.** Every append copies the whole string, both `+=` and
+   `` `${s}${x}` `` on any variable or field: 100k appends take 3.4 s, push and join takes
+   18 ms. The deep tree took 8 minutes until the renderer switched to `string[]` plus `join`.
+   Smaller: there is no `Array.shift`.
 
 ### sigx side (decisions for this repo)
 
@@ -176,9 +180,10 @@ The setup and render bodies are the same code. The differences are the definitio
 
 ## Suggested next steps
 
-1. File the Velt items 1–3 and 7 as issues on velt-lang/velt. They are small compiler changes,
-   and they unlock precompile mode, `count.value++` and the JavaScript-shaped
-   `const X = component(...)` definition.
+1. In velt-lang/velt#379, the precompile text separator, getter `++`, module constants from calls,
+   and extending `IntrinsicElements` are small compiler changes. They unlock precompile mode,
+   `count.value++`, the JavaScript-shaped `const X = component(...)` definition and event
+   handler attributes.
 2. Decide the shared component subset (sigx item 1) and prove it on one example app, rendering
    `examples/spa-ssr`'s pages from Velt and hydrating them with the real client in a Playwright
    check, the same way `pnpm smoke:hydration` does.
