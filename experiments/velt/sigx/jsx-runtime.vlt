@@ -1,0 +1,117 @@
+// sigx/jsx-runtime: the sigx JSX provider for Velt (velt docs/internals/contracts/jsx.md). A
+// module whose import source is this package compiles its JSX to these calls and sees the
+// types as `JSX.Element`, `JSX.IntrinsicElements`, ….
+//
+// This is the generic lowering only: Velt's SSR precompile folds adjacent static and dynamic
+// text into one string, so the `<!--t-->` separators sigx's hydration needs between text nodes
+// would be lost (see ../README.md). `sigx/precompile/jsx-runtime` adds the precompile exports
+// to measure what that mode is worth.
+
+import { escapeHtml } from "velt:html";
+import { Element, Builder } from "./node";
+import type { AttrValue, Child, Text } from "./node";
+
+export { Element } from "./node";
+export type { AttrValue, Child, Text } from "./node";
+export type { IntrinsicElements } from "velt:jsx/intrinsic";
+export type ElementChildrenAttribute = { children: Child };
+
+const VOID_TAGS = "|area|base|br|col|embed|hr|img|input|link|meta|source|track|wbr|";
+
+function isVoid(tag: string): bool {
+  return VOID_TAGS.includes(`|${tag}|`);
+}
+
+// ` name="value"`, ` name` for `true`, nothing for `false` / `null` (sigx's `renderProps`).
+export function attr(name: string, v: AttrValue): string {
+  if (v == null) {
+    return "";
+  }
+  if (typeof v === "string") {
+    return ` ${name}="${escapeHtml(v)}"`;
+  }
+  if (typeof v === "boolean") {
+    return v ? ` ${name}` : "";
+  }
+  return ` ${name}="${v}"`;
+}
+
+// Escaped text of a text child ("" for booleans and null, which render nothing).
+export function textOf(v: Text): string {
+  if (v == null) {
+    return "";
+  }
+  if (typeof v === "string") {
+    return escapeHtml(v);
+  }
+  if (typeof v === "boolean") {
+    return "";
+  }
+  return `${v}`;
+}
+
+// sigx renders a `true`, `false` or `null` child as an empty comment, the placeholder its
+// hydration aligns on (the Velt contract's "render nothing" is a provider choice).
+const EMPTY = "<!---->";
+
+function addChild(b: Builder, c: Child) {
+  if (c == null) {
+    b.markup(EMPTY);
+  } else if (c instanceof Element) {
+    b.element(c);
+  } else if (typeof c === "object") {
+    for (const e of c) {
+      b.element(e);
+    }
+  } else if (typeof c === "boolean") {
+    b.markup(EMPTY);
+  } else {
+    b.text(textOf(c));
+  }
+}
+
+// `<tag names[i]=values[i]…>children</tag>`; `key` is not rendered.
+export function jsx(
+  tag: string,
+  names: string[],
+  values: AttrValue[],
+  children: Child[],
+  key: string | null,
+): Element {
+  let open = `<${tag}`;
+  for (let i: usize = 0; i < names.length; i++) {
+    open += attr(names[i], values[i]);
+  }
+  open += ">";
+  if (isVoid(tag)) {
+    return new Element(open);
+  }
+  const b = new Builder();
+  b.markup(open);
+  for (const c of children) {
+    addChild(b, c);
+  }
+  b.markup(`</${tag}>`);
+  return b.finish();
+}
+
+// `<>children</>`.
+export function Fragment(children: Child[], key: string | null): Element {
+  const b = new Builder();
+  for (const c of children) {
+    addChild(b, c);
+  }
+  return b.finish();
+}
+
+// `<Card …/>`. A sigx component (`component(props, setup)`) returns its boundary node, which
+// runs when the renderer reaches it. A plain function component is called at once and is no
+// boundary: sigx emits no marker for it.
+export function jsxComponent<P>(
+  component: (props: P) => Element,
+  props: P,
+  key: string | null,
+  name: string,
+): Element {
+  return component(props);
+}

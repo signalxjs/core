@@ -1,0 +1,6 @@
+// sigx for Velt: the public API (POC). Components import from here; JSX compiles against
+// ./jsx-runtime.
+
+export { component, SetupContext } from "./component";
+export { Runtime, Signal, Computed, Reaction } from "./reactivity";
+export { Element, Renderer, renderToString } from "./node";

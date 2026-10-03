@@ -1,0 +1,194 @@
+// sigx/node: what every JSX expression evaluates to under the sigx provider, and the renderer
+// that turns it into sigx-compatible SSR HTML.
+//
+// Elements are built eagerly where they can be: an intrinsic element or fragment whose children
+// contain no component is one string by the time it is complete (`html`). A component is never
+// called when its element is built: its node holds a `setup` thunk that the renderer runs
+// parent-first, handing it the per-render `Renderer`. That is what gives sigx's pre-order
+// component ids (`<!--$c:N-->`, the hydration anchors), and it is how per-render state (the id
+// counter, the reactive runtime) reaches a component without module-level state, which Velt
+// does not have.
+//
+// sigx's server renderer separates adjacent text nodes in one DOM parent with `<!--t-->` (the
+// browser's parser would merge them, and hydration claims them one by one). Text adjacency is
+// tracked inside a node while it is built and across nodes by the renderer: every chunk records
+// whether it starts and ends with text.
+
+import { Runtime } from "./reactivity";
+
+// What an intrinsic attribute may hold: `true` renders the bare name, `false` and `null` omit
+// the attribute, numbers render like `${n}`.
+export type AttrValue = string | i64 | f64 | bool | null;
+
+// Text a precompiled template folds into its strings.
+export type Text = string | i64 | f64 | bool | null;
+
+// What may appear as a child: text is escaped, numbers render like `${n}`, `true`, `false` and
+// `null` render nothing, and an array renders its elements in order.
+export type Child = Element | Element[] | string | i64 | f64 | bool | null;
+
+export class Element {
+  // Markup of this node; with `parts`, only what precedes them.
+  html: string;
+  // `html` starts / ends with a text node (drives the `<!--t-->` separators).
+  textStart: bool = false;
+  textEnd: bool = false;
+  // What follows `html`, in document order, when the node contains a component.
+  parts: Element[] | null = null;
+  // Set on a component's node: the component, called by the renderer when it reaches it.
+  setup: ((r: Renderer) => Element) | null = null;
+
+  constructor(html: string) {
+    this.html = html;
+  }
+
+  // True when `html` is the whole node (no component inside).
+  get isComplete(): bool {
+    return this.parts == null && this.setup == null;
+  }
+}
+
+// A component's node: `run` is called by the renderer, parent first.
+export function componentNode(run: (r: Renderer) => Element): Element {
+  const node = new Element("");
+  node.setup = run;
+  return node;
+}
+
+// Builds one node from a sequence of markup, text and child elements, folding complete
+// children into the current string and keeping incomplete ones as parts.
+export class Builder {
+  cur: string = "";
+  curTextStart: bool = false;
+  lastText: bool = false;
+  started: bool = false;
+  parts: Element[] = [];
+  first: Element | null = null;
+
+  // Markup (a tag or a comment): never text.
+  markup(s: string) {
+    if (!this.started) {
+      this.started = true;
+      this.curTextStart = false;
+    }
+    this.cur += s;
+    this.lastText = false;
+  }
+
+  // Already escaped text; empty text emits nothing (as in sigx).
+  text(s: string) {
+    if (s == "") {
+      return;
+    }
+    if (!this.started) {
+      this.started = true;
+      this.curTextStart = true;
+    }
+    if (this.lastText) {
+      this.cur += "<!--t-->";
+    }
+    this.cur += s;
+    this.lastText = true;
+  }
+
+  // A child element.
+  element(el: Element) {
+    if (el.isComplete) {
+      if (el.html == "") {
+        return;
+      }
+      if (!this.started) {
+        this.started = true;
+        this.curTextStart = el.textStart;
+      }
+      if (this.lastText && el.textStart) {
+        this.cur += "<!--t-->";
+      }
+      this.cur += el.html;
+      this.lastText = el.textEnd;
+      return;
+    }
+    this.flush();
+    this.parts.push(el);
+    // What the incomplete child ends with is known only when it is rendered: the renderer
+    // decides about separators between parts.
+    this.lastText = false;
+    this.started = false;
+  }
+
+  // Ends the current string run as a chunk.
+  flush() {
+    if (this.cur == "" && this.first != null) {
+      return;
+    }
+    const chunk = new Element(this.cur);
+    chunk.textStart = this.curTextStart;
+    chunk.textEnd = this.lastText;
+    if (this.first == null) {
+      this.first = chunk;
+    } else {
+      this.parts.push(chunk);
+    }
+    this.cur = "";
+    this.started = false;
+    this.curTextStart = false;
+  }
+
+  finish(): Element {
+    this.flush();
+    const head = this.first;
+    if (head == null) {
+      return new Element("");
+    }
+    if (this.parts.length > 0) {
+      head.parts = this.parts;
+    }
+    return head;
+  }
+}
+
+// Per-render state: the output, the next component id, the reactive runtime components create
+// their signals in.
+export class Renderer {
+  // Output pieces, joined once at the end: `s += x` copies the whole string in Velt today, so
+  // appending to one string is quadratic (velt-lang/velt#379).
+  out: string[] = [];
+  nextId: i64 = 1;
+  lastText: bool = false;
+  rt: Runtime = new Runtime();
+
+  render(el: Element) {
+    const setup = el.setup;
+    if (setup != null) {
+      // Pre-order ids: the component's id is taken before its children render.
+      const id = this.nextId;
+      this.nextId += 1;
+      const child = setup(this);
+      this.render(child);
+      this.out.push(`<!--$c:${id}-->`);
+      this.lastText = false;
+      return;
+    }
+    if (el.html != "") {
+      if (this.lastText && el.textStart) {
+        this.out.push("<!--t-->");
+      }
+      this.out.push(el.html);
+      this.lastText = el.textEnd;
+    }
+    const parts = el.parts;
+    if (parts != null) {
+      for (const p of parts) {
+        this.render(p);
+      }
+    }
+  }
+}
+
+// The HTML sigx's `renderToString` produces for `el`: components run parent-first, each
+// followed by its `<!--$c:N-->` marker.
+export function renderToString(el: Element): string {
+  const r = new Renderer();
+  r.render(el);
+  return r.out.join("");
+}

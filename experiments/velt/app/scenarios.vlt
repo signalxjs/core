@@ -1,0 +1,85 @@
+// @jsxImportSource ../sigx
+
+// The benchmark scenario trees as sigx components, ported from
+// benchmarks/src/scenarios/build.ts. Each component is the JavaScript one with Velt's
+// definition form (`function X(props) { return component(props, setup) }`) and a string `style`.
+
+import { component } from "../sigx/index";
+import { TableRow, SmallPageData, scoreColor } from "./data";
+
+function Card(props: { title: string; children: JSX.Child }): JSX.Element {
+  return component(props, (ctx) => {
+    return () => (
+      <section class="card">
+        <h2>{ctx.props.title}</h2>
+        <div class="card-body">{ctx.props.children}</div>
+      </section>
+    );
+  });
+}
+
+function Row(props: { row: TableRow }): JSX.Element {
+  return component(props, (ctx) => {
+    const row = ctx.props.row;
+    return () => (
+      <tr class={row.active ? "row active" : "row"}>
+        <td>{`${row.id}`}</td>
+        <td>{row.name}</td>
+        <td>{row.email}</td>
+        <td>{row.role}</td>
+        <td>
+          <span style={`color:${scoreColor(row.score)};`}>{row.score.toFixed(2)}</span>
+        </td>
+        <td>{row.active ? "yes" : "no"}</td>
+      </tr>
+    );
+  });
+}
+
+export function Table(props: { rows: TableRow[] }): JSX.Element {
+  return component(props, (ctx) => {
+    const rows = ctx.props.rows;
+    return () => (
+      <table class="data">
+        <tbody>{rows.map((row) => <Row key={`${row.id}`} row={row} />)}</tbody>
+      </table>
+    );
+  });
+}
+
+export function Level(props: { depth: i64; branching: i64 }): JSX.Element {
+  return component(props, (ctx) => {
+    const depth = ctx.props.depth;
+    const branching = ctx.props.branching;
+    return () => {
+      if (depth <= 1) {
+        return <div class={`lvl lvl-${depth}`}>leaf</div>;
+      }
+      const kids: JSX.Element[] = [];
+      for (let i: i64 = 0; i < branching; i++) {
+        kids.push(<Level key={`${i}`} depth={depth - 1} branching={branching} />);
+      }
+      return <div class={`lvl lvl-${depth}`}>{kids}</div>;
+    };
+  });
+}
+
+export function SmallPage(props: { data: SmallPageData }): JSX.Element {
+  const d = props.data;
+  return (
+    <div id="app">
+      <header>
+        <h1>{d.title}</h1>
+        <nav>{d.navLinks.map((l) => <a key={l.href} href={l.href}>{l.label}</a>)}</nav>
+      </header>
+      <main>
+        {d.cards.map((c) => (
+          <Card title={c.title}>{c.paragraphs.map((p) => <p>{p}</p>)}</Card>
+        ))}
+      </main>
+      <footer>
+        <p>{d.footer}</p>
+      </footer>
+    </div>
+  );
+}

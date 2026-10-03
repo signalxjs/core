@@ -1,0 +1,42 @@
+// sigx/component: sigx's component model, `setup` once then a render function.
+//
+// JavaScript sigx:   const Counter = component<P>((ctx) => { …; return () => <div/>; });
+// Velt sigx:         function Counter(props: P): JSX.Element {
+//                      return component(props, (ctx) => { …; return () => <div/>; });
+//                    }
+// Module constants must be literals in Velt, so the definition is a function; the setup and
+// render bodies are the same code.
+
+import { Element, Renderer, componentNode } from "./node";
+import { Runtime, Signal, Computed } from "./reactivity";
+
+// What `setup` receives (sigx's ComponentSetupContext, the parts the POC needs).
+export class SetupContext<P> {
+  props: P;
+  rt: Runtime;
+
+  constructor(props: P, rt: Runtime) {
+    this.props = props;
+    this.rt = rt;
+  }
+
+  signal<T>(v: T): Signal<T> {
+    return this.rt.signal(v);
+  }
+
+  computed<T>(fn: () => T, initial: T): Computed<T> {
+    return this.rt.computed(fn, initial);
+  }
+}
+
+// A sigx component instance: `setup` runs when the renderer reaches the element (parent
+// first), with the render's reactive runtime; its render function produces the content.
+export function component<P>(
+  props: P,
+  setup: (ctx: SetupContext<P>) => () => Element,
+): Element {
+  return componentNode((r: Renderer): Element => {
+    const render = setup(new SetupContext<P>(props, r.rt));
+    return render();
+  });
+}

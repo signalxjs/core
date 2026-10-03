@@ -1,0 +1,99 @@
+// The benchmark scenario data, ported from benchmarks/src/scenarios/data.ts: the same seeded
+// PRNG (mulberry32, in u32 arithmetic) produces the same rows, so the Velt render can be
+// compared byte for byte with sigx's on Node.
+
+export type TableRow = {
+  id: i64;
+  name: string;
+  email: string;
+  role: string;
+  active: bool;
+  score: f64;
+};
+
+export type NavLink = { href: string; label: string };
+export type CardData = { title: string; paragraphs: string[] };
+export type SmallPageData = {
+  title: string;
+  navLinks: NavLink[];
+  cards: CardData[];
+  footer: string;
+};
+
+// mulberry32: tiny 32-bit seeded PRNG, floats in [0, 1). JavaScript's `| 0`, `Math.imul` and
+// `>>> 0` are all arithmetic modulo 2^32, which is what u32 does.
+export class Mulberry32 {
+  private a: u32;
+
+  constructor(seed: u32) {
+    this.a = seed;
+  }
+
+  next(): f64 {
+    const step: u32 = 0x6d2b79f5;
+    this.a = this.a + step;
+    const a = this.a;
+    let t: u32 = (a ^ (a >> 15)) * (1 | a);
+    t = (t + (t ^ (t >> 7)) * (61 | t)) ^ t;
+    return ((t ^ (t >> 14)) as f64) / 4294967296.0;
+  }
+}
+
+function pick(rng: Mulberry32, xs: string[]): string {
+  return xs[Math.floor(rng.next() * (xs.length as f64)) as usize];
+}
+
+export function tableRows(n: i64): TableRow[] {
+  const first = ["Ada", "Grace", "Tim & Tam", "Alan <The Great>", "Edsger", "\"Deno\"", "Barbara", "Linus"];
+  const last = ["Lovelace", "Hopper & Co", "O\"Connor", "Turing", "Dijkstra", "Liskov <jr>", "Kernighan", "Ritchie"];
+  const roles = ["admin", "editor", "viewer", "owner"];
+  const rng = new Mulberry32(0xc0ffee);
+  const rows: TableRow[] = [];
+  for (let i: i64 = 0; i < n; i++) {
+    const f = pick(rng, first);
+    const l = pick(rng, last);
+    const active = rng.next() < 0.5;
+    const score = Math.round(rng.next() * 10000.0) / 100.0;
+    rows.push({
+      id: i + 1,
+      name: `${f} ${l}`,
+      email: `user+${i + 1}&tag@example.com`,
+      role: roles[(i % 4) as usize],
+      active: active,
+      score: score,
+    });
+  }
+  return rows;
+}
+
+export function scoreColor(score: f64): string {
+  return score >= 50.0 ? "#0a7f2e" : "#b00020";
+}
+
+export function smallPage(): SmallPageData {
+  return {
+    title: "SSR Benchmark — Small Page",
+    navLinks: [
+      { href: "/", label: "Home" },
+      { href: "/docs", label: "Docs & Guides" },
+      { href: "/blog", label: "Blog" },
+      { href: "/about", label: "About <us>" },
+      { href: "/contact", label: "Contact" },
+    ],
+    cards: [
+      {
+        title: "Fast & lean",
+        paragraphs: ["Renders straight to a string.", "No client runtime needed for this page."],
+      },
+      {
+        title: "Streaming \"TTFB\"",
+        paragraphs: ["First byte before the last row.", "Backpressure-aware output."],
+      },
+      {
+        title: "Escaping <safely>",
+        paragraphs: ["All text is HTML-escaped.", "Attributes too — it's table stakes."],
+      },
+    ],
+    footer: "© 2026 bench & co — all comparisons rendered server-side",
+  };
+}

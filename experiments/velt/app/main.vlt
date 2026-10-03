@@ -1,0 +1,55 @@
+// @jsxImportSource ../sigx
+
+// The Velt side of the POC: renders the benchmark scenarios through the sigx provider, writes
+// each scenario's HTML to out/velt/<scenario>.html (compared byte for byte with out/node by
+// ../run.sh) and prints one JSON line per scenario with the median render time, like
+// ../node/reference.ts. Usage: main [iterations (default 20)] [output dir (default out/velt)].
+
+import { renderToString, Element } from "../sigx/index";
+import { mkdirSync, writeFileSync } from "velt:fs";
+import { args } from "velt:process";
+import { tableRows, smallPage, TableRow } from "./data";
+import { Table, Level, SmallPage } from "./scenarios";
+
+// Builds one scenario's tree; the data is generated once, outside the timed loop (Node's
+// reference builds its rows at module load too).
+function build(scenario: string, rows1k: TableRow[], rows10k: TableRow[]): Element {
+  if (scenario == "small-page") {
+    // A plain tree in the JavaScript benchmark, not a component: called, not rendered as a tag.
+    return SmallPage({ data: smallPage() });
+  }
+  if (scenario == "large-table-1k") {
+    return <Table rows={rows1k} />;
+  }
+  if (scenario == "large-table") {
+    return <Table rows={rows10k} />;
+  }
+  return <Level depth={12} branching={3} />;
+}
+
+function main() {
+  const argv = args();
+  const iterations: i64 = argv.length > 0 ? parseInt(argv[0]) as i64 : 20;
+  const rows1k = tableRows(1000);
+  const rows10k = tableRows(10000);
+  const outDir = argv.length > 1 ? argv[1] : "out/velt";
+  mkdirSync(outDir, { recursive: true });
+  const scenarios = ["small-page", "large-table-1k", "large-table", "deep-tree"];
+  for (const scenario of scenarios) {
+    const html = renderToString(build(scenario, rows1k, rows10k));
+    writeFileSync(`${outDir}/${scenario}.html`, html);
+    const rounds = scenario == "deep-tree" ? Math.max((iterations / 5) as f64, 3.0) as i64 : iterations;
+    for (let i = 0; i < 3; i++) {
+      renderToString(build(scenario, rows1k, rows10k));
+    }
+    const times: f64[] = [];
+    for (let i: i64 = 0; i < rounds; i++) {
+      const t0 = performance.now();
+      renderToString(build(scenario, rows1k, rows10k));
+      times.push(performance.now() - t0);
+    }
+    times.sort();
+    const median = times[times.length / 2];
+    console.log(`{"runtime":"${outDir}","scenario":"${scenario}","bytes":${html.length},"ms":${median}}`);
+  }
+}
