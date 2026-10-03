@@ -80,3 +80,26 @@ export function test_peek_does_not_subscribe() {
   s.value = 1;
   assertEq(seen, [0]);
 }
+
+// An effect that writes a signal while the queue is being flushed: each effect runs once per
+// change (a nested flush must not rerun what the outer one has not cleared yet).
+export function test_effect_writing_a_signal_runs_each_effect_once() {
+  const rt = new Runtime();
+  const a = rt.signal(0);
+  const b = rt.signal(0);
+  const runsA: i64[] = [];
+  const runsB: i64[] = [];
+  rt.effect(() => {
+    const v = a.value;
+    runsA.push(v);
+    if (v == 1) {
+      b.value = 10;
+    }
+  });
+  rt.effect(() => {
+    runsB.push(b.value);
+  });
+  a.value = 1;
+  assertEq(runsA, [0, 1]);
+  assertEq(runsB, [0, 10]);
+}

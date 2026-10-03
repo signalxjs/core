@@ -8,7 +8,6 @@
 // text children (all the benchmark scenarios). Exists to measure what precompile is worth; the
 // compiler change that makes it safe is described in ../../README.md.
 
-import { escapeHtml } from "velt:html";
 import { Element, Builder } from "../node";
 import type { AttrValue, Text } from "../node";
 import { attr, textOf } from "../jsx-runtime";

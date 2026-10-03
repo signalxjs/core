@@ -16,6 +16,9 @@ export class Runtime {
   active: Reaction | null = null;
   batchDepth: i64 = 0;
   queue: Reaction[] = [];
+  // True while `flush` drains the queue: a reaction that writes a signal then only enqueues,
+  // and the running loop picks the new item up (a nested drain would rerun the queue from 0).
+  flushing: bool = false;
 
   // Runs `fn`, deferring effects until it returns (sigx `batch`).
   batch(fn: () => void) {
@@ -52,6 +55,10 @@ export class Runtime {
   }
 
   flush() {
+    if (this.flushing) {
+      return;
+    }
+    this.flushing = true;
     // Index-based: running a reaction may queue more.
     let i: usize = 0;
     while (i < this.queue.length) {
@@ -63,6 +70,7 @@ export class Runtime {
       }
     }
     this.queue.truncate(0);
+    this.flushing = false;
   }
 
   // Runs `r` with reads subscribing it.

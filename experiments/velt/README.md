@@ -135,7 +135,7 @@ speedups. Velt can rerun `run.sh` after a change to check an item.
    explicit dispose.
 6. **The provider contract says booleans and `null` "render nothing"**; sigx renders `<!---->`.
    The provider can already do this; only the contract wording needs to allow it.
-7. **Event handler attributes.** `IntrinsicElements` from `velt:jsx` has no `onClick`, and a
+7. **Event handler attributes.** `IntrinsicElements` from `velt:jsx` has no `onClick`, and
    the docs show no way for a provider to extend an imported object type (no intersections or
    mapped types).
    A shared component with handlers will not compile until a provider can declare
