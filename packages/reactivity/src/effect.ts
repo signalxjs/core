@@ -352,6 +352,11 @@ function runEffect(fn: EffectFn, scheduler?: EffectScheduler): EffectRunner {
     // overwrite freshly-rebuilt deps and corrupt any state the outer
     // run is mid-mutating (in practice, the renderer's subtree ref).
     let running = false;
+    // A scheduler effect notified mid-run owes one re-run once the current
+    // run unwinds (#739). Only scheduler (render) effects defer: a plain
+    // effect has no queue to defer into, so its re-entrant notification is
+    // still dropped.
+    let rerun = false;
 
     // Devtools id minted at create time when a hook is installed.
     // `null` means "untracked by devtools" — the hot path in the
@@ -375,12 +380,20 @@ function runEffect(fn: EffectFn, scheduler?: EffectScheduler): EffectRunner {
     const effectFn: Subscriber = function () {
         if (stopped) return;
         if (running) {
-            // Re-entrant notification (the effect triggered itself while
-            // executing): dropped, never scheduled — matching the long-
-            // standing guard that prevents render loops. Clear the dirt
-            // bits (but keep QUEUED bookkeeping) so a stale bit can't
-            // skew the next real validation.
-            effectFn.flags &= QUEUED;
+            // Re-entrant notification: something the effect read changed
+            // while it was still executing. It must never re-enter (see the
+            // guard above). With a scheduler, keep the dirt bits and owe a
+            // re-run after the current run unwinds (#739: a descendant's
+            // setup/onMounted writing state an ancestor's first render
+            // read). A render that writes its own dependency then re-queues
+            // on every run, which the scheduler's runaway guard catches.
+            // Without one, drop it and clear the dirt bits (keeping QUEUED
+            // bookkeeping) so a stale bit can't skew the next validation.
+            if (scheduler) {
+                rerun = true;
+            } else {
+                effectFn.flags &= QUEUED;
+            }
             return;
         }
         if (scheduler) {
@@ -407,6 +420,7 @@ function runEffect(fn: EffectFn, scheduler?: EffectScheduler): EffectRunner {
             }
         }
         running = true;
+        rerun = false;
         startTracking(effectFn);
         const prev = currentSubscriber;
         currentSubscriber = effectFn;
@@ -418,6 +432,7 @@ function runEffect(fn: EffectFn, scheduler?: EffectScheduler): EffectRunner {
                 currentSubscriber = prev;
                 running = false;
             }
+            if (rerun) scheduleRerun();
             return;
         }
         // Devtools path: measure duration and emit. We don't catch
@@ -440,6 +455,21 @@ function runEffect(fn: EffectFn, scheduler?: EffectScheduler): EffectRunner {
                 });
             }
         }
+        if (rerun) scheduleRerun();
+    };
+
+    // Hand the owed re-run to the scheduler, then drain: an empty batch
+    // bound ends in flushPendingEffects → the flush handler, so a re-run
+    // owed by a run outside any wave (a component's first, inline render)
+    // still executes before the caller regains control. Inside an outer
+    // batch it waits for that batch; inside a running flush the queue
+    // loop picks it up.
+    const scheduleRerun = (): void => {
+        rerun = false;
+        if (stopped) return;
+        scheduler!(runJob);
+        startBatch();
+        endBatch();
     };
 
     effectFn.deps = [];

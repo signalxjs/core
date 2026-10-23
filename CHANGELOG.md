@@ -6,6 +6,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- **`@sigx/reactivity` / `@sigx/runtime-core`: a write to state an ancestor's
+  render read, made while that render is still running, now re-renders the
+  ancestor instead of being dropped (#739).** A component's first render mounts
+  its subtree inline, so a descendant's `setup()` or `onMounted` writing a
+  signal the ancestor read (a theme provider, a cold deep link routing from
+  `onMounted`, signalxjs/lynx#1193) changed the state but left the old value
+  painted. A scheduler (render) effect notified during its own run now owes one
+  re-run, queued after the run unwinds and drained before `render()` or the
+  write returns. It still never re-enters mid-run (#18), and a render writing
+  its own dependency now trips the dev runaway guard (`Unbounded render
+  flush`) where it used to stop silently after one pass. Plain effects (no
+  `scheduler`) keep dropping re-entrant notifications. Observable changes: an
+  ancestor renders one extra time in these cases, and workarounds that
+  re-render on mount "if the state moved on during the mount" are no longer
+  needed.
+- **`@sigx/runtime-dom`: restoring focus after a patch no longer suppresses
+  the `focus`/`focusin`/`blur`/`focusout` events (#739).** The suppression
+  hid only the restore half of a steal whose blur had already fired, so a
+  focus-tracking handler was left believing a focused element was blurred —
+  previously masked because its write was dropped mid-render. Handlers now see
+  the element regain focus; code relying on `onFocus` NOT firing on that
+  restore will see it fire once.
+
 ## [1.0.1] — 2026-09-18
 
 ### Fixed
